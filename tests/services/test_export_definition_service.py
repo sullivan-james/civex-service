@@ -119,9 +119,10 @@ def test_the_kind_that_holds_the_files_must_be_the_schema_or_beneath_it(
         tree.svc.create("recording", "above", holder="encounter")
     with pytest.raises(ValidationError, match="beneath it"):
         tree.svc.create("encounter", "elsewhere", holder="site")
-    # The schema itself must be able to hold a file to be its own holder.
-    with pytest.raises(ValidationError, match="can hold a file"):
-        tree.svc.create("encounter", "no files here", holder="encounter")
+    # The schema itself needn't hold a file yet to be its own holder: the
+    # export takes whatever file fields are added later.
+    d = tree.svc.create("encounter", "nothing yet", holder="encounter")
+    assert d.holder == "encounter"
 
 
 def test_the_fields_must_be_file_fields_the_kind_has(ctx: AppContext, tree) -> None:
@@ -146,13 +147,34 @@ def test_with_any_kind_the_fields_come_from_anywhere_in_the_schemas_tree(
         tree.svc.create("encounter", "site-scan", fields=["scan"])  # Site isn't beneath
 
 
-def test_a_schema_with_nothing_that_can_hold_a_file_cannot_have_an_export(
+def test_a_schema_with_nothing_that_can_hold_a_file_yet_can_still_have_an_export(
     ctx: AppContext, make_schema
 ) -> None:
+    """The export is saved before there is anything to export: it takes the
+    files of whatever file fields come later."""
     make_schema("plain", fields=[("name", "string")])
 
-    with pytest.raises(ValidationError, match="can hold a file"):
-        ctx.export_def_svc.create("plain", "nothing")
+    d = ctx.export_def_svc.create("plain", "everything")
+    assert d.include_files and d.fields == []
+    with pytest.raises(ValidationError, match="isn't a file field"):
+        ctx.export_def_svc.create("plain", "named", fields=["photo"])
+
+
+def test_an_export_says_how_it_is_made(ctx: AppContext, make_schema) -> None:
+    make_schema("plain", fields=[("name", "string")])
+    d = ctx.export_def_svc.create("plain", "links")
+    assert (d.method, d.volume) == ("link", None)
+    d = ctx.export_def_svc.create("plain", "copies", method="copy", volume="archive")
+    assert (d.method, d.volume) == ("copy", "archive")
+    d = ctx.export_def_svc.update("plain", "copies", method="zip")
+    assert (d.method, d.volume) == (
+        "zip",
+        None,
+    )  # a drive only means something for a copy
+    with pytest.raises(ValidationError, match="one of: link, copy, zip"):
+        ctx.export_def_svc.create("plain", "odd", method="email")
+    with pytest.raises(ValidationError, match="only chosen for an export that copies"):
+        ctx.export_def_svc.create("plain", "odd", method="link", volume="archive")
 
 
 def test_a_filter_tests_one_kind_of_record_and_is_checked(

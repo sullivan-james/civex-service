@@ -111,6 +111,7 @@ export function FieldForm(props: FieldFormProps) {
 
   const ctx: ControlContext = {
     schemaName,
+    type,
     fields: props.fields,
     schemas: props.schemas ?? [],
     existing: editing,

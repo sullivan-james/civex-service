@@ -74,6 +74,7 @@ def test_plan_under_a_record_starts_below_it(client, study) -> None:
 
 
 def test_plan_errors(client, study) -> None:
+    study.add("a", b"hello")  # a field is only checked against records there are
     assert (
         client.post(
             "/api/file-access/plan", json={**BODY, "base": "ffffffff"}
@@ -539,6 +540,7 @@ def test_a_header_that_is_not_a_plain_id_is_ignored(client, study) -> None:
 
 
 def test_a_request_that_fails_says_so_in_its_progress(client, study) -> None:
+    study.add("a", b"hello")
     resp = client.post(
         "/api/file-access/plan",
         json={**BODY, "fields": ["nope"]},

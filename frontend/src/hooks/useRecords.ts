@@ -6,9 +6,12 @@ import {
   type QueryClient,
   type QueryKey,
 } from '@tanstack/react-query'
+import { useCallback } from 'react'
 import {
   recordsApi,
   type CivexRecord,
+  type FileSaver,
+  type FileUpload,
   type PaginatedRecords,
   type ListParams,
 } from '../api/records'
@@ -148,12 +151,18 @@ export function useReferrers(id: string) {
   })
 }
 
+type CreateBody = Parameters<typeof recordsApi.create>[1]
+
+/** Creates a record; with `files` (chosen before it existed), the record and
+ * its files go as one request, kept together or not at all. */
 export function useCreateRecord(datasetName: string) {
   const qc = useQueryClient()
   const toast = useToast()
   return useMutation({
-    mutationFn: (body: Parameters<typeof recordsApi.create>[1]) =>
-      recordsApi.create(datasetName, body),
+    mutationFn: ({ files, ...body }: CreateBody & { files?: FileUpload[] }) =>
+      files?.length
+        ? recordsApi.createWithFiles(datasetName, body, files)
+        : recordsApi.create(datasetName, body),
     onSuccess: (created) => {
       qc.invalidateQueries({ queryKey: ['records', datasetName] })
       qc.invalidateQueries({ queryKey: ['record-counts', datasetName] })
@@ -198,18 +207,43 @@ export function useUpdateRecord({ quiet = false }: { quiet?: boolean } = {}) {
       if (quiet) return
       toast.success(`Record "${updated.natural_name ?? updated.id}" updated`)
     },
-    onSettled: (_data, _err, vars) => {
-      qc.invalidateQueries({ queryKey: ['record', vars.id] })
-      // Lists too: an edit can change the record's natural name and any
-      // server-resolved reference labels shown in a table row.
-      qc.invalidateQueries({ queryKey: ['records'] })
-      qc.invalidateQueries({ queryKey: ['record-audit', vars.id] })
-      qc.invalidateQueries({ queryKey: ['store', 'volumes'] })
-      qc.invalidateQueries({ queryKey: ['store', 'collection'] })
-      qc.invalidateQueries({ queryKey: ['jobs'] })
-      invalidateRecordNames(qc)
-    },
+    onSettled: (_data, _err, vars) => settleRecordCaches(qc, vars.id),
   })
+}
+
+/** Everything a saved record may have changed on screen: the record, the
+ * lists (its natural name, reference labels in rows), its history, what the
+ * drives hold, and the runs it may have started. */
+function settleRecordCaches(qc: QueryClient, id: string) {
+  qc.invalidateQueries({ queryKey: ['record', id] })
+  qc.invalidateQueries({ queryKey: ['records'] })
+  qc.invalidateQueries({ queryKey: ['record-audit', id] })
+  qc.invalidateQueries({ queryKey: ['store', 'volumes'] })
+  qc.invalidateQueries({ queryKey: ['store', 'collection'] })
+  qc.invalidateQueries({ queryKey: ['jobs'] })
+  invalidateRecordNames(qc)
+}
+
+/** The record page's `FileSaver`: a file chosen in a field is stored and the
+ * record saved with it as one request (`recordsApi.attachFile`), the answer
+ * shown at once and the caches settled as after any save. */
+export function useRecordFileSaver(recordId: string): FileSaver {
+  const qc = useQueryClient()
+  return useCallback<FileSaver>(
+    async (field, file, onProgress, signal) => {
+      const record = await recordsApi.attachFile(
+        recordId,
+        field.name,
+        file,
+        onProgress,
+        signal,
+      )
+      qc.setQueryData(['record', recordId], record)
+      settleRecordCaches(qc, recordId)
+      return record
+    },
+    [qc, recordId],
+  )
 }
 
 export function useDeleteRecord(datasetName: string) {
