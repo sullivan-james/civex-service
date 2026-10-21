@@ -149,27 +149,39 @@ function renderSection() {
 }
 
 describe('schema fields section', () => {
-  it('lists fields on the left and shows the selected one on the right', async () => {
+  it('lists the fields as wide rows, and a row opens in place with its rules', async () => {
     renderSection()
-    const nav = screen.getByRole('list', { name: 'Fields' })
-    expect(within(nav).getByText('Species')).toBeInTheDocument()
-    expect(within(nav).getByText('Depth')).toBeInTheDocument()
-    // the first field is open, with its rules
-    expect(screen.getByRole('heading', { name: 'Species' })).toBeInTheDocument()
-    expect(screen.getByText('Allowed values')).toBeInTheDocument()
+    const list = screen.getByRole('list', { name: 'Fields' })
+    expect(within(list).getByText('Species')).toBeInTheDocument()
+    expect(within(list).getByText('Depth')).toBeInTheDocument()
+    // nothing is open until a row is pressed; there is no side panel
+    expect(screen.queryByText('Allowed values')).toBeNull()
+    expect(screen.queryByText(/select a field/i)).toBeNull()
 
-    await userEvent.click(within(nav).getByText('Depth'))
+    await userEvent.click(
+      within(list).getByRole('button', { name: /Depth/, expanded: false }),
+    )
     expect(screen.getByRole('heading', { name: 'Depth' })).toBeInTheDocument()
     expect(screen.getByLabelText('Unit')).toHaveValue('m')
+    expect(
+      screen.getByRole('button', { name: 'Remove field…' }),
+    ).toBeInTheDocument()
+
+    // pressing the row again closes it
+    await userEvent.click(
+      within(list).getByRole('button', { name: /Depth/, expanded: true }),
+    )
+    expect(screen.queryByLabelText('Unit')).toBeNull()
   })
 
-  it('starts a new field from the kind of data and saves its rules', async () => {
+  it('starts a new field from the kind of data, at the end, and saves its rules', async () => {
     renderSection()
-    await userEvent.click(screen.getByRole('button', { name: '+ Add field' }))
+    await userEvent.click(screen.getByRole('button', { name: /add field/i }))
+    expect(screen.getByText('What kind of field?')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: /Location/ }))
     // the kind's lead rule comes first
     expect(screen.getByText('Shapes allowed')).toBeInTheDocument()
-    await userEvent.type(screen.getByLabelText('Field label'), 'Release point')
+    await userEvent.type(screen.getByLabelText('Name'), 'Release point')
     await userEvent.click(screen.getByLabelText('Point'))
     await userEvent.click(screen.getByRole('button', { name: 'Add field' }))
     await waitFor(() => expect(calls).toHaveLength(1))
@@ -184,7 +196,9 @@ describe('schema fields section', () => {
   it('saves a changed rule on an existing field', async () => {
     renderSection()
     await userEvent.click(
-      within(screen.getByRole('list', { name: 'Fields' })).getByText('Depth'),
+      within(screen.getByRole('list', { name: 'Fields' })).getByRole('button', {
+        name: /Depth/,
+      }),
     )
     const save = screen.getByRole('button', { name: 'Save changes' })
     expect(save).toBeDisabled()
@@ -200,9 +214,10 @@ describe('schema fields section', () => {
 
   it('asks before throwing away unsaved edits', async () => {
     renderSection()
-    const nav = screen.getByRole('list', { name: 'Fields' })
-    await userEvent.type(screen.getByLabelText('Field label'), 'x')
-    await userEvent.click(within(nav).getByText('Depth'))
+    const list = screen.getByRole('list', { name: 'Fields' })
+    await userEvent.click(within(list).getByRole('button', { name: /Species/ }))
+    await userEvent.type(screen.getByLabelText('Name'), 'x')
+    await userEvent.click(within(list).getByRole('button', { name: /Depth/ }))
     expect(screen.getByText('Discard unsaved changes?')).toBeInTheDocument()
     await userEvent.click(
       within(screen.getByRole('dialog')).getByRole('button', {
@@ -210,7 +225,7 @@ describe('schema fields section', () => {
       }),
     )
     expect(screen.getByRole('heading', { name: 'Species' })).toBeInTheDocument()
-    await userEvent.click(within(nav).getByText('Depth'))
+    await userEvent.click(within(list).getByRole('button', { name: /Depth/ }))
     await userEvent.click(
       within(screen.getByRole('dialog')).getByRole('button', {
         name: 'Discard changes',

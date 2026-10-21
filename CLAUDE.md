@@ -228,7 +228,7 @@ Schemas and fields each carry a `name` and a `label` (see `domain/naming.py`, mi
 - `name` — the machine key. Slug-validated (`^[a-z_][a-z0-9_]*$`) on create and rename only. Referenced as text by workflow YAML (`field:`, `schema:`, `reference` restrictions), CSV headers, name templates and API paths.
 - `label` — free-text display name, nullable. `display_label(name, label)` derives one from the name when unset; `FieldDTO.display_name`/`SchemaDTO.display_name` wrap that.
 
-Validation is write-time only: rows predating the rule keep working, and `civex schema lint` (`SchemaService.lint_names()`) reports them. Restore/import paths pass `allow_legacy_name=True` so an old dump round-trips unchanged. UI forms collect the label first and auto-slug the name (`NameLabelFields`); editing never re-derives an existing name.
+Validation is write-time only: rows predating the rule keep working, and `civex schema lint` (`SchemaService.lint_names()`) reports them. Restore/import paths pass `allow_legacy_name=True` so an old dump round-trips unchanged. UI forms collect the label first and auto-slug the name (`NameLabelFields`); editing never re-derives an existing name. **The app's words are Name (the `label`) and Key (the `name`)**: the key is folded under the name with a *change* link and a tooltip while it follows the name, and is a field of its own when editing. Don't surface "label" or "name" as UI words for these.
 
 ### Name templates
 
