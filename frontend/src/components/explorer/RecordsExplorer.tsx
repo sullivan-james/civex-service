@@ -25,6 +25,7 @@ import {
   TableSkeleton,
   SegmentedControl,
   Field,
+  Skeleton,
 } from '../ui'
 import { ChevronDown, Columns3, Download, Plus, Upload } from '../ui/icons'
 import { toTableRows } from '../records/tableRows'
@@ -52,6 +53,7 @@ import { useWorkflows } from '../../hooks/useWorkflows'
 import { useExplorer, type ExplorerScope } from './useExplorer'
 import { useCollection } from '../../hooks/useCollections'
 import { usePermissions } from '../../hooks/useMe'
+import { EmptyCollectionGuide } from './EmptyCollectionGuide'
 import { recordRecent } from '../../hooks/usePins'
 import { placeTarget, viewTarget } from '../../utils/navTargets'
 import { viewPatch } from '../../utils/explorerState'
@@ -67,7 +69,6 @@ export interface RecordsExplorerProps extends ExplorerScope {
   /** Extra buttons on the toolbar (e.g. Import). */
   toolbarActions?: ReactNode
   /** Shown instead of the table when there is nothing in scope at all. */
-  emptyHint?: ReactNode
 }
 
 /** The one way records are browsed: a collection, a single record's
@@ -78,7 +79,6 @@ export interface RecordsExplorerProps extends ExplorerScope {
 export function RecordsExplorer({
   scopeLabel,
   toolbarActions,
-  emptyHint,
   ...scope
 }: RecordsExplorerProps) {
   const x = useExplorer(scope)
@@ -309,7 +309,12 @@ export function RecordsExplorer({
   // The collection's own top-level schemas: where a record can start. Levels
   // come from record counts, so a schema with no records yet has none, and
   // without these there would be no way to create the first of its kind.
-  const enabledSchemas = new Set(collection?.schemas ?? [])
+  // A collection holds records of every schema, unless it was given a list
+  // of its own (the CLI's --schema), in which case only those.
+  const ownList = collection?.schemas ?? []
+  const enabledSchemas = new Set(
+    ownList.length ? ownList : (x.schemas ?? []).map((s) => s.name),
+  )
   const navigate = useNavigate()
   // What this person may do here: the controls stay, off, saying why.
   const { can, why } = usePermissions()
@@ -398,26 +403,30 @@ export function RecordsExplorer({
       </Button>
     ))
 
+  // Until the collection and its counts have answered, nothing is listed and
+  // there is no New: a menu opened now would be replaced by the loaded one.
+  if (!listed && (!x.countsLoaded || (dataset && !collection)))
+    return <Skeleton className="h-32 w-full" />
+
   if (!listed && !x.page.isLoading && x.levels.length === 0) {
     // Levels come from record counts, so an empty collection has none and the
     // list's own "Add" button never renders -- offer the collection's own
     // top-level schemas here instead, or there is no way to create the first
     // record (a child schema needs a parent record, so it can't start one).
-    const noSchemas = !!collection && collection.schemas.length === 0
     return (
-      <div className="space-y-3">
-        <EmptyState
-          title="No records yet"
-          message={
-            noSchemas
-              ? 'This collection has no record types yet. Edit the collection and choose the record types it is for.'
-              : (emptyHint ?? 'Add a record to get started.')
-          }
-        />
-        {(x.rootId ? childStarters : starters).length > 0 && (
-          <div className="flex justify-center">{newMenu}</div>
-        )}
-      </div>
+      <EmptyCollectionGuide
+        collection={dataset ? collection : null}
+        schemas={x.schemas ?? []}
+        within={
+          x.rootId && x.scopeSchema
+            ? { id: x.rootId, schema: x.scopeSchema }
+            : null
+        }
+        newMenu={newMenu}
+        cannotAddSchema={
+          can('change_structure') ? undefined : why('change_structure')
+        }
+      />
     )
   }
 
@@ -768,7 +777,7 @@ export function RecordsExplorer({
               className="text-accent hover:underline"
               to={`/schemas/${listed.parent_id}`}
             >
-              open the record type it goes inside
+              open the schema it goes inside
             </Link>{' '}
             to start from the top of the hierarchy.
           </p>

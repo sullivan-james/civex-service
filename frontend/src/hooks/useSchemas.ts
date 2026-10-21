@@ -6,6 +6,7 @@ import {
   type QueryKey,
 } from '@tanstack/react-query'
 import { schemasApi, type Schema, type Field } from '../api/schemas'
+import { displayLabel } from '../utils/naming'
 import { useToast } from '../components/ui/ToastProvider'
 import { invalidateRecordNames } from './useRecordName'
 import { errorMessage } from '../lib/errors'
@@ -153,7 +154,9 @@ export function useAddField(schemaName: string) {
     }) => schemasApi.addField(schemaName, body),
     onSuccess: (field) => {
       qc.invalidateQueries({ queryKey: ['schemas'] })
-      toast.success(`Field "${field.name}" added`)
+      toast.success(
+        `Added ${displayLabel(field.name, field.label)} to every ${schemaName}.`,
+      )
     },
     onError: (err) => toast.error(errorMessage(err)),
   })

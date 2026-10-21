@@ -103,6 +103,9 @@ export function useExplorer(scope: ExplorerScope) {
     scope.dataset ?? (scope.lockedSchema ? '' : null),
     rootId ? { within: rootId } : undefined,
   )
+  // Until the counts answer there are no levels, which looks like an empty
+  // collection; the list waits for them before saying so.
+  const countsLoaded = counts !== undefined
   const levels = useMemo<RailLevel[]>(() => {
     if (scope.lockedSchema) return []
     return railLevels({
@@ -246,6 +249,7 @@ export function useExplorer(scope: ExplorerScope) {
     chain,
     scopeSchema,
     levels,
+    countsLoaded,
     listed,
     listedName,
     filter,

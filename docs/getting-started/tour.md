@@ -1,26 +1,27 @@
 # Five-minute tour
 
-One example from start to finish: a *Sample* record type, a collection to hold
+One example from start to finish: a *Sample* schema, a collection to hold
 samples, a sample record, and a workflow that fills a field by itself. Use the
 app or the CLI; both build the same project.
 
-If you haven't yet, read [Record types, collections and records](concepts.md)
-first: a record type is the blank form, a record is one filled-in copy.
+If you haven't yet, read [Schemas, collections and records](concepts.md)
+first: a schema is the blank form, a record is one filled-in copy.
 
-## 1. A record type: what a sample looks like
+## 1. A schema: what a sample looks like
 
 You do this **once**. Every sample you add afterwards uses this form.
 
 === "Web UI"
 
-    `civex serve --open`, then **Record types → New record type**, labelled
-    *Sample*. On its page, **Add field** four times: *number* (whole number,
-    required), *depth* (number, unit `m`), *condition* (text, allowed values
-    `good`, `damaged`, `lost`) and *summary* (text).
+    `civex serve --open`, then **Collections → New collection**, named
+    `survey-2024`. Its page says what to do first: **New schema…**, which
+    takes you to the Schemas page with the collection remembered. **New schema**, labelled
+    *Sample*, opens its page: **Add field** four times, *number* (whole
+    number, required), *depth* (number, unit `m`), *condition* (text, allowed
+    values `good`, `damaged`, `lost`) and *summary* (text). Then back to
+    `survey-2024`.
 
 === "CLI"
-
-    The CLI calls a record type a *schema*:
 
     ```bash
     civex schema create sample --label "Sample" --description "One physical sample"
@@ -40,16 +41,16 @@ You do this **once**. Every sample you add afterwards uses this form.
 
 ## 2. A collection to hold samples
 
-A collection is the binder. It says which record types may go in it.
+A collection is the binder: it holds records of any schema.
 
 === "Web UI"
 
-    **Collections → New collection**, named `survey-2024`, with **Sample** ticked.
+    Already done: the collection was made first, in step 1.
 
 === "CLI"
 
     ```bash
-    civex collection create survey-2024 --schema sample --description "2024 field season"
+    civex collection create survey-2024 --description "2024 field season"
     ```
 
 ## 3. A record
@@ -58,7 +59,7 @@ This is the step you repeat: one record per sample, on the same form.
 
 === "Web UI"
 
-    Open `survey-2024`, then **New ▸ New sample**. Fill in number, depth and
+    Open `survey-2024`, then **New ▸ Sample**. Fill in number, depth and
     condition, leave summary blank, and save. **Add and add another** keeps the
     form open for the next one.
 
@@ -79,10 +80,9 @@ This is the step you repeat: one record per sample, on the same form.
     Added record f623c8d7-eb75-41e1-b2ec-d6feb7f02f7a.
     ```
 
-!!! tip "Not a new record type"
-    The second sample is **New ▸ New sample** again, not a second record type.
-    A record type is made once per *kind* of thing; a record is made once per
-    *thing*.
+!!! tip "Not a new schema"
+    The second sample is **New ▸ Sample** again. **New schema…** is only for
+    a kind of record the collection doesn't have yet.
 
 ## 4. A workflow: fill a field automatically
 
@@ -137,7 +137,7 @@ the run.
 | To… | Read |
 |---|---|
 | Bring in a spreadsheet or a folder of files | [Import data](../how-to/import-data.md) |
-| Put samples inside visits and sites | [Record types & fields](../guides/schemas-and-fields.md#types-inside-other-types) |
+| Put samples inside visits and sites | [Schemas & fields](../guides/schemas-and-fields.md#types-inside-other-types) |
 | Keep files on an external drive | [Put files on another drive](../how-to/storage-drives.md) |
 | Work on several computers | [Sync a project](../how-to/set-up-sync.md) |
 | Automate more | [Fill fields from file names](../how-to/fill-fields-from-filenames.md) |

@@ -58,21 +58,33 @@ def test_cannot_remove_a_schema_that_has_records(
     ctx: AppContext, make_schema, make_collection, strict_schema_lists
 ):
     make_schema("species")
+    make_schema("site")
     make_collection("taxonomy", schemas=["species"])
     ctx.record_svc.add("taxonomy", "species", {})
     ctx.commit()
     with pytest.raises(ValidationError, match="still has records"):
-        ctx.dataset_svc.update("taxonomy", schemas=[])
+        ctx.dataset_svc.update("taxonomy", schemas=["site"])
+    # clearing the list means every schema, so nothing is stranded
+    assert ctx.dataset_svc.update("taxonomy", schemas=[]).schemas == []
 
 
 # --- the schema list gates record creation ---
 
 
-def test_record_needs_an_enabled_schema(
+def test_a_collection_without_a_list_holds_every_schema(
     ctx: AppContext, make_schema, make_collection, strict_schema_lists
 ):
     make_schema("species")
     make_collection("taxonomy")
+    assert ctx.record_svc.add("taxonomy", "species", {}).dataset_name == "taxonomy"
+
+
+def test_a_collection_with_a_list_holds_only_those(
+    ctx: AppContext, make_schema, make_collection, strict_schema_lists
+):
+    make_schema("species")
+    make_schema("site")
+    make_collection("taxonomy", schemas=["site"])
     with pytest.raises(ValidationError, match="not enabled"):
         ctx.record_svc.add("taxonomy", "species", {})
     ctx.dataset_svc.add_schemas("taxonomy", ["species"])

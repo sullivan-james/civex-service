@@ -50,6 +50,7 @@ import { underRecord } from '../utils/auditFilter'
 import { DeletedFieldValues } from '../components/records/DeletedFieldValues'
 import { RecordFieldGrid } from '../components/records/RecordFieldGrid'
 import { usePermissions } from '../hooks/useMe'
+import { AddFieldRow } from '../components/schemas/AddFieldRow'
 import { MergeView } from '../components/sync/MergeView'
 import { ReviewStepper } from '../components/sync/ReviewStepper'
 import { RecordConflicts } from '../components/sync/RecordConflicts'
@@ -358,6 +359,9 @@ export default function RecordDetailPage() {
               errors={saveErrors}
               onDismissError={() => updateRecord.reset()}
               marked={conflictLayout.marked}
+              footer={
+                schema && <AddFieldRow schema={schema} allSchemas={schemas} />
+              }
             />
             <DeletedFieldValues fields={record.deleted_fields ?? []} />
           </UploadCollectionContext.Provider>

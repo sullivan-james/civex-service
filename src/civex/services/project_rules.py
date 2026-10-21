@@ -105,6 +105,8 @@ class ProjectRules:
         if dataset is None or dataset.deleted_at is not None:
             return
         listed = {uuid.UUID(str(s)) for s in dataset.schema_ids or []}
+        if not listed:
+            return  # no list: the collection holds records of every schema
         for schema_id in self._records.live_schema_ids(dataset.id) - listed:
             schema = self._schemas.get_by_id(schema_id, include_deleted=True)
             raise ValidationError(

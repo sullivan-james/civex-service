@@ -487,7 +487,7 @@ class UpdateDatasetRequest(BaseModel):
     schemas: list[str] | None = Field(
         default=None,
         description=(
-            "Replace the collection's schema list. Omit or null to leave "
+            "Limit the collection to these schemas (an empty list allows every schema). Omit or null to leave "
             "unchanged. A schema with records in the collection can't be "
             "removed."
         ),

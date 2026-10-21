@@ -230,7 +230,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 async function openNew() {
-  await userEvent.click(await screen.findByRole('button', { name: /New/ }))
+  await userEvent.click(await screen.findByRole('button', { name: /^New$/ }))
 }
 const item = (name: RegExp) => screen.queryByRole('menuitem', { name })
 
@@ -252,8 +252,8 @@ describe('RecordsExplorer', () => {
       return undefined
     }
 
-    it('offers a New entry for each enabled top-level schema', async () => {
-      override = emptyCollection(['encounter', 'recording'])
+    it('offers a New entry for each top-level schema', async () => {
+      override = emptyCollection([])
       renderExplorer({}, '/collections/hb')
       await openNew()
       expect(item(/New encounter/)).toBeInTheDocument()
@@ -261,15 +261,61 @@ describe('RecordsExplorer', () => {
       expect(item(/New recording/)).not.toBeInTheDocument()
     })
 
-    it('says so when no schemas are enabled yet', async () => {
-      override = emptyCollection([])
+    it('guides to a schema first, apart from New, when there are none', async () => {
+      override = (url) => {
+        if (url.pathname === '/api/schemas') return json([])
+        return emptyCollection([])(url)
+      }
+      renderExplorer({}, '/collections/hb')
+      expect(await screen.findByText('Nothing here yet')).toBeInTheDocument()
+      expect(screen.getByText(/No schema yet/)).toBeInTheDocument()
+      const link = screen.getByRole('link', { name: 'New schema…' })
+      expect(link).toHaveAttribute('href', '/schemas?new=1')
+      // records come second: no New menu until there is a schema
+      expect(
+        screen.queryByRole('button', { name: /^New/ }),
+      ).not.toBeInTheDocument()
+    })
+
+    it('says which schemas are here and offers New for records', async () => {
+      override = emptyCollection(['encounter'])
       renderExplorer({}, '/collections/hb')
       expect(
-        await screen.findByText(/has no record types yet/),
+        await screen.findByText(/You have Encounter\./),
       ).toBeInTheDocument()
-      expect(
-        screen.queryByRole('button', { name: /New/ }),
-      ).not.toBeInTheDocument()
+      await openNew()
+      expect(item(/New encounter/)).toBeInTheDocument()
+      expect(item(/New schema/)).toBeNull()
+    })
+
+    it('switches New schema… off, saying why, for someone who may not change the structure', async () => {
+      override = (url) => {
+        if (url.pathname === '/api/schemas') return json([])
+        if (url.pathname === '/api/me')
+          return json({
+            account: null,
+            permissions: {
+              actions: { read: ['project'], write_records: ['project'] },
+              all: {},
+            },
+          })
+        return emptyCollection([])(url)
+      }
+      renderExplorer({}, '/collections/hb')
+      expect(await screen.findByText('Nothing here yet')).toBeInTheDocument()
+      const button = await screen.findByRole('button', { name: 'New schema…' })
+      expect(button).toBeDisabled()
+      expect(button).toHaveAttribute('title')
+    })
+  })
+
+  describe('inside a record', () => {
+    it('the rail offers a schema that goes inside this one, apart from New', async () => {
+      renderExplorer({ root: { id: 'e1' } }, '/records/e1?tab=contains')
+      await openNew()
+      expect(item(/New schema/)).toBeNull()
+      const link = await screen.findByRole('link', { name: 'New schema…' })
+      expect(link).toHaveAttribute('href', '/schemas?new=1&parent=encounter')
     })
   })
 
@@ -1126,7 +1172,7 @@ describe('what this person may do', () => {
       return undefined
     }
     renderExplorer({}, '/collections/hb')
-    const button = await screen.findByRole('button', { name: /New/ })
+    const button = await screen.findByRole('button', { name: /^New$/ })
     await waitFor(() => expect(button).toBeDisabled())
     expect(button).toHaveAttribute(
       'title',

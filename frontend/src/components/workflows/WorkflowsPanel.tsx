@@ -255,7 +255,7 @@ export function WorkflowsPanel({
           filtered
             ? 'No workflows match'
             : schemaName
-              ? 'No automations for this record type yet'
+              ? 'No automations for this schema yet'
               : 'No workflows yet'
         }
         emptyMessage={

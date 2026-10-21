@@ -504,7 +504,7 @@ export function SchemaControl({
         onChange={(e) => set(desc.key, e.target.value || undefined)}
         className="max-w-xs"
       >
-        <option value="">— choose a record type —</option>
+        <option value="">— choose a schema —</option>
         {ctx.schemas
           .filter((s) => s.name !== ctx.schemaName)
           .map((s) => (

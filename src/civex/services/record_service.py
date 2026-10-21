@@ -1264,8 +1264,10 @@ class RecordService:
         return out
 
     def _check_schema_allowed(self, dataset: DatasetDTO, schema: SchemaDTO) -> None:
-        """A collection only holds records of the schemas it is for."""
-        if schema.name not in dataset.schemas:
+        """A collection holds records of every schema, unless it was given a
+        list of its own (`civex collection update --schema`), in which case
+        only those."""
+        if dataset.schemas and schema.name not in dataset.schemas:
             raise ValidationError(
                 f"Schema '{schema.name}' is not enabled for collection "
                 f"'{dataset.name}' -- add it to the collection's schemas first"

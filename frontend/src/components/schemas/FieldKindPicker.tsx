@@ -7,14 +7,17 @@ import { Button, Card, Skeleton } from '../ui'
 export function FieldKindPicker({
   onPick,
   onCancel,
+  title = 'New field',
 }: {
   onPick: (kind: FieldKind) => void
   onCancel?: () => void
+  /** The heading; null when the surround already has one. */
+  title?: string | null
 }) {
   const types = useFieldTypes()
   return (
     <div className="space-y-4">
-      <h3 className="text-base font-semibold text-fg">New field</h3>
+      {title && <h3 className="text-base font-semibold text-fg">{title}</h3>}
       {!types ? (
         <Skeleton className="h-32 w-full" />
       ) : (

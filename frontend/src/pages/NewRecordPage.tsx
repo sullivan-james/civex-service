@@ -30,6 +30,7 @@ import { previewFromFilename } from '../utils/filenameExtract'
 import { splitPendingFiles } from '../components/records/pendingFiles'
 import { errorMessage } from '../lib/errors'
 import { useBack } from '../hooks/useBack'
+import { AddFieldRow } from '../components/schemas/AddFieldRow'
 
 const PARENT = '__parent__'
 
@@ -112,7 +113,7 @@ export default function NewRecordPage() {
                 ? errorMessage(error)
                 : !collection
                   ? 'Collection not found'
-                  : 'Unknown record type'
+                  : 'Unknown schema'
             }
           />
         }
@@ -207,6 +208,7 @@ export default function NewRecordPage() {
               }
               errors={errors}
               onDismissError={() => createRecord.reset()}
+              footer={<AddFieldRow schema={schema} allSchemas={schemas} />}
               extra={(field) => {
                 if (
                   field.name === PARENT ||

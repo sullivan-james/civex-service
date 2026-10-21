@@ -55,7 +55,6 @@ export default function CollectionDetailPage() {
   const [nameValue, setNameValue] = useState('')
   const [descriptionValue, setDescriptionValue] = useState('')
   const [scopeValue, setScopeValue] = useState<CollectionScope>('local')
-  const [schemasValue, setSchemasValue] = useState<string[]>([])
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [tab, setTab] = useTabParam(COLLECTION_TABS, 'records')
   const [params, setParams] = useSearchParams()
@@ -123,7 +122,6 @@ export default function CollectionDetailPage() {
     setDescriptionValue(collection!.description ?? '')
     setTimezoneValue(collection!.timezone ?? '')
     setScopeValue(collection!.scope)
-    setSchemasValue(collection!.schemas)
     setEditing(true)
   }
 
@@ -134,7 +132,6 @@ export default function CollectionDetailPage() {
       description?: string
       timezone?: string
       scope?: CollectionScope
-      schemas?: string[]
     } = {}
     if (newName && newName !== collection!.name) body.rename = newName
     if (descriptionValue !== (collection!.description ?? ''))
@@ -143,8 +140,6 @@ export default function CollectionDetailPage() {
     if (timezoneValue !== (collection!.timezone ?? ''))
       body.timezone = timezoneValue
     if (scopeValue !== collection!.scope) body.scope = scopeValue
-    if (schemasValue.join('\n') !== collection!.schemas.join('\n'))
-      body.schemas = schemasValue
     if (!Object.keys(body).length) {
       setEditing(false)
       return
@@ -252,8 +247,6 @@ export default function CollectionDetailPage() {
               <CollectionScopeFields
                 scope={scopeValue}
                 onScopeChange={setScopeValue}
-                schemas={schemasValue}
-                onSchemasChange={setSchemasValue}
               />
               {updateCollection.error && (
                 <span role="alert" className="text-xs text-danger">
@@ -280,18 +273,6 @@ export default function CollectionDetailPage() {
             <RecordsExplorer
               dataset={collection.name}
               scopeLabel={collection.name}
-              emptyHint={
-                <>
-                  Add your first record with the button above, or use{' '}
-                  <Link
-                    to={`/collections/${id}/import`}
-                    className="text-accent hover:underline"
-                  >
-                    guided import
-                  </Link>{' '}
-                  to bring in a folder of files or a spreadsheet.
-                </>
-              }
             />
           </TabPanel>
 
