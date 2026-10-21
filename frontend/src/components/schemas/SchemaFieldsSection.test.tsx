@@ -202,6 +202,10 @@ describe('schema fields section', () => {
     )
     const save = screen.getByRole('button', { name: 'Save changes' })
     expect(save).toBeDisabled()
+    // the unit is set, so it shows; a bound it doesn't have waits behind More rules
+    expect(screen.getByLabelText('Unit')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Smallest allowed')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: /more rules/i }))
     await userEvent.type(screen.getByLabelText('Smallest allowed'), '0')
     await userEvent.click(save)
     await waitFor(() => expect(calls).toHaveLength(1))
