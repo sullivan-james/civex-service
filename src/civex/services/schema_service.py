@@ -85,12 +85,26 @@ def _check_control_value(desc: RestrictionDescriptor, value: Any) -> None:
         if not isinstance(value, str) or not value.strip():
             problem = "non-empty text"
     elif desc.control == "from_filename":
+        patterns = filename_extract.patterns_of(
+            value.get("pattern") if isinstance(value, dict) else None
+        )
         if (
             not isinstance(value, dict)
             or set(value) != {"field", "pattern"}
-            or not all(isinstance(v, str) and v.strip() for v in value.values())
+            or not isinstance(value["field"], str)
+            or not value["field"].strip()
+            or not isinstance(value["pattern"], (str, list))
+            or (
+                isinstance(value["pattern"], list)
+                and len(patterns) != len(value["pattern"])
+            )
+            or not patterns
+            or not all(p.strip() for p in patterns)
         ):
-            problem = '{"field": <a file field>, "pattern": <a pattern>}'
+            problem = (
+                '{"field": <a file field>, "pattern": <a pattern, or a list '
+                "of patterns tried in order>}"
+            )
     if problem:
         raise ValidationError(
             f"Restriction '{desc.key}' must be {problem}, got {value!r}"
@@ -192,13 +206,13 @@ def _validate_from_filename(
     known_fields: list[ResolvedField],
 ) -> None:
     """Check a field's `from_filename` rule: it names a `file` or `file_list`
-    field of the schema or one above it, and its pattern reads a `dtype`
-    (`filename_extract.compile_pattern`). The key's shape was checked by
-    `_check_control_value`."""
+    field of the schema or one above it, and each of its patterns reads a
+    `dtype` (`filename_extract.compile_pattern`). The key's shape was checked
+    by `_check_control_value`."""
     rule = filename_extract.rule_of(restrictions)
     if rule is None:
         return
-    source_name, pattern = rule
+    source_name, patterns = rule
     source = next(
         (rf.field for rf in known_fields if rf.field.name == source_name), None
     )
@@ -211,10 +225,11 @@ def _validate_from_filename(
         raise ValidationError(
             f"from_filename: '{source_name}' is a {source.dtype} field, not a file field"
         )
-    try:
-        filename_extract.compile_pattern(pattern, dtype)
-    except ValueError as e:
-        raise ValidationError(f"from_filename: {e}") from None
+    for pattern in patterns:
+        try:
+            filename_extract.compile_pattern(pattern, dtype)
+        except ValueError as e:
+            raise ValidationError(f"from_filename: {e}") from None
 
 
 def _suggest(name: str) -> str | None:

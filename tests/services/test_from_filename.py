@@ -62,6 +62,34 @@ def recordings(ctx: AppContext, make_schema, make_collection):
             "2024-03-15T09:30:00",
         ),
         (r"take_(\d+)", "integer", "nothing_here.wav", None),
+        # Named groups: the parts in any order, any width.
+        (
+            r"(?P<day>\d{2})\.(?P<month>\d{2})\.(?P<year>\d{4})",
+            "date",
+            "scan_15.03.2024.pdf",
+            "2024-03-15",
+        ),
+        (
+            r"(?P<year>\d{4})(?P<month>\d{2})(?P<day>\d{2})T(?P<hour>\d{1,2})h",
+            "datetime",
+            "20240315T9h.csv",
+            "2024-03-15T09:00:00",
+        ),
+        # Several patterns: the first that matches wins.
+        (
+            ["DDMMYYYY_HHmmSS", "YYYY-MM-DD"],
+            "datetime",
+            "15032024_093000.csv",
+            "2024-03-15T09:30:00",
+        ),
+        (
+            ["DDMMYYYY_HHmmSS", "YYYY-MM-DD"],
+            "datetime",
+            "site_2024-03-15.csv",
+            "2024-03-15T00:00:00",
+        ),
+        ([r"take_(\d+)", r"sel_(\d+)"], "integer", "sel_12.txt", 12),
+        ([r"take_(\d+)", r"sel_(\d+)"], "integer", "other.txt", None),
     ],
 )
 def test_extract_reads_the_value_or_nothing(pattern, kind, filename, expected):
@@ -77,6 +105,13 @@ def test_extract_reads_the_value_or_nothing(pattern, kind, filename, expected):
         ("HHmmSS", "datetime", "YYYY MM DD"),
         ("YYYY-MM", "date", "DD"),
         (r"(\d+)", "boolean", "can't be filled"),
+        (r"(?P<year>\d{4})", "date", "needs month, day"),
+        (
+            r"(?P<year>\d{4})(?P<month>\d{2})(?P<day>\d{2})(?P<week>\d)",
+            "date",
+            r"unknown group\(s\) week",
+        ),
+        (r"(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})", "date", None),
     ],
 )
 def test_compile_pattern_refuses_what_cannot_work(pattern, kind, message):
@@ -306,6 +341,10 @@ def test_the_rule_is_not_a_key_of_other_types(ctx: AppContext, make_schema):
         {"field": "attachment"},
         {"field": "attachment", "pattern": ""},
         {"field": "attachment", "pattern": "(.+)", "extra": 1},
+        {"field": "attachment", "pattern": []},
+        {"field": "attachment", "pattern": ["(.+)", ""]},
+        {"field": "attachment", "pattern": ["(.+)", 3]},
+        {"field": "attachment", "pattern": ["(.+)", "("]},
     ],
 )
 def test_a_malformed_rule_is_refused(ctx: AppContext, make_schema, value):
@@ -314,6 +353,51 @@ def test_a_malformed_rule_is_refused(ctx: AppContext, make_schema, value):
         ctx.schema_svc.add_field(
             "doc", "name", "string", restrictions={"from_filename": value}
         )
+
+
+def test_several_patterns_are_one_rule_tried_in_order(
+    ctx: AppContext, make_schema, make_collection
+):
+    make_collection("study")
+    make_schema("sample", fields=[("reading", "file")])
+    ctx.schema_svc.add_field(
+        "sample",
+        "taken_at",
+        "datetime",
+        restrictions={
+            "from_filename": {
+                "field": "reading",
+                "pattern": ["DDMMYYYY_HHmmSS", "YYYY-MM-DD"],
+            }
+        },
+    )
+    first = ctx.record_svc.add(
+        "study", "sample", {"reading": _file(ctx, "15032024_093000.csv")}
+    )
+    second = ctx.record_svc.add(
+        "study", "sample", {"reading": _file(ctx, "site_2024-03-16.csv")}
+    )
+    assert first.data["taken_at"] == "2024-03-15T09:30:00+00:00"
+    assert second.data["taken_at"] == "2024-03-16T00:00:00+00:00"
+
+
+def test_a_date_regex_with_named_groups_is_a_pattern(
+    ctx: AppContext, make_schema, make_collection
+):
+    make_collection("study")
+    make_schema("sample", fields=[("reading", "file")])
+    ctx.schema_svc.add_field(
+        "sample",
+        "taken_on",
+        "date",
+        restrictions=_rule(
+            "reading", r"(?P<day>\d{2})\.(?P<month>\d{2})\.(?P<year>\d{4})"
+        ),
+    )
+    rec = ctx.record_svc.add(
+        "study", "sample", {"reading": _file(ctx, "scan_15.03.2024.pdf")}
+    )
+    assert rec.data["taken_on"] == "2024-03-15"
 
 
 def test_the_file_field_must_exist_and_be_a_file(ctx: AppContext, make_schema):

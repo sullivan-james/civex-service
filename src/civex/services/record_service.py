@@ -1021,7 +1021,7 @@ class RecordService:
             if rf.source_schema_name != shape.schema.name
         }
         result = dict(data)
-        for field, (source_name, pattern) in rules:
+        for field, (source_name, patterns) in rules:
             if not _is_blank_value(result.get(field.name)):
                 continue
             source = shape.by_name.get(source_name)
@@ -1034,7 +1034,7 @@ class RecordService:
             if filename is None:
                 continue
             try:
-                value = filename_extract.extract(filename, pattern, field.dtype)
+                value = filename_extract.extract(filename, patterns, field.dtype)
             except ValueError as e:
                 raise FieldValueError(
                     f"Field '{field.name}': could not be filled from '{filename}': {e}",
