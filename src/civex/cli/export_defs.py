@@ -22,14 +22,14 @@ app = typer.Typer(
 _LAYOUT_HELP = (
     "tree: a folder per record above each file (default); grouped: the folders "
     "above, with the records that hold the files gathered into one folder named "
-    "for their kind (Encounter/Recording/Selections); flat: every file in one "
+    "for their kind (Site/Visit/Samples); flat: every file in one "
     f"folder. One of: {', '.join(LAYOUTS)}."
 )
 
 
 _TABLE_HELP = (
     "Also make a table. On its own it is one table per kind of record the export "
-    "holds, written at the top and named for the kind (Selections.csv); the "
+    "holds, written at the top and named for the kind (Samples.csv); the "
     "--table-* options say which records are its rows and where it is written. "
     f"One of: {', '.join(FORMATS)}."
 )
@@ -126,7 +126,7 @@ def _tables(
 
 def _table_line(t: dict[str, Any]) -> str:
     """One table, as a person says it: 'csv table' for the simple form, 'csv of
-    selection in each recording' once it says what its rows are and where it goes."""
+    sample in each visit' once it says what its rows are and where it goes."""
     columns = t.get("columns")
     extra = f" ({len(columns)} columns)" if columns else ""
     if not t.get("kind"):
@@ -286,9 +286,9 @@ def exports_add(
 ) -> None:
     """Save an export with a schema.
 
-    For example, adding an export called contours to the encounter schema with
-    --kind selection, --field contour and --layout flat takes the contour files
-    of every selection beneath an encounter and puts them in one folder. It is
+    For example, adding an export called photos to the site schema with
+    --kind sample, --field photo and --layout flat takes the photo files
+    of every sample beneath a site and puts them in one folder. It is
     then offered on collections that use the schema and on records of it (and of
     the schemas beneath it, down to the kind that holds the files).
     """

@@ -1,37 +1,53 @@
-# Schemas & fields
+# Record types & fields
 
-A **schema** is a kind of record: its fields, their types and their rules. Schemas
-can nest (an Encounter holds Recordings, which hold Selections), and every
-record belongs to a [collection](collections-and-records.md).
+A **record type** is a blank form: the fields one kind of thing has, their types
+and the rules on each. The CLI and the API call it a *schema*. You design it
+once; every record of that type is one filled-in copy of the form, and lives in
+a [collection](collections-and-records.md). Types can go inside other types (a
+Site holds Visits, which hold Samples). New to these ideas? Start with
+[Record types, collections and records](../getting-started/concepts.md).
 
 ## A worked example
 
 ```bash
-civex schema create encounter --label "Encounter"
-civex schema add-field encounter site --type string --required
-civex schema add-field encounter seen_on --type date --precision month
+civex schema create site --label "Site"
+civex schema add-field site name --type string --required
+civex schema add-field site location --type geo
 
-civex schema create recording --parent encounter --label "Recording"
-civex schema add-field recording take --type integer --min 1
-civex schema add-field recording audio --type file --accept ".wav,.flac"
-civex schema add-field recording depth --type float --unit m --min 0
-civex schema update recording --display-template "Take {take:02}"
+civex schema create visit --parent site --label "Visit"
+civex schema add-field visit visited_on --type date --required --precision month
+civex schema add-field visit team --type string
 
-civex schema show recording
+civex schema create sample --parent visit --label "Sample"
+civex schema add-field sample number --type integer --min 1
+civex schema add-field sample depth --type float --unit m --min 0
+civex schema add-field sample taken_at --type datetime
+civex schema add-field sample photo --type file --accept ".jpg,.png"
+civex schema add-field sample reading --type file --accept ".csv"
+civex schema update sample --display-template "Sample {number:02}"
+
+civex schema show sample
 ```
 
 ```text
-Recording (recording)
-  Inherits: encounter
-Label    Field    Type     Required  Source
-Take     take     integer            recording
-Audio    audio    file               recording
-Depth    depth    float              recording
-Site     site     string   yes       ↑ encounter
-Seen On  seen_on  date               ↑ encounter
+Sample (sample)
+  Inherits: visit
+Label       Field       Type      Required  Source
+Number      number      integer             sample
+Depth       depth       float               sample
+Taken At    taken_at    datetime            sample
+Photo       photo       file                sample
+Reading     reading     file                sample
+Visited On  visited_on  date      yes       ↑ visit
+Team        team        string              ↑ visit
+Name        name        string    yes       ↑ site
+Location    location    geo                 ↑ site
 ```
 
-**In the app:** **Schemas → New schema**, then **Add field** on the schema's
+Three record types, designed once. From here on the project only gets records:
+sites, visits and samples.
+
+**In the app:** **Record types → New record type**, then **Add field** on its
 page. Type the label and the name fills itself in. The rules offered depend on
 the kind of field you pick.
 
@@ -68,9 +84,9 @@ imports and workflows.
 | `--precision` | `date` | `--precision month` (accepts `2024-03` and `2024-03-15`) |
 | `--geometry-types` | `geo` | `--geometry-types Point,Polygon` |
 | `--bbox` | `geo` | `--bbox "-12,48,4,62"` (west,south,east,north) |
-| `--accept` | `file`, `file_list` | `--accept ".wav,.flac"` |
+| `--accept` | `file`, `file_list` | `--accept ".jpg,.png"` |
 | `--max-size` | `file`, `file_list` | `--max-size 10485760` (bytes) |
-| `--references` | `reference`, `reference_list` | `--references encounter` |
+| `--references` | `reference`, `reference_list` | `--references species` |
 
 Some rules are set in the app (or over the API, as `restrictions`) only: a
 `date`/`datetime` minimum and maximum, a `datetime` field's own timezone, and a
@@ -99,7 +115,7 @@ instrument or a file name, is read as wall time in the field's timezone, else
 the collection's, else UTC:
 
 ```bash
-civex collection update humpbacks --timezone America/Chicago
+civex collection update survey-2024 --timezone Europe/London
 ```
 
 Times that don't exist or happen twice at a DST change are rejected rather than
@@ -131,7 +147,7 @@ detail, set a tile server in **Settings → Map** (`[map] tile_url` and
 | | `name` | `label` |
 |---|---|---|
 | Is | the machine key | the display name |
-| Looks like | `recording_date` (lowercase, digits, `_`) | `Recording Date` (anything) |
+| Looks like | `visited_on` (lowercase, digits, `_`) | `Visited On` (anything) |
 | Used by | workflow YAML, CSV headers, templates, API paths | the app, `schema show`, forms |
 | Changing it | a real rename (see below) | always safe |
 
@@ -140,37 +156,37 @@ so a rename never touches stored data, and templates are updated for you. **Work
 YAML that names the old field must be updated by hand.**
 
 ```bash
-civex schema update-field recording take --label "Take number"   # safe
-civex schema update-field recording take --rename take_no        # update workflows
+civex schema update-field sample number --label "Sample number"   # safe
+civex schema update-field sample number --rename sample_no        # update workflows
 civex schema lint                                                # names that aren't valid slugs
 ```
 
 ## Naming records and files
 
-A record's name comes from its schema's **template**. It shows in lists,
+A record's name comes from its record type's **template**. It shows in lists,
 breadcrumbs, references and export folder names.
 
 ```bash
-civex schema update sample --display-template "{site.code}-{taken_on:YYYY-MM}-{sample_no:03}"
+civex schema update sample --display-template "{species.common}-{taken_at:YYYY-MM}-{number:03}"
 civex schema update sample --clear-display-template
 ```
 
 | Write | Gives |
 |---|---|
-| `{site}` | the value |
-| `{site:upper}`, `:lower`, `:title` | `NORTH RIDGE`, … |
-| `{site:slug}` | `north_ridge` |
-| `{site:trunc(3)}` | `Nor` |
-| `{taken_on:YYYY-MM-DD}` | a date pattern (`YYYY MM DD HH mm SS`) |
-| `{sample_no:03}`, `{depth:.1f}` | `007`, `12.5` |
-| `{site.code}` | a field of the record the reference `site` points at |
-| `{schema}`, `{id}` | the schema's name, the record's short id |
+| `{team}` | the value |
+| `{team:upper}`, `:lower`, `:title` | `NORTH RIDGE`, … |
+| `{team:slug}` | `north_ridge` |
+| `{team:trunc(3)}` | `Nor` |
+| `{visited_on:YYYY-MM-DD}` | a date pattern (`YYYY MM DD HH mm SS`) |
+| `{number:03}`, `{depth:.1f}` | `007`, `12.5` |
+| `{species.common}` | a field of the record the reference `species` points at |
+| `{schema}`, `{id}` | the record type's name, the record's short id |
 | `{{`, `}}` | literal braces |
 
-- A blank value is dropped with the separator beside it: `{site} - {n}` with no
-  site gives just `7`.
-- The first nameable field you add becomes the template, so new schemas name
-  records from the start.
+- A blank value is dropped with the separator beside it: `{team} - {number}` with
+  no team gives just `7`.
+- The first nameable field you add becomes the template, so new record types
+  name records from the start.
 - `{ref.field}` reaches one level through a single `reference` field that names
   its target schema. Editing the target renames at once.
 - Renaming or deleting a field updates every template that uses it.
@@ -178,33 +194,38 @@ civex schema update sample --clear-display-template
 A file field's **download name** (set on the field in the app) uses the same
 builder. It names the stem, keeps the file's own extension, and may use fields of
 records above and through any reference:
-`{species.common}_{site}_{take:02}`.
+`{species.common}_{name}_{number:02}`.
 
-## Nesting
+## Types inside other types
 
 ```bash
-civex schema create selection --parent recording
+civex schema create sample --parent visit
 ```
 
-A child record sits inside a parent record of the parent schema. A child stores
-only its own fields, but filters, sorts, columns and templates can use its
-parents' fields, and parents can be filtered by their children ("encounters
-that have a selection where…"). The parent can't be changed after creation.
+In the app this is **Goes inside** when you create the type. A record of a child
+type sits inside a record of the parent type: every sample is filed under its
+visit, and every visit under its site. A child stores only its own fields, but
+filters, sorts, columns and templates can use its parents' fields, and parents
+can be filtered by their children ("sites that have a sample where…"). The
+parent can't be changed after creation.
+
+This is still three record types and many records. Don't make a record type per
+site: *Site* is the type, and North Ridge and East Shore are two records of it.
 
 ## Keeping records unique
 
 ```bash
-civex schema add-unique plot site number    # no two plots share both
-civex schema unique plot
-civex schema remove-unique plot site number
+civex schema add-unique sample number    # no two samples in a visit share a number
+civex schema unique sample
+civex schema remove-unique sample number
 ```
 
-In the app: the schema's **Uniqueness** tab.
+In the app: the record type's **Uniqueness** tab.
 
-- Checked among records of that schema **under the same parent**, or for top-level
-  records **in the same collection**.
+- Checked among records of that type **under the same parent** (the samples of
+  one visit), or for top-level records **in the same collection**.
 - A record with a blank in any of the rule's fields isn't held to it.
-- Only the schema's own scalar fields (text, numbers, dates, yes/no, choices,
+- Only the type's own scalar fields (text, numbers, dates, yes/no, choices,
   links). Not files, locations, tags or lists.
 - You can't add a rule while records already break it. The message names
   clashing records.
@@ -213,17 +234,17 @@ In the app: the schema's **Uniqueness** tab.
 - A deleted record frees its values. Restoring it is refused if another record
   took them.
 
-## Changing and deleting fields
+## Changing and deleting fields and types
 
 ```bash
-civex schema update-field trial score --min 0 --max 50     # merges with existing rules
-civex schema update-field trial subject --optional
-civex schema update-field trial score --clear-restrictions
-civex schema remove-field trial score
-civex schema delete trial
+civex schema update-field sample depth --min 0 --max 50     # merges with existing rules
+civex schema update-field visit team --optional
+civex schema update-field sample depth --clear-restrictions
+civex schema remove-field sample depth
+civex schema delete sample
 ```
 
 A field's type can't change. Removing a field is reversible: records keep their
 values, shown under **Deleted fields** on the record, and restoring the field
-brings them back. A schema delete takes its records to Recently Deleted. See
+brings them back. Deleting a record type takes its records to Recently Deleted. See
 [Deleting & restoring data](deleting-and-restoring.md).

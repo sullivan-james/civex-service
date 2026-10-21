@@ -7,19 +7,19 @@ when you start it. Runs are covered in [Automation](automation.md).
 ## A complete example
 
 ```yaml
-name: extract-start-time
-description: Read the recording's start time from its file name.
+name: read-sample-time
+description: Read the sample's time from its file name.
 
 triggers:
   record_updated:
-    schema: recording
-    fields: [audio]              # only when audio is set or changed
+    schema: sample
+    fields: [reading]            # only when reading is set or changed
 
 steps:
   - id: extract
     plugin: civex.extract_from_filename
     config:
-      field: audio
+      field: reading
       pattern: '(\d{8}[-_]\d{6})'
       output_type: datetime
       date_format: 'YYYYMMDD[-_]HHmmSS'
@@ -27,12 +27,12 @@ steps:
   - id: save
     plugin: civex.save_field
     config:
-      field: start_time
+      field: taken_at
     inputs:
       value: extract.value       # <step id>.<output name>
 ```
 
-Attaching `20240315_093000.wav` to a recording sets its `start_time` to
+Attaching `20240315_093000.csv` to a sample sets its `taken_at` to
 `2024-03-15T09:30:00`. [Fill fields from file names](../how-to/fill-fields-from-filenames.md)
 walks through it.
 
@@ -57,14 +57,14 @@ shows what's installed here.
 ```yaml
 triggers:
   record_created:
-    schema: selection          # every new selection
+    schema: sample             # every new sample
   record_updated:
-    schema: recording
-    fields: [audio, notes]     # only when one of these changed
+    schema: sample
+    fields: [reading, photo]   # only when one of these changed
 ```
 
 Creating a record also fires `record_updated` for each field given a value, so a
-`record_updated` trigger on `audio` covers a recording created with its audio
+`record_updated` trigger on `reading` covers a sample created with its reading
 already attached. You don't need both.
 
 Changes that arrive by [sync](sync.md) never trigger workflows. A chain of
@@ -74,36 +74,36 @@ workflows triggering each other stops after 10 hops. See
 ## Manual runs and inputs
 
 ```yaml
-name: load-recordings
-record_schema: encounter
+name: load-samples
+record_schema: visit
 inputs:
   files:
     type: files                # or: value, a single string or number
-    label: WAV files
+    label: CSV files
 
 steps:
   - id: insert
     plugin: civex.create_records_from_files
     config:
-      schema: recording
-      file_field: audio
+      schema: sample
+      file_field: reading
     inputs:
       files: __input__.files   # the run's input
 ```
 
 ```bash
 civex workflow list
-civex workflow run load-recordings --record 2d69dc46 --input "files=recordings/*.wav"
+civex workflow run load-samples --record 2d69dc46 --input "files=readings/*.csv"
 ```
 
 ```text
-  → workflow 'load-recordings' (trigger: manual)
+  → workflow 'load-samples' (trigger: manual)
     ✓ done
-  → workflow 'extract-start-time' (trigger: record_updated)
+  → workflow 'read-sample-time' (trigger: record_updated)
     ✓ done
 ```
 
-Each new recording triggered `extract-start-time`, so the start times were filled
+Each new sample triggered `read-sample-time`, so the times were filled
 in as well.
 
 **In the app:** a record's header has **Run …** for the workflows that fit it. A

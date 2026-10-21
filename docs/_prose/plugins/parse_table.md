@@ -10,7 +10,7 @@ Parse a CSV, TSV or other delimited file's bytes into a pandas DataFrame — the
 - id: load
   plugin: civex.load_file
   config:
-    field: selection_table
+    field: sample_sheet
 
 - id: parse
   plugin: civex.parse_table

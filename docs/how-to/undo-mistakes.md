@@ -39,7 +39,7 @@ civex trash list
 
 ```text
 Type    Name            ID        Deleted
-record  1 in humpbacks  bfcdc007  today
+record  1 in survey-2024  bfcdc007  today
 Retention: 30 day(s). Restore with `civex schema|collection|record restore <name/id>` …
 ```
 
@@ -65,10 +65,10 @@ of it back, or open it and tick only the records you want.
 ## Bring back a field, schema or collection
 
 ```bash
-civex schema restore trial
-civex collection restore study-2024
+civex schema restore sample
+civex collection restore survey-2024
 civex trash list --kind field                  # find the field's id
-civex schema restore-field trial <field-id>    # values come back too
+civex schema restore-field sample <field-id>    # values come back too
 ```
 
 Restoring a schema or collection brings back the records deleted *with* it, not

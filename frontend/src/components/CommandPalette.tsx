@@ -70,7 +70,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           ...placeTarget(
             `/schemas/${s.id}/records`,
             displayLabel(s.name, s.label),
-            'Schema',
+            'Record type',
           ),
         })),
         views: (views ?? []).map((v) =>
@@ -141,8 +141,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           aria-activedescendant={
             flat[active] ? `${listId}-${active}` : undefined
           }
-          aria-label="Jump to a collection, schema, filter or record"
-          placeholder="Jump to a collection, schema, filter or record…"
+          aria-label="Jump to a collection, record type, filter or record"
+          placeholder="Jump to a collection, record type, filter or record…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onKeyDown}

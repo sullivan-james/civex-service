@@ -1,34 +1,37 @@
 # Collections & records
 
-A **collection** holds records: one per study, site or season, as suits you. It
-says which [schemas](schemas-and-fields.md) its records may be, and who may
-link to them.
+A **collection** is the binder: it holds records, one collection per study or
+season, as suits you. It says which [record types](schemas-and-fields.md) its
+records may be (`--schema`, since the CLI calls a record type a *schema*), and
+who may link to them. A **record** is one filled-in form of a record type: this
+site, this sample. If the two blur together, read
+[Record types, collections and records](../getting-started/concepts.md).
 
 ## Collections
 
 ```bash
-civex collection create humpbacks --schema encounter --schema recording \
-  --description "2024 field season" --timezone America/Chicago
-civex collection show humpbacks
+civex collection create survey-2024 --schema site --schema visit \
+  --description "2024 field season" --timezone Europe/London
+civex collection show survey-2024
 ```
 
 ```text
-humpbacks
+survey-2024
   Records  0
   2024 field season
-  Timezone  America/Chicago
+  Timezone  Europe/London
   Scope     local
-  Schemas   encounter, recording
+  Schemas   site, visit
 ```
 
 | Setting | Means |
 |---|---|
-| **Schemas** (`--schema`, `add-schema`) | Records here can only be of these. A new collection with none holds nothing. A child schema needs its parent listed too (`add-schema` adds parents for you). A schema with records here can't be removed |
-| **Scope** (`--scope`) | `local` (default): only records here can link to these. `global`: any collection can, for shared lists such as species, sites or people |
+| **Record types** (`--schema`, `add-schema`) | Records here can only be of these. A new collection with none holds nothing. A type that goes inside another needs its parent listed too (`add-schema` adds parents for you). A type with records here can't be removed |
+| **Scope** (`--scope`) | `local` (default): only records here can link to these. `global`: any collection can, for shared lists such as species, instruments or people |
 | **Timezone** (`--timezone`) | How times without a UTC offset are read and shown. See [Times and timezones](schemas-and-fields.md#times-and-timezones) |
 
 ```bash
-civex collection add-schema humpbacks selection
+civex collection add-schema survey-2024 sample
 civex collection create taxonomy --scope global --schema species
 civex collection list
 ```
@@ -43,43 +46,49 @@ page.
 ## Adding records
 
 === "Web UI"
-    In a collection, the **New** menu lists the kinds you can add here. Inside a
-    record, it lists the kinds that go inside it. **Add and add another** saves
+    In a collection, the **New** menu lists the record types you can add here
+    (**New ▸ New site**). Inside a record, it lists the types that go inside it
+    (inside a visit: **New ▸ New sample**). This is the step you repeat; the
+    record type is made once. **Add and add another** saves
     and gives you a blank form. **New ▸ Import data…** brings in a spreadsheet or
     a folder of files: see [Import data](../how-to/import-data.md).
 
 === "CLI"
     ```bash
-    civex record add --to study-2024 --schema trial
+    civex record add --to survey-2024 --schema sample
     ```
 
     ```text
-      subject (string) [required]: S01
-      duration (float) []: 12.5
-      result (string) []: pass
-      summary (string) []:
+      Parent record ID (visit): 2d69dc46
+      number (integer) []: 3
+      depth (float) []: 12.5
+      taken_at (datetime) []:
+      photo (file) []: /data/IMG_0412.jpg
+      reading (file) []:
     Added record f623c8d7-eb75-41e1-b2ec-d6feb7f02f7a.
     ```
 
-    For a child schema it asks for the parent record first. A file field takes a
-    path, and a reference takes a record id or any unique prefix of one.
+    For a type that goes inside another it asks for the parent record first. A
+    file field takes a path, and a reference takes a record id or any unique
+    prefix of one.
 
 ## Finding records
 
 ```bash
-civex record find --in study-2024 --schema trial --where "result=pass" --limit 20
+civex record find --in survey-2024 --schema sample --where "number=3" --limit 20
 civex record show f623
 ```
 
 ```text
 Record f623c8d7-eb75-41e1-b2ec-d6feb7f02f7a
-  Schema    trial
+  Schema    sample
+  Parent    2d69dc46 (visit)
   Created   2026-10-09 11:11 UTC
 Field     Value
-subject   S01
-duration  12.5
-result    pass
-summary   pass
+number    3
+depth     12.5
+photo     IMG_0412.jpg
+name      North Ridge  (↑ site)
 ```
 
 `--where` repeats, and all conditions must match. Every record has a UUID, and
@@ -89,14 +98,14 @@ any unique prefix of it works wherever an id is asked for.
 
 A collection's page (and a record's **Contains** tab) is one explorer:
 
-- **Levels:** the collection's schemas top-down (Encounter → Recording →
-  Selection), with counts. A row shows its children ("3 recordings →"). Click to
-  go down, and use the trail to go back up.
+- **Levels:** the collection's record types top-down (Site → Visit → Sample),
+  with counts. A row shows its children ("3 visits →"). Click to go down, and
+  use the trail to go back up.
 - **Search** is scoped to where you are.
 - **+ Filter** builds AND/OR conditions on this level's fields, a parent's, or
-  any child's: "Recordings that have a Selection whose `quality` is empty" is
-  one condition. Reference values are picked by name.
-- **Saved filters** are the schema's [views](views.md). **Save as view…** saves
+  any child's: "Visits that have a Sample whose `depth` is empty" is one
+  condition. Reference values are picked by name.
+- **Saved filters** are the record type's [views](views.md). **Save as view…** saves
   yours, and everyone sees it.
 - **Columns** include parents' fields and fields through a reference. Click a
   header to sort.
@@ -128,7 +137,7 @@ date fields have **from filename** to fill them from the file's name.
 ```bash
 civex record delete f623        # with its children, to Recently Deleted
 civex record restore f623
-civex record delete-all study-2024 --schema trial
+civex record delete-all survey-2024 --schema sample
 ```
 
 A record linked from another record's `reference` field can't be deleted without
@@ -149,6 +158,6 @@ See [Undo a mistake](../how-to/undo-mistakes.md) and
 
 ## Copying a project's data
 
-`civex dump` writes schemas, collections, records and workflows to one YAML
+`civex dump` writes record types, collections, records and workflows to one YAML
 file, and `civex restore` reads it into another project. It leaves out files,
 history and settings. See [Back up a project](../how-to/back-up.md).

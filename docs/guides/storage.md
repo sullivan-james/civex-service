@@ -72,7 +72,7 @@ Storage → Tasks → Use a bucket…**, or from the command line:
 ```bash
 export AWS_ACCESS_KEY_ID=… AWS_SECRET_ACCESS_KEY=…
 civex store bucket check lab-files --endpoint http://127.0.0.1:9000   # try it
-civex store bucket set lab-files --prefix projects/humpbacks          # use it
+civex store bucket set lab-files --prefix projects/survey-2024          # use it
 civex store bucket show --check
 civex store bucket clear                                              # drives again
 ```
@@ -88,7 +88,7 @@ while a bucket is in use. The settings are saved in `_civex/config.toml`:
 ```toml
 [store.s3]
 bucket = "lab-files"
-prefix = "projects/humpbacks"     # optional: a folder inside the bucket
+prefix = "projects/survey-2024"     # optional: a folder inside the bucket
 region = "eu-west-2"              # optional
 endpoint = "http://minio:9000"    # for MinIO and the like
 profile = "lab"                   # an AWS profile; else the default chain
@@ -115,10 +115,10 @@ them before putting them in the bucket.
 2. Otherwise the **write queue**, in order, skipping volumes that can't take it.
 
 ```bash
-civex store place set humpbacks archive                       # home
-civex store place set humpbacks archive --on-unavailable fail # never anywhere else
+civex store place set survey-2024 archive                       # home
+civex store place set survey-2024 archive --on-unavailable fail # never anywhere else
 civex store place list
-civex store place clear humpbacks
+civex store place clear survey-2024
 ```
 
 Homes are keyed by collection id in `config.toml`
@@ -149,8 +149,8 @@ doesn't sync.
 | Move | CLI | What moves |
 |---|---|---|
 | Empty a drive | `civex store move --off old --to archive` | Everything on `old` |
-| Gather a collection | `civex store move --collection humpbacks --to archive` | What its live records point at |
-| Gather a selection | `civex files gather --in humpbacks --on field-ssd --to archive` | Just those files |
+| Gather a collection | `civex store move --collection survey-2024 --to archive` | What its live records point at |
+| Gather a selection | `civex files gather --in survey-2024 --on field-ssd --to archive` | Just those files |
 
 All three work the same way:
 

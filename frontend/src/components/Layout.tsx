@@ -134,7 +134,7 @@ const navGroups: NavGroupDef[] = [
   },
   {
     heading: 'Structure',
-    items: [{ to: '/schemas', label: 'Schemas', icon: Database }],
+    items: [{ to: '/schemas', label: 'Record types', icon: Database }],
     secondary: true,
   },
   {

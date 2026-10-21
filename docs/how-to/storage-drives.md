@@ -30,11 +30,11 @@ never written to.
 ## 2. Send a collection's new files there
 
 ```bash
-civex store place set humpbacks archive
+civex store place set survey-2024 archive
 ```
 
 ```text
-New files for 'humpbacks' now go to 'archive' (spill when it is unavailable).
+New files for 'survey-2024' now go to 'archive' (spill when it is unavailable).
 ```
 
 *Spill* means that if the drive is unplugged, uploads go to the next volume in
@@ -42,7 +42,7 @@ the write queue instead of failing. To refuse uploads instead, so the
 collection's files are never written anywhere else:
 
 ```bash
-civex store place set humpbacks archive --on-unavailable fail
+civex store place set survey-2024 archive --on-unavailable fail
 ```
 
 **In the app:** Settings → Storage → **Collections**, and pick the home on the
@@ -53,7 +53,7 @@ collection's row (or tick several collections to set them together).
 Preview first:
 
 ```bash
-civex store move --collection humpbacks --to archive --dry-run
+civex store move --collection survey-2024 --to archive --dry-run
 ```
 
 ```text
@@ -64,7 +64,7 @@ Would move 2 files (391 KB); 0 already on a target.
 Then run it:
 
 ```bash
-civex store move --collection humpbacks --to archive
+civex store move --collection survey-2024 --to archive
 ```
 
 ```text
@@ -87,7 +87,7 @@ civex store collections
 ```
 
 ```text
-humpbacks  2 files, 391 KB
+survey-2024  2 files, 391 KB
   archive: 2 files, 391 KB
 ```
 
@@ -98,8 +98,8 @@ civex store where bfcdc007
 ```
 
 ```text
-Field  File       Stored on  State
-audio  take1.wav  archive    online
+Field    File                 Stored on  State
+reading  20240315_093000.csv  archive    online
 ```
 
 ## When the drive is unplugged
@@ -128,7 +128,7 @@ Move everything off it, then remove it:
 civex store add new-archive --path /media/new-archive/civex
 civex store move --off archive --to new-archive
 civex store set-state archive retired
-civex store place clear humpbacks        # or point it at the new drive
+civex store place clear survey-2024        # or point it at the new drive
 civex store remove archive
 ```
 

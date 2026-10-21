@@ -5,13 +5,13 @@ Load file refs from a `file_list` field. Returns the refs as a list without read
 <!-- civex:tables -->
 
 ```yaml
-- id: get_clips
+- id: get_photos
   plugin: civex.load_file_list
   config:
-    field: audio_clips
+    field: photos
 
 - id: process
   plugin: civex.match_files_to_records
   inputs:
-    files: get_clips.files
+    files: get_photos.files
 ```

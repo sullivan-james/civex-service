@@ -1,6 +1,6 @@
 # Import a spreadsheet or a folder of files
 
-**Goal:** turn an existing CSV, or a folder of recordings, images or documents,
+**Goal:** turn an existing CSV, or a folder of readings, images or documents,
 into records without typing them in one by one.
 
 ## In the app: guided import
@@ -24,12 +24,13 @@ column choose the field it goes into, **+ Create new field**, or **Skip this
 column**. Columns are matched to fields by name to start with.
 
 ```text
-site,taken_on,depth_ft
+site,taken_at,depth_ft
 North Ridge,2024-03-15,41
-South Bay,2024-03-16,131
+East Shore,2024-03-16,131
 ```
 
-Mapped to a `sample` schema: `site` → *site*, `taken_on` → *taken on*, and
+Mapped to the `sample` record type (`--schema sample`): `site` → *site*,
+`taken_at` → *taken at*, and
 `depth_ft` → *depth*, a field stored in metres, with the column's unit set to
 `ft`. The two records get depths of `12.4968` and `39.9288`.
 
@@ -38,7 +39,7 @@ Mapped to a `sample` schema: `site` → *site*, `taken_on` → *taken on*, and
 - **Times:** a time without a UTC offset is read in the collection's timezone
   (UTC if it has none). The Map step says which applies. Set the timezone on the
   collection *before* importing.
-- **Child records** (a Recording inside an Encounter) need the parent record
+- **Child records** (a Sample inside a Visit) need the parent record
   chosen in this step.
 
 ### A folder of files
@@ -48,13 +49,13 @@ become records:
 
 - **Create one record per file**: every file becomes a new record.
 - **Match to existing records by a key in the filename**: for files named after
-  records that already exist, such as `sel_03.txt` going to Selection 3. A
+  records that already exist, such as `sample_03.jpg` going to Sample 03. A
   matching record is updated, and a new one is made where no key matches. This is
   available for a record type that sits inside another, once you choose the
   parent.
 
 **Also fill a field from the filename** reads a value out of each name with a
-pattern, for example the start time in `20240315_093000.wav`. A preview shows
+pattern, for example the time in `20240315_093000.csv`. A preview shows
 what each file gives.
 
 On **Confirm**, tick **Save this as a reusable automation** to keep the
@@ -64,33 +65,33 @@ folder of files.
 ## From a terminal: a workflow
 
 There is no `civex import` command. A folder import is a short workflow, so it
-can be scripted and repeated. Save this as `_civex/workflows/load-recordings.yaml`:
+can be scripted and repeated. Save this as `_civex/workflows/load-samples.yaml`:
 
 ```yaml
-name: load-recordings
-record_schema: encounter        # run it on an encounter
+name: load-samples
+record_schema: visit            # run it on a visit
 inputs:
   files:
     type: files
-    label: WAV files
+    label: CSV files
 
 steps:
   - id: insert
     plugin: civex.create_records_from_files
     config:
-      schema: recording
-      file_field: audio
+      schema: sample
+      file_field: reading
     inputs:
       files: __input__.files
 ```
 
-Then run it on the encounter the recordings belong to:
+Then run it on the visit the samples belong to:
 
 ```bash
-civex workflow run load-recordings --record 2d69dc46 --input "files=recordings/*.wav"
+civex workflow run load-samples --record 2d69dc46 --input "files=readings/*.csv"
 ```
 
-Each new recording is created inside that encounter. To read values out of the
+Each new sample is created inside that visit. To read values out of the
 file names as well, see [Fill fields from file names](fill-fields-from-filenames.md).
 For tables, the [Parse Table](../reference/plugins/parse_table.md) and
 [Upsert Records](../reference/plugins/upsert_records.md) plugins do the same for

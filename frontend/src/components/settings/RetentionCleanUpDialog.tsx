@@ -28,7 +28,7 @@ function Lines({ report }: { report: RetentionReport }) {
       `Deleted items removed for good: ${[
         report.deleted_collections &&
           n(report.deleted_collections, 'collection'),
-        report.deleted_schemas && n(report.deleted_schemas, 'schema'),
+        report.deleted_schemas && n(report.deleted_schemas, 'record type'),
         report.deleted_records && n(report.deleted_records, 'record'),
       ]
         .filter(Boolean)

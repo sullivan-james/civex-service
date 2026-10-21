@@ -89,12 +89,12 @@ export function CollectionScopeFields({
         </Select>
       </Field>
       <Field
-        label="Schemas"
-        info="The schemas this collection is for. Its records can only be of these. A child schema needs its parent schema too."
+        label="Record types"
+        info="The record types this collection is for. Its records can only be of these. A type that goes inside another needs that one too."
       >
         {live.length === 0 ? (
           <p className="text-sm text-fg-muted">
-            No schemas yet — create one first.
+            No record types yet — create one first.
           </p>
         ) : (
           <ul className="max-h-48 space-y-1 overflow-y-auto rounded-md border border-border p-2">

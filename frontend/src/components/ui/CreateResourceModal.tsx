@@ -13,8 +13,9 @@ export interface CreateResourceModalProps {
   resourceLabel: string
   nameLabel?: string
   namePlaceholder?: string
-  /** One-line plain-language explanation shown under the name field — for
-   * resources a first-time user hasn't met yet. */
+  /** A plain-language sentence or two at the top of the form, for resources a
+   * first-time user hasn't met yet ("A record type is a blank form…"). */
+  hint?: ReactNode
   /**
    * Resources whose `name` is a machine key referenced elsewhere (schemas,
    * fields) collect a display label first and derive the name from it. Pass
@@ -41,6 +42,7 @@ export function CreateResourceModal({
   nameLabel = 'Name',
   namePlaceholder,
   slugKind,
+  hint,
   onClose,
   onSubmit,
   isPending,
@@ -65,6 +67,7 @@ export function CreateResourceModal({
       <ModalHeader>New {resourceLabel}</ModalHeader>
       <form onSubmit={handleSubmit}>
         <ModalBody className="flex flex-col gap-3">
+          {hint && <p className="text-sm text-fg-muted">{hint}</p>}
           {slugKind ? (
             <NameLabelFields
               kind={slugKind}

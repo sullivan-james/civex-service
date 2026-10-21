@@ -28,7 +28,7 @@ civex automation stats                    # failures per plugin
 
 ```text
 ID         Workflow      Schema     Record             Trigger  Changed  Status
-1adcfb22…  extract-sta…  recording  Take 01 bfcdc007…  manual   —        failed
+1adcfb22…  read-sample-…  sample  Sample 01 bfcdc007…  manual   —        failed
 ```
 
 **The Runs page** lists runs with their workflow, record, trigger, result and

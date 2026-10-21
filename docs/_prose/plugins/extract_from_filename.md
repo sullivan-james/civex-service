@@ -1,6 +1,6 @@
 # `civex.extract_from_filename`
 
-Apply a regex to a file field's filename (or a plain string field) and optionally convert the captured value to a typed output. Reach for this when the data you need — a timestamp, a selection number, a session ID — is embedded in a filename rather than stored as its own field. Works with `file`, `file_list`, and `string` fields.
+Apply a regex to a file field's filename (or a plain string field) and optionally convert the captured value to a typed output. Reach for this when the data you need — a timestamp, a sample number, a session ID — is embedded in a filename rather than stored as its own field. Works with `file`, `file_list`, and `string` fields.
 
 <!-- civex:tables -->
 
@@ -21,27 +21,27 @@ All other characters in the format string are treated as **raw regex fragments**
 YYYYMMDD[-_]HHmmSS   →  matches  20240315-093000  and  20240315_093000
 ```
 
-Extracted datetimes carry no UTC offset: a timestamp in a filename is wall time where the file was recorded. When the value is saved it is read in the datetime field's `timezone` restriction, else the collection's timezone, else UTC, and stored as a UTC ISO 8601 string. Set the collection's timezone (`civex collection update NAME --timezone America/Chicago`) so extracted times land on the right instant.
+Extracted datetimes carry no UTC offset: a timestamp in a filename is wall time where the file was made. When the value is saved it is read in the datetime field's `timezone` restriction, else the collection's timezone, else UTC, and stored as a UTC ISO 8601 string. Set the collection's timezone (`civex collection update NAME --timezone Europe/London`) so extracted times land on the right instant.
 
 **Examples**
 
-Extract a datetime from `20210218_075000_recording.wav`:
+Extract a datetime from `20240315_093000.csv`:
 ```yaml
 - id: extract_time
   plugin: civex.extract_from_filename
   config:
-    field: audio_file
+    field: reading
     pattern: '(\d{8}[-_]\d{6})'
     output_type: datetime
     date_format: 'YYYYMMDD[-_]HHmmSS'
 ```
 
-Extract a selection number from `sel_042_contour.csv`:
+Extract a sample number from `sample_042_photo.jpg`:
 ```yaml
 - id: extract_num
   plugin: civex.extract_from_filename
   config:
-    field: contour_file
-    pattern: 'sel_(\d+)'
+    field: photo
+    pattern: 'sample_(\d+)'
     output_type: integer
 ```

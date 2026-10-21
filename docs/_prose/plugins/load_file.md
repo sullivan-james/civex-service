@@ -5,14 +5,14 @@ Load the bytes and metadata from a `file` field on the trigger record. Reach for
 <!-- civex:tables -->
 
 ```yaml
-- id: load_audio
+- id: load_reading
   plugin: civex.load_file
   config:
-    field: audio_file
+    field: reading
 
 - id: process
-  plugin: my.audio_processor
+  plugin: my.csv_processor
   inputs:
-    bytes: load_audio.bytes
-    filename: load_audio.filename
+    bytes: load_reading.bytes
+    filename: load_reading.filename
 ```

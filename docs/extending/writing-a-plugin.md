@@ -107,7 +107,7 @@ Declare each one you use in `capabilities` — see the table above for the exact
 
 ```python
 record = ctx.get_context_record()
-value = record["data"].get("audio_file")   # None if not set
+value = record["data"].get("reading")   # None if not set
 
 ctx.update_record(record["id"], {"duration": 42.5})   # merges into existing data
 ```
@@ -118,7 +118,7 @@ Or use `civex.save_field` / `civex.save_fields` as separate workflow steps inste
 
 ```python
 record = ctx.get_context_record()
-ref = record["data"].get("audio_file")   # {"sha256": "...", "filename": "...", "size": ...}
+ref = record["data"].get("reading")   # {"sha256": "...", "filename": "...", "size": ...}
 if ref:
     raw_bytes = ctx.get_file(ref["sha256"])
 ```
