@@ -5,11 +5,12 @@ import { useAddField, useUpdateField } from '../../hooks/useSchemas'
 import { useFieldTypes } from '../../hooks/useFieldTypes'
 import {
   Button,
+  CheckRow,
+  Disclosure,
   Field,
   FormGrid,
   Input,
   NameLabelFields,
-  Checkbox,
   Skeleton,
 } from '../ui'
 import { nameError } from '../../utils/naming'
@@ -28,6 +29,8 @@ type FieldFormProps = {
   /** Told whenever the form differs from what was loaded, so the page can
    * ask before throwing edits away. */
   onDirtyChange?: (dirty: boolean) => void
+  /** Offered on an existing field: remove it (the caller confirms). */
+  onRemove?: () => void
 } & (
   | { mode: 'create'; kind: FieldKind; onChangeKind?: () => void }
   | { mode: 'edit'; field: SchemaField }
@@ -48,7 +51,7 @@ function tidy(rules: Rules): Rules | undefined {
  * field-type descriptors, so a new rule shows up here without a UI change;
  * `CONTROLS` maps each descriptor's `control` to its editor. */
 export function FieldForm(props: FieldFormProps) {
-  const { mode, schemaName, onDone, onDirtyChange } = props
+  const { mode, schemaName, onDone, onDirtyChange, onRemove } = props
   const editing = props.mode === 'edit' ? props.field : undefined
   const type = props.mode === 'edit' ? props.field.type : props.kind.type
   const focus = props.mode === 'create' ? props.kind.focus : null
@@ -108,6 +111,7 @@ export function FieldForm(props: FieldFormProps) {
 
   const ctx: ControlContext = {
     schemaName,
+    type,
     fields: props.fields,
     schemas: props.schemas ?? [],
     existing: editing,
@@ -147,16 +151,60 @@ export function FieldForm(props: FieldFormProps) {
     }
   }
 
-  // The rule the chosen kind leads with comes first.
-  const ordered = descriptor
-    ? [...descriptor.restrictions].sort(
-        (a, b) => Number(b.key === focus) - Number(a.key === focus),
-      )
-    : []
+  // Most fields need no rules. The one the chosen kind leads with (a
+  // choice's values, a quantity's unit, a link's target) is part of the kind
+  // and shows inline; on an existing field, so does any rule already set.
+  // Everything else waits behind "More rules".
+  const isSet = (key: string) => {
+    const v = rules[key]
+    return !(
+      v === undefined ||
+      v === null ||
+      v === '' ||
+      (Array.isArray(v) && v.length === 0)
+    )
+  }
+  const leads = (key: string) =>
+    key === focus || (mode === 'edit' && isSet(key))
+  const all = descriptor?.restrictions ?? []
+  const lead = all.filter((d) => leads(d.key))
+  const more = all.filter((d) => !leads(d.key))
+  const renderRule = (desc: (typeof all)[number]) => {
+    const Control = CONTROLS[desc.control]
+    return Control ? (
+      <Control
+        key={desc.key}
+        desc={desc}
+        rules={rules}
+        set={setRule}
+        problem={setProblem}
+        ctx={ctx}
+      />
+    ) : (
+      <p key={desc.key} className="text-xs text-fg-subtle">
+        {desc.label} can't be edited here yet.
+      </p>
+    )
+  }
 
   return (
-    <div className="space-y-6">
-      <section aria-label="Identity" className="space-y-3">
+    <div className="space-y-7">
+      <section aria-label="Identity" className="space-y-4">
+        {mode === 'create' && (
+          <p className="flex items-baseline gap-3 text-sm text-fg-muted">
+            <span>
+              Kind:{' '}
+              <span className="font-medium text-fg">
+                {descriptor?.label ?? type}
+              </span>
+            </span>
+            {props.mode === 'create' && props.onChangeKind && (
+              <Button size="sm" variant="link" onClick={props.onChangeKind}>
+                Change
+              </Button>
+            )}
+          </p>
+        )}
         <FormGrid>
           <NameLabelFields
             kind="Field"
@@ -170,64 +218,44 @@ export function FieldForm(props: FieldFormProps) {
             onEnter={submit}
             autoFocus
           />
-          <Field label="Required" layout="inline" span={4}>
-            <Checkbox
-              checked={required}
-              onChange={(e) => setRequired(e.target.checked)}
+        </FormGrid>
+        <CheckRow
+          compact
+          title="Required"
+          description="Every record must have a value here."
+          checked={required}
+          onChange={setRequired}
+        />
+        {mode === 'create' && descriptor?.supports_default !== false && (
+          <Field label="Default value" span={6}>
+            <Input
+              value={defaultVal}
+              onChange={(e) => setDefaultVal(e.target.value)}
+              placeholder="None"
+              className="max-w-sm"
             />
           </Field>
-          {mode === 'create' && descriptor?.supports_default !== false && (
-            <Field label="Default value" span={4}>
-              <Input
-                size="sm"
-                value={defaultVal}
-                onChange={(e) => setDefaultVal(e.target.value)}
-                placeholder="none"
-              />
-            </Field>
-          )}
-        </FormGrid>
+        )}
       </section>
 
-      {mode === 'create' && (
-        <p className="flex items-baseline gap-3 text-sm text-fg-muted">
-          <span>
-            Kind:{' '}
-            <span className="font-medium text-fg">
-              {descriptor?.label ?? type}
-            </span>
-          </span>
-          {props.mode === 'create' && props.onChangeKind && (
-            <Button size="sm" variant="link" onClick={props.onChangeKind}>
-              Change
-            </Button>
-          )}
-        </p>
+      {!descriptor && <Skeleton className="h-16 w-full" />}
+      {lead.length > 0 && (
+        <section aria-label="Rules" className="space-y-5">
+          {lead.map(renderRule)}
+        </section>
+      )}
+      {more.length > 0 && (
+        <Disclosure
+          summary="More rules"
+          defaultOpen={false}
+          className="rounded-md border border-border"
+        >
+          <div className="space-y-5 px-4 pb-4 pt-2">{more.map(renderRule)}</div>
+        </Disclosure>
       )}
 
-      <section aria-label="Rules" className="space-y-4">
-        {!descriptor && <Skeleton className="h-16 w-full" />}
-        {ordered.map((desc) => {
-          const Control = CONTROLS[desc.control]
-          return Control ? (
-            <Control
-              key={desc.key}
-              desc={desc}
-              rules={rules}
-              set={setRule}
-              problem={setProblem}
-              ctx={ctx}
-            />
-          ) : (
-            <p key={desc.key} className="text-xs text-fg-subtle">
-              {desc.label} can't be edited here yet.
-            </p>
-          )
-        })}
-      </section>
-
       {(problemList.length > 0 || mutation.error) && (
-        <ul role="alert" className="space-y-0.5 text-xs text-danger">
+        <ul role="alert" className="space-y-0.5 text-sm text-danger">
           {problemList.map((p) => (
             <li key={p}>{p}</li>
           ))}
@@ -235,10 +263,9 @@ export function FieldForm(props: FieldFormProps) {
         </ul>
       )}
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-3 border-t border-border pt-5">
         <Button
           variant="primary"
-          size="sm"
           onClick={submit}
           disabled={
             mutation.isPending || !canSubmit || (mode === 'edit' && !dirty)
@@ -252,9 +279,18 @@ export function FieldForm(props: FieldFormProps) {
               ? 'Saving…'
               : 'Save changes'}
         </Button>
-        <Button size="sm" onClick={() => onDone()}>
+        <Button onClick={() => onDone()}>
           {mode === 'edit' && dirty ? 'Discard changes' : 'Cancel'}
         </Button>
+        {mode === 'edit' && onRemove && (
+          <Button
+            variant="ghost"
+            className="ml-auto text-danger"
+            onClick={onRemove}
+          >
+            Remove field…
+          </Button>
+        )}
       </div>
     </div>
   )

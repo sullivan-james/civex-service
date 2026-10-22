@@ -69,6 +69,8 @@ def test_an_export_is_created_read_listed_changed_and_deleted(client, tree) -> N
         "files_layout": "flat",
         "include_files": True,
         "tables": [],
+        "method": "link",
+        "volume": None,
     }
 
     listed = client.get("/api/schemas/encounter/exports").json()

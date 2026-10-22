@@ -255,6 +255,13 @@ class ExportDefinition(Base):
     # The tables made beside the files: a list of `civex.domain.tables.TableSpec`
     # dicts (what its rows are, where it is written, its columns); None for none.
     tables: Mapped[list[dict[str, Any]] | None] = mapped_column(_JSON, nullable=True)
+    # How a run hands the export over: "link" (a folder of links on the files'
+    # drive), "copy" (real copies on `volume`, the project folder when None) or
+    # "zip" (one file to download). civex.domain.file_access.METHODS.
+    method: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="link", server_default="link"
+    )
+    volume: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
 
     schema: Mapped[Schema] = relationship("Schema", foreign_keys=[schema_id])

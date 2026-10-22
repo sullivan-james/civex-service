@@ -174,7 +174,7 @@ describe('files on a record page', () => {
       screen.getByRole('menuitem', { name: /set up exports/i }),
     ).toBeTruthy()
     await userEvent.click(screen.getByRole('menuitem', { name: /contours/i }))
-    await finishExport('folder', 0)
+    // Saved with how it is handed over, so it runs straight away.
 
     const sent = await vi.waitFor(() => {
       const r = requests.find((q) => q.path === '/api/file-access/export')

@@ -3,9 +3,13 @@ import type { FilterTreeWire } from '../utils/filterTree'
 import type { TableSpec } from './fileAccess'
 import type { FilesLayout } from './views'
 
+/** How a saved export is handed over when run: a folder of links on the files'
+ * drive, real copies on a drive, or one zip file. */
+export type ExportMethod = 'link' | 'copy' | 'zip'
+
 /** An export saved with a schema: which kind of record holds the files, which
- * file fields, a filter on those records, and a layout. It says nothing about
- * which collection or record it runs on. */
+ * file fields, a filter on those records, a layout, and how it is handed over.
+ * It says nothing about which collection or record it runs on. */
 export interface ExportDefinition {
   id: string
   schema_id: string
@@ -22,6 +26,9 @@ export interface ExportDefinition {
   include_files: boolean
   /** The tables made beside the files (or instead of them). */
   tables: TableSpec[]
+  method: ExportMethod
+  /** For 'copy': the drive to copy onto; null is the project folder. */
+  volume: string | null
 }
 
 export interface CreateExportDefinition {
@@ -32,6 +39,8 @@ export interface CreateExportDefinition {
   files_layout?: FilesLayout
   include_files?: boolean
   tables?: TableSpec[]
+  method?: ExportMethod
+  volume?: string | null
 }
 
 export interface UpdateExportDefinition {
@@ -42,6 +51,8 @@ export interface UpdateExportDefinition {
   files_layout?: FilesLayout
   include_files?: boolean
   tables?: TableSpec[]
+  method?: ExportMethod
+  volume?: string | null
 }
 
 const base = (schema: string) =>

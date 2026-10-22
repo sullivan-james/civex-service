@@ -74,6 +74,10 @@ export function summarise(
   }
   if (type === 'datetime' && typeof restrictions.timezone === 'string')
     parts.push(`timezone ${restrictions.timezone}`)
+  const rule = restrictions.from_filename as
+    { field?: unknown; pattern?: unknown } | undefined
+  if (rule && typeof rule === 'object' && typeof rule.field === 'string')
+    parts.push(`from ${rule.field}'s file name`)
   return parts.join(' · ')
 }
 

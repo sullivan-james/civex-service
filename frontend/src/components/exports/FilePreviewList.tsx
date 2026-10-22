@@ -49,7 +49,9 @@ export function FilePreviewList({ data }: { data: FilePreview }) {
       </p>
       <ToDownloadNotice toFetch={data.to_fetch} />
       {empty ? (
-        <p className="text-sm text-fg-muted">There is nothing to export.</p>
+        <p className="text-sm text-fg-muted">
+          Nothing to export yet. Records added later are included.
+        </p>
       ) : (
         <div className="max-h-80 overflow-y-auto rounded-md border border-border bg-canvas p-3">
           <FileTree collapsible label="Folder preview" rows={rows} />

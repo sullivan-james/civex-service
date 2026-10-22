@@ -7,7 +7,6 @@ import { useExportPreview } from '../../hooks/useExportPreview'
 import { errorMessage } from '../../lib/errors'
 import {
   definitionBody,
-  describeDefinition,
   draftFrom,
   emptyDraft,
   kindsIn,
@@ -93,6 +92,8 @@ export function ExportBuilder({
           // shows (its columns), and a list with no files is a table alone.
           files: run?.context.files !== false,
           tables: run?.context.tables ?? [],
+          method: run?.preset?.definition?.method ?? 'link',
+          volume: run?.preset?.definition?.volume ?? null,
         }
   const [draft, setDraft] = useState<Draft>(initial)
   // An export from a list begins as just its table; the rest is one click away.
@@ -116,11 +117,13 @@ export function ExportBuilder({
     attach?.editing?.schema_name ?? attach?.schema.name ?? '',
   )
   const save = useSaveExportDefinition(attachedTo)
-  // Running: how to get the files.
-  const [picked, setMethod] = useState<Method>(initial.files ? 'link' : 'zip')
+  // How it is handed over, saved with the export and offered again when run.
   // With no files there is nothing to link to.
-  const method: Method = !draft.files && picked === 'link' ? 'zip' : picked
-  const [drive, setDrive] = useState<string | null>(null)
+  const method: Method =
+    !draft.files && draft.method === 'link' ? 'zip' : draft.method
+  const setMethod = (m: Method) => set({ method: m })
+  const drive = draft.volume
+  const setDrive = (d: string) => set({ volume: d === PROJECT ? null : d })
 
   const scope = attach
     ? attachedTo
@@ -160,6 +163,8 @@ export function ExportBuilder({
               files_layout: body.files_layout,
               include_files: body.include_files,
               tables: body.tables,
+              method: body.method,
+              volume: body.volume ?? null,
             },
           }
         : { body },
@@ -173,12 +178,7 @@ export function ExportBuilder({
     onDone()
     if (method === 'zip') return void downloadZip(run.ctx, selection, name)
     if (method === 'copy')
-      return void copyToDrive(
-        run.ctx,
-        selection,
-        name,
-        !drive || drive === PROJECT ? undefined : drive,
-      )
+      return void copyToDrive(run.ctx, selection, name, drive ?? undefined)
     void openAsFolder(run.ctx, selection, name)
   }
 
@@ -191,16 +191,6 @@ export function ExportBuilder({
     names.length < 2
       ? (names[0] ?? '')
       : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
-
-  // Where a saved export will be offered: the schema it is saved with, down to
-  // the kind that holds the files.
-  const offeredOn = kindsIn(schemas, attachedTo)
-    .filter(
-      (s) =>
-        !draft.holder ||
-        kindsIn(schemas, s.name).some((k) => k.name === draft.holder),
-    )
-    .map((s) => label(s.name))
 
   // A filter tests one kind of record, which a list or ticked rows can't be given.
   const withFilter = !(run?.context.schema_name || run?.context.record_ids)
@@ -258,12 +248,7 @@ export function ExportBuilder({
                   </Select>
                 )}
                 <p className="text-sm text-fg-muted">
-                  It takes {label(attachedTo)}
-                  {startsWithin.length > 1
-                    ? ` and everything inside it, and is offered on every ${words(startsWithin)} page`
-                    : `, and is offered on every ${label(attachedTo)} page`}{' '}
-                  and on collections that use{' '}
-                  {startsWithin.length > 1 ? 'them' : 'it'}.
+                  Offered on {words(startsWithin)} pages and on collections.
                 </p>
               </Row>
             )}
@@ -312,31 +297,20 @@ export function ExportBuilder({
               </Row>
             )}
 
-            <Row label="Summary">
-              <dl className="grid max-w-xl grid-cols-[7rem_1fr] gap-y-1.5 text-sm">
-                <dt className="text-fg-muted">Takes</dt>
-                <dd className="text-fg">
-                  {describeDefinition(
-                    {
-                      holder: draft.holder || null,
-                      fields: draft.files ? draft.fields : [],
-                      files_layout: draft.layout,
-                      filter_tree: draft.holder ? draft.filter : null,
-                      include_files: draft.files,
-                      tables: draft.tables,
-                    },
-                    schemas,
-                  )}
-                </dd>
-                {attach && (
-                  <>
-                    <dt className="text-fg-muted">Offered on</dt>
-                    <dd className="text-fg">
-                      {['Collections', ...offeredOn].join(' · ')}
-                    </dd>
-                  </>
-                )}
-              </dl>
+            <Row
+              label={
+                draft.files
+                  ? 'How the files are handed over'
+                  : 'How the table is handed over'
+              }
+            >
+              <MethodStep
+                files={draft.files}
+                method={method}
+                setMethod={setMethod}
+                drive={drive}
+                setDrive={setDrive}
+              />
             </Row>
 
             <Row label="What it makes">
@@ -353,18 +327,6 @@ export function ExportBuilder({
                 <Spinner />
               )}
             </Row>
-
-            {run && (
-              <Row label={draft.files ? 'Get the files' : 'Get the tables'}>
-                <MethodStep
-                  files={draft.files}
-                  method={method}
-                  setMethod={setMethod}
-                  drive={drive}
-                  setDrive={setDrive}
-                />
-              </Row>
-            )}
 
             {save.error != null && (
               <p role="alert" className="text-sm text-danger">

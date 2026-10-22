@@ -197,6 +197,11 @@ def _parse_bbox(text: str) -> list[float]:
     return parts
 
 
+def _one_or_many(patterns: list[str]) -> str | list[str]:
+    """A rule's `pattern`: the one string when one was given, else the list."""
+    return patterns[0] if len(patterns) == 1 else list(patterns)
+
+
 def _typed_restrictions(
     dtype: str,
     unit: Optional[str],
@@ -302,6 +307,24 @@ def schema_add_field(
         help="Allowed area as WEST,SOUTH,EAST,NORTH in degrees; west greater "
         "than east crosses the 180th meridian (geo)",
     ),
+    from_file: Optional[str] = typer.Option(
+        None,
+        "--from-file",
+        help="Fill this field from the name of the file in this file field "
+        "when it is left blank (string, integer, float, date, datetime). "
+        "Needs --filename-pattern.",
+    ),
+    filename_pattern: Optional[list[str]] = typer.Option(
+        None,
+        "--filename-pattern",
+        help="How to read the value out of the file name: for a date or "
+        "datetime a token format such as YYYYMMDD[-_]HHmmSS (tokens YYYY MM "
+        "DD HH mm SS, anything else a regular expression) or a regular "
+        "expression with named groups year, month, day, hour, minute, "
+        "second; for text and numbers a regular expression whose first "
+        "capture group is the value. Give it more than once to try several "
+        "patterns in order.",
+    ),
 ) -> None:
     """Add a field to a schema.
 
@@ -317,6 +340,7 @@ def schema_add_field(
       --type float --unit m --min 0
       --type date --precision month
       --type geo --geometry-types Point --bbox "-12,48,4,62"
+      --type datetime --from-file audio --filename-pattern "YYYYMMDD[-_]HHmmSS"
     """
     restrictions: dict = {}
 
@@ -376,6 +400,16 @@ def schema_add_field(
     restrictions.update(
         _typed_restrictions(dtype, unit, precision, geometry_types, bbox)
     )
+    if from_file is not None or filename_pattern is not None:
+        if not (from_file and filename_pattern):
+            console.print(
+                "[error]--from-file and --filename-pattern go together.[/error]"
+            )
+            raise typer.Exit(1)
+        restrictions["from_filename"] = {
+            "field": from_file,
+            "pattern": _one_or_many(filename_pattern),
+        }
 
     ctx = _ctx()
     try:
@@ -521,6 +555,23 @@ def schema_update_field(
         help="Allowed area as WEST,SOUTH,EAST,NORTH in degrees; west greater "
         "than east crosses the 180th meridian (geo)",
     ),
+    from_file: Optional[str] = typer.Option(
+        None,
+        "--from-file",
+        help="Fill this field from the name of the file in this file field "
+        "when it is left blank (string, integer, float, date, datetime). "
+        "With --filename-pattern; either alone changes just that part of "
+        "an existing rule.",
+    ),
+    filename_pattern: Optional[list[str]] = typer.Option(
+        None,
+        "--filename-pattern",
+        help="How to read the value out of the file name: a token format "
+        "such as YYYYMMDD[-_]HHmmSS or a regular expression with named "
+        "groups (year, month, day, ...) for a date or datetime, else a "
+        "regular expression whose first capture group is the value. Give it "
+        "more than once to try several patterns in order.",
+    ),
     clear_restrictions: bool = typer.Option(
         False, "--clear-restrictions", help="Remove all restrictions"
     ),
@@ -539,6 +590,8 @@ def schema_update_field(
             precision,
             geometry_types,
             bbox,
+            from_file,
+            filename_pattern,
         ]
     )
 
@@ -623,6 +676,15 @@ def schema_update_field(
             new_restrictions.update(
                 _typed_restrictions(dtype, unit, precision, geometry_types, bbox)
             )
+            if from_file is not None or filename_pattern is not None:
+                # Either flag alone changes that part of the rule already
+                # there; the service refuses a rule left incomplete.
+                rule = dict(new_restrictions.get("from_filename") or {})
+                if from_file is not None:
+                    rule["field"] = from_file
+                if filename_pattern is not None:
+                    rule["pattern"] = _one_or_many(filename_pattern)
+                new_restrictions["from_filename"] = rule
             old_unit = (field.restrictions or {}).get("unit")
             if unit is not None and old_unit and old_unit != unit:
                 console.print(

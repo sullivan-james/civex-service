@@ -14,10 +14,11 @@ const RECORD_COLUMNS: ExtraColumn[] = [
   { name: 'updated_at', label: 'Updated' },
 ]
 
-/** Everything about one ticked table, on its row: its format, what it is called,
- * which columns it has (a panel that opens under the row), and, for a list written
- * in each folder, whether a folder with nothing to list gets one too. Rendered as
- * the children of a `CheckRow`, so it appears only while the table is on. */
+/** One ticked table's settings, on its row: its format, and behind Customise
+ * what it is called, which columns it has (a panel that opens under the row)
+ * and, for a list written in each folder, whether a folder with nothing to list
+ * gets one too. Rendered as the children of a `CheckRow`, so it appears only
+ * while the table is on. */
 export function TableSettings({
   table,
   title,
@@ -34,6 +35,10 @@ export function TableSettings({
   onChange: (patch: Partial<TableSpec>) => void
 }) {
   const [open, setOpen] = useState(false)
+  // The rest (name, columns, empty folders) is for the few who want it.
+  const [more, setMore] = useState(
+    !!table.name || !!table.columns || table.skip_empty === false,
+  )
   const kind = table.kind ?? ''
   // Columns are chosen for one kind of record; a table of each kind taken has
   // each kind's own, so there is nothing to choose.
@@ -59,28 +64,42 @@ export function TableSettings({
             </option>
           ))}
         </Select>
-        named
-        <Input
-          size="sm"
-          value={table.name ?? ''}
-          placeholder={placeholder}
-          aria-label={`${title}: file name`}
-          className="w-44"
-          onChange={(e) => onChange({ name: e.target.value || null })}
-        />
-        {choices && (
+        {!more && (
           <Button
             size="sm"
-            aria-expanded={open}
-            aria-label={`${title}: columns`}
-            onClick={() => setOpen((o) => !o)}
+            variant="link"
+            aria-label={`${title}: customise`}
+            onClick={() => setMore(true)}
           >
-            <Columns3 size={14} aria-hidden />
-            {columns ? `${columns.length} columns` : 'All columns'}
+            Customise…
           </Button>
         )}
+        {more && (
+          <>
+            named
+            <Input
+              size="sm"
+              value={table.name ?? ''}
+              placeholder={placeholder}
+              aria-label={`${title}: file name`}
+              className="w-44"
+              onChange={(e) => onChange({ name: e.target.value || null })}
+            />
+            {choices && (
+              <Button
+                size="sm"
+                aria-expanded={open}
+                aria-label={`${title}: columns`}
+                onClick={() => setOpen((o) => !o)}
+              >
+                <Columns3 size={14} aria-hidden />
+                {columns ? `${columns.length} columns` : 'All columns'}
+              </Button>
+            )}
+          </>
+        )}
       </span>
-      {list && (
+      {more && list && (
         <label className="flex w-full items-center gap-2 text-xs text-fg-muted">
           <Checkbox
             checked={table.skip_empty === false}
@@ -90,7 +109,7 @@ export function TableSettings({
           Also make one in folders with nothing to list (just its header)
         </label>
       )}
-      {choices && open && (
+      {more && choices && open && (
         <div className="w-full space-y-2 pt-1">
           <ColumnPicker
             columns={columns ?? everything}

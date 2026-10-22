@@ -1013,7 +1013,7 @@ describe('RecordsExplorer', () => {
         screen.getByRole('button', { name: /add files or more tables/i }),
       ).toBeTruthy()
       // None of the folder choices are in the way.
-      expect(screen.queryByText('What goes in the folder')).toBeNull()
+      expect(screen.queryByText('What to include')).toBeNull()
     })
 
     it('exports only the table, without files, unless more is asked for', async () => {
@@ -1056,13 +1056,13 @@ describe('RecordsExplorer', () => {
         screen.getByRole('button', { name: /add files or more tables/i }),
       )
 
-      expect(screen.getByText('What goes in the folder')).toBeTruthy()
+      expect(screen.getByText('What to include')).toBeTruthy()
       expect(screen.queryByText('The table you’re looking at')).toBeNull()
       // The table is still ticked, and no file is.
       expect(
         (
           screen.getAllByRole('checkbox', {
-            name: /^all .* in one table$/i,
+            name: /^one spreadsheet of all /i,
           })[0] as HTMLInputElement
         ).checked,
       ).toBe(true)

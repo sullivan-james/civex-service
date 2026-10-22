@@ -2595,6 +2595,15 @@ class ExportDefinitionResponse(BaseModel):
     tables: list[TableRequest] = Field(
         default_factory=list, description="The tables made beside the files."
     )
+    method: Literal["link", "copy", "zip"] = Field(
+        default="link",
+        description="How a run hands it over: 'link' (a folder of links on the "
+        "files' drive), 'copy' (real copies on a drive) or 'zip' (one file).",
+    )
+    volume: str | None = Field(
+        default=None,
+        description="For 'copy': the drive to copy onto; null is the project folder.",
+    )
 
     @classmethod
     def from_dto(cls, dto: "ExportDefinitionDTO") -> "ExportDefinitionResponse":
@@ -2609,6 +2618,8 @@ class ExportDefinitionResponse(BaseModel):
             files_layout=dto.files_layout,  # type: ignore[arg-type]
             include_files=dto.include_files,
             tables=[TableRequest(**t) for t in dto.tables],
+            method=dto.method,  # type: ignore[arg-type]
+            volume=dto.volume,
         )
 
 
@@ -2639,6 +2650,15 @@ class CreateExportDefinitionRequest(BaseModel):
     tables: list[TableRequest] = Field(
         default_factory=list, description="Also make these tables."
     )
+    method: Literal["link", "copy", "zip"] = Field(
+        default="link",
+        description="How a run hands it over: 'link' (a folder of links on the "
+        "files' drive), 'copy' (real copies on a drive) or 'zip' (one file).",
+    )
+    volume: str | None = Field(
+        default=None,
+        description="For 'copy': the drive to copy onto; omit for the project folder.",
+    )
 
 
 class UpdateExportDefinitionRequest(BaseModel):
@@ -2661,4 +2681,11 @@ class UpdateExportDefinitionRequest(BaseModel):
     tables: list[TableRequest] | None = Field(
         default=None,
         description="Replace the tables; send an empty list to remove them.",
+    )
+    method: Literal["link", "copy", "zip"] | None = Field(
+        default=None, description="Change how it is handed over; omit to leave as is."
+    )
+    volume: str | None = Field(
+        default=None,
+        description="For 'copy': the drive to copy onto; send null for the project folder.",
     )

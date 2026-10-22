@@ -67,6 +67,8 @@ class LocalExportDefinitionRepository:
         files_layout: str,
         include_files: bool = True,
         tables: list[dict[str, Any]] | None = None,
+        method: str = "link",
+        volume: str | None = None,
     ) -> ExportDefinitionDTO:
         row = ExportDefinition(
             schema_id=schema_id,
@@ -77,6 +79,8 @@ class LocalExportDefinitionRepository:
             files_layout=files_layout,
             include_files=include_files,
             tables=tables or [],
+            method=method,
+            volume=volume,
         )
         self._s.add(row)
         self._s.flush()
@@ -94,6 +98,8 @@ class LocalExportDefinitionRepository:
         files_layout=_SENTINEL,
         include_files=_SENTINEL,
         tables=_SENTINEL,
+        method=_SENTINEL,
+        volume=_SENTINEL,
     ) -> ExportDefinitionDTO:
         row = self._s.query(ExportDefinition).filter_by(id=id).first()
         if row is None:
@@ -112,6 +118,10 @@ class LocalExportDefinitionRepository:
             row.include_files = include_files
         if tables is not self._SENTINEL:
             row.tables = tables
+        if method is not self._SENTINEL:
+            row.method = method
+        if volume is not self._SENTINEL:
+            row.volume = volume
         self._s.flush()
         return _to_dto(row)
 
@@ -136,4 +146,6 @@ def _to_dto(row: ExportDefinition) -> ExportDefinitionDTO:
         created_at=row.created_at,
         include_files=row.include_files is not False,
         tables=row.tables or [],
+        method=row.method or "link",
+        volume=row.volume,
     )
