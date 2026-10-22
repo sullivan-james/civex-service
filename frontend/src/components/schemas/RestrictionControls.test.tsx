@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { useCallback, useState } from 'react'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { schemasApi } from '../../api/schemas'
@@ -72,6 +72,26 @@ vi.spyOn(schemasApi, 'previewName').mockResolvedValue({
   name: 'preview',
   error: null,
 })
+// The server runs the patterns; this stands in for it with canned answers.
+const PATTERN_PROBLEMS: Record<string, string> = {
+  HHmmSS: 'a datetime pattern needs the tokens YYYY MM DD',
+  'YYYYMMDD_HHmmSS(': 'not a valid regular expression',
+}
+const NAME_GIVES: Record<string, unknown> = {
+  'rec_take_07.wav': 7,
+  'site_2024-03-15.csv': '2024-03-15T00:00:00',
+  '15032024_093000.csv': '2024-03-15T09:30:00',
+}
+const previewFromFilename = vi
+  .spyOn(schemasApi, 'previewFromFilename')
+  .mockImplementation(async ({ filename, patterns }) => {
+    const problems = patterns.map((p) => PATTERN_PROBLEMS[p] ?? null)
+    const value =
+      problems.some(Boolean) || !filename
+        ? null
+        : (NAME_GIVES[filename] ?? null)
+    return { problems, value, error: null }
+  })
 
 const rules = () => JSON.parse(screen.getByTestId('rules').textContent!)
 const problems = () => JSON.parse(screen.getByTestId('problems').textContent!)
@@ -329,7 +349,7 @@ describe('fill from a file name', () => {
     expect(problems()).toEqual([])
   })
 
-  it('tries the pattern on a file name as the server would', async () => {
+  it('asks the server what a file name gives and shows the answer', async () => {
     render(
       <Harness
         d={d}
@@ -339,13 +359,22 @@ describe('fill from a file name', () => {
     )
     const sample = screen.getByLabelText('Try a file name')
     await userEvent.type(sample, 'rec_take_07.wav')
-    expect(screen.getByTestId('tried')).toHaveTextContent('Gives 7')
+    await waitFor(() =>
+      expect(screen.getByTestId('tried')).toHaveTextContent('Gives 7'),
+    )
+    expect(previewFromFilename).toHaveBeenCalledWith({
+      filename: 'rec_take_07.wav',
+      patterns: ['take_(\\d+)'],
+      kind: 'integer',
+    })
     await userEvent.clear(sample)
     await userEvent.type(sample, 'rec.wav')
-    expect(screen.getByTestId('tried')).toHaveTextContent(/stay blank/)
+    await waitFor(() =>
+      expect(screen.getByTestId('tried')).toHaveTextContent(/stay blank/),
+    )
   })
 
-  it('refuses a bad pattern and a date pattern without a date', async () => {
+  it("shows the server's problem with a pattern and blocks saving", async () => {
     render(
       <Harness
         d={d}
@@ -353,13 +382,15 @@ describe('fill from a file name', () => {
         initial={{ from_filename: { field: 'audio', pattern: 'HHmmSS' } }}
       />,
     )
-    expect(problems()[0]).toMatch(/needs the tokens YYYY MM DD/)
+    await waitFor(() =>
+      expect(problems()[0]).toMatch(/needs the tokens YYYY MM DD/),
+    )
     const pattern = screen.getByLabelText('Pattern')
     await userEvent.clear(pattern)
     await userEvent.type(pattern, 'YYYYMMDD_HHmmSS')
-    expect(problems()).toEqual([])
+    await waitFor(() => expect(problems()).toEqual([]))
     await userEvent.type(pattern, '(')
-    expect(problems()[0]).toMatch(/regular expression/)
+    await waitFor(() => expect(problems()[0]).toMatch(/regular expression/))
   })
 
   it('takes several patterns, tried in order, and stores one as a string', async () => {
@@ -385,15 +416,14 @@ describe('fill from a file name', () => {
       },
     })
     expect(problems()).toEqual([])
-    const sample = screen.getByLabelText('Try a file name')
-    await userEvent.type(sample, 'site_2024-03-15.csv')
-    expect(screen.getByTestId('tried')).toHaveTextContent(
-      'Gives 2024-03-15T00:00:00',
+    await userEvent.type(
+      screen.getByLabelText('Try a file name'),
+      'site_2024-03-15.csv',
     )
-    await userEvent.clear(sample)
-    await userEvent.type(sample, '15032024_093000.csv')
-    expect(screen.getByTestId('tried')).toHaveTextContent(
-      'Gives 2024-03-15T09:30:00',
+    await waitFor(() =>
+      expect(screen.getByTestId('tried')).toHaveTextContent(
+        'Gives 2024-03-15T00:00:00',
+      ),
     )
     await userEvent.click(
       screen.getByRole('button', { name: 'Remove pattern 1' }),
@@ -401,19 +431,6 @@ describe('fill from a file name', () => {
     expect(rules()).toEqual({
       from_filename: { field: 'audio', pattern: 'YYYY-MM-DD' },
     })
-  })
-
-  it('reads a date regex with named groups', async () => {
-    render(
-      <Harness
-        d={d}
-        context={{ ...withFiles, type: 'date' }}
-        initial={{
-          from_filename: { field: 'audio', pattern: '(?P<year>\\d{4})' },
-        }}
-      />,
-    )
-    expect(problems()[0]).toMatch(/named groups needs month, day/)
   })
 
   it('choosing no file field removes the rule', async () => {

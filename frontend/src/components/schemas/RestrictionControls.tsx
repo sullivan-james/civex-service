@@ -34,12 +34,8 @@ import {
 import { UNIT_GROUPS, canonicalUnit } from '../../utils/units'
 import { displayLabel } from '../../utils/naming'
 import { FILENAME_FORMAT_TOKENS_HELP } from '../../utils/filenamePattern'
-import {
-  DATE_KINDS,
-  extractFromFilename,
-  fromFilenameRule,
-  patternProblem,
-} from '../../utils/filenameExtract'
+import { DATE_KINDS, fromFilenameRule } from '../../utils/filenameExtract'
+import { useFromFilenamePreview } from '../../hooks/useFromFilenamePreview'
 import {
   TemplateBuilder,
   type TemplateField,
@@ -336,11 +332,19 @@ export function FromFilenameControl({
     (f) => f.dtype === 'file' || f.dtype === 'file_list',
   )
   const [sample, setSample] = useState('')
-  const rowErrors = patterns.map((p) =>
-    field && p.trim() ? patternProblem(p, kind) : null,
+  const incomplete = !!field && patterns.some((p) => !p.trim())
+  // The server tries the patterns, as the one implementation of them: each
+  // row's problem, and what the sample name gives.
+  const preview = useFromFilenamePreview(
+    sample,
+    patterns,
+    kind,
+    !!field && !incomplete,
+  )
+  const rowErrors = patterns.map((_, i) =>
+    incomplete ? null : (preview.data?.problems[i] ?? null),
   )
   const patternErr = rowErrors.find((e) => e) ?? null
-  const incomplete = !!field && patterns.some((p) => !p.trim())
   useEffect(() => {
     problem(
       desc.key,
@@ -365,9 +369,7 @@ export function FromFilenameControl({
         : undefined,
     )
   const tried =
-    sample && field && !incomplete && !patternErr
-      ? extractFromFilename(sample, patterns, kind)
-      : null
+    sample && field && !incomplete && !patternErr ? preview.data : null
   return (
     <Shell label={desc.label} help={desc.help}>
       {fileFields.length === 0 ? (
