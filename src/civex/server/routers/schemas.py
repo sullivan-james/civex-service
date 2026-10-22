@@ -5,6 +5,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 
 from civex.context import AppContext
+from civex.domain import filename_extract
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
 from civex.server.deps import get_ctx
 from civex.server.models import (
@@ -12,6 +13,8 @@ from civex.server.models import (
     CreateSchemaRequest,
     FieldResponse,
     FieldTypesResponse,
+    FromFilenamePreviewRequest,
+    FromFilenamePreviewResponse,
     NameIssueResponse,
     PreviewNameRequest,
     PreviewNameResponse,
@@ -53,6 +56,17 @@ def field_types():
     record-form guidance from this, so a new type or rule appears there
     without a frontend change."""
     return FieldTypesResponse.build()
+
+
+@router.post("/from-filename/preview", response_model=FromFilenamePreviewResponse)
+def preview_from_filename(body: FromFilenamePreviewRequest):
+    """Try a `from_filename` rule's patterns on a file name without saving
+    anything: what is wrong with each pattern, and what the name gives. The
+    field editor and the new-record form show this as the person types."""
+    problems, value, error = filename_extract.try_patterns(
+        body.filename, body.patterns, body.kind
+    )
+    return FromFilenamePreviewResponse(problems=problems, value=value, error=error)
 
 
 @router.post("/{name}/preview-name", response_model=PreviewNameResponse)

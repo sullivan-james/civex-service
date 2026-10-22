@@ -132,6 +132,33 @@ class SetUniqueKeysRequest(BaseModel):
     )
 
 
+class FromFilenamePreviewRequest(BaseModel):
+    filename: str = Field(
+        default="",
+        description="A file name to try the patterns on; blank only checks them.",
+    )
+    patterns: list[str] = Field(
+        description="The rule's patterns, tried in order (the `from_filename` rule's `pattern`)."
+    )
+    kind: str = Field(
+        description="The field type the value is read as, e.g. 'datetime'."
+    )
+
+
+class FromFilenamePreviewResponse(BaseModel):
+    problems: list[str | None] = Field(
+        description="Per pattern: why it can't be used, or null when it can."
+    )
+    value: Any = Field(
+        default=None,
+        description="What the file name gives; null when no pattern matches or one has a problem.",
+    )
+    error: str | None = Field(
+        default=None,
+        description="A pattern matched but what it captured isn't a value of the kind.",
+    )
+
+
 class PreviewNameRequest(BaseModel):
     template: str = Field(
         description="The template to try, e.g. '{site}-{taken_on:YYYY-MM}'."

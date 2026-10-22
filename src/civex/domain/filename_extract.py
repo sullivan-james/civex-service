@@ -1,31 +1,14 @@
-"""Reading a value out of a file's name.
+"""Reading a value out of a file's name: the `from_filename` restriction and
+the `civex.extract_from_filename` plugin. Pure, so anything may import it.
 
-The one rule for the `from_filename` restriction (a field filled from a file
-field's name as the record is saved) and for the `civex.extract_from_filename`
-workflow plugin, which calls in here and adds nothing of its own to the
-parsing. Pure: no civex imports, so anything may use it. Mirrored by
-`frontend/src/utils/filenameExtract.ts` for the live preview; the two are
-tested against the same table of examples.
-
-A rule's `pattern` is one pattern or a list tried in order, first match wins
-(so a field can read file names written two ways). A pattern takes one of
-three forms:
-
-- For a `date` or `datetime`, a *token format*: `YYYY MM DD HH mm SS` stand
-  for the parts of the date; anything else is a raw regular expression, so
-  `YYYYMMDD[-_]HHmmSS` reads both `20240315_093000` and `20240315-093000`.
-  The year, month and day tokens are required.
-- For a `date` or `datetime`, a regular expression with *named groups* for
-  the parts (`(?P<year>\\d{4})`, `month`, `day`, `hour`, `minute`,
-  `second`): a pattern that has named groups is read this way. Year, month
-  and day are required.
-- For text and numbers, a plain regular expression: the first capture group
-  is the value, or the whole match when there is none.
-
-The pattern is searched for anywhere in the name, so it needn't describe the
-whole of it. A datetime comes out *naive* (no UTC offset): a timestamp in a
-file name is wall time where it was recorded, and the record service reads
-it in the field's, else the collection's, timezone when it is saved.
+A rule's `pattern` is one pattern or a list tried in order, first match wins.
+For a `date`/`datetime` a pattern is a token format (`YYYY MM DD HH mm SS`,
+anything else raw regex, year, month and day required) or a regex with named
+groups (`(?P<year>…)`, `month`, `day`, `hour`, `minute`, `second`); for text
+and numbers a regex whose first capture group is the value, else the whole
+match. Patterns are searched for anywhere in the name. A datetime comes out
+naive: the record service reads it in the field's, else the collection's,
+timezone.
 """
 
 from __future__ import annotations
@@ -35,14 +18,10 @@ from collections.abc import Sequence
 from datetime import date as _date, datetime as _dt
 from typing import Any
 
-#: Field types a value can be read out of a file name for.
 KINDS: frozenset[str] = frozenset({"string", "integer", "float", "date", "datetime"})
-#: Kinds whose pattern names the parts of a date (tokens or named groups).
 DATE_KINDS: frozenset[str] = frozenset({"date", "datetime"})
 
-#: The tokens a date pattern may use, in the order a person would list them.
 TOKENS: tuple[str, ...] = ("YYYY", "MM", "DD", "HH", "mm", "SS")
-#: The named groups a date regex may use, in the same order.
 DATE_PARTS: tuple[str, ...] = ("year", "month", "day", "hour", "minute", "second")
 _REQUIRED_TOKENS = ("YYYY", "MM", "DD")
 _REQUIRED_PARTS = ("year", "month", "day")
@@ -60,21 +39,20 @@ _NAMED_GROUP_RE = re.compile(r"\(\?P<(\w+)>")
 
 
 def token_regex(fmt: str) -> str:
-    """The regular expression a token format stands for: each token a named
-    group, everything else left as it is."""
+    """The regex a token format stands for: each token a named group."""
     parts = _TOKEN_RE.split(fmt)
     return "".join(_TOKEN_MAP[p] if p in _TOKEN_MAP else p for p in parts)
 
 
 def is_named(pattern: str) -> bool:
-    """Whether `pattern` is a regular expression with named groups (the
-    second form), rather than a token format."""
+    """Whether `pattern` is a regex with named groups, not a token format."""
+
     return _NAMED_GROUP_RE.search(pattern) is not None
 
 
 def patterns_of(value: Any) -> tuple[str, ...]:
-    """A rule's `pattern` as the patterns to try, in order: one string, or a
-    list of them. Anything else is no patterns."""
+    """A rule's `pattern` as the patterns to try: one string, or a list."""
+
     if isinstance(value, str):
         return (value,)
     if isinstance(value, (list, tuple)):
@@ -83,10 +61,8 @@ def patterns_of(value: Any) -> tuple[str, ...]:
 
 
 def compile_pattern(pattern: str, kind: str) -> re.Pattern[str]:
-    """`pattern` as a regular expression for a value of `kind`, or ValueError
-    saying what is wrong with it: not a kind a name can fill, an empty
-    pattern, a date pattern without a year, month and day (tokens or named
-    groups), or a regular expression that doesn't compile."""
+    """`pattern` as a regex for a value of `kind`, or ValueError saying why not."""
+
     if kind not in KINDS:
         raise ValueError(
             f"a {kind} field can't be filled from a file name "
@@ -139,13 +115,10 @@ def _date_value(groups: dict[str, str | None], kind: str) -> str:
 
 
 def parse_by_format(raw: str, fmt: str, kind: str) -> str:
-    """`raw` read with the token format `fmt` as an ISO date (`kind` "date")
-    or naive ISO datetime (anything else). ValueError when the format
-    doesn't match or the numbers don't make a date.
+    """`raw` read with the token format `fmt` as an ISO date or naive datetime
+    (the plugin's two-step form; a format with no date tokens reads as
+    1970-01-01, as it always has). ValueError when it doesn't match."""
 
-    The plugin's two-step form: a capture group first, then this on what it
-    captured. Unlike `compile_pattern`, a format with no date tokens is
-    allowed and reads as 1970-01-01, as it always has."""
     m = re.search(token_regex(fmt), raw)
     if m is None:
         raise ValueError(f"Format '{fmt}' did not match '{raw}'")
@@ -173,11 +146,10 @@ def _value_of(m: re.Match[str], kind: str) -> Any:
 
 
 def extract(filename: str, patterns: str | Sequence[str], kind: str) -> Any:
-    """The value of `kind` that `patterns` (one, or several tried in order,
-    the first that matches deciding) read out of `filename`: None when none
-    matches (the field stays blank), the value otherwise. ValueError when a
-    pattern is bad or what the matching one captured isn't a `kind` (not a
-    number, not a real date)."""
+    """The value of `kind` the first matching pattern reads out of `filename`,
+    None when none matches. ValueError for a bad pattern or a match that
+    isn't a `kind`."""
+
     for pattern in patterns_of(patterns):
         m = compile_pattern(pattern, kind).search(filename)
         if m is not None:
@@ -185,28 +157,45 @@ def extract(filename: str, patterns: str | Sequence[str], kind: str) -> Any:
     return None
 
 
+def try_patterns(
+    filename: str, patterns: Sequence[str], kind: str
+) -> tuple[list[str | None], Any, str | None]:
+    """What an editor shows while a rule is typed: each pattern's problem (or
+    None), then, when they all compile and there is a name to try, the value
+    read and the error reading it. Nothing is saved."""
+    problems: list[str | None] = []
+    for pattern in patterns:
+        try:
+            compile_pattern(pattern, kind)
+            problems.append(None)
+        except ValueError as e:
+            problems.append(str(e))
+    if not filename or any(problems):
+        return problems, None, None
+    try:
+        return problems, extract(filename, patterns, kind), None
+    except ValueError as e:
+        return problems, None, str(e)
+
+
 def _first_file(value: Any) -> dict[str, Any] | None:
-    """The file reference in a `file` or `file_list` value (the first file of
-    a list), or None when there is no file."""
     if isinstance(value, list):
         value = value[0] if value else None
     return value if isinstance(value, dict) else None
 
 
 def first_filename(value: Any) -> str | None:
-    """The file name in a `file` or `file_list` value (the first file of a
-    list), or None when there is no file."""
+    """The name of the (first) file in a `file`/`file_list` value, or None."""
+
     ref = _first_file(value)
     name = ref.get("filename") if ref else None
     return name if isinstance(name, str) and name else None
 
 
 def first_file_key(value: Any) -> tuple[Any, Any] | None:
-    """What identifies the file in a `file` or `file_list` value (the first
-    file of a list): its content hash and its name, or None when there is no
-    file. Two values with different keys hold different files as far as a
-    rule reading the name is concerned: new content under the same name, or
-    the same content under a new name, is a new file."""
+    """(sha256, filename) of the (first) file, or None: a new name or new
+    content is a new file as far as a rule reading the name is concerned."""
+
     ref = _first_file(value)
     if ref is None:
         return None
@@ -214,9 +203,8 @@ def first_file_key(value: Any) -> tuple[Any, Any] | None:
 
 
 def rule_of(restrictions: dict[str, Any] | None) -> tuple[str, tuple[str, ...]] | None:
-    """The `(file field name, patterns)` of a field's `from_filename` rule, or
-    None when it has none or the rule is malformed (no field, no patterns,
-    or a blank one among them)."""
+    """`(file field, patterns)` of a field's rule, or None when absent or malformed."""
+
     rule = (restrictions or {}).get("from_filename")
     if not isinstance(rule, dict):
         return None
@@ -227,20 +215,3 @@ def rule_of(restrictions: dict[str, Any] | None) -> tuple[str, tuple[str, ...]] 
     if not patterns or any(not p.strip() for p in patterns):
         return None
     return source, patterns
-
-
-__all__ = [
-    "DATE_KINDS",
-    "DATE_PARTS",
-    "KINDS",
-    "TOKENS",
-    "compile_pattern",
-    "extract",
-    "first_file_key",
-    "first_filename",
-    "is_named",
-    "parse_by_format",
-    "patterns_of",
-    "rule_of",
-    "token_regex",
-]
