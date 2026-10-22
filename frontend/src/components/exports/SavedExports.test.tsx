@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router'
 import { ToastProvider } from '../ui/ToastProvider'
-import { exported, fakeServer, finishExport, json } from '../files/testSupport'
+import { exported, fakeServer, json } from '../files/testSupport'
 import { SavedExports } from './SavedExports'
 import { definition, SCHEMAS } from './exportsTestSupport'
 
@@ -170,7 +170,7 @@ describe('running', () => {
     const row = await rowOf('Contours')
 
     await userEvent.click(within(row).getByRole('button', { name: 'Run…' }))
-    await finishExport('folder', 0)
+    // Saved with how it is handed over, so it runs straight away.
 
     await waitFor(() =>
       expect(calls.some((c) => c.path === '/api/file-access/export')).toBe(

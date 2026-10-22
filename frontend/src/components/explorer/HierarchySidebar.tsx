@@ -3,6 +3,10 @@ import { useNavigate, useSearchParams } from 'react-router'
 import type { Schema } from '../../api/schemas'
 import { useRecord, useRecordCounts } from '../../hooks/useRecords'
 import { useSchemas } from '../../hooks/useSchemas'
+import { usePermissions } from '../../hooks/useMe'
+import { Button } from '../ui'
+import { Plus } from '../ui/icons'
+import { newSchemaHref } from './EmptyCollectionGuide'
 import {
   applyExplorerPatch,
   parseExplorerState,
@@ -87,8 +91,37 @@ export function HierarchySidebar({
     else setSearchParams((prev) => applyExplorerPatch(prev, patch))
   }
 
+  const { can, why } = usePermissions()
+  const cannot = can('change_structure') ? undefined : why('change_structure')
+  // A new schema goes inside the record's own kind on a record page, else
+  // at the top. It is made on the Schemas page, never from the New menu.
+  const footer = (
+    <div className="mt-1 border-t border-border px-1 pt-2">
+      {cannot ? (
+        <Button size="sm" variant="ghost" disabled title={cannot}>
+          <Plus size={14} /> New schema…
+        </Button>
+      ) : (
+        <Button
+          size="sm"
+          variant="ghost"
+          to={newSchemaHref(recordId ? scopeSchema?.name : null)}
+        >
+          <Plus size={14} /> New schema…
+        </Button>
+      )}
+    </div>
+  )
+
   if (levels.length === 0) return null
-  return <HierarchyRail levels={levels} current={current} onPick={pick} />
+  return (
+    <HierarchyRail
+      levels={levels}
+      current={current}
+      onPick={pick}
+      footer={footer}
+    />
+  )
 }
 
 /** Page content with the collection's hierarchy kept beside it. */

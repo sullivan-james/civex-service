@@ -245,7 +245,9 @@ class FileAccessService:
             if progress:
                 progress.phase("Working out the folders")
             values, known = self._records.file_values(records, selection.fields)
-            if selection.fields and not (known & set(selection.fields)):
+            # With no records yet there is nothing to check the fields against:
+            # the export is empty for now, not wrong.
+            if records and selection.fields and not (known & set(selection.fields)):
                 raise ValidationError(
                     "None of the selected records has a file field named "
                     + ", ".join(f"'{f}'" for f in selection.fields)

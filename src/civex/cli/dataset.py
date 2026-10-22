@@ -47,8 +47,8 @@ def dataset_create(
         "--schema",
         "-s",
         help=(
-            "A schema the collection is for; repeat for several. Records here "
-            "can only be of these schemas. A child schema needs its parent "
+            "Limit the collection to this schema; repeat for several. Without "
+            "any, it holds records of every schema. A child schema needs its parent "
             "listed too."
         ),
     ),
@@ -144,7 +144,8 @@ def dataset_update(
         "--schema",
         "-s",
         help=(
-            "Replace the collection's schema list; repeat for several. A "
+            "Limit the collection to these schemas; repeat for several. "
+            "Without a list a collection holds records of every schema. A "
             "schema that still has records here can't be removed."
         ),
     ),

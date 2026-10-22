@@ -14,6 +14,7 @@ import {
 } from '../hooks/useSchemas'
 import {
   Button,
+  Card,
   DetailSkeleton,
   Skeleton,
   Field,
@@ -41,10 +42,10 @@ function describeDeleteImpact(childCount: number, recordCount: number): string {
   const records = `${recordCount.toLocaleString()} record${recordCount === 1 ? '' : 's'}`
   const children = `${childCount} child type${childCount === 1 ? '' : 's'}`
   if (childCount > 0 && recordCount > 0) {
-    return `Deleting it will also delete ${records} typed by it. This record type has ${children} that inherit from it — they'll keep working, pointing at a hidden parent, until it's restored.`
+    return `Deleting it will also delete ${records} typed by it. This schema has ${children} that inherit from it — they'll keep working, pointing at a hidden parent, until it's restored.`
   }
   if (childCount > 0) {
-    return `This record type has ${children} that inherit from it — they'll keep working, pointing at a hidden parent, until it's restored.`
+    return `This schema has ${children} that inherit from it — they'll keep working, pointing at a hidden parent, until it's restored.`
   }
   if (recordCount > 0) {
     return `Deleting it will also delete ${records}.`
@@ -130,18 +131,23 @@ function MetaEditor({
 
 const TABS = [
   { id: 'fields', label: 'Fields' },
-  { id: 'naming', label: 'Naming' },
-  { id: 'uniqueness', label: 'Uniqueness' },
+  { id: 'records', label: 'Records' },
   { id: 'automations', label: 'Automations' },
   { id: 'history', label: 'History' },
 ] as const
 type TabId = (typeof TABS)[number]['id']
+// Naming and uniqueness were tabs of their own; a saved link to either opens
+// the Records tab, where both now are.
+const OLD_TABS: Record<string, TabId> = {
+  naming: 'records',
+  uniqueness: 'records',
+}
 
 export default function SchemaDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [editing, setEditing] = useState(false)
-  const [tab, setTab] = useTabParam<TabId>(TABS, 'fields')
+  const [tabParam, setTab] = useTabParam<TabId>(TABS, 'fields')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const { can } = usePermissions()
 
@@ -150,6 +156,7 @@ export default function SchemaDetailPage() {
   const { data: allSchemas } = useSchemas()
   // Exports used to be a tab here; a saved link to it goes to the Exports page.
   const [params] = useSearchParams()
+  const tab: TabId = OLD_TABS[params.get('tab') ?? ''] ?? tabParam
   const gone = params.get('tab') === 'exports' ? schema?.name : undefined
   useEffect(() => {
     if (gone)
@@ -185,7 +192,7 @@ export default function SchemaDetailPage() {
         error={
           <SchemaMissing
             id={id!}
-            message={error ? errorMessage(error) : 'Record type not found'}
+            message={error ? errorMessage(error) : 'Schema not found'}
           />
         }
       />
@@ -206,7 +213,7 @@ export default function SchemaDetailPage() {
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span
             className="font-mono text-xs text-fg-subtle"
-            title="Record type name — what workflows and CSV headers reference"
+            title="Key — what workflows and CSV headers use"
           >
             {schema.name}
           </span>
@@ -226,7 +233,7 @@ export default function SchemaDetailPage() {
       }
       secondaryActions={[
         {
-          label: 'Delete record type…',
+          label: 'Delete schema…',
           variant: 'danger',
           onClick: () => setConfirmDelete(true),
           disabled: !can('delete'),
@@ -253,22 +260,26 @@ export default function SchemaDetailPage() {
         <MetaEditor schema={schema} onDone={() => setEditing(false)} />
       )}
 
-      <TabNav
-        label="Record type"
-        tabs={[...TABS]}
-        value={tab}
-        onChange={setTab}
-      />
+      <TabNav label="Schema" tabs={[...TABS]} value={tab} onChange={setTab} />
       <TabPanel id="fields" value={tab}>
         <SchemaFieldsSection schema={schema} allSchemas={allSchemas} />
       </TabPanel>
 
-      <TabPanel id="naming" value={tab}>
-        <NamingSection schema={schema} allSchemas={allSchemas} />
-      </TabPanel>
-
-      <TabPanel id="uniqueness" value={tab}>
-        <UniquenessSection schema={schema} />
+      <TabPanel id="records" value={tab}>
+        <div className="space-y-6">
+          <Card
+            title="How records are named"
+            info="The name shows in lists, breadcrumbs, links and export folders. Built from the fields you pick."
+          >
+            <NamingSection schema={schema} allSchemas={allSchemas} />
+          </Card>
+          <Card
+            title="What must be unique"
+            info="Fields no two records of this schema may share. Checked when a record is saved."
+          >
+            <UniquenessSection schema={schema} />
+          </Card>
+        </div>
       </TabPanel>
 
       <TabPanel id="automations" value={tab}>
@@ -308,14 +319,14 @@ export default function SchemaDetailPage() {
 
           return (
             <ConfirmDialog
-              title="Delete record type"
+              title="Delete schema"
               body={
                 <>
                   <p>
-                    Delete record type '{schema.name}'?{' '}
+                    Delete schema '{schema.name}'?{' '}
                     {impactReady
                       ? describeDeleteImpact(childCount, recordCount)
-                      : 'Checking what depends on this record type…'}
+                      : 'Checking what depends on this schema…'}
                   </p>
                 </>
               }
@@ -323,7 +334,7 @@ export default function SchemaDetailPage() {
                 impactReady
                   ? recordCount > 0
                     ? `Delete schema and ${recordCount.toLocaleString()} record${recordCount === 1 ? '' : 's'}`
-                    : 'Delete record type'
+                    : 'Delete schema'
                   : 'Checking…'
               }
               variant="danger"

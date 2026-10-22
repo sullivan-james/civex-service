@@ -43,7 +43,7 @@ export interface ImportWizardProps {
    * ask for one mid-wizard — see `schemaId` for the symmetric case. */
   datasetName?: string
   /** Pre-chosen schema (e.g. entering from a schema page) — skips the
-   * "record type" picker entirely rather than just hiding it. */
+   * "schema" picker entirely rather than just hiding it. */
   schemaId?: string
 }
 
@@ -72,7 +72,7 @@ export default function ImportWizard({
     ? (schemas?.find((s) => s.id === schemaId) ?? null)
     : null
   // schemaId was given but the schemas list hasn't loaded yet -- avoid a
-  // one-frame flash of the "pick a record type" UI before snapping to
+  // one-frame flash of the "pick a schema" UI before snapping to
   // "already have one".
   const schemaResolving = !!schemaId && !schemas
 

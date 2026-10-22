@@ -26,8 +26,11 @@ import {
 } from '../components/records/FilenameExtractor'
 import { ScanText } from '../components/ui/icons'
 import { displayLabel } from '../utils/naming'
+import { FromFilenamePreview } from '../components/records/FromFilenamePreview'
+import { splitPendingFiles } from '../components/records/pendingFiles'
 import { errorMessage } from '../lib/errors'
 import { useBack } from '../hooks/useBack'
+import { AddFieldRow } from '../components/schemas/AddFieldRow'
 
 const PARENT = '__parent__'
 
@@ -110,7 +113,7 @@ export default function NewRecordPage() {
                 ? errorMessage(error)
                 : !collection
                   ? 'Collection not found'
-                  : 'Unknown record type'
+                  : 'Unknown schema'
             }
           />
         }
@@ -129,15 +132,19 @@ export default function NewRecordPage() {
   )
 
   function submit(another = false) {
-    const data: Record<string, unknown> = {}
+    const chosen: Record<string, unknown> = {}
     for (const f of schema!.fields)
-      if (values[f.name] !== undefined) data[f.name] = values[f.name]
+      if (values[f.name] !== undefined) chosen[f.name] = values[f.name]
+    // Files picked so far were held in the browser; they go with the record,
+    // and are stored only if the record is.
+    const { data, files } = splitPendingFiles(chosen)
     createRecord.mutate(
       {
         schema_name: schema!.name,
         data,
         parent_record_id:
           parentParam ?? (values[PARENT] as string | undefined) ?? undefined,
+        files,
       },
       {
         onSuccess: (created) => {
@@ -190,6 +197,7 @@ export default function NewRecordPage() {
             <RecordFieldGrid
               fields={fields}
               data={values}
+              holdFiles
               onSave={(name, value) =>
                 setValues((prev) => {
                   const next = { ...prev }
@@ -200,6 +208,7 @@ export default function NewRecordPage() {
               }
               errors={errors}
               onDismissError={() => createRecord.reset()}
+              footer={<AddFieldRow schema={schema} allSchemas={schemas} />}
               extra={(field) => {
                 if (
                   field.name === PARENT ||
@@ -207,9 +216,12 @@ export default function NewRecordPage() {
                   fileSources.length === 0
                 )
                   return null
+                // A field with a from-filename rule is filled by the server
+                // as the record is added; say what it will get.
                 const open = extracting === field.name
                 return (
                   <>
+                    <FromFilenamePreview field={field} values={values} />
                     <Button
                       size="sm"
                       variant="ghost"

@@ -918,8 +918,8 @@ def parent_allows_restore(record_model, stamp):
     """A condition on records being brought back by a schema's or collection's
     restore: none above it, or the one above is live, or it was deleted at the
     same moment (and so comes back in the same restore); and its collection
-    still lists its schema (it may have been taken off the list while the
-    record was deleted). The one rule both restores (and sync, which uses
+    allows its schema: every schema unless it has a list of its own, which
+    may have lost this one while the record was deleted. The one rule both restores (and sync, which uses
     them) follow: a record comes back only where it could be added."""
     from sqlalchemy import and_, exists, or_
     from sqlalchemy.orm import aliased
@@ -935,8 +935,12 @@ def parent_allows_restore(record_model, stamp):
                 or_(above.deleted_at.is_(None), above.deleted_at == stamp),
             ),
         ),
-        exists().where(
-            DatasetSchema.dataset_id == record_model.dataset_id,
-            DatasetSchema.schema_id == record_model.schema_id,
+        or_(
+            # no list: every schema is allowed
+            ~exists().where(DatasetSchema.dataset_id == record_model.dataset_id),
+            exists().where(
+                DatasetSchema.dataset_id == record_model.dataset_id,
+                DatasetSchema.schema_id == record_model.schema_id,
+            ),
         ),
     )

@@ -30,6 +30,7 @@ from civex.domain.dtos import (
     RestoreSetResultDTO,
     SchemaDTO,
 )
+from civex.domain import filename_extract
 from civex.domain import geo as geo_domain
 from civex.domain.audit_diff import tombstone
 from civex.domain import partial_dates, templating, units
@@ -986,6 +987,125 @@ class RecordService:
             for r, ids in zip(records, per_record_ids)
         ]
 
+    def _fill_from_filenames(
+        self,
+        data: dict[str, Any],
+        shape: ResolvedSchema | None,
+        parent: RecordDTO | None,
+        stored: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """`data` with each field that carries a `from_filename` rule read
+        from the name of the file in the field the rule names
+        (`domain/filename_extract`). The rule follows the file, not the
+        field's emptiness, and this is the one place that decides:
+
+        - A blank field with a file present is filled.
+        - The source file changed in this save (on add, any file; on update,
+          the incoming file's sha256 or name differs from the one in `stored`,
+          the record's data as it was, by field name; for a `file_list`, the
+          first file's): the value is read again and replaces what the field
+          held, since the old value belonged to the old file.
+        - The same file, and the field edited by hand or left as it was: what
+          is there is kept. A hand edit is an override until the file changes,
+          and a value given in the same save as the new file (on add, every
+          value given) is such an edit, so a new file never discards it.
+        - A name no pattern fits leaves the field as it is: a blank stays
+          blank and a value stays, never blanked because the new file doesn't
+          fit.
+
+        An inherited file field's file is on the nearest record above
+        (`parent`, then up); a child's save doesn't change it, so it counts as
+        unchanged, and a child's field is filled only while blank. A parent's
+        save never reaches into its children. A name a pattern fits but that
+        doesn't read as the field's type is refused naming the field, as a
+        typed value would be. Runs before defaults, validation and unique
+        keys, so the derived value is held to all of them."""
+        if shape is None:
+            return data
+        # Own fields only: a child record holds no values for inherited
+        # fields (they live on the record above), so a rule on one is for
+        # records of that schema.
+        rules = [
+            (rf.field, rule)
+            for rf in shape.fields
+            if rf.source_schema_name == shape.schema.name
+            and (rule := filename_extract.rule_of(rf.field.restrictions))
+        ]
+        if not rules:
+            return data
+        inherited = {
+            rf.field.name
+            for rf in shape.fields
+            if rf.source_schema_name != shape.schema.name
+        }
+        result = dict(data)
+        for field, (source_name, patterns) in rules:
+            source = shape.by_name.get(source_name)
+            if source is None:
+                continue
+            incoming = result.get(source_name)
+            filename = filename_extract.first_filename(incoming)
+            if source_name in inherited:
+                # An inherited file field's file is on a record above, which
+                # this save doesn't change.
+                changed = False
+                if filename is None and parent is not None:
+                    filename = self._filename_above(parent, str(source.id))
+            elif stored is None:
+                changed = filename is not None
+            else:
+                changed = filename_extract.first_file_key(
+                    incoming
+                ) != filename_extract.first_file_key(stored.get(source_name))
+            current = result.get(field.name)
+            blank = _is_blank_value(current)
+            edited = not blank and (stored is None or current != stored.get(field.name))
+            if filename is None or not (blank or (changed and not edited)):
+                continue
+            try:
+                value = filename_extract.extract(filename, patterns, field.dtype)
+            except ValueError as e:
+                raise FieldValueError(
+                    f"Field '{field.name}': could not be filled from '{filename}': {e}",
+                    f"data.{field.id}",
+                ) from None
+            if value is not None:
+                result[field.name] = value
+        return result
+
+    def _parent_if_needed(
+        self, raw: RecordDTO, shape: ResolvedSchema | None, data: dict[str, Any]
+    ) -> RecordDTO | None:
+        """The record above `raw`, fetched only when a blank field's
+        `from_filename` rule reads an inherited file field `data` has no file
+        in: one query, and only for the records that need it."""
+        if shape is None or raw.parent_record_id is None:
+            return None
+        own = {f.name for f in shape.schema.fields}
+        for rf in shape.fields:
+            rule = filename_extract.rule_of(rf.field.restrictions)
+            if rule is None or not _is_blank_value(data.get(rf.field.name)):
+                continue
+            if rule[0] in own or filename_extract.first_filename(data.get(rule[0])):
+                continue
+            return self._records.get_by_id(raw.parent_record_id, include_deleted=True)
+        return None
+
+    def _filename_above(self, record: RecordDTO, field_id: str) -> str | None:
+        """The name of the file in field `field_id` on `record` or the nearest
+        record above it that has one (stored data is keyed by field id)."""
+        current: RecordDTO | None = record
+        while current is not None:
+            filename = filename_extract.first_filename(current.data.get(field_id))
+            if filename is not None:
+                return filename
+            if current.parent_record_id is None:
+                return None
+            current = self._records.get_by_id(
+                current.parent_record_id, include_deleted=True
+            )
+        return None
+
     def _apply_defaults(
         self, data: dict[str, Any], shape: ResolvedSchema | None
     ) -> dict[str, Any]:
@@ -1144,8 +1264,10 @@ class RecordService:
         return out
 
     def _check_schema_allowed(self, dataset: DatasetDTO, schema: SchemaDTO) -> None:
-        """A collection only holds records of the schemas it is for."""
-        if schema.name not in dataset.schemas:
+        """A collection holds records of every schema, unless it was given a
+        list of its own (`civex collection update --schema`), in which case
+        only those."""
+        if dataset.schemas and schema.name not in dataset.schemas:
             raise ValidationError(
                 f"Schema '{schema.name}' is not enabled for collection "
                 f"'{dataset.name}' -- add it to the collection's schemas first"
@@ -1547,8 +1669,14 @@ class RecordService:
         schema = self._schema_svc.get(schema_name)
         self._check_schema_allowed(dataset, schema)
 
-        # Apply field defaults before validation
         shape = self._schema_svc.resolve(schema)
+        parent_record = (
+            self._records.get_by_prefix(parent_record_id)
+            if schema.parent_id and parent_record_id
+            else None
+        )
+        # Fields read from a file's name first, then defaults, then validation.
+        data = self._fill_from_filenames(data, shape, parent_record)
         data = self._apply_defaults(data, shape)
         if shape is not None:
             data = _strip_derived_file_keys(data, shape.fields)
@@ -1560,7 +1688,6 @@ class RecordService:
                 raise ValidationError(
                     f"Schema '{schema.name}' inherits from another schema — a parent record ID is required"
                 )
-            parent_record = self._records.get_by_prefix(parent_record_id)
             if not parent_record:
                 raise NotFoundError(f"Parent record '{parent_record_id}' not found")
             self._check_parent(parent_record, dataset, schema)
@@ -1704,11 +1831,20 @@ class RecordService:
         if not raw:
             raise NotFoundError(f"Record '{record_id}' not found")
         self._permissions.require(permissions.WRITE_RECORDS, raw.dataset_id)
-        # Apply field defaults before validation
         shapes = self._schema_svc.resolver()
         shape = shapes(raw.schema_id)
-        data = self._apply_defaults(data, shape)
         old_data = self._ids_to_names(raw.data, shape)
+        # Fields read from a file's name first, then defaults, then validation.
+        # The stored data says whether the file changed; the parent is only
+        # looked up when a rule reads an inherited file field the record
+        # itself doesn't carry.
+        data = self._fill_from_filenames(
+            data,
+            shape,
+            self._parent_if_needed(raw, shape, data),
+            stored=old_data,
+        )
+        data = self._apply_defaults(data, shape)
         dataset = (
             self._datasets.get_by_id(
                 raw.dataset_id,

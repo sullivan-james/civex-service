@@ -128,7 +128,7 @@ export function AnalyticsFilterBar({
         onChange={(dataset) => onChange({ dataset })}
       />
       <DimensionSelect
-        label="Record type"
+        label="Schema"
         value={filters.schema}
         options={schemaOptions}
         onChange={(schema) => onChange({ schema })}

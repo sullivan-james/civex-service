@@ -3,7 +3,7 @@ import type { Schema } from '../../api/schemas'
 import { useSetUniqueKeys } from '../../hooks/useSchemas'
 import { errorMessage } from '../../lib/errors'
 import { displayLabel } from '../../utils/naming'
-import { Button, Checkbox, Chip, EmptyState, InfoTip, Subheading } from '../ui'
+import { Button, CheckRow, Chip, EmptyState, InfoTip, Subheading } from '../ui'
 
 /** Field types whose values compare as plain scalars (`domain/uniqueness.py`
  * is the authority; the server refuses the rest). */
@@ -42,8 +42,8 @@ export function UniquenessSection({ schema }: { schema: Schema }) {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="space-y-2">
+    <div className="space-y-6">
+      <div className="space-y-3">
         <Subheading>Rules</Subheading>
         {keys.length === 0 ? (
           <EmptyState
@@ -69,7 +69,7 @@ export function UniquenessSection({ schema }: { schema: Schema }) {
         )}
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-3">
         <Subheading>
           Add a rule
           <InfoTip>
@@ -88,21 +88,19 @@ export function UniquenessSection({ schema }: { schema: Schema }) {
             </InfoTip>
           </p>
         ) : (
-          <div className="flex flex-wrap gap-x-4 gap-y-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {eligible.map((f) => (
-              <label key={f.name} className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={draft.includes(f.name)}
-                  onChange={(e) =>
-                    setDraft(
-                      e.target.checked
-                        ? [...draft, f.name]
-                        : draft.filter((n) => n !== f.name),
-                    )
-                  }
-                />
-                {displayLabel(f.name, f.label)}
-              </label>
+              <CheckRow
+                key={f.name}
+                compact
+                title={displayLabel(f.name, f.label)}
+                checked={draft.includes(f.name)}
+                onChange={(on) =>
+                  setDraft(
+                    on ? [...draft, f.name] : draft.filter((n) => n !== f.name),
+                  )
+                }
+              />
             ))}
           </div>
         )}
@@ -113,7 +111,6 @@ export function UniquenessSection({ schema }: { schema: Schema }) {
         )}
         <Button
           variant="primary"
-          size="sm"
           disabled={draft.length === 0 || save.isPending}
           onClick={add}
         >

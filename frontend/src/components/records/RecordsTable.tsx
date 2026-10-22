@@ -139,7 +139,7 @@ export function RecordsTable({
   if (showSchemaColumn)
     cols.push({
       key: '__schema',
-      header: 'Type',
+      header: 'Schema',
       width: '9rem',
       render: (r) => {
         const rowSchema = schemas?.find((s) => s.name === r.schema_name)

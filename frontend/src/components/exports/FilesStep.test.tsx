@@ -41,9 +41,13 @@ const tick = (name: RegExp | string) =>
   screen.getByRole('checkbox', { name }) as HTMLInputElement
 const level = (name: string) => screen.getByRole('region', { name })
 
-const ALL_SELECTIONS = 'All Selections in one table'
-const SELECTION_SHEET = 'A details sheet for each Selection'
-const RECORDING_LIST = 'A table of each Recording’s Selections'
+const ALL_SELECTIONS = 'One spreadsheet of all Selections'
+const SELECTION_SHEET = 'Each Selection’s details, as a sheet in its folder'
+const RECORDING_LIST = 'A list of each Recording’s Selections, in its folder'
+const ALL_RECORDINGS = 'One spreadsheet of all Recordings'
+// A table's name, columns and the like sit behind Customise on its row.
+const customise = (title: string) =>
+  userEvent.click(screen.getByRole('button', { name: `${title}: customise` }))
 
 describe('what goes in the folder', () => {
   it('shows each kind as a card of its own, saying where it is, with no nesting to decode', () => {
@@ -70,20 +74,22 @@ describe('what goes in the folder', () => {
     render(<Harness />)
 
     const recording = within(level('Recording'))
-    expect(recording.getByLabelText('All Recordings in one table')).toBeTruthy()
+    expect(recording.getByLabelText(ALL_RECORDINGS)).toBeTruthy()
     expect(
-      recording.getByLabelText('A details sheet for each Recording'),
+      recording.getByLabelText(
+        'Each Recording’s details, as a sheet in its folder',
+      ),
     ).toBeTruthy()
     expect(recording.getByLabelText(RECORDING_LIST)).toBeTruthy()
-    // What each means is in an info tip beside it, so the rows stay slim.
+    // Each row says what it is; there is nothing more to open to find out.
     expect(
       within(
         screen.getByRole('group', { name: 'Recording tables' }),
-      ).getAllByRole('button', { name: 'More information' }),
-    ).toHaveLength(3)
+      ).queryAllByRole('button', { name: 'More information' }),
+    ).toHaveLength(0)
     // The last level has nothing inside it to list.
     expect(
-      within(level('Selection')).queryByLabelText(/^A table of each/),
+      within(level('Selection')).queryByLabelText(/^A list of each/),
     ).toBeNull()
   })
 
@@ -202,9 +208,13 @@ describe('what goes in the folder', () => {
       ).getAllByRole('checkbox'))
         await userEvent.click(box)
 
-    expect(screen.getByText(/choose something to include/i)).toBeTruthy()
+    expect(
+      screen.getByText(/choose at least one thing to include/i),
+    ).toBeTruthy()
     await userEvent.click(tick(ALL_SELECTIONS))
-    expect(screen.queryByText(/choose something to include/i)).toBeNull()
+    expect(
+      screen.queryByText(/choose at least one thing to include/i),
+    ).toBeNull()
   })
 })
 
@@ -216,6 +226,9 @@ describe('each table’s own format and name', () => {
     await userEvent.click(tick(ALL_SELECTIONS))
 
     expect(screen.getByLabelText(`${ALL_SELECTIONS}: format`)).toBeTruthy()
+    // The name and columns are there for whoever wants them, behind one link.
+    expect(screen.queryByLabelText(`${ALL_SELECTIONS}: file name`)).toBeNull()
+    await customise(ALL_SELECTIONS)
     expect(screen.getByLabelText(`${ALL_SELECTIONS}: file name`)).toBeTruthy()
   })
 
@@ -237,9 +250,10 @@ describe('each table’s own format and name', () => {
 
   it('name the table of all of a kind, and say what it is called otherwise', async () => {
     render(<Harness />)
-    await userEvent.click(tick('All Recordings in one table'))
+    await userEvent.click(tick(ALL_RECORDINGS))
+    await customise(ALL_RECORDINGS)
 
-    const name = screen.getByLabelText('All Recordings in one table: file name')
+    const name = screen.getByLabelText(`${ALL_RECORDINGS}: file name`)
     expect(name).toHaveAttribute('placeholder', 'Recordings')
     await userEvent.type(name, 'Every recording')
 
@@ -252,6 +266,7 @@ describe('each table’s own format and name', () => {
   it('name a table written in folders from a template over the folder’s record', async () => {
     render(<Harness />)
     await userEvent.click(tick(RECORDING_LIST))
+    await customise(RECORDING_LIST)
     const name = screen.getByLabelText(`${RECORDING_LIST}: file name`)
     expect(name).toHaveAttribute('placeholder', 'Selections')
     await userEvent.type(name, '{{rname} selections')
@@ -262,6 +277,7 @@ describe('each table’s own format and name', () => {
   it('keep the name and format when other ticks change', async () => {
     render(<Harness />)
     await userEvent.click(tick(ALL_SELECTIONS))
+    await customise(ALL_SELECTIONS)
     await userEvent.type(
       screen.getByLabelText(`${ALL_SELECTIONS}: file name`),
       'All',
@@ -277,6 +293,7 @@ describe('choosing columns, on the table’s own row', () => {
   it('shows every column to begin with, and opens a panel to choose from', async () => {
     render(<Harness />)
     await userEvent.click(tick(ALL_SELECTIONS))
+    await customise(ALL_SELECTIONS)
     const open = screen.getByRole('button', {
       name: `${ALL_SELECTIONS}: columns`,
     })
@@ -291,6 +308,7 @@ describe('choosing columns, on the table’s own row', () => {
   it('keeps the table as it is until a column is changed', async () => {
     render(<Harness />)
     await userEvent.click(tick(ALL_SELECTIONS))
+    await customise(ALL_SELECTIONS)
     await userEvent.click(
       screen.getByRole('button', { name: `${ALL_SELECTIONS}: columns` }),
     )
@@ -310,6 +328,7 @@ describe('choosing columns, on the table’s own row', () => {
   it('offers the record’s own id and dates beside its fields', async () => {
     render(<Harness />)
     await userEvent.click(tick(ALL_SELECTIONS))
+    await customise(ALL_SELECTIONS)
     await userEvent.click(
       screen.getByRole('button', { name: `${ALL_SELECTIONS}: columns` }),
     )
@@ -322,6 +341,7 @@ describe('choosing columns, on the table’s own row', () => {
   it('can go back to every column', async () => {
     render(<Harness />)
     await userEvent.click(tick(ALL_SELECTIONS))
+    await customise(ALL_SELECTIONS)
     await userEvent.click(
       screen.getByRole('button', { name: `${ALL_SELECTIONS}: columns` }),
     )
@@ -337,6 +357,7 @@ describe('choosing columns, on the table’s own row', () => {
   it('says when no column is left, since a table needs one', async () => {
     render(<Harness />)
     await userEvent.click(tick(ALL_SELECTIONS))
+    await customise(ALL_SELECTIONS)
     await userEvent.click(
       screen.getByRole('button', { name: `${ALL_SELECTIONS}: columns` }),
     )
@@ -361,6 +382,7 @@ describe('a list in each folder', () => {
   it('can also be made where a folder has nothing to list', async () => {
     render(<Harness />)
     await userEvent.click(tick(RECORDING_LIST))
+    await customise(RECORDING_LIST)
 
     await userEvent.click(
       screen.getByLabelText(
@@ -375,6 +397,8 @@ describe('a list in each folder', () => {
     render(<Harness />)
     await userEvent.click(tick(ALL_SELECTIONS))
     await userEvent.click(tick(SELECTION_SHEET))
+    await customise(ALL_SELECTIONS)
+    await customise(SELECTION_SHEET)
 
     expect(
       screen.queryByLabelText(/also where there is nothing to list/),

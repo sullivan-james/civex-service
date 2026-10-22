@@ -31,7 +31,6 @@ function CreateCollectionModal({ onClose }: { onClose: () => void }) {
   const create = useCreateCollection()
   const [timezone, setTimezone] = useState('')
   const [scope, setScope] = useState<CollectionScope>('local')
-  const [schemas, setSchemas] = useState<string[]>([])
 
   return (
     <CreateResourceModal
@@ -53,12 +52,7 @@ function CreateCollectionModal({ onClose }: { onClose: () => void }) {
               className="w-full"
             />
           </Field>
-          <CollectionScopeFields
-            scope={scope}
-            onScopeChange={setScope}
-            schemas={schemas}
-            onSchemasChange={setSchemas}
-          />
+          <CollectionScopeFields scope={scope} onScopeChange={setScope} />
         </>
       }
       onSubmit={async ({ name, description }) => {
@@ -67,7 +61,6 @@ function CreateCollectionModal({ onClose }: { onClose: () => void }) {
           description: description || undefined,
           timezone: timezone || undefined,
           scope,
-          schemas,
         })
       }}
     />

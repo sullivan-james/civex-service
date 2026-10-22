@@ -31,7 +31,7 @@ export function RecordMissing({ id }: { id: string }) {
         <p className="text-sm text-fg-muted">
           It is{' '}
           {blocker.kind === 'schema'
-            ? 'of the record type'
+            ? 'of the schema'
             : blocker.kind === 'collection'
               ? 'in the collection'
               : 'under the record'}{' '}

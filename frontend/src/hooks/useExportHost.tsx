@@ -4,7 +4,13 @@ import { useNavigate } from 'react-router'
 import type { FileSelection } from '../api/fileAccess'
 import { ExportDialog, type MenuPreset } from '../components/files/ExportDialog'
 import { FilesDialog } from '../components/files/FilesDialog'
-import type { FlowContext, Problem } from '../components/files/fileFlows'
+import {
+  copyToDrive,
+  downloadZip,
+  openAsFolder,
+  type FlowContext,
+  type Problem,
+} from '../components/files/fileFlows'
 import { useToast } from '../components/ui'
 
 /** Everything a place that offers exports needs: the flows' context and the two
@@ -23,7 +29,8 @@ export function useExportHost({
 }): {
   ctx: FlowContext
   navigate: ReturnType<typeof useNavigate>
-  /** Open the export dialog, for a saved export or (none) a one-time one. */
+  /** Run a saved export the way it was saved, or (none) open the dialog for a
+   * one-time one. */
   openExport: (preset?: MenuPreset) => void
   dialogs: ReactNode
 } {
@@ -39,7 +46,21 @@ export function useExportHost({
   return {
     ctx,
     navigate,
-    openExport: (preset) => setExporting({ preset }),
+    openExport: (preset) => {
+      const def = preset?.definition
+      if (!preset || !def) return setExporting({ preset })
+      // Saved with how it is handed over: no questions, it just runs.
+      if (def.method === 'zip')
+        return void downloadZip(ctx, preset.selection, preset.folderName)
+      if (def.method === 'copy')
+        return void copyToDrive(
+          ctx,
+          preset.selection,
+          preset.folderName,
+          def.volume ?? undefined,
+        )
+      void openAsFolder(ctx, preset.selection, preset.folderName)
+    },
     dialogs: (
       <>
         {exporting && (

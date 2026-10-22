@@ -19,6 +19,7 @@ from civex.domain.dtos import (
     SchemaDTO,
 )
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
+from civex.domain import filename_extract
 from civex.domain import geo as geo_domain
 from civex.domain import partial_dates, templating, units
 from civex.domain.field_descriptors import (
@@ -83,6 +84,27 @@ def _check_control_value(desc: RestrictionDescriptor, value: Any) -> None:
     elif desc.control in ("schema", "accept"):
         if not isinstance(value, str) or not value.strip():
             problem = "non-empty text"
+    elif desc.control == "from_filename":
+        patterns = filename_extract.patterns_of(
+            value.get("pattern") if isinstance(value, dict) else None
+        )
+        if (
+            not isinstance(value, dict)
+            or set(value) != {"field", "pattern"}
+            or not isinstance(value["field"], str)
+            or not value["field"].strip()
+            or not isinstance(value["pattern"], (str, list))
+            or (
+                isinstance(value["pattern"], list)
+                and len(patterns) != len(value["pattern"])
+            )
+            or not patterns
+            or not all(p.strip() for p in patterns)
+        ):
+            problem = (
+                '{"field": <a file field>, "pattern": <a pattern, or a list '
+                "of patterns tried in order>}"
+            )
     if problem:
         raise ValidationError(
             f"Restriction '{desc.key}' must be {problem}, got {value!r}"
@@ -176,6 +198,38 @@ def _validate_filename_template(
         restrictions["filename_template"] = stem
     else:
         del restrictions["filename_template"]
+
+
+def _validate_from_filename(
+    dtype: str,
+    restrictions: dict[str, Any] | None,
+    known_fields: list[ResolvedField],
+) -> None:
+    """Check a field's `from_filename` rule: it names a `file` or `file_list`
+    field of the schema or one above it, and each of its patterns reads a
+    `dtype` (`filename_extract.compile_pattern`). The key's shape was checked
+    by `_check_control_value`."""
+    rule = filename_extract.rule_of(restrictions)
+    if rule is None:
+        return
+    source_name, patterns = rule
+    source = next(
+        (rf.field for rf in known_fields if rf.field.name == source_name), None
+    )
+    if source is None:
+        raise ValidationError(
+            f"from_filename: there is no field '{source_name}' on this schema "
+            "or the ones it inherits from"
+        )
+    if source.dtype not in ("file", "file_list"):
+        raise ValidationError(
+            f"from_filename: '{source_name}' is a {source.dtype} field, not a file field"
+        )
+    for pattern in patterns:
+        try:
+            filename_extract.compile_pattern(pattern, dtype)
+        except ValueError as e:
+            raise ValidationError(f"from_filename: {e}") from None
 
 
 def _suggest(name: str) -> str | None:
@@ -348,12 +402,14 @@ class SchemaService:
                 f"Field '{field_name}' already exists on schema '{schema_name}'"
             )
 
-        known_field_names = {rf.field.name for rf in self.collect_fields(schema)}
+        known_fields = self.collect_fields(schema)
+        known_field_names = {rf.field.name for rf in known_fields}
         if restrictions:
             restrictions = dict(restrictions)
             _validate_filename_template(
                 restrictions, known_field_names, self._reference_targets(schema)
             )
+            _validate_from_filename(dtype, restrictions, known_fields)
 
         field = self._repo.add_field(
             schema_id=schema.id,
@@ -651,6 +707,46 @@ class SchemaService:
                         "update", "field", f.id, f.to_dict(), changed.to_dict()
                     )
 
+    def _filename_rule_holders(self, target_field: FieldDTO) -> list[FieldDTO]:
+        """Every live field whose `from_filename` rule reads `target_field`'s
+        name. Resolved by field identity through the inheritance chain, as
+        `_template_holders` does, so a child schema's own field shadowing an
+        inherited `target_field` is left alone."""
+        if target_field.dtype not in ("file", "file_list"):
+            return []
+        holders: list[FieldDTO] = []
+        for schema in self._repo.list_all():
+            resolved = {rf.field.name: rf.field for rf in self.collect_fields(schema)}
+            for f in schema.fields:
+                rule = filename_extract.rule_of(f.restrictions)
+                if rule is None:
+                    continue
+                found = resolved.get(rule[0])
+                if found is not None and found.id == target_field.id:
+                    holders.append(f)
+        return holders
+
+    def _rewrite_filename_rules(
+        self, holders: list[FieldDTO], new_name: str | None
+    ) -> None:
+        """Point every rule in `holders` at the file field's `new_name`, or drop
+        the rule when it is None (the file field is gone). Each is an edit of
+        that field, logged like any other."""
+        for f in holders:
+            restrictions = dict(f.restrictions or {})
+            if new_name is None:
+                del restrictions["from_filename"]
+            else:
+                restrictions["from_filename"] = {
+                    **restrictions["from_filename"],
+                    "field": new_name,
+                }
+            changed = self._repo.update_field(f.id, restrictions=restrictions)
+            if self._audit:
+                self._audit.log_change(
+                    "update", "field", f.id, f.to_dict(), changed.to_dict()
+                )
+
     def restore_field_plan(
         self, schema_name: str, field_id: uuid.UUID
     ) -> RestorePlanDTO:
@@ -729,6 +825,7 @@ class SchemaService:
                 f"Field '{field_name}' not found on schema '{schema_name}'"
             )
         holders = self._template_holders(field)
+        rule_holders = self._filename_rule_holders(field)
         # A uniqueness policy can't outlive one of its fields.
         kept_keys = [k for k in schema.unique_keys if str(field.id) not in k]
         stamp = datetime.now(timezone.utc)
@@ -748,6 +845,8 @@ class SchemaService:
         self._rewrite_templates(
             holders, lambda tpl, via: templating.remove_field(tpl, field_name, via)
         )
+        # A field filled from this file's name has nothing to read any more.
+        self._rewrite_filename_rules(rule_holders, None)
 
     @_one_action
     def update_field(
@@ -778,11 +877,13 @@ class SchemaService:
                 )
         if restrictions is not None:
             _validate_restriction_keys(field.dtype, restrictions)
-            known_field_names = {rf.field.name for rf in self.collect_fields(schema)}
+            known_fields = self.collect_fields(schema)
+            known_field_names = {rf.field.name for rf in known_fields}
             restrictions = dict(restrictions)
             _validate_filename_template(
                 restrictions, known_field_names, self._reference_targets(schema)
             )
+            _validate_from_filename(field.dtype, restrictions, known_fields)
         old_dict = field.to_dict()
         kwargs: dict[str, Any] = dict(
             name=new_name, required=required, restrictions=restrictions
@@ -792,6 +893,7 @@ class SchemaService:
         if label is not ...:
             kwargs["label"] = label or None
         holders = self._template_holders(field) if renaming else []
+        rule_holders = self._filename_rule_holders(field) if renaming else []
         updated = self._repo.update_field(field.id, **kwargs)
         if renaming:
             assert new_name is not None  # implied by `renaming`
@@ -801,6 +903,7 @@ class SchemaService:
                     tpl, field_name, new_name, via
                 ),
             )
+            self._rewrite_filename_rules(rule_holders, new_name)
         if self._audit:
             self._audit.log_change(
                 "update", "field", updated.id, old_dict, updated.to_dict()

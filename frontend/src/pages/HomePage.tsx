@@ -13,8 +13,8 @@ import { HomeShortcuts } from '../components/home/HomeShortcuts'
 import { DesktopShortcut } from '../components/settings/DesktopShortcut'
 
 const ONBOARDING_STEPS = [
-  { to: '/schemas', title: 'Design your record types' },
-  { to: '/collections', title: 'Add records to a collection' },
+  { to: '/collections', title: 'Start a collection' },
+  { to: '/collections', title: 'Bring in a spreadsheet or folder' },
   { to: '/runs', title: 'Automate the rest' },
 ]
 
@@ -35,7 +35,7 @@ export default function HomePage() {
 
       <ol className="grid gap-3 sm:grid-cols-3">
         {ONBOARDING_STEPS.map((s, i) => (
-          <li key={s.to}>
+          <li key={s.title}>
             <Card
               to={s.to}
               title={

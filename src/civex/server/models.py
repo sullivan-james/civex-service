@@ -132,6 +132,33 @@ class SetUniqueKeysRequest(BaseModel):
     )
 
 
+class FromFilenamePreviewRequest(BaseModel):
+    filename: str = Field(
+        default="",
+        description="A file name to try the patterns on; blank only checks them.",
+    )
+    patterns: list[str] = Field(
+        description="The rule's patterns, tried in order (the `from_filename` rule's `pattern`)."
+    )
+    kind: str = Field(
+        description="The field type the value is read as, e.g. 'datetime'."
+    )
+
+
+class FromFilenamePreviewResponse(BaseModel):
+    problems: list[str | None] = Field(
+        description="Per pattern: why it can't be used, or null when it can."
+    )
+    value: Any = Field(
+        default=None,
+        description="What the file name gives; null when no pattern matches or one has a problem.",
+    )
+    error: str | None = Field(
+        default=None,
+        description="A pattern matched but what it captured isn't a value of the kind.",
+    )
+
+
 class PreviewNameRequest(BaseModel):
     template: str = Field(
         description="The template to try, e.g. '{site}-{taken_on:YYYY-MM}'."
@@ -487,7 +514,7 @@ class UpdateDatasetRequest(BaseModel):
     schemas: list[str] | None = Field(
         default=None,
         description=(
-            "Replace the collection's schema list. Omit or null to leave "
+            "Limit the collection to these schemas (an empty list allows every schema). Omit or null to leave "
             "unchanged. A schema with records in the collection can't be "
             "removed."
         ),
@@ -2595,6 +2622,15 @@ class ExportDefinitionResponse(BaseModel):
     tables: list[TableRequest] = Field(
         default_factory=list, description="The tables made beside the files."
     )
+    method: Literal["link", "copy", "zip"] = Field(
+        default="link",
+        description="How a run hands it over: 'link' (a folder of links on the "
+        "files' drive), 'copy' (real copies on a drive) or 'zip' (one file).",
+    )
+    volume: str | None = Field(
+        default=None,
+        description="For 'copy': the drive to copy onto; null is the project folder.",
+    )
 
     @classmethod
     def from_dto(cls, dto: "ExportDefinitionDTO") -> "ExportDefinitionResponse":
@@ -2609,6 +2645,8 @@ class ExportDefinitionResponse(BaseModel):
             files_layout=dto.files_layout,  # type: ignore[arg-type]
             include_files=dto.include_files,
             tables=[TableRequest(**t) for t in dto.tables],
+            method=dto.method,  # type: ignore[arg-type]
+            volume=dto.volume,
         )
 
 
@@ -2639,6 +2677,15 @@ class CreateExportDefinitionRequest(BaseModel):
     tables: list[TableRequest] = Field(
         default_factory=list, description="Also make these tables."
     )
+    method: Literal["link", "copy", "zip"] = Field(
+        default="link",
+        description="How a run hands it over: 'link' (a folder of links on the "
+        "files' drive), 'copy' (real copies on a drive) or 'zip' (one file).",
+    )
+    volume: str | None = Field(
+        default=None,
+        description="For 'copy': the drive to copy onto; omit for the project folder.",
+    )
 
 
 class UpdateExportDefinitionRequest(BaseModel):
@@ -2661,4 +2708,11 @@ class UpdateExportDefinitionRequest(BaseModel):
     tables: list[TableRequest] | None = Field(
         default=None,
         description="Replace the tables; send an empty list to remove them.",
+    )
+    method: Literal["link", "copy", "zip"] | None = Field(
+        default=None, description="Change how it is handed over; omit to leave as is."
+    )
+    volume: str | None = Field(
+        default=None,
+        description="For 'copy': the drive to copy onto; send null for the project folder.",
     )

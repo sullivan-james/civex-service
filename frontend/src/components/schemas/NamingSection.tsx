@@ -51,16 +51,13 @@ export function NamingSection({
       <div className="flex gap-2">
         <Button
           variant="primary"
-          size="sm"
           disabled={!dirty || update.isPending}
           onClick={() => update.mutate({ display_template: draft.trim() })}
         >
           {update.isPending ? 'Saving…' : 'Save'}
         </Button>
         {dirty && (
-          <Button size="sm" onClick={() => setDraft(saved)}>
-            Discard changes
-          </Button>
+          <Button onClick={() => setDraft(saved)}>Discard changes</Button>
         )}
       </div>
     </div>
