@@ -38,6 +38,16 @@ def test_everything_stays_in_the_launcher_s_own_folder(home: Path) -> None:
     assert env["CIVEX_UV_BIN"] == "/bundled/uv"
 
 
+def test_civex_is_installed_onto_a_pinned_python(home: Path) -> None:
+    """Not the newest CPython uv can download: a Python the dependencies have
+    no wheels for makes uv build them, which needs a compiler the user's
+    computer hasn't got."""
+    env = launcher.environment(home, Path("/bundled/uv"))
+    assert env["UV_PYTHON"] == launcher.PYTHON
+    major, minor = launcher.PYTHON.split(".")
+    assert major == "3" and minor.isdigit()
+
+
 def test_upgrades_take_pre_releases_only_when_asked() -> None:
     uv = Path("/u/uv")
     assert launcher.upgrade_command(uv, pre=False) == [
@@ -270,6 +280,7 @@ def test_civex_knows_the_apps_folders_as_the_launcher_does(
         "UV_PYTHON_INSTALL_DIR",
         "UV_CACHE_DIR",
         "UV_PYTHON_PREFERENCE",
+        "UV_PYTHON",
     ):
         assert ours[name] == theirs[name], name
     # The same exact-version install, so the app and a terminal agree.

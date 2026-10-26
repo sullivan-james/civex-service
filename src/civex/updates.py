@@ -40,6 +40,10 @@ _PYPI_URL = "https://pypi.org/pypi/civex/json"
 
 #: Set by the desktop launcher for the app it starts: where to ask for an update.
 REQUEST_ENV = "CIVEX_UPDATE_REQUEST"
+#: The Python the desktop app's civex is installed onto (the launcher's
+#: PYTHON; the launcher never imports civex, so both carry it). Pinned so uv
+#: never installs onto a Python newer than the dependencies' wheels.
+APP_PYTHON = "3.13"
 #: Set by `civex serve`: its own arguments, so it can be started again.
 SERVE_ARGS_ENV = "CIVEX_SERVE_ARGS"
 
@@ -164,6 +168,7 @@ def app_uv_env() -> dict[str, str]:
             "UV_PYTHON_INSTALL_DIR": str(home / "python"),
             "UV_CACHE_DIR": str(home / "cache"),
             "UV_PYTHON_PREFERENCE": "only-managed",
+            "UV_PYTHON": APP_PYTHON,
         }
     )
     return env
