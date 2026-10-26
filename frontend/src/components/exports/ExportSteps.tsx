@@ -97,7 +97,7 @@ export function FilesStep({
 
   return (
     <>
-      <Row label="What goes in the folder">
+      <Row label="What to include">
         <div className="space-y-2.5">
           {levels.map((l) => {
             const kind = l.schema.name
@@ -129,7 +129,7 @@ export function FilesStep({
                     className="flex flex-wrap items-center gap-2"
                   >
                     <span className="mr-1 text-xs font-medium text-fg-muted">
-                      Files
+                      Files to include
                     </span>
                     {l.fileFields.map((f) => (
                       <CheckRow
@@ -137,7 +137,6 @@ export function FilesStep({
                         compact
                         className="w-auto"
                         title={displayLabel(f)}
-                        description={`Put each ${name}’s ${displayLabel(f)} in its folder.`}
                         checked={(selected[kind] ?? []).includes(f)}
                         onChange={(on) => setFileField(kind, f, on)}
                       />
@@ -180,8 +179,7 @@ export function FilesStep({
                     pattern={tableAll(kind)}
                     draft={draft}
                     schemas={schemas}
-                    title={`All ${many} in one table`}
-                    description={`One file at the top, with a row for every ${name}.`}
+                    title={`One spreadsheet of all ${many}`}
                     placeholder={many}
                     onToggle={setTable}
                     onChange={changeTable}
@@ -190,9 +188,8 @@ export function FilesStep({
                     pattern={tableDetails(kind)}
                     draft={draft}
                     schemas={schemas}
-                    title={`A details sheet for each ${name}`}
-                    description={`In each ${name} folder: its fields, and those of the kinds above it, one per line.`}
-                    placeholder="Metadata"
+                    title={`Each ${name}’s details, as a sheet in its folder`}
+                    placeholder="Details"
                     onToggle={setTable}
                     onChange={changeTable}
                   />
@@ -202,8 +199,7 @@ export function FilesStep({
                       pattern={tableList(kind, c.name)}
                       draft={draft}
                       schemas={schemas}
-                      title={`A table of each ${name}’s ${pluralize(label(c.name))}`}
-                      description={`In each ${name} folder: a row for every ${label(c.name)} inside it.`}
+                      title={`A list of each ${name}’s ${pluralize(label(c.name))}, in its folder`}
                       placeholder={pluralize(label(c.name))}
                       onToggle={setTable}
                       onChange={changeTable}
@@ -216,7 +212,7 @@ export function FilesStep({
         </div>
         {nothing && (
           <p role="alert" className="mt-2 text-sm text-danger">
-            Choose something to include: a file or a table.
+            Choose at least one thing to include.
           </p>
         )}
       </Row>
@@ -257,14 +253,12 @@ export function FilesStep({
 }
 
 /** One kind of table the step can switch on, as a slim row. While it is on, its
- * settings (format, name, columns) sit on the same row. What it means is in the
- * info tip beside its title. */
+ * format sits on the same row, with the rest (name, columns) behind Customise. */
 function TableOption({
   pattern,
   draft,
   schemas,
   title,
-  description,
   placeholder,
   onToggle,
   onChange,
@@ -273,7 +267,6 @@ function TableOption({
   draft: Draft
   schemas: Schema[]
   title: string
-  description: string
   /** What the file is called when no name is given, without its extension. */
   placeholder: string
   onToggle: (pattern: TablePattern, on: boolean) => void
@@ -284,16 +277,6 @@ function TableOption({
     <CheckRow
       compact
       title={title}
-      description={
-        pattern.where ? (
-          <>
-            {description} The name may use {'{schema}'}, {'{id}'} and the fields
-            of the folder’s record, like {'{name}'}.
-          </>
-        ) : (
-          description
-        )
-      }
       checked={!!table}
       onChange={(on) => onToggle(pattern, on)}
     >

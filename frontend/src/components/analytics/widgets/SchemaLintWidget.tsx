@@ -23,9 +23,9 @@ export function SchemaLintWidget() {
   return (
     <WidgetCard
       title="Naming health"
-      description="Record type and field names that predate slug validation"
+      description="Schema and field names that predate slug validation"
       viewRunsTo="/schemas"
-      viewRunsLabel="View record types"
+      viewRunsLabel="View schemas"
     >
       {error ? (
         <ErrorState message={errorMessage(error)} />
@@ -36,7 +36,7 @@ export function SchemaLintWidget() {
       ) : !issues || issues.length === 0 ? (
         <EmptyState
           title="All names are valid slugs"
-          message="No legacy record type or field names to clean up."
+          message="No legacy schema or field names to clean up."
         />
       ) : (
         <>

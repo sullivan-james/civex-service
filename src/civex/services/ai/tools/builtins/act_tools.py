@@ -615,7 +615,7 @@ class UpdateCollectionTool(AiTool):
             "schemas": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Replaces the collection's schema list.",
+                "description": "Limits the collection to these schemas; an empty list allows every schema (the default).",
             },
         },
         "required": ["name"],

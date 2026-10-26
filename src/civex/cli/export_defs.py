@@ -234,6 +234,10 @@ def exports_show(
         f"  files:          {'yes' if d.include_files else 'no (table alone)'}"
     )
     console.print(f"  layout:         {d.files_layout}")
+    console.print(
+        f"  made as:        {d.method}"
+        + (f" onto {escape(d.volume)}" if d.volume else "")
+    )
     for t in d.tables:
         columns = t.get("columns")
         console.print(f"  table:          {escape(_table_line(t))}")
@@ -283,6 +287,15 @@ def exports_add(
     no_files: bool = typer.Option(
         False, "--no-files", help="Make the tables alone, without the files."
     ),
+    method: str = typer.Option(
+        "link",
+        "--method",
+        help="How a run hands it over: link (a folder of links on the files' "
+        "drive), copy (real copies on a drive) or zip (one file).",
+    ),
+    to: Optional[str] = typer.Option(
+        None, "--to", help="For --method copy: the drive to copy onto."
+    ),
 ) -> None:
     """Save an export with a schema.
 
@@ -313,6 +326,8 @@ def exports_add(
             files_layout=layout,
             include_files=not no_files,
             tables=tables,
+            method=method,
+            volume=to,
         )
         ctx.commit()
     except CivexError as e:
@@ -361,6 +376,12 @@ def exports_set(
     no_table: bool = typer.Option(False, "--no-table", help="Remove every table"),
     files: Optional[bool] = typer.Option(
         None, "--files/--no-files", help="Take the files, or make the table alone"
+    ),
+    method: Optional[str] = typer.Option(
+        None, "--method", help="How a run hands it over: link, copy or zip."
+    ),
+    to: Optional[str] = typer.Option(
+        None, "--to", help="For copy: the drive to copy onto."
     ),
 ) -> None:
     """Change an export.
@@ -411,6 +432,10 @@ def exports_set(
         changes["tables"] = []
     if files is not None:
         changes["include_files"] = files
+    if method:
+        changes["method"] = method
+    if to:
+        changes["volume"] = to
     if not changes and not rename:
         console.print("[error]Nothing to change.[/error]")
         raise typer.Exit(1)

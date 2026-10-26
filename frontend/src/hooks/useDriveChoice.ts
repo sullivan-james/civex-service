@@ -19,7 +19,9 @@ export function useDriveChoice({
   allowProject: boolean
   chosen: string | null
 }) {
-  const { data: volumes = [] } = useVolumes()
+  const { data } = useVolumes()
+  // An answer that isn't a list (a server without drives) is no drives.
+  const volumes = Array.isArray(data) ? data : []
   const targets = volumes.filter((v) => v.available && v.state === 'online')
   const fallback = allowProject ? PROJECT : (targets[0]?.name ?? '')
   const target =

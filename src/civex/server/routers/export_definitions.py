@@ -50,6 +50,8 @@ def create_export(
             files_layout=body.files_layout,
             include_files=body.include_files,
             tables=[t.model_dump() for t in body.tables],
+            method=body.method,
+            volume=body.volume,
         )
         ctx.commit()
     except NotFoundError as e:
@@ -100,6 +102,8 @@ def update_export(
                 if body.tables is not None
                 else ...
             ),
+            method=body.method if body.method else ...,
+            volume=body.volume if "volume" in sent else ...,
         )
         ctx.commit()
     except NotFoundError as e:

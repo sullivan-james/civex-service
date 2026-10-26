@@ -57,6 +57,19 @@ beforeEach(() => {
           data: {},
           ancestors: [],
         })
+      if (url.pathname === '/api/schemas/field-types')
+        return json({
+          types: [],
+          kinds: [
+            {
+              key: 'text',
+              label: 'Text',
+              type: 'string',
+              description: 'Words',
+              focus: null,
+            },
+          ],
+        })
       if (url.pathname === '/api/schemas') return json(SCHEMAS)
       if (url.pathname === '/api/collections/hb')
         return json({ id: 'c', name: 'hb', description: null, record_count: 0 })
@@ -115,6 +128,15 @@ describe('NewRecordPage', () => {
       </QueryClientProvider>,
     )
   }
+
+  it('adds a field in place, as the last row of the form', async () => {
+    const user = userEvent.setup()
+    renderAt(['/collections/hb/new?schema=encounter'])
+    await user.click(await screen.findByRole('button', { name: /Add field/ }))
+    // the same kind picker as the schema's page, under the rows
+    expect(await screen.findByText('Text')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
 
   it('Cancel returns to where the person came from', async () => {
     const user = userEvent.setup()
@@ -226,6 +248,94 @@ describe('NewRecordPage', () => {
 
       expect(await screen.findByText(/site is required/)).toBeInTheDocument()
       expect(screen.queryByText(/^Added/)).toBeNull()
+    })
+  })
+
+  describe('files chosen before Add', () => {
+    const WITH_FILE = [
+      {
+        ...SCHEMAS[0],
+        fields: [field('site', 'string'), field('reading', 'file')],
+      },
+    ]
+    let sent: { record: unknown; files: string[] } | null
+    let answer: Response
+
+    beforeEach(() => {
+      sent = null
+      answer = json({ id: 'new1', natural_name: 'N', data: {} })
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = new URL(String(input), 'http://x')
+          if (url.pathname.endsWith('/records/with-files')) {
+            const form = init?.body as FormData
+            sent = {
+              record: JSON.parse(String(form.get('record'))),
+              files: form.getAll('reading').map((f) => (f as File).name),
+            }
+            return answer
+          }
+          if (url.pathname.startsWith('/api/files'))
+            throw new Error('a file must not be stored before the record is')
+          if (url.pathname === '/api/schemas') return json(WITH_FILE)
+          if (url.pathname === '/api/collections/hb')
+            return json({
+              id: 'c',
+              name: 'hb',
+              description: null,
+              record_count: 0,
+            })
+          return json({})
+        }),
+      )
+    })
+
+    it('holds the file in the field and sends it with the record', async () => {
+      const user = userEvent.setup()
+      renderAt(['/collections/hb/new?schema=encounter'])
+      await screen.findByLabelText('Add Reading')
+
+      await user.upload(
+        screen.getByLabelText('Add Reading'),
+        new File(['abc'], 'a.csv'),
+      )
+      expect(await screen.findByText('a.csv')).toBeInTheDocument()
+      expect(screen.getByText('not added yet')).toBeInTheDocument()
+      expect(sent).toBeNull()
+
+      await user.click(screen.getByRole('button', { name: 'Add encounter' }))
+      await screen.findByText('record page')
+      expect(sent).toEqual({
+        record: { schema_name: 'encounter', data: {} },
+        files: ['a.csv'],
+      })
+    })
+
+    it('shows a refusal under the field, with nothing stored', async () => {
+      const user = userEvent.setup()
+      answer = new Response(
+        JSON.stringify({
+          detail:
+            "Field 'reading': 'a.csv' type '.csv' not allowed — accepted: .wav",
+        }),
+        { status: 422, headers: { 'Content-Type': 'application/json' } },
+      )
+      renderAt(['/collections/hb/new?schema=encounter'])
+      await screen.findByLabelText('Add Reading')
+      await user.upload(
+        screen.getByLabelText('Add Reading'),
+        new File(['abc'], 'a.csv'),
+      )
+
+      await user.click(screen.getByRole('button', { name: 'Add encounter' }))
+
+      expect(
+        await screen.findByText(/isn't an accepted file type/),
+      ).toBeInTheDocument()
+      expect(screen.queryByText('record page')).toBeNull()
+      // The file is still held, for another try.
+      expect(screen.getByText('not added yet')).toBeInTheDocument()
     })
   })
 })

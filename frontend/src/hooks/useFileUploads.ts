@@ -4,7 +4,17 @@ import {
   filesApi,
   UploadConnectionError,
   type FileRef,
+  type UploadInfo,
 } from '../api/files'
+
+/** Sends one file and answers its reference: given to `useFileUploads` where
+ * each file is its own request (a record's field, saved with the file),
+ * instead of the batch upload. A refusal rejects with the reason. */
+export type FileSender = (
+  file: File,
+  onProgress: (info: UploadInfo) => void,
+  signal: AbortSignal,
+) => Promise<FileRef>
 
 /** Files being added, as it goes: which file is going in, and how far the
  * whole selection has got (bytes, speed, time left), or that every byte is in
@@ -78,8 +88,10 @@ function fileAt(sizes: number[], loaded: number): number {
  * person stop. Nothing is lost when a selection stops: cancelling keeps what
  * had gone in, and a file that can't be added stops it with `stopped` saying
  * why and holding the rest, so the caller saves what went in and offers the
- * rest again (`UploadStopped`). */
-export function useFileUploads(collectionId?: string) {
+ * rest again (`UploadStopped`). With a `sender`, files go one request each
+ * through it, in order, with the same progress and the same stop on the
+ * first that is refused. */
+export function useFileUploads(collectionId?: string, sender?: FileSender) {
   const [current, setCurrent] = useState<UploadProgressState | null>(null)
   const [stopped, setStopped] = useState<UploadStop | null>(null)
   const controller = useRef<AbortController | null>(null)
@@ -134,18 +146,23 @@ export function useFileUploads(collectionId?: string) {
       }
 
       try {
-        for (const batch of fileBatches(files)) {
+        const batches = sender ? files.map((f) => [f]) : fileBatches(files)
+        for (const batch of batches) {
           const first = refs.length
           say(first, batch, 0, false)
           let result
           for (let attempt = 0; ; attempt++) {
             try {
-              result = await filesApi.uploadBatch(
-                batch,
-                (info) => say(first, batch, info.loaded, info.saving),
-                collectionId,
-                abort.signal,
-              )
+              const report = (info: UploadInfo) =>
+                say(first, batch, info.loaded, info.saving)
+              result = sender
+                ? { files: [await sender(batch[0], report, abort.signal)] }
+                : await filesApi.uploadBatch(
+                    batch,
+                    report,
+                    collectionId,
+                    abort.signal,
+                  )
               break
             } catch (err) {
               if (err instanceof DOMException && err.name === 'AbortError')
@@ -162,7 +179,7 @@ export function useFileUploads(collectionId?: string) {
             }
           }
           refs.push(...result.files)
-          if (result.stopped)
+          if ('stopped' in result && result.stopped)
             return stop(first + result.stopped.index, result.stopped.message)
           before += batch.reduce((n, f) => n + f.size, 0)
         }
@@ -176,7 +193,7 @@ export function useFileUploads(collectionId?: string) {
         setCurrent(null)
       }
     },
-    [collectionId],
+    [collectionId, sender],
   )
 
   const cancel = useCallback(() => controller.current?.abort(), [])

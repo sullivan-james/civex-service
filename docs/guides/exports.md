@@ -14,7 +14,7 @@ it, then the file's name:
 North Ridge/2024-03-15/Sample 03/photo.jpg
 ```
 
-- Names are the record names shown in the app (the record type's name template).
+- Names are the record names shown in the app (the schema's name template).
 - The record holding a file is a folder too, so many samples each holding
   `photo.jpg` never clash.
 - Two records with the same name in one place get a short id each
@@ -92,15 +92,20 @@ civex schema exports add site "Sheets" --kind sample --tables-json '[
 
 ## Saved exports
 
-A saved export belongs to a record type (a schema) and **starts from** it: it takes that kind
-and everything inside it. Saved on Site, it is offered on every Site,
-Visit and Sample page, and on collections that use them. It never names a
-collection or a record. Those are where it is *run*.
+A saved export belongs to a schema and **starts from** it: it takes that kind
+and everything inside it. Saved on Site, it is offered on every Site, Visit
+and Sample page, and on collections. It never names a collection or a record;
+those are where it is *run*. It also says **how it is handed over**, so running
+it asks nothing: `--method link` (a folder of links on the files' drive, the
+default), `copy` with `--to <drive>` (real copies), or `zip` (one file). An
+export can be saved before there is anything to export; it takes whatever
+records and files come later.
 
 ```bash
 civex schema exports add site "Photo files" --kind sample --field photo --layout flat
+civex schema exports add site "For the lab" --method copy --to archive
 civex schema exports list site --available   # every export that runs within a site
-civex schema exports set site "Photo files" --layout grouped
+civex schema exports set site "Photo files" --layout grouped --method zip
 civex schema exports remove site "Photo files"
 
 civex files export --export "site/Photo files" --in survey-2024 --name photos
@@ -119,14 +124,15 @@ view lists, use `civex files export --view schema/view`.
   lists them (narrow with **Starts from…**, run with **Run on…**), **Made** lists
   folders on disk and removes them.
 - **The builder** has three steps:
-    1. **What**: one card per kind, top down. Tick the file fields to take and the
-       tables to write (*All Visits in one table*, *A details sheet for each
-       Visit*, *A table of each Visit's Samples*). A ticked table shows
-       its format, name and **columns** on its row. **Only some Samples…**
-       filters.
-    2. **Layout**: the three layouts, with pictures.
-    3. **Finish**: a live preview of the folder tree with each table in place,
-       then **Open as folder**, **Copy to a drive** or **Download**.
-- When something is in the way (an unplugged drive, files on several drives),
-  one dialog says what and offers the ways forward, including *move them onto
-  one drive, then link*.
+    1. **What to include**: one card per kind, top down. Tick the files to
+       include and the tables to write (*One spreadsheet of all Visits*, *Each
+       Visit's details, as a sheet in its folder*, *A list of each Visit's
+       Samples, in its folder*). A ticked table shows its format; **Customise…**
+       opens its name and **columns**. **Only some Samples…** adds a filter.
+    2. **Layout**: how the folders nest.
+    3. **Save**: a name, **how it is handed over** (folder of links, copies on a
+       drive, or a zip), and a preview of what it makes with the data you have
+       now. With no data yet the preview says so and the export still saves.
+- A saved export in an **Export** menu runs straight away, the way it was
+  saved. **Export…** in the same menu is a one-time export, which asks how to
+  hand it over at the end.

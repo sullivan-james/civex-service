@@ -73,7 +73,7 @@ describe('a collection’s Exports tab', () => {
     const row = (await screen.findByText('Contours')).closest('li')!
 
     await userEvent.click(within(row).getByRole('button', { name: /^export/i }))
-    await finishExport('folder', 0)
+    // Saved with how it is handed over, so it runs straight away.
 
     await waitFor(() =>
       expect(calls.some((c) => c.path === '/api/file-access/export')).toBe(

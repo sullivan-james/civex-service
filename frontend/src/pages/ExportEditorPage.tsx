@@ -81,8 +81,8 @@ export default function ExportEditorPage() {
         breadcrumbs={crumbs}
         error={
           <EmptyState
-            title="No record types yet"
-            message="An export starts from a kind of record, so make a record type first."
+            title="No schemas yet"
+            message="An export starts from a kind of record, so make a schema first."
           />
         }
       />

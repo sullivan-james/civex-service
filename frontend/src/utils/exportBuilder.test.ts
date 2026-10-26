@@ -87,6 +87,8 @@ describe('what is saved', () => {
       filter_tree: null,
       files_layout: 'flat',
       include_files: true,
+      method: 'link',
+      volume: null,
       tables: [],
     })
   })
@@ -114,6 +116,8 @@ describe('what is saved', () => {
       filter_tree: null,
       files_layout: 'grouped',
       include_files: true,
+      method: 'link',
+      volume: null,
       tables: [],
     }
 
@@ -125,6 +129,8 @@ describe('what is saved', () => {
       layout: 'grouped',
       files: true,
       tables: [],
+      method: 'link',
+      volume: null,
     })
   })
 })
@@ -294,6 +300,8 @@ describe('tables in an export', () => {
       filter_tree: null,
       files_layout: 'tree',
       include_files: true,
+      method: 'link',
+      volume: null,
       tables: [spec],
     }
 

@@ -1,6 +1,7 @@
 import type {
   CreateExportDefinition,
   ExportDefinition,
+  ExportMethod,
 } from '../api/exportDefinitions'
 import type { FileSelection, TableSpec } from '../api/fileAccess'
 import type { Schema } from '../api/schemas'
@@ -28,6 +29,9 @@ export interface Draft {
   files: boolean
   /** The tables made beside the files (or instead of them), each its own. */
   tables: TableSpec[]
+  /** How it is handed over, and for a copy the drive (null: the project). */
+  method: ExportMethod
+  volume: string | null
 }
 
 export const emptyDraft: Draft = {
@@ -38,6 +42,8 @@ export const emptyDraft: Draft = {
   layout: 'tree',
   files: true,
   tables: [],
+  method: 'link',
+  volume: null,
 }
 
 /** The schema and every kind beneath it, live ones only: where files can be.
@@ -88,6 +94,9 @@ export function definitionBody(draft: Draft): CreateExportDefinition {
     files_layout: draft.layout,
     include_files: draft.files,
     tables: draft.tables,
+    // With no files there is nothing to link to.
+    method: !draft.files && draft.method === 'link' ? 'zip' : draft.method,
+    volume: draft.method === 'copy' ? draft.volume : null,
   }
 }
 
@@ -101,6 +110,8 @@ export function draftFrom(def: ExportDefinition): Draft {
     layout: def.files_layout,
     files: def.include_files,
     tables: def.tables,
+    method: def.method ?? 'link',
+    volume: def.volume ?? null,
   }
 }
 

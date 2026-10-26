@@ -108,6 +108,68 @@ from the next tag forward.
   host's extensions draw into five named places (`utils/slots.ts`) and get
   civex's own controls from `@civex/ui` (`frontend/packages/ui`). Nothing
   changes for a local civex.
+- **Schemas, explained where people meet them.** The docs open with one page
+  on the three ideas (a schema is a blank form, a record one filled-in copy, a
+  collection the binder), one survey example (Site › Visit › Sample) runs
+  through every page, the three ideas carry one colour each, and the tour is
+  the app first. The word stays "schema" everywhere; the earlier plan to say
+  "record type" was tried and taken back the same day, since the detour, not
+  the word, was what confused people. The AI assistant explains the same way,
+  uses the app's words, and when someone describes one thing rather than a kind
+  of thing it proposes a record instead of a new schema.
+- **A collection holds records of every schema.** The schema checklist is gone
+  from the collection forms; nothing in the app picks schemas for a collection
+  any more. A list given from the command line (`civex collection create|update
+  --schema`, `add-schema`) still restricts, and an empty list means every
+  schema, so nothing existing changes and no migration is needed.
+- **Starting a collection no longer sends you to the Schemas page first.** An
+  empty collection is a short two-step guide with its own **New schema…**
+  button, apart from **New**; the same button sits under the schema rail of a
+  collection that has records. It opens the Schemas page on a new schema, and
+  from inside a record the new schema goes inside that record's kind. Every
+  record form ends with **+ Add field**, which adds a field to the schema in
+  place (the toast says "Added Depth to every sample"). The explorer waits for
+  the collection and its counts before showing a list, so a New menu opened in
+  the first moment is no longer replaced under the pointer.
+- **Fields filled from a file's name when the record is saved.** A text,
+  number, date or datetime field can carry a `from_filename` rule naming a
+  file field and a pattern (`DDMMYYYY_HHmmSS`, a regex with named groups, or
+  several patterns tried in order); the value is read from the file's name in
+  the same save, before validation and uniqueness, so a recording's start time
+  that is the unique key is filled without typing. The rule follows the file:
+  a blank field is filled, a replaced file re-fills it, a value you type stays
+  until the file changes, and a name that fits no pattern changes nothing.
+  Set it on the field (Rules → **Filled from file name**, with a live
+  preview), or `civex schema add-field … --from-file FIELD
+  --filename-pattern PATTERN`. The pattern logic is `domain/filename_extract`;
+  the `civex.extract_from_filename` plugin now uses it and stays optional.
+- **A file and its record save as one request.** Attaching a file on a record
+  (`PUT /records/{id}/files/{field}`) and adding a record with files
+  (`POST /collections/{c}/records/with-files`) store the bytes and save the
+  record together: if the save is refused (a uniqueness clash, a value the
+  field refuses) the new bytes are removed, nothing of the record changes, and
+  the progress line says "Not added — <file>: <reason>". On a new record the
+  files stay in the browser until **Add**. Content another record already
+  holds is never deleted.
+- **Saved exports say how they are handed over.** An export is saved with its
+  method (a folder of links, copies on a drive, or a zip; migration
+  `a1e5c9d3f7b2`, applied on first open) and runs straight away from any
+  Export menu, no dialog; only a one-time **Export…** still asks. An export
+  saves before there is anything to export (the preview says "Nothing to export
+  yet"), the include step reads as plain choices (*One spreadsheet of all
+  visits*, *Each visit's details, as a sheet in its folder*), and a table's
+  name and columns sit behind **Customise…**. CLI: `--method`, `--to`.
+- **The schema page, simplified.** Fields are one column of wide rows that
+  open in place with Save, Cancel and Remove field; **Add field** is one big
+  button at the end, turning into large kind cards then the form. Only the
+  rule the chosen kind leads with shows inline (a choice's values, a
+  quantity's unit, a link's target); everything else waits behind **More
+  rules**. The app says **Name** (what people see) and **Key** (what workflows,
+  CSV headers and the API use), the key folded under the name with a *change*
+  link. Naming and Uniqueness are one **Records** tab of two cards; old links
+  to either still open it. Sentences became tooltips.
+- Dependencies: certifi 2026.10.19, virtualenv 21.14.12 and vite 8.3.4, for
+  advisories pip-audit and npm audit raised.
 
 ## v2.0.0 — syncing between machines, updates from the app (2026-10-07)
 

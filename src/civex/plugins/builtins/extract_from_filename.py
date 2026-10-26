@@ -1,53 +1,13 @@
 from __future__ import annotations
 
 import re
-from datetime import date as _date, datetime as _dt
 from typing import Any
 
 from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel, Field
 
+from civex.domain import filename_extract
 from civex.plugins.base import Tier0Plugin, WorkflowContext
-
-_TOKEN_RE = re.compile(r"(YYYY|MM|DD|HH|mm|SS)")
-_TOKEN_MAP = {
-    "YYYY": r"(?P<year>\d{4})",
-    "MM": r"(?P<month>\d{2})",
-    "DD": r"(?P<day>\d{2})",
-    "HH": r"(?P<hour>\d{2})",
-    "mm": r"(?P<minute>\d{2})",
-    "SS": r"(?P<second>\d{2})",
-}
-
-
-def _parse_by_format(raw: str, fmt: str, output_type: str) -> str:
-    """Convert *raw* string → ISO date/datetime using token format like 'YYYYMMDD-HHmmSS'.
-
-    Known tokens (YYYY MM DD HH mm SS) become named capture groups.
-    Everything else is treated as a raw regex fragment, so you can use character
-    classes — e.g. 'YYYYMMDD[-_]HHmmSS' matches both dashes and underscores.
-
-    A datetime is returned *naive* (no UTC offset): a timestamp in a filename
-    is wall time where it was recorded, and the record service reads it in the
-    field's / collection's timezone when it is saved (UTC if neither is set).
-    """
-    parts = _TOKEN_RE.split(fmt)
-    regex_parts = [_TOKEN_MAP[p] if p in _TOKEN_MAP else p for p in parts]
-    pattern = "".join(regex_parts)
-    m = re.search(pattern, raw)
-    if m is None:
-        raise ValueError(f"Format '{fmt}' did not match '{raw}'")
-    g = m.groupdict()
-    year = int(g.get("year", 1970))
-    month = int(g.get("month", 1))
-    day = int(g.get("day", 1))
-    hour = int(g.get("hour", 0))
-    minute = int(g.get("minute", 0))
-    second = int(g.get("second", 0))
-    if output_type == "date":
-        return _date(year, month, day).isoformat()
-    else:
-        return _dt(year, month, day, hour, minute, second).isoformat()
 
 
 class Plugin(Tier0Plugin):
@@ -139,7 +99,12 @@ class Plugin(Tier0Plugin):
                 raise ValueError(
                     "date_format is required when output_type is 'date' or 'datetime'"
                 )
-            value = _parse_by_format(extracted, config.date_format, config.output_type)
+            # The parsing is the domain's (`civex.domain.filename_extract`), the
+            # same the `from_filename` field rule uses; this plugin only adds
+            # the step around it.
+            value = filename_extract.parse_by_format(
+                extracted, config.date_format, config.output_type
+            )
         else:
             value = extracted
 

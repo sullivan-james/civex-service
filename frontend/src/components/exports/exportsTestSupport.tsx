@@ -48,6 +48,8 @@ export const definition = (
   holder: 'selection',
   fields: ['contour'],
   filter_tree: null,
+  method: 'link',
+  volume: null,
   files_layout: 'flat',
   include_files: true,
   tables: [],

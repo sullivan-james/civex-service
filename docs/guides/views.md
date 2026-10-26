@@ -1,6 +1,6 @@
 # Views
 
-A **view** is a saved filter, column set and sort on a record type (a schema). Views show as
+A **view** is a saved filter, column set and sort on a schema (a schema). Views show as
 chips above a list of records, so the lists a team keeps reaching for are one
 click away. A view belongs to its schema, not to a person or a collection: a view
 on `sample` works on samples in every collection, for everyone.

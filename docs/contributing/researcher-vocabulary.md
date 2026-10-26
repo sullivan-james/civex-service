@@ -1,5 +1,16 @@
 # Researcher-facing vocabulary
 
+!!! note "Schema → Record type was reversed (2026-10-21)"
+    The rename below was applied to the app and docs and then taken back the
+    same day: "schema" stays, in the app, the docs and the CLI alike. The
+    word was not what confused people; the detour was (define a schema on
+    its own page before any data, then go elsewhere to add a record). The
+    fix is to explain a schema where one is about to be made (a schema is
+    the form every record of one kind fills in; make one per kind of thing,
+    not per record) and to start it from the New menu where the records
+    are. The rest of this glossary stands.
+
+
 This is the agreed glossary for CIVEX-259: which implementer-facing terms
 get replaced with researcher-facing ones in the **web UI**, and which stay.
 CIVEX-260 applies it mechanically to `frontend/src`; CIVEX-261 separately

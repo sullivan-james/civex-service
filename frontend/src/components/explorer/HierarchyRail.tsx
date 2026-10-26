@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { ListButton } from '../ui'
 import type { Schema } from '../../api/schemas'
 import { displayLabel } from '../../utils/naming'
@@ -19,10 +20,13 @@ export function HierarchyRail({
   levels,
   current,
   onPick,
+  footer,
 }: {
   levels: RailLevel[]
   current: string | null
   onPick: (schema: Schema) => void
+  /** Under the levels: the way to a new schema, kept apart from New. */
+  footer?: ReactNode
 }) {
   return (
     <nav
@@ -60,6 +64,7 @@ export function HierarchyRail({
           </ListButton>
         )
       })}
+      {footer}
     </nav>
   )
 }

@@ -9,8 +9,11 @@ import {
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ComponentProps } from 'react'
 import { RecordFieldGrid } from './RecordFieldGrid'
 import { filesApi, type FileRef } from '../../api/files'
+import { ApiError } from '../../api/client'
+import type { CivexRecord, FileSaver } from '../../api/records'
 import type { Field } from '../../api/schemas'
 
 vi.mock('../../api/files', async (original) => ({
@@ -42,6 +45,7 @@ function renderGrid(
   type: 'file' | 'file_list',
   data: Record<string, unknown>,
   restrictions = {},
+  extra: Partial<ComponentProps<typeof RecordFieldGrid>> = {},
 ) {
   const onSave = vi.fn()
   render(
@@ -55,6 +59,7 @@ function renderGrid(
           fields={[fileField(type, restrictions)]}
           data={data}
           onSave={onSave}
+          {...extra}
         />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -177,7 +182,7 @@ describe('attaching files to a record', () => {
 
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('Added 1 of 3 files')
-    expect(alert).toHaveTextContent('Couldn’t add b.wav')
+    expect(alert).toHaveTextContent('Not added — b.wav')
     expect(onSave).toHaveBeenCalledWith('clip', [ref('a.wav', 'aa')])
 
     upload.mockImplementation(async (files) =>
@@ -191,6 +196,92 @@ describe('attaching files to a record', () => {
       'b.wav',
       'c.wav',
     ])
+  })
+})
+
+describe('saving the record with each file (a record page)', () => {
+  const saved = (data: Record<string, unknown>) =>
+    ({ id: 'r1', data }) as unknown as CivexRecord
+
+  it('stores the file and the record as one request, and saves nothing itself', async () => {
+    const fileSaver = vi.fn<FileSaver>(async (field, file, onProgress) => {
+      onProgress({ loaded: file.size, total: file.size, saving: true })
+      return saved({ [field.name]: ref(file.name, 'aa') })
+    })
+    const onSave = renderGrid('file', {}, {}, { fileSaver })
+
+    await pick('a.wav')
+
+    await waitFor(() => expect(fileSaver).toHaveBeenCalledTimes(1))
+    expect(fileSaver.mock.calls[0][0].name).toBe('clip')
+    expect(fileSaver.mock.calls[0][1].name).toBe('a.wav')
+    // The record came back saved: nothing to save again, no upload of its own.
+    expect(onSave).not.toHaveBeenCalled()
+    expect(upload).not.toHaveBeenCalled()
+  })
+
+  it('says a refused save was not added, in the field, and changes nothing', async () => {
+    const fileSaver = vi.fn<FileSaver>(async () => {
+      throw new ApiError(
+        "Field 'clip': 'a.wav' type '.wav' not allowed — accepted: .csv",
+        422,
+      )
+    })
+    const onSave = renderGrid('file', {}, {}, { fileSaver })
+
+    await pick('a.wav')
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Not added — a.wav')
+    expect(alert).toHaveTextContent("'a.wav' isn't an accepted file type")
+    expect(onSave).not.toHaveBeenCalled()
+    expect(screen.getByText('empty')).toBeInTheDocument()
+  })
+
+  it('appends to a list, each file one request, and stops at the first refused', async () => {
+    const user = userEvent.setup()
+    const fileSaver = vi.fn<FileSaver>(async (field, file) => {
+      if (file.name === 'b.wav')
+        throw new ApiError(
+          "Field 'clip': file size 1 bytes exceeds max_size 0",
+          422,
+        )
+      return saved({ [field.name]: [ref(file.name, file.name)] })
+    })
+    const onSave = renderGrid('file_list', {}, {}, { fileSaver })
+
+    await user.upload(screen.getByLabelText('Add Clip'), [
+      new File(['a'], 'a.wav'),
+      new File(['b'], 'b.wav'),
+      new File(['c'], 'c.wav'),
+    ])
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Added 1 of 3 files')
+    expect(alert).toHaveTextContent('Not added — b.wav')
+    expect(fileSaver).toHaveBeenCalledTimes(2)
+    expect(onSave).not.toHaveBeenCalled()
+  })
+})
+
+describe('holding files for a record that does not exist yet', () => {
+  it('keeps the chosen file in the field, stores nothing, and lets it go', async () => {
+    const user = userEvent.setup()
+    const onSave = renderGrid('file', {}, {}, { holdFiles: true })
+
+    await pick('a.wav')
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    const held = onSave.mock.calls[0][1]
+    expect(held).toMatchObject({ pending: true, filename: 'a.wav', size: 1 })
+    expect(held.file).toBeInstanceOf(File)
+    expect(upload).not.toHaveBeenCalled()
+
+    // Shown by name, marked as not added, removable without a question.
+    renderGrid('file', { clip: held }, {}, { holdFiles: true })
+    expect(screen.getByText('not added yet')).toBeInTheDocument()
+    await user.click(screen.getAllByRole('button', { name: 'Remove a.wav' })[0])
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 })
 

@@ -704,7 +704,7 @@ describe('one dialog for every way of getting the files', () => {
 
     await choose(/^export…/i)
 
-    expect(screen.getByText('What goes in the folder')).toBeTruthy()
+    expect(screen.getByText('What to include')).toBeTruthy()
     await next()
     expect(screen.getByRole('radiogroup', { name: /layout/i })).toBeTruthy()
     await next()

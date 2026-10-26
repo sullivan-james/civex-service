@@ -168,7 +168,9 @@ describe('the export builder, step by step', () => {
 
     await onlyFiles()
 
-    expect(screen.getByText(/choose something to include/i)).toBeTruthy()
+    expect(
+      screen.getByText(/choose at least one thing to include/i),
+    ).toBeTruthy()
     expect(
       (screen.getByRole('button', { name: /^next/i }) as HTMLButtonElement)
         .disabled,
@@ -215,7 +217,7 @@ describe('the kind it starts from', () => {
 
     expect(
       screen.getByText(
-        /It takes Encounter and everything inside it, and is offered on every Encounter, Recording and Selection page and on collections that use them\./,
+        'Offered on Encounter, Recording and Selection pages and on collections.',
       ),
     ).toBeTruthy()
   })
@@ -224,7 +226,9 @@ describe('the kind it starts from', () => {
     const calls = serve()
     renderIt()
     await userEvent.click(
-      screen.getByRole('checkbox', { name: 'All Selections in one table' }),
+      screen.getByRole('checkbox', {
+        name: 'One spreadsheet of all Selections',
+      }),
     )
 
     await userEvent.selectOptions(
@@ -238,7 +242,7 @@ describe('the kind it starts from', () => {
     expect(
       (
         screen.getByRole('checkbox', {
-          name: 'All Selections in one table',
+          name: 'One spreadsheet of all Selections',
         }) as HTMLInputElement
       ).checked,
     ).toBe(false)
@@ -285,7 +289,7 @@ describe('choosing a layout', () => {
     expect(within(grouped).getByText('Item 2 - file.txt')).toBeTruthy()
     expect(within(flat).queryByText('Parent 1')).toBeNull()
     expect(within(flat).getAllByText(/ - file\.txt$/)).toHaveLength(3)
-    // Nothing tied to anyone’s own record types.
+    // Nothing tied to anyone’s own schemas.
     expect(document.body.textContent).not.toMatch(
       /encounter 1|recording 1|selection 1/i,
     )
@@ -314,7 +318,7 @@ describe('reviewing', () => {
     await next()
   }
 
-  it('shows what it takes and where it will be available, briefly', async () => {
+  it('asks how it is handed over, a folder of links to begin with', async () => {
     serve()
     renderIt()
     await onlyFiles('contour')
@@ -322,12 +326,24 @@ describe('reviewing', () => {
     await userEvent.click(layout(/all in one folder/i))
     await next()
 
+    const radios = screen.getByRole('radiogroup', { name: /method/i })
     expect(
-      screen.getByText('contour of Selection · all in one folder'),
-    ).toBeTruthy()
+      (
+        within(radios).getByRole('radio', {
+          name: /open as folder/i,
+        }) as HTMLInputElement
+      ).checked,
+    ).toBe(true)
+    await userEvent.click(
+      within(radios).getByRole('radio', { name: /download zip/i }),
+    )
     expect(
-      screen.getByText('Collections · Encounter · Recording · Selection'),
-    ).toBeTruthy()
+      (
+        within(radios).getByRole('radio', {
+          name: /download zip/i,
+        }) as HTMLInputElement
+      ).checked,
+    ).toBe(true)
   })
 
   it('previews against your data on its own, and again when the choices change', async () => {
@@ -453,6 +469,8 @@ describe('saving', () => {
       files_layout: 'grouped',
       include_files: true,
       tables: [],
+      method: 'link',
+      volume: null,
     })
   })
 

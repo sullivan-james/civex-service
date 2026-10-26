@@ -4,7 +4,9 @@ import { useHasFeature } from '../../hooks/useFeatures'
 import { Select } from '../ui'
 import { Archive, FolderOpen, HardDrive } from '../ui/icons'
 
-export type Method = 'link' | 'copy' | 'zip'
+import type { ExportMethod } from '../../api/exportDefinitions'
+
+export type Method = ExportMethod
 
 const METHODS: {
   id: Method

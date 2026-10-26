@@ -80,6 +80,16 @@ export interface NameIssue {
   suggestion: string | null
 }
 
+/** A `from_filename` rule tried on a file name, by the server. */
+export interface FromFilenamePreview {
+  /** Per pattern: why it can't be used, or null. */
+  problems: (string | null)[]
+  /** What the name gives; null when nothing matches or a pattern is bad. */
+  value: unknown
+  /** A pattern matched but what it captured isn't a value of the kind. */
+  error: string | null
+}
+
 export interface NamePreview {
   /** The rendered text; null when the template renders to nothing. */
   name: string | null
@@ -98,6 +108,11 @@ export const schemasApi = {
     api.get<PaginatedAuditLog>(
       auditUrl(`/schemas/${name}`, offset, limit, view),
     ),
+  previewFromFilename: (body: {
+    filename: string
+    patterns: string[]
+    kind: string
+  }) => api.post<FromFilenamePreview>('/schemas/from-filename/preview', body),
   previewName: (
     name: string,
     body: {

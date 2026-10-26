@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router'
 import { useSchemas, useCreateSchema } from '../hooks/useSchemas'
 import {
   Badge,
@@ -14,26 +15,35 @@ import { displayLabel } from '../utils/naming'
 import { pluralise } from '../lib/utils'
 import { errorMessage } from '../lib/errors'
 
-function CreateSchemaModal({ onClose }: { onClose: () => void }) {
-  const [parent, setParent] = useState('')
+function CreateSchemaModal({
+  onClose,
+  initialParent = '',
+}: {
+  onClose: () => void
+  /** The schema the new one goes inside, when New schema… was pressed in a record. */
+  initialParent?: string
+}) {
+  const [parent, setParent] = useState(initialParent)
   const create = useCreateSchema()
   const { data: schemas } = useSchemas()
+  const navigate = useNavigate()
 
   return (
     <CreateResourceModal
-      resourceLabel="record type"
+      resourceLabel="schema"
       slugKind="Schema"
-      hint="A record type is a blank form: the fields one kind of thing has, such as a site or a sample. You design it once, then add a record each time you have another one. If what you want has the same fields as a type you already have, add a record to a collection instead."
       onClose={onClose}
       isPending={create.isPending}
       error={create.error}
       onSubmit={async ({ name, label, description }) => {
-        await create.mutateAsync({
+        const created = await create.mutateAsync({
           name,
           label: label || undefined,
           description: description || undefined,
           parent: parent || undefined,
         })
+        // Next comes its fields: the schema's own page.
+        navigate(`/schemas/${created.id}`)
       }}
       extraFields={
         <Field
@@ -60,7 +70,16 @@ function CreateSchemaModal({ onClose }: { onClose: () => void }) {
 
 export default function SchemasPage() {
   const { data, isLoading, error } = useSchemas()
+  const [params, setParams] = useSearchParams()
+  // `?new=1&parent=` is New schema… from a list of records:
+  // the dialog opens with that context, and closing it clears the address.
+  const fromList = params.get('new') === '1'
   const [showCreate, setShowCreate] = useState(false)
+  const creating = showCreate || fromList
+  const closeCreate = () => {
+    setShowCreate(false)
+    if (fromList) setParams({}, { replace: true })
+  }
 
   const labelById = Object.fromEntries(
     (data ?? []).map((s) => [s.id, displayLabel(s.name, s.label)]),
@@ -68,15 +87,20 @@ export default function SchemasPage() {
 
   return (
     <Page
-      title="Record types"
-      info="A record type is a blank form: the fields a kind of thing has. You design it once, then add a record every time you have another one."
+      title="Schemas"
+      info="A schema is a blank form: the fields a kind of thing has. You design it once, then add a record every time you have another one."
       action={
         <Button variant="primary" onClick={() => setShowCreate(true)}>
-          New record type
+          New schema
         </Button>
       }
     >
-      {showCreate && <CreateSchemaModal onClose={() => setShowCreate(false)} />}
+      {creating && (
+        <CreateSchemaModal
+          onClose={closeCreate}
+          initialParent={params.get('parent') ?? ''}
+        />
+      )}
 
       <DataTable
         layout="auto"
@@ -128,11 +152,11 @@ export default function SchemasPage() {
         rowHref={(s) => `/schemas/${s.id}`}
         isLoading={isLoading}
         error={error ? errorMessage(error) : undefined}
-        emptyTitle="No record types yet"
-        emptyMessage="A record type is a blank form for one kind of thing you record, such as a site or a sample. Make one per kind, then add records of it to a collection."
+        emptyTitle="No schemas yet"
+        emptyMessage="Make one here, or from a collection's page."
         emptyAction={
           <Button variant="primary" onClick={() => setShowCreate(true)}>
-            New record type
+            New schema
           </Button>
         }
       />
