@@ -581,15 +581,30 @@ class LocalRecordRepository:
         schema_id: uuid.UUID,
         data: dict[str, Any],
         parent_record_id: uuid.UUID | None = None,
+        id: uuid.UUID | None = None,
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
     ) -> RecordDTO:
         # search_vector is maintained by a Postgres trigger (CIVEX-173) so it
         # can't go stale on writes that don't go through this repo; unused on
         # SQLite (see models._TSVECTOR).
+        # `id` and the dates are given when a record is brought in from another
+        # project (a bundle), so its parent and references still mean the same.
+        given = {
+            k: v
+            for k, v in (
+                ("id", id),
+                ("created_at", created_at),
+                ("updated_at", updated_at),
+            )
+            if v is not None
+        }
         row = Record(
             dataset_id=dataset_id,
             schema_id=schema_id,
             data=data,
             parent_record_id=parent_record_id,
+            **given,
         )
         self._s.add(row)
         self._s.flush()

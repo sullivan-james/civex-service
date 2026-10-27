@@ -52,6 +52,7 @@ if TYPE_CHECKING:
     from civex.services.schema_service import SchemaService
     from civex.services.bucket_service import BucketService
     from civex.services.store_service import StoreService
+    from civex.services.bundle_service import BundleService
     from civex.services.export_definition_service import ExportDefinitionService
     from civex.services.history_compaction import HistoryCompactionService
     from civex.services.device_keys import DeviceKeys
@@ -109,6 +110,7 @@ class AppContext:
     policy_svc: PolicyService
     view_svc: ViewService
     export_def_svc: ExportDefinitionService
+    bundle_svc: BundleService
     sync_repo: LocalSyncRepository
     authority_svc: SyncAuthorityService
     device_keys: DeviceKeys
@@ -269,6 +271,7 @@ def build_context(
     from civex.services.bucket_service import BucketService
     from civex.services.store_service import StoreService
     from civex.repositories.local.file_store import VolumeAwareFileObjectStore
+    from civex.services.bundle_service import BundleService
     from civex.services.export_definition_service import ExportDefinitionService
     from civex.services.view_service import ViewService
     from civex.services.workflow_job_service import WorkflowJobService
@@ -507,6 +510,15 @@ def build_context(
         policy_svc=policy_svc,
         view_svc=view_svc,
         export_def_svc=export_def_svc,
+        bundle_svc=BundleService(
+            schema_svc,
+            dataset_svc,
+            record_svc,
+            file_svc,
+            session.commit,
+            config.civex_dir,
+            batch=history_svc.batch,
+        ),
         sync_repo=sync_repo,
         authority_svc=authority_svc,
         device_keys=device_keys,

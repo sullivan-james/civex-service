@@ -1658,10 +1658,17 @@ class RecordService:
         _job_depth: int = 0,
         _cause: dict[str, Any] | None = None,
         with_labels: bool = True,
+        record_id: uuid.UUID | None = None,
+        created_at: _dt | None = None,
+        updated_at: _dt | None = None,
     ) -> RecordDTO:
         """Create a record. `with_labels=False` skips resolving its reference
         values' display names and collection for the returned DTO (a few
-        queries) -- for loops, like a restore, that discard the result."""
+        queries) -- for loops, like an import, that discard the result.
+        `record_id` and the dates are for a record brought in from another
+        project (a bundle): it keeps its identity, so what sits inside it and
+        what references it still mean the same; the caller has checked the id
+        is free."""
         dataset = self._datasets.get_by_name(dataset_name, with_count=False)
         if not dataset:
             raise NotFoundError(f"Dataset '{dataset_name}' not found")
@@ -1708,6 +1715,9 @@ class RecordService:
             schema_id=schema.id,
             data=id_data,
             parent_record_id=resolved_parent_id,
+            id=record_id,
+            created_at=created_at,
+            updated_at=updated_at,
         )
         shapes = self._schema_svc.resolver()
         shapes.prime(shape)
@@ -1736,6 +1746,14 @@ class RecordService:
         return (
             self._attach_reference_labels([named], shapes)[0] if with_labels else named
         )
+
+    def exists(self, record_id: str) -> bool:
+        """Whether a record with this id is here, live or deleted."""
+        try:
+            rid = uuid.UUID(record_id)
+        except ValueError:
+            return False
+        return self._records.get_by_id(rid, include_deleted=True) is not None
 
     def get(self, record_id: str) -> RecordDTO:
         record = self._records.get_by_prefix(record_id)

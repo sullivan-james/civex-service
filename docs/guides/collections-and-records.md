@@ -180,6 +180,8 @@ See [Undo a mistake](../how-to/undo-mistakes.md) and
 
 ## Copying a project's data
 
-`civex dump` writes schemas, collections, records and workflows to one YAML
-file, and `civex restore` reads it into another project. It leaves out files,
-history and settings. See [Back up a project](../how-to/back-up.md).
+`civex bundle export` writes schemas, collections, records (their ids kept),
+the files they cite and the project's workflows to one file, and `civex bundle
+import` reads it into another project; in the app, **Export bundle…** and
+**Import bundle…** on the Collections page. It leaves out history and
+settings. See [Back up a project](../how-to/back-up.md).

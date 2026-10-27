@@ -25,7 +25,7 @@ from civex.cli import (
 from civex.cli.shell import run_shell
 from civex.cli.demo import demo
 from civex.cli.doctor import doctor
-from civex.cli.dump import dump, restore
+from civex.cli import bundle as bundle_cli
 from civex.cli.init import init
 from civex.cli.license import license_cmd
 from civex.cli.resolve import resolve
@@ -91,8 +91,13 @@ app.add_typer(view.app, name="view", rich_help_panel=_WORK)
 app.command("resolve", rich_help_panel=_WORK)(resolve)
 app.command("doctor", rich_help_panel=_WORK)(doctor)
 
-app.command("dump", rich_help_panel=_COLLAB)(dump)
-app.command("restore", rich_help_panel=_COLLAB)(restore)
+app.add_typer(bundle_cli.app, name="bundle", rich_help_panel=_COLLAB)
+app.command("dump", hidden=True, context_settings=bundle_cli._ANY_ARGS)(
+    bundle_cli.dump_replaced
+)
+app.command("restore", hidden=True, context_settings=bundle_cli._ANY_ARGS)(
+    bundle_cli.restore_replaced
+)
 
 
 def _refuse_unless_serving() -> None:

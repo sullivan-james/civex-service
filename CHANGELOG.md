@@ -31,6 +31,21 @@ from the next tag forward.
   one record at a time. On SQLite the `records` table is rebuilt. Nothing
   to do by hand.
 
+- **`civex dump`/`civex restore` are replaced by bundles.** `civex bundle
+  export|show|import`, `GET /bundle`, `GET /bundle/plan`, `POST /bundle/import`,
+  and **Export bundle…** / **Import bundle…** on the Collections page. A bundle
+  is a zip (`bundle.json`, `records.jsonl`, `files/<sha256>`, `workflows/`,
+  `plugins/`) that keeps record ids, so records inside others and references
+  survive the move to another project, and carries the stored files the
+  records cite unless `--no-files` (the app's dialog says how many files and
+  bytes that is). Importing matches schemas and collections by name and records
+  by id (what is already there is left alone, so a bundle can be imported
+  again), writes each record through the usual checks and history, defers a
+  record until the record it sits inside and the records it references are
+  there, and is one `import` event in Activity. A file whose bytes don't hash
+  to their name is refused. `civex dump`/`restore` and `GET /dump`, `POST
+  /restore` are gone; a YAML dump from an older release is read by that
+  release.
 - **Records can be moved to another collection**, or inside another record
   there: `civex record move <ids> --to <collection> [--under <record>]`,
   `civex record move-all` for everything a query lists, `POST
