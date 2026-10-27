@@ -23,7 +23,13 @@ from typing import Any
 from civex.domain.audit_filter import AuditFilter
 from civex.domain.audit_filters import parse_audit_filter
 from civex.domain.filters import FilterCondition, FilterGroup, FilterNode
-from civex.domain.audit_diff import Change, diff_entry, entry_snapshots, strip_derived
+from civex.domain.audit_diff import (
+    PLACEMENT_KEYS,
+    Change,
+    diff_entry,
+    entry_snapshots,
+    strip_derived,
+)
 from civex.domain.dtos import (
     REVERT_APPLY,
     REVERT_CONFLICT,
@@ -336,6 +342,10 @@ class AuditService:
         # renamed or deleted has no place there and no label or type to show.
         order = {rf.field.name: i for i, rf in enumerate(shape.fields)}
         for change in changes:
+            if change.field in PLACEMENT_KEYS:
+                self._name_place(change)
+                order[change.field] = -1
+                continue
             field = shape.by_name.get(change.field)
             if field is not None:
                 change.label, change.dtype = field.display_name, field.dtype
@@ -355,6 +365,26 @@ class AuditService:
                 change.label = "(deleted field)"
                 change.deleted = {"status": "gone", "id": change.field}
         return sorted(changes, key=lambda c: (order.get(c.field, len(order)), c.field))
+
+    def _name_place(self, change: Change) -> None:
+        """A moved record's old and new place, as names: the collection, or the
+        record it sits inside (deleted ones by name too; one gone for good by
+        its id)."""
+        sides = [str(v) for v in (change.before, change.after) if v]
+        names: dict[str, str] = {}
+        if change.field == "dataset_id":
+            change.label = "Collection"
+            for dataset_id, found in self._datasets.find(
+                {uuid.UUID(v) for v in sides if _is_uuid(v)}
+            ).items():
+                names[str(dataset_id)] = found.name
+        else:
+            change.label = "Inside"
+            for record in self._records.labels(sides):
+                names[str(record.id)] = record.natural_name or str(record.id)[:8]
+        change.before = names.get(str(change.before), change.before)
+        change.after = names.get(str(change.after), change.after)
+        change.dtype = "string"
 
     # ------------------------------------------------------------------
     # Restoring what is deleted

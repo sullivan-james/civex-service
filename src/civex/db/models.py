@@ -331,10 +331,17 @@ class Record(Base):
         # lets (id, dataset_id) be the target of the composite FK that ties
         # parent_record_id to the parent's dataset_id.
         UniqueConstraint("id", "dataset_id", name="uq_records_id_dataset"),
+        # Checked when the transaction commits, not after each statement: a
+        # tree moved to another collection changes the parent's dataset_id and
+        # the children's in separate statements (one UPDATE per record when
+        # sync applies the move's entries), and in between a child points at
+        # a parent in another collection.
         ForeignKeyConstraint(
             ["parent_record_id", "dataset_id"],
             ["records.id", "records.dataset_id"],
             name="fk_records_parent_same_dataset",
+            deferrable=True,
+            initially="DEFERRED",
         ),
         Index("ix_records_dataset_schema", "dataset_id", "schema_id"),
         Index("ix_records_dataset_created", "dataset_id", "created_at"),

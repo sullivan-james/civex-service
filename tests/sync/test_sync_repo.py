@@ -151,10 +151,13 @@ def test_what_the_authority_numbers_comes_back_in_order_and_pages(project):
     assert r.entries_after(0, 10) == ([], False)  # nothing numbered yet
     assert r.sequence_local_entries() == 3  # the schema, the field, and the template
 
-    first, more = r.entries_after(0, 2)
-    assert [e.hub_seq for e in first] == [1, 2] and more is True
-    rest, more = r.entries_after(2, 2)
-    assert [e.hub_seq for e in rest] == [3] and more is False
+    first, more = r.entries_after(0, 1)
+    assert [e.hub_seq for e in first] == [1] and more is True
+    # A page never ends inside an action: adding the field also set the
+    # schema's template, one action, so both come together.
+    rest, more = r.entries_after(1, 1)
+    assert [e.hub_seq for e in rest] == [2, 3] and more is False
+    assert r.entries_after(3, 2) == ([], False)
     assert r.sequence_local_entries() == 0  # already numbered
 
 

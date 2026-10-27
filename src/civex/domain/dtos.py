@@ -1056,6 +1056,48 @@ class RestoreSetDTO:
 
 
 @dataclass
+class RecordMovePlanDTO:
+    """What moving some records to a collection would do, worked out without
+    doing it. A record moves with everything beneath it and keeps its id; its
+    files stay where they are stored."""
+
+    collection: str  # where they would go
+    collection_id: uuid.UUID
+    parent_id: uuid.UUID | None  # the record they would sit inside, if any
+    parent_name: str | None
+    roots: int  # chosen records that would move
+    records: int  # with everything beneath them
+    skipped: int  # chosen records already where they would go
+    sources: list[str]  # the collections they would leave
+    problems: list[str]  # why it can't be done, in plain words; empty when it can
+
+    @property
+    def can_move(self) -> bool:
+        return not self.problems and self.records > 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "collection": self.collection,
+            "collection_id": str(self.collection_id),
+            "parent_id": str(self.parent_id) if self.parent_id else None,
+            "parent_name": self.parent_name,
+            "roots": self.roots,
+            "records": self.records,
+            "skipped": self.skipped,
+            "sources": self.sources,
+            "problems": self.problems,
+            "can_move": self.can_move,
+        }
+
+
+@dataclass
+class RecordMoveResultDTO:
+    roots: int  # chosen records moved
+    records: int  # records moved in all, with everything beneath them
+    collection: str
+
+
+@dataclass
 class RestoreSetResultDTO:
     restored: int  # records restored in their own right
     came_back: int  # records live again in all, with what went with them

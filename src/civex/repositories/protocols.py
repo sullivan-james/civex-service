@@ -373,6 +373,31 @@ class RecordRepository(Protocol):
         self, ids: list[uuid.UUID], stamp: datetime | None = None
     ) -> None: ...
     def restore_many(self, ids: list[uuid.UUID]) -> None: ...
+
+    def references_of(
+        self, record_ids: list[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, uuid.UUID, uuid.UUID]]:
+        """(record id, field id, target id) for every reference value these
+        records hold, live or deleted."""
+        ...
+
+    def dataset_mismatches(self, record_ids: list[uuid.UUID]) -> int:
+        """How many of `record_ids`, or of the records directly beneath them,
+        are in a different collection from the record above them."""
+        ...
+
+    def move(
+        self,
+        ids: list[uuid.UUID],
+        dataset_id: uuid.UUID,
+        root_ids: list[uuid.UUID],
+        parent_id: uuid.UUID | None,
+        stamp: datetime,
+    ) -> None:
+        """Put `ids` (whole trees: each root in `root_ids` and everything
+        beneath it) in collection `dataset_id`, the roots under `parent_id`."""
+        ...
+
     def live_under_deleted(self, limit: int) -> tuple[list[RecordDTO], int]: ...
     def purge_many(self, ids: list[uuid.UUID]) -> None: ...
 
