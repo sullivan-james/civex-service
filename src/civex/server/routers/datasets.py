@@ -40,7 +40,6 @@ def create_dataset(body: CreateDatasetRequest, ctx: AppContext = Depends(get_ctx
             description=body.description,
             timezone=body.timezone,
             scope=body.scope,
-            schemas=body.schemas,
         )
     except AlreadyExistsError as e:
         raise HTTPException(409, detail=str(e))
@@ -134,7 +133,6 @@ def update_dataset(
             description=body.description,
             timezone=body.timezone,
             scope=body.scope,
-            schemas=body.schemas,
         )
         ctx.commit()
     except AlreadyExistsError as e:

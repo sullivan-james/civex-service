@@ -24,7 +24,6 @@ from civex.db.models import (
     AuditBatch,
     AuditLog,
     Dataset,
-    DatasetSchema,
     Field,
     FileReference,
     Record,
@@ -1014,21 +1013,6 @@ class LocalSyncRepository:
                 # to the other columns lets the column's on-update default stamp
                 # it with this machine's clock, and the copies drift apart.
                 flag_modified(row, "updated_at")
-        self._s.flush()
-        if kind == "dataset" and "schema_ids" in snap:
-            self._set_schema_links(row, snap["schema_ids"])
-
-    def _set_schema_links(self, dataset: Dataset, schema_ids: list[str]) -> None:
-        wanted = {uuid.UUID(i) for i in schema_ids}
-        have = {link.schema_id for link in dataset.schema_links}
-        if wanted == have:
-            return
-        known = {
-            sid for (sid,) in self._s.query(Schema.id).filter(Schema.id.in_(wanted))
-        }
-        dataset.schema_links = [
-            DatasetSchema(dataset_id=dataset.id, schema_id=sid) for sid in known
-        ]
         self._s.flush()
 
     def soft_delete(self, kind: str, id: uuid.UUID, stamp: datetime) -> None:

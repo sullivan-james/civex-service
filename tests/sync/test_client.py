@@ -51,9 +51,7 @@ def test_seeding_sends_what_a_record_needs_before_the_record(project, authority)
     laptop.schema_svc.create("recording", parent="encounter")
     laptop.schema_svc.add_field("recording", "label", "string")
     laptop.dataset_svc.create("taxonomy", scope="global")
-    laptop.dataset_svc.update("taxonomy", schemas=["species"])
     laptop.dataset_svc.create("study")
-    laptop.dataset_svc.update("study", schemas=["encounter", "recording"])
 
     encounter = laptop.record_svc.add("study", "encounter", {})
     species = laptop.record_svc.add("taxonomy", "species", {"latin": "orcinus"})
@@ -86,7 +84,6 @@ def test_something_the_server_refuses_while_seeding_is_kept_for_review(
         "item", "grade", "string", restrictions={"choices": ["a", "b"]}
     )
     laptop.dataset_svc.create("things")
-    laptop.dataset_svc.update("things", schemas=["item"])
     fine = laptop.record_svc.add("things", "item", {"grade": "b"})
     odd = laptop.record_svc.add("things", "item", {"grade": "a"})
     laptop.schema_svc.update_field("item", "grade", restrictions={"choices": ["b"]})
@@ -114,7 +111,6 @@ def test_following_a_different_authority_forgets_the_old_ones_cursor_and_items(
         "item", "grade", "string", restrictions={"choices": ["a", "b"]}
     )
     laptop.dataset_svc.create("things")
-    laptop.dataset_svc.update("things", schemas=["item"])
     kept = laptop.record_svc.add("things", "item", {"grade": "b"})
     laptop.record_svc.add("things", "item", {"grade": "a"})
     laptop.schema_svc.update_field("item", "grade", restrictions={"choices": ["b"]})
@@ -273,7 +269,6 @@ def test_a_delete_and_its_restore_travel_as_a_group(pair, project):
     laptop, phone, record = pair
     laptop.schema_svc.create("recording", parent="encounter")
     laptop.schema_svc.add_field("recording", "rate", "integer")
-    laptop.dataset_svc.update("study", schemas=["encounter", "recording"])
     for rate in (1, 2, 3):
         laptop.record_svc.add(
             "study", "recording", {"rate": rate}, parent_record_id=str(record.id)

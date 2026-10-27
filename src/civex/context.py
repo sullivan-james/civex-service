@@ -320,7 +320,6 @@ def build_context(
     dataset_svc = DatasetService(
         dataset_repo,
         audit_repo,
-        schema_svc,
         record_svc,
         on_purge=lambda collection_id: (
             store_svc.clear_placement(str(collection_id)) if store_svc else None
@@ -432,7 +431,7 @@ def build_context(
         applier,
         file_store,
         record_svc,
-        ProjectRules(schema_svc, dataset_repo, record_repo),
+        ProjectRules(schema_svc, record_repo),
         authenticator=device_keys,
         # The same answer a person at a browser gets, asked of each change a
         # device pushes (the local user's refuses nothing).

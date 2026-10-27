@@ -8,8 +8,6 @@ from sqlalchemy import text
 
 from civex.testing.peers import connect, device, snapshots
 
-pytestmark = pytest.mark.usefixtures("strict_schema_lists")
-
 
 @pytest.fixture()
 def calls(project, authority):
@@ -18,7 +16,6 @@ def calls(project, authority):
     laptop.schema_svc.add_field("call", "annotation", "string")
     laptop.schema_svc.add_field("call", "note", "string")
     laptop.dataset_svc.create("survey")
-    laptop.dataset_svc.update("survey", schemas=["call"])
     laptop.commit()
     connect(laptop)
     phone = device(project, authority, "phone")
@@ -79,7 +76,6 @@ def test_a_record_refused_while_filling_a_new_server_can_be_sent_again_and_fixed
     laptop.schema_svc.create("call")
     laptop.schema_svc.add_field("call", "annotation", "string")
     laptop.dataset_svc.create("survey")
-    laptop.dataset_svc.update("survey", schemas=["call"])
     made = laptop.record_svc.add("survey", "call", {"annotation": "M (bold)"})
     laptop.schema_svc.update_field(
         "call", "annotation", restrictions={"choices": ["Y", "M", "N"]}

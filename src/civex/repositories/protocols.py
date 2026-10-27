@@ -142,11 +142,9 @@ class DatasetRepository(Protocol):
         name: str,
         include_deleted: bool = False,
         with_count: bool = True,
-        with_schemas: bool = True,
     ) -> DatasetDTO | None:
         """`with_count=False` skips the live-record count (an O(records) scan)
-        and leaves `record_count` at 0; `with_schemas=False` skips the schema
-        list lookup and leaves `schemas` empty -- for callers that don't read
+        and leaves `record_count` at 0 -- for callers that don't read
         them."""
         ...
 
@@ -155,7 +153,6 @@ class DatasetRepository(Protocol):
         id: uuid.UUID,
         include_deleted: bool = False,
         with_count: bool = True,
-        with_schemas: bool = True,
     ) -> DatasetDTO | None: ...
     def list_all(self, with_count: bool = True) -> list[DatasetDTO]: ...
     def list_deleted(self) -> list[DatasetDTO]: ...
@@ -174,13 +171,6 @@ class DatasetRepository(Protocol):
         timezone: str | None = None,
         scope: str | None = None,
     ) -> DatasetDTO: ...
-    def set_schemas(self, id: uuid.UUID, schema_names: list[str]) -> DatasetDTO:
-        """Replace the collection's schema list (names must be live schemas)."""
-        ...
-
-    def schemas_in_use(self, id: uuid.UUID) -> set[str]:
-        """Names of the schemas live records in the collection are typed by."""
-        ...
 
     def delete(self, id: uuid.UUID, stamp: datetime | None = None) -> None: ...
     def restore(self, id: uuid.UUID) -> DatasetDTO: ...

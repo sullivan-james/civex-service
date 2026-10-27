@@ -23,8 +23,8 @@ from civex.domain import hlc
 # way an older peer can't read (a new kind, a new field in `WIRE_FIELDS`, a
 # changed meaning); MIN goes up when an older one is no longer served. An
 # authority is upgraded first and answers a device on any version both speak.
-PROTOCOL_MIN = 2
-PROTOCOL_MAX = 2
+PROTOCOL_MIN = 3
+PROTOCOL_MAX = 3
 # Optional features, by name, that a peer can look for in `Hello`. Adding one is
 # not a protocol change; an older peer just doesn't have it.
 CAPABILITIES: tuple[str, ...] = ("library", "device_login")
@@ -81,8 +81,6 @@ WIRE_FIELDS: dict[str, frozenset[str]] = {
             "description",
             "scope",
             "timezone",
-            "schema_ids",
-            "schemas",
             "created_at",
             "deleted_at",
         }

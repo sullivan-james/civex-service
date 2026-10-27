@@ -163,7 +163,7 @@ def restore_datasets(
     commit: Callable[[], None],
     on_exists: Callable[[str, Exception], None] | None = None,
 ) -> int:
-    """Create the dump's collections (scope, timezone and schema list included).
+    """Create the dump's collections (scope and timezone included).
     Returns how many were new."""
     restored = 0
     for d in datasets:
@@ -173,7 +173,6 @@ def restore_datasets(
                 description=d.get("description"),
                 scope=d.get("scope") or "local",
                 timezone=d.get("timezone"),
-                schemas=d.get("schemas") or [],
             )
             commit()
             restored += 1
@@ -217,7 +216,6 @@ def write_dump(
             "description": d.description,
             "scope": d.scope,
             "timezone": d.timezone,
-            "schemas": d.schemas,
         }
         for d in datasets
     ]

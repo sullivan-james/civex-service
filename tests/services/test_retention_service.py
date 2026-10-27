@@ -41,6 +41,10 @@ def survey(ctx: AppContext, make_schema, make_collection, make_record):
     make_schema("encounter", fields=[("site", "string")])
     make_schema("recording", fields=[("label", "string")], parent="encounter")
     make_collection("humpback")
+    # An edit between the collection's creation and its latest change: the one
+    # entry here that pruning by age may remove.
+    ctx.dataset_svc.update("humpback", description="2024")
+    ctx.dataset_svc.update("humpback", description="2024 season")
     enc = make_record("humpback", "encounter", {"site": "S"})
     recs = [
         make_record(

@@ -917,30 +917,17 @@ def _to_dto(row: Record) -> RecordDTO:
 def parent_allows_restore(record_model, stamp):
     """A condition on records being brought back by a schema's or collection's
     restore: none above it, or the one above is live, or it was deleted at the
-    same moment (and so comes back in the same restore); and its collection
-    allows its schema: every schema unless it has a list of its own, which
-    may have lost this one while the record was deleted. The one rule both restores (and sync, which uses
-    them) follow: a record comes back only where it could be added."""
-    from sqlalchemy import and_, exists, or_
+    same moment (and so comes back in the same restore). The one rule both
+    restores (and sync, which uses them) follow: a record comes back only
+    where it could be added."""
+    from sqlalchemy import exists, or_
     from sqlalchemy.orm import aliased
 
-    from civex.db.models import DatasetSchema
-
     above = aliased(record_model)
-    return and_(
-        or_(
-            record_model.parent_record_id.is_(None),
-            exists().where(
-                above.id == record_model.parent_record_id,
-                or_(above.deleted_at.is_(None), above.deleted_at == stamp),
-            ),
-        ),
-        or_(
-            # no list: every schema is allowed
-            ~exists().where(DatasetSchema.dataset_id == record_model.dataset_id),
-            exists().where(
-                DatasetSchema.dataset_id == record_model.dataset_id,
-                DatasetSchema.schema_id == record_model.schema_id,
-            ),
+    return or_(
+        record_model.parent_record_id.is_(None),
+        exists().where(
+            above.id == record_model.parent_record_id,
+            or_(above.deleted_at.is_(None), above.deleted_at == stamp),
         ),
     )

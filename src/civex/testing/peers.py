@@ -398,7 +398,6 @@ def build_study(ctx):
     ctx.schema_svc.add_field("encounter", "site", "string")
     ctx.schema_svc.add_field("encounter", "depth", "float")
     ctx.dataset_svc.create("study")
-    ctx.dataset_svc.update("study", schemas=["encounter"])
     record = ctx.record_svc.add("study", "encounter", {"site": "x", "depth": 1.0})
     ctx.commit()
     return record

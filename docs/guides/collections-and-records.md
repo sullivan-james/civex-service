@@ -36,9 +36,8 @@ A `reference` field links to records in its own collection or in a global one,
 never in another local collection. A global collection that others link to can't
 be made local or deleted.
 
-Every collection holds records of every schema. For a script that wants a
-collection limited to some, `--schema` (and `add-schema`) give it a list of
-its own; nothing in the app asks for one.
+Every collection holds records of every schema, including one made after the
+collection: there is no list of schemas on a collection to keep up to date.
 
 **In the app:** **Collections → New collection**, and **Edit** on a collection's
 page.

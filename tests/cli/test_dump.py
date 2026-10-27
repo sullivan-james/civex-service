@@ -96,9 +96,7 @@ def test_dump_and_restore_keep_field_restrictions_and_name_templates(
         restrictions={"filename_template": "{depth}-{species}"},
     )
     ctx.schema_svc.update("encounter", display_template="{depth}")
-    ctx.dataset_svc.create(
-        "study", timezone="Europe/London", schemas=["species", "encounter"]
-    )
+    ctx.dataset_svc.create("study", timezone="Europe/London")
     ctx.commit()
     ctx.close()
 

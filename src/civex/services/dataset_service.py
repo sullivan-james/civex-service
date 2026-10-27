@@ -18,7 +18,6 @@ from civex.repositories.protocols import AuditRepository, DatasetRepository
 
 if TYPE_CHECKING:
     from civex.services.record_service import RecordService
-    from civex.services.schema_service import SchemaService
 
 
 @contextmanager
@@ -32,7 +31,6 @@ class DatasetService:
         self,
         dataset_repo: DatasetRepository,
         audit_repo: AuditRepository | None = None,
-        schema_svc: SchemaService | None = None,
         record_svc: RecordService | None = None,
         on_purge: Callable[[uuid.UUID], object] | None = None,
         permissions: Permissions = EVERYTHING,
@@ -40,31 +38,10 @@ class DatasetService:
         self._permissions = permissions
         self._datasets = dataset_repo
         self._audit = audit_repo
-        self._schema_svc = schema_svc
         self._record_svc = record_svc
         # Called with the id of every purged collection, so anything keyed by
         # collection id elsewhere (storage placement) can drop it.
         self._on_purge = on_purge
-
-    def _check_schema_list(self, names: list[str]) -> list[str]:
-        """A collection with no list holds records of every schema. One with a
-        list holds only those: every name must be a live schema, and every listed child schema's
-        ancestors must be listed too: a child record's parent record lives in
-        the same collection, so the collection has to be able to hold it."""
-        unique = sorted(set(names))
-        if self._schema_svc is None:
-            return unique
-        listed = set(unique)
-        for name in unique:
-            schema = self._schema_svc.get(name)  # NotFoundError if unknown
-            for ancestor in self._schema_svc.ancestors(schema):
-                if ancestor.name not in listed:
-                    raise ValidationError(
-                        f"Schema '{name}' inherits from '{ancestor.name}', so "
-                        f"'{ancestor.name}' must be in the collection's schema "
-                        "list too"
-                    )
-        return unique
 
     def _check_not_referenced(self, dataset: DatasetDTO, action: str) -> None:
         """A global collection that records in other collections reference
@@ -89,7 +66,6 @@ class DatasetService:
         description: str | None = None,
         timezone: str | None = None,
         scope: str = LOCAL,
-        schemas: list[str] | None = None,
     ) -> DatasetDTO:
         self._permissions.require(permissions.CHANGE_STRUCTURE)
         if self._datasets.get_by_name(name):
@@ -97,12 +73,9 @@ class DatasetService:
         if timezone:
             timezone = validate_timezone(timezone)
         scope = validate_scope(scope)
-        schema_names = self._check_schema_list(schemas or [])
         dto = self._datasets.create(
             name=name, description=description, timezone=timezone or None, scope=scope
         )
-        if schema_names:
-            dto = self._datasets.set_schemas(dto.id, schema_names)
         if self._audit:
             self._audit.log_change("create", "dataset", dto.id, None, dto.to_dict())
         return dto
@@ -127,11 +100,10 @@ class DatasetService:
                 uuid.UUID(ref),
                 include_deleted=True,
                 with_count=False,
-                with_schemas=False,
             )
         except ValueError:
             dto = self._datasets.get_by_name(
-                ref, include_deleted=True, with_count=False, with_schemas=False
+                ref, include_deleted=True, with_count=False
             )
         if dto is None:
             raise NotFoundError(f"Dataset '{ref}' not found")
@@ -142,7 +114,7 @@ class DatasetService:
         found: dict[uuid.UUID, DatasetDTO] = {}
         for dataset_id in ids:
             dto = self._datasets.get_by_id(
-                dataset_id, include_deleted=True, with_count=False, with_schemas=False
+                dataset_id, include_deleted=True, with_count=False
             )
             if dto:
                 found[dataset_id] = dto
@@ -160,10 +132,9 @@ class DatasetService:
         description: str | None = None,
         timezone: str | None = None,
         scope: str | None = None,
-        schemas: list[str] | None = None,
     ) -> DatasetDTO:
         """`timezone`: None = unchanged, "" = clear, otherwise an IANA zone.
-        `scope` / `schemas`: None = unchanged; `schemas` replaces the list."""
+        `scope`: None = unchanged."""
         self._permissions.require(permissions.CHANGE_STRUCTURE)
         if timezone:
             timezone = validate_timezone(timezone)
@@ -175,21 +146,6 @@ class DatasetService:
             scope = validate_scope(scope)
             if scope == LOCAL and dataset.scope == GLOBAL:
                 self._check_not_referenced(dataset, "make local")
-        schema_names: list[str] | None = None
-        if schemas is not None:
-            schema_names = self._check_schema_list(schemas)
-            # An empty list is "every schema", so clearing it never strands a
-            # record; a list of some schemas must keep the ones with records.
-            in_use = (
-                self._datasets.schemas_in_use(dataset.id) - set(schema_names)
-                if schema_names
-                else set()
-            )
-            if in_use:
-                raise ValidationError(
-                    f"Cannot remove schema '{sorted(in_use)[0]}' from "
-                    f"'{dataset.name}': it still has records here"
-                )
         old_dict = dataset.to_dict()
         updated = self._datasets.update(
             dataset.id,
@@ -198,32 +154,11 @@ class DatasetService:
             timezone=timezone,
             scope=scope,
         )
-        if schema_names is not None:
-            updated = self._datasets.set_schemas(dataset.id, schema_names)
         if self._audit:
             self._audit.log_change(
                 "update", "dataset", updated.id, old_dict, updated.to_dict()
             )
         return updated
-
-    def add_schemas(self, name: str, schemas: list[str]) -> DatasetDTO:
-        """Enable more schemas on a collection, along with any ancestor
-        schemas they need. Idempotent: schemas already listed are kept."""
-        self._permissions.require(permissions.CHANGE_STRUCTURE)
-        dataset = self.get(name)
-        wanted = set(dataset.schemas)
-        for schema_name in schemas:
-            wanted.add(schema_name)
-            if self._schema_svc is not None:
-                wanted.update(
-                    a.name
-                    for a in self._schema_svc.ancestors(
-                        self._schema_svc.get(schema_name)
-                    )
-                )
-        if wanted == set(dataset.schemas):
-            return dataset
-        return self.update(name, schemas=sorted(wanted))
 
     def delete(self, name: str) -> None:
         """Soft-delete: the collection (and every record in it — see

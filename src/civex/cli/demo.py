@@ -70,7 +70,6 @@ def demo(
     ctx.dataset_svc.create(
         "amazon-survey-2024",
         description="Amazon field survey 2024",
-        schemas=["deployment", "detection"],
     )
 
     # --- Deployment records ---

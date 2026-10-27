@@ -452,13 +452,6 @@ class DatasetResponse(BaseModel):
             "collection)."
         ),
     )
-    schemas: list[str] = Field(
-        default_factory=list,
-        description=(
-            "Names of the schemas this collection is for. Records in it can "
-            "only be of these schemas."
-        ),
-    )
 
     @classmethod
     def from_dto(cls, dto: DatasetDTO) -> DatasetResponse:
@@ -470,7 +463,6 @@ class DatasetResponse(BaseModel):
             deleted_at=dto.deleted_at,
             timezone=dto.timezone,
             scope=dto.scope,
-            schemas=list(dto.schemas),
         )
 
 
@@ -484,13 +476,6 @@ class CreateDatasetRequest(BaseModel):
     scope: str = Field(
         default="local",
         description="'local' (default) or 'global' -- see the collection's `scope`.",
-    )
-    schemas: list[str] = Field(
-        default_factory=list,
-        description=(
-            "Names of the schemas the collection is for. A child schema's "
-            "parent schema must be listed too."
-        ),
     )
 
 
@@ -509,14 +494,6 @@ class UpdateDatasetRequest(BaseModel):
         description=(
             "'local' or 'global'. Omit or null to leave unchanged. A global "
             "collection that other collections reference can't become local."
-        ),
-    )
-    schemas: list[str] | None = Field(
-        default=None,
-        description=(
-            "Limit the collection to these schemas (an empty list allows every schema). Omit or null to leave "
-            "unchanged. A schema with records in the collection can't be "
-            "removed."
         ),
     )
 

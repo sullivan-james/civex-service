@@ -1,5 +1,6 @@
-"""Collection scope (local/global), per-collection schema lists, and the rule
-that a reference may only point into its own collection or a global one."""
+"""Collection scope (local/global) and the rule that a reference may only point
+into its own collection or a global one. A collection holds records of every
+schema; there is no list to keep."""
 
 from __future__ import annotations
 
@@ -19,16 +20,12 @@ def species_schemas(make_schema):
 # --- creating and updating collections ---
 
 
-def test_defaults_to_local_with_no_schemas(ctx: AppContext, make_collection):
-    c = make_collection("study")
-    assert c.scope == "local"
-    assert c.schemas == []
+def test_defaults_to_local(ctx: AppContext, make_collection):
+    assert make_collection("study").scope == "local"
 
 
-def test_create_with_scope_and_schemas(ctx: AppContext, make_schema, make_collection):
-    make_schema("species")
-    c = make_collection("taxonomy", scope="global", schemas=["species"])
-    assert (c.scope, c.schemas) == ("global", ["species"])
+def test_create_with_scope(ctx: AppContext, make_collection):
+    assert make_collection("taxonomy", scope="global").scope == "global"
 
 
 def test_invalid_scope_rejected(ctx: AppContext):
@@ -36,59 +33,17 @@ def test_invalid_scope_rejected(ctx: AppContext):
         ctx.dataset_svc.create("x", scope="everywhere")
 
 
-def test_child_schema_needs_its_parent_listed(ctx: AppContext, make_schema):
-    make_schema("deployment")
-    make_schema("detection", parent="deployment")
-    with pytest.raises(ValidationError, match="deployment"):
-        ctx.dataset_svc.create("study", schemas=["detection"])
-
-
-def test_add_schemas_brings_ancestors_and_is_idempotent(
+def test_a_collection_holds_records_of_every_schema(
     ctx: AppContext, make_schema, make_collection
 ):
-    make_schema("deployment")
-    make_schema("detection", parent="deployment")
-    make_collection("study")
-    c = ctx.dataset_svc.add_schemas("study", ["detection"])
-    assert c.schemas == ["deployment", "detection"]
-    assert ctx.dataset_svc.add_schemas("study", ["detection"]).schemas == c.schemas
-
-
-def test_cannot_remove_a_schema_that_has_records(
-    ctx: AppContext, make_schema, make_collection, strict_schema_lists
-):
-    make_schema("species")
-    make_schema("site")
-    make_collection("taxonomy", schemas=["species"])
-    ctx.record_svc.add("taxonomy", "species", {})
-    ctx.commit()
-    with pytest.raises(ValidationError, match="still has records"):
-        ctx.dataset_svc.update("taxonomy", schemas=["site"])
-    # clearing the list means every schema, so nothing is stranded
-    assert ctx.dataset_svc.update("taxonomy", schemas=[]).schemas == []
-
-
-# --- the schema list gates record creation ---
-
-
-def test_a_collection_without_a_list_holds_every_schema(
-    ctx: AppContext, make_schema, make_collection, strict_schema_lists
-):
+    """Including one made after the collection: nothing lists schemas on a
+    collection, so a new kind of record can always be added where the person
+    is working."""
     make_schema("species")
     make_collection("taxonomy")
     assert ctx.record_svc.add("taxonomy", "species", {}).dataset_name == "taxonomy"
-
-
-def test_a_collection_with_a_list_holds_only_those(
-    ctx: AppContext, make_schema, make_collection, strict_schema_lists
-):
-    make_schema("species")
     make_schema("site")
-    make_collection("taxonomy", schemas=["site"])
-    with pytest.raises(ValidationError, match="not enabled"):
-        ctx.record_svc.add("taxonomy", "species", {})
-    ctx.dataset_svc.add_schemas("taxonomy", ["species"])
-    assert ctx.record_svc.add("taxonomy", "species", {}).dataset_name == "taxonomy"
+    assert ctx.record_svc.add("taxonomy", "site", {}).dataset_name == "taxonomy"
 
 
 # --- the reference rule ---
@@ -191,19 +146,14 @@ def test_find_by_schema_reachable_from_skips_other_local_collections(
 # --- HTTP ---
 
 
-def test_api_round_trips_scope_and_schemas(client: TestClient):
+def test_api_round_trips_scope_and_takes_no_schema_list(client: TestClient):
     client.post("/api/schemas", json={"name": "species"})
     r = client.post(
         "/api/collections",
         json={"name": "taxonomy", "scope": "global", "schemas": ["species"]},
     )
     assert r.status_code == 201, r.text
-    assert (r.json()["scope"], r.json()["schemas"]) == ("global", ["species"])
+    assert r.json()["scope"] == "global"
+    assert "schemas" not in r.json()  # an old client's list is ignored
     r = client.patch("/api/collections/taxonomy", json={"scope": "local"})
     assert r.json()["scope"] == "local"
-    assert (
-        client.post(
-            "/api/collections", json={"name": "bad", "schemas": ["nope"]}
-        ).status_code
-        == 404
-    )

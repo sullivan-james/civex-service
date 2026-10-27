@@ -8,7 +8,7 @@ from civex.repositories.local.record_repo import parent_allows_restore
 from sqlalchemy.orm import Session
 
 from civex.repositories.local._jobs import bulk_delete_jobs
-from civex.db.models import Dataset, DatasetSchema, Record, Schema, WorkflowJob
+from civex.db.models import Dataset, Record, WorkflowJob
 from civex.domain.dtos import DatasetDTO
 from civex.domain.exceptions import NotFoundError
 
@@ -22,26 +22,24 @@ class LocalDatasetRepository:
         name: str,
         include_deleted: bool = False,
         with_count: bool = True,
-        with_schemas: bool = True,
     ) -> DatasetDTO | None:
         q = self._s.query(Dataset).filter_by(name=name)
         if not include_deleted:
             q = q.filter(Dataset.deleted_at.is_(None))
         row = q.first()
-        return _to_dto(self._s, row, with_count, with_schemas) if row else None
+        return _to_dto(self._s, row, with_count) if row else None
 
     def get_by_id(
         self,
         id: uuid.UUID,
         include_deleted: bool = False,
         with_count: bool = True,
-        with_schemas: bool = True,
     ) -> DatasetDTO | None:
         q = self._s.query(Dataset).filter_by(id=id)
         if not include_deleted:
             q = q.filter(Dataset.deleted_at.is_(None))
         row = q.first()
-        return _to_dto(self._s, row, with_count, with_schemas) if row else None
+        return _to_dto(self._s, row, with_count) if row else None
 
     def list_all(self, with_count: bool = True) -> list[DatasetDTO]:
         return _to_dtos(
@@ -102,37 +100,6 @@ class LocalDatasetRepository:
             row.scope = scope
         self._s.flush()
         return _to_dto(self._s, row)
-
-    def set_schemas(self, id: uuid.UUID, schema_names: list[str]) -> DatasetDTO:
-        row = self._s.query(Dataset).filter_by(id=id).first()
-        if row is None:
-            raise NotFoundError(f"Dataset '{id}' not found")
-        wanted = set(schema_names)
-        schemas = (
-            self._s.query(Schema)
-            .filter(Schema.name.in_(wanted), Schema.deleted_at.is_(None))
-            .all()
-            if wanted
-            else []
-        )
-        missing = wanted - {s.name for s in schemas}
-        if missing:
-            raise NotFoundError(f"Schema '{sorted(missing)[0]}' not found")
-        row.schema_links = [
-            DatasetSchema(dataset_id=id, schema_id=s.id) for s in schemas
-        ]
-        self._s.flush()
-        return _to_dto(self._s, row)
-
-    def schemas_in_use(self, id: uuid.UUID) -> set[str]:
-        rows = (
-            self._s.query(Schema.name)
-            .join(Record, Record.schema_id == Schema.id)
-            .filter(Record.dataset_id == id, Record.deleted_at.is_(None))
-            .distinct()
-            .all()
-        )
-        return {name for (name,) in rows}
 
     def delete(self, id: uuid.UUID, stamp: datetime | None = None) -> None:
         """Soft-delete: mark the dataset deleted and cascade to every record
@@ -214,26 +181,20 @@ def _to_dto(
     session: Session,
     row: Dataset,
     with_count: bool = True,
-    with_schemas: bool = True,
 ) -> DatasetDTO:
-    return _to_dtos(session, [row], with_count, with_schemas)[0]
+    return _to_dtos(session, [row], with_count)[0]
 
 
 def _to_dtos(
     session: Session,
     rows: list[Dataset],
     with_count: bool = True,
-    with_schemas: bool = True,
 ) -> list[DatasetDTO]:
-    """DTOs for `rows`, their schema lists from one query for the lot.
-
-    The live-record count scans a collection's records, so a caller that only
-    needs the collections themselves (every record write looks one up) skips
-    it, leaving `record_count` at 0; one that doesn't read `schemas` skips
-    that lookup too."""
+    """DTOs for `rows`. The live-record count scans a collection's records, so
+    a caller that only needs the collections themselves (every record write
+    looks one up) skips it, leaving `record_count` at 0."""
     if not rows:
         return []
-    ids = [r.id for r in rows]
     counts: dict[uuid.UUID, int] = {}
     if with_count:
         # One indexed count per collection, not a single GROUP BY: counted
@@ -247,21 +208,6 @@ def _to_dtos(
                 .scalar()
                 or 0
             )
-    schema_names: dict[uuid.UUID, list[str]] = {}
-    schema_ids: dict[uuid.UUID, list[uuid.UUID]] = {}
-    for dataset_id, schema_id, name in (
-        ()
-        if not with_schemas
-        else (
-            session.query(DatasetSchema.dataset_id, Schema.id, Schema.name)
-            .join(Schema, DatasetSchema.schema_id == Schema.id)
-            .filter(DatasetSchema.dataset_id.in_(ids))
-            .order_by(Schema.name)
-            .all()
-        )
-    ):
-        schema_names.setdefault(dataset_id, []).append(name)
-        schema_ids.setdefault(dataset_id, []).append(schema_id)
     return [
         DatasetDTO(
             id=row.id,
@@ -272,8 +218,6 @@ def _to_dtos(
             deleted_at=row.deleted_at,
             timezone=row.timezone,
             scope=row.scope,
-            schemas=schema_names.get(row.id, []),
-            schema_ids=schema_ids.get(row.id, []),
         )
         for row in rows
     ]

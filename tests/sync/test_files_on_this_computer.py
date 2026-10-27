@@ -115,7 +115,6 @@ def test_a_file_a_kept_collection_also_uses_stays(pair):
     laptop, _, record = pair
     ref = _with_file(laptop, record, b"shared")
     laptop.dataset_svc.create("archive")
-    laptop.dataset_svc.update("archive", schemas=["encounter"])
     laptop.record_svc.add(
         "archive", "encounter", {"site": "a", "depth": 1.0, "scan": ref.to_dict()}
     )
