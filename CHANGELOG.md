@@ -23,6 +23,57 @@ from the next tag forward.
 
 ## Unreleased
 
+### Breaking
+
+- Migration `c4d8e2f6a9b3`: the key that holds a record to its parent's
+  collection is now checked when a transaction commits rather than at each
+  statement (`DEFERRABLE INITIALLY DEFERRED`), so a tree of records can move
+  one record at a time. On SQLite the `records` table is rebuilt. Nothing
+  to do by hand.
+
+- **`civex dump`/`civex restore` are replaced by bundles.** `civex bundle
+  export|show|import`, `GET /bundle`, `GET /bundle/plan`, `POST /bundle/import`,
+  and **Export bundle…** / **Import bundle…** on the Collections page. A bundle
+  is a zip (`bundle.json`, `records.jsonl`, `files/<sha256>`, `workflows/`,
+  `plugins/`) that keeps record ids, so records inside others and references
+  survive the move to another project, and carries the stored files the
+  records cite unless `--no-files` (the app's dialog says how many files and
+  bytes that is). Importing matches schemas and collections by name and records
+  by id (what is already there is left alone, so a bundle can be imported
+  again), writes each record through the usual checks and history, defers a
+  record until the record it sits inside and the records it references are
+  there, and is one `import` event in Activity. A file whose bytes don't hash
+  to their name is refused. `civex dump`/`restore` and `GET /dump`, `POST
+  /restore` are gone; a YAML dump from an older release is read by that
+  release.
+- **Records can be moved to another collection**, or inside another record
+  there: `civex record move <ids> --to <collection> [--under <record>]`,
+  `civex record move-all` for everything a query lists, `POST
+  /records/move` (and `/records/move/plan`, the same rule as a preview), and
+  **Move to…** on the explorer's selection bar beside Delete. A record keeps
+  its id, values and history and takes everything beneath it along; files are
+  stored by content and stay where they are; the move is one event in
+  Activity (`move`), reads in a record's history as "Collection: a → b", and
+  is refused whole when a reference would break, a uniqueness key is taken
+  where it would land, or the kind can't sit there. Over sync a move is one
+  action, taken or held whole: a device with an unsent change beneath a moved
+  record waits for its push before taking the move, a child's collection
+  follows its parent on the authority when the parent moved meanwhile, and a
+  refused move is put back on the device that made it.
+- **The guided import is gone.** The spreadsheet and folder wizard
+  (**New ▸ Import data…**, a schema page's **Import data**) read the file in
+  the browser, guessed a schema from it and made a request per row, and led
+  people to shape their records around a file rather than the other way
+  round. Records are added from the **New** menu; a folder of files comes in
+  through a workflow (`civex.create_records_from_files`,
+  `civex.match_files_to_records`), which can be saved and run again.
+- **The desktop app installs civex onto a pinned Python (3.13).** The
+  launcher and the in-app updater used to let uv pick the newest CPython it
+  could download; once that became 3.15, which PyYAML has no wheel for, a
+  fresh install on Windows tried to compile it and failed asking for Visual
+  C++ Build Tools. Both now set `UV_PYTHON` (the launcher's `PYTHON`,
+  `updates.APP_PYTHON`), so a new setup exe is needed for the fix to reach a
+  first install.
 - A server serves the project it is asked for, not the one in its working
   directory: `deps.current_project` resolves it once per request (a host
   serving many projects installs `app.state.project_resolver`), a context is
@@ -58,6 +109,18 @@ from the next tag forward.
   record's) **Their files** filters by **On the server** / **Not on the server
   yet**, marks each file not sent yet, and shows files going up live, with
   **Send now**. A missing file says so, and which computer added it.
+- **Versions are shown, not enforced.** Settings → Sync and `civex sync
+  now|status` show the civex on this computer and on the server. Whether two
+  can sync is still decided by the sync protocol alone, so updating a server
+  doesn't cut devices off; a server that will stop accepting an older civex at
+  its next update says so first, and those devices show *Update civex soon*.
+  A field of a type this civex doesn't know stops a sync before anything is
+  applied.
+- **Sync and connect failures in plain words.** One sentence saying what to do
+  (a database problem points to `civex doctor`), with the technical text in
+  the log, behind *Technical details* in Settings → Sync, and dimmed in the
+  CLI. `civex doctor` now checks that the database has every table and column
+  this civex expects, whatever revision it is stamped at.
 - **Every collection in one view**: `/collections` has an **All records** tab,
   the records explorer across every collection, with **Their files** listing
   every file in the project (a filter or a record narrows it as usual).
@@ -118,10 +181,14 @@ from the next tag forward.
   uses the app's words, and when someone describes one thing rather than a kind
   of thing it proposes a record instead of a new schema.
 - **A collection holds records of every schema.** The schema checklist is gone
-  from the collection forms; nothing in the app picks schemas for a collection
-  any more. A list given from the command line (`civex collection create|update
-  --schema`, `add-schema`) still restricts, and an empty list means every
-  schema, so nothing existing changes and no migration is needed.
+  from the collection forms, the command line (`--schema` on `collection
+  create|update`, `collection add-schema`) and the API, and the list itself is
+  gone from the database (migration `b3c7d1e9f5a2` drops `dataset_schemas`,
+  with every list in it): a schema made after a collection can be used in it
+  at once, and nothing has to keep a list right. Collections made before this
+  release lose the list they were given when they were made. The sync
+  protocol is now 3 (a collection's change no longer carries `schema_ids` and
+  `schemas`); every machine on a project needs this release.
 - **Starting a collection no longer sends you to the Schemas page first.** An
   empty collection is a short two-step guide with its own **New schema…**
   button, apart from **New**; the same button sits under the schema rail of a

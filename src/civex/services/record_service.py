@@ -21,6 +21,8 @@ from civex.domain.dtos import (
     FieldValueDTO,
     FileRef,
     RecordDTO,
+    RecordMovePlanDTO,
+    RecordMoveResultDTO,
     ReferrerGroupDTO,
     ResolvedField,
     ResolvedSchema,
@@ -362,6 +364,10 @@ def _hashable(value: Any) -> Any:
     if isinstance(value, (int, float)):
         return float(value)
     return value
+
+
+def _count(n: int, noun: str) -> str:
+    return f"{n} {noun}{'' if n == 1 else 's'}"
 
 
 def _join_names(names: list[str], cap: bool = False) -> str:
@@ -862,7 +868,6 @@ class RecordService:
                     dataset_id,
                     include_deleted=True,
                     with_count=False,
-                    with_schemas=False,
                 )
                 dataset_names[dataset_id] = ds.name if ds else None
             return dataset_names[dataset_id]
@@ -1263,16 +1268,6 @@ class RecordService:
                 ) from None
         return out
 
-    def _check_schema_allowed(self, dataset: DatasetDTO, schema: SchemaDTO) -> None:
-        """A collection holds records of every schema, unless it was given a
-        list of its own (`civex collection update --schema`), in which case
-        only those."""
-        if dataset.schemas and schema.name not in dataset.schemas:
-            raise ValidationError(
-                f"Schema '{schema.name}' is not enabled for collection "
-                f"'{dataset.name}' -- add it to the collection's schemas first"
-            )
-
     def _check_unique(
         self,
         shape: ResolvedSchema | None,
@@ -1378,7 +1373,6 @@ class RecordService:
                     target.dataset_id,
                     include_deleted=True,
                     with_count=False,
-                    with_schemas=False,
                 )
             owner = owners[target.dataset_id]
             if owner is None or not can_reference(dataset.id, owner.id, owner.scope):
@@ -1406,7 +1400,6 @@ class RecordService:
                     dataset_id,
                     include_deleted=True,
                     with_count=False,
-                    with_schemas=False,
                 )
             ds = datasets[dataset_id]
             field_name, dtype = field_map[str(field_id)]
@@ -1581,9 +1574,12 @@ class RecordService:
                     "The record it sits under was deleted on the server"
                 )
 
-        if head is None or head.get("deleted_at"):
-            # Made, or brought back: only where it could be added.
-            self._check_schema_allowed(dataset, shape.schema)
+        moved = head is not None and (
+            str(head.get("parent_record_id") or "") != str(parent_id or "")
+            or str(head.get("dataset_id")) != str(dataset_id)
+        )
+        if head is None or head.get("deleted_at") or moved:
+            # Made, brought back, or moved: only where it could be added.
             if shape.schema.parent_id:
                 parent = self._records.get_by_id(parent_id) if parent_id else None
                 if parent is None:
@@ -1592,6 +1588,11 @@ class RecordService:
                         "schema: its parent record does not exist here"
                     )
                 self._check_parent(parent, dataset, shape.schema)
+            elif moved and parent_id is not None:
+                raise ValidationError(
+                    f"A '{shape.schema.name}' sits at the top of a collection, "
+                    "not inside another record"
+                )
         # A record that is deleted here and comes back is checked in full: its
         # stored values say nothing about whether they still fit.
         before = head.get("data") or {} if head and not head.get("deleted_at") else None
@@ -1657,18 +1658,23 @@ class RecordService:
         _job_depth: int = 0,
         _cause: dict[str, Any] | None = None,
         with_labels: bool = True,
+        record_id: uuid.UUID | None = None,
+        created_at: _dt | None = None,
+        updated_at: _dt | None = None,
     ) -> RecordDTO:
         """Create a record. `with_labels=False` skips resolving its reference
         values' display names and collection for the returned DTO (a few
-        queries) -- for loops, like a restore, that discard the result."""
+        queries) -- for loops, like an import, that discard the result.
+        `record_id` and the dates are for a record brought in from another
+        project (a bundle): it keeps its identity, so what sits inside it and
+        what references it still mean the same; the caller has checked the id
+        is free."""
         dataset = self._datasets.get_by_name(dataset_name, with_count=False)
         if not dataset:
             raise NotFoundError(f"Dataset '{dataset_name}' not found")
         self._permissions.require(permissions.WRITE_RECORDS, dataset.id)
 
         schema = self._schema_svc.get(schema_name)
-        self._check_schema_allowed(dataset, schema)
-
         shape = self._schema_svc.resolve(schema)
         parent_record = (
             self._records.get_by_prefix(parent_record_id)
@@ -1709,6 +1715,9 @@ class RecordService:
             schema_id=schema.id,
             data=id_data,
             parent_record_id=resolved_parent_id,
+            id=record_id,
+            created_at=created_at,
+            updated_at=updated_at,
         )
         shapes = self._schema_svc.resolver()
         shapes.prime(shape)
@@ -1737,6 +1746,14 @@ class RecordService:
         return (
             self._attach_reference_labels([named], shapes)[0] if with_labels else named
         )
+
+    def exists(self, record_id: str) -> bool:
+        """Whether a record with this id is here, live or deleted."""
+        try:
+            rid = uuid.UUID(record_id)
+        except ValueError:
+            return False
+        return self._records.get_by_id(rid, include_deleted=True) is not None
 
     def get(self, record_id: str) -> RecordDTO:
         record = self._records.get_by_prefix(record_id)
@@ -1850,7 +1867,6 @@ class RecordService:
                 raw.dataset_id,
                 include_deleted=True,
                 with_count=False,
-                with_schemas=False,
             )
             if raw.dataset_id
             else None
@@ -1923,9 +1939,7 @@ class RecordService:
         resolve, so a bad query fails loudly instead of matching nothing."""
         dataset_id = None
         if query.dataset:
-            dataset = self._datasets.get_by_name(
-                query.dataset, with_count=False, with_schemas=False
-            )
+            dataset = self._datasets.get_by_name(query.dataset, with_count=False)
             if not dataset:
                 raise NotFoundError(f"Dataset '{query.dataset}' not found")
             dataset_id = dataset.id
@@ -2260,9 +2274,7 @@ class RecordService:
         schema = self._schema_svc.get(schema_name)
         dataset_ids = None
         if reachable_from:
-            source = self._datasets.get_by_name(
-                reachable_from, with_count=False, with_schemas=False
-            )
+            source = self._datasets.get_by_name(reachable_from, with_count=False)
             if not source:
                 raise NotFoundError(f"Dataset '{reachable_from}' not found")
             dataset_ids = [source.id] + [
@@ -2290,9 +2302,7 @@ class RecordService:
             return []
         dataset_id = None
         if collection:
-            dataset = self._datasets.get_by_name(
-                collection, with_count=False, with_schemas=False
-            )
+            dataset = self._datasets.get_by_name(collection, with_count=False)
             if not dataset:
                 raise NotFoundError(f"Dataset '{collection}' not found")
             dataset_id = dataset.id
@@ -2705,9 +2715,7 @@ class RecordService:
     ) -> list[RecordDTO]:
         dataset_id = None
         if dataset_name:
-            dataset = self._datasets.get_by_name(
-                dataset_name, with_count=False, with_schemas=False
-            )
+            dataset = self._datasets.get_by_name(dataset_name, with_count=False)
             if not dataset:
                 raise NotFoundError(f"Dataset '{dataset_name}' not found")
             dataset_id = dataset.id
@@ -2716,6 +2724,328 @@ class RecordService:
                 self._records.list_deleted(dataset_id, offset=offset, limit=limit)
             )
         )
+
+    # ------------------------------------------------------------------
+    # Moving records to another collection (or under another record)
+    # ------------------------------------------------------------------
+
+    def plan_move(
+        self,
+        to: str,
+        parent: str | None = None,
+        *,
+        ids: list[str] | None = None,
+        query: RecordQuery | None = None,
+    ) -> RecordMovePlanDTO:
+        """What moving the chosen records (`ids`, or every record `query`
+        lists) to collection `to` would do, without doing it: how many go,
+        with everything beneath them, and anything in the way. The one rule
+        behind the preview and `move`, so they can't disagree."""
+        return self._move_plan(to, parent, ids=ids, query=query)[0]
+
+    def move(
+        self,
+        to: str,
+        parent: str | None = None,
+        *,
+        ids: list[str] | None = None,
+        query: RecordQuery | None = None,
+    ) -> RecordMoveResultDTO:
+        """Re-point the chosen records at collection `to`, inside `parent`
+        there (or at its top level), with everything beneath them. A record
+        keeps its id, its values and its history: this is a change to where
+        it is, logged as an edit of each record moved (one action per tree,
+        one event for the lot), so it is undoable from Activity and syncs like
+        any other edit. Files are not copied anywhere: they are stored by
+        content, not by collection. Refuses (`ValidationError`) with the plan's
+        problems rather than doing part of it."""
+        plan, roots, records, target = self._move_plan(to, parent, ids=ids, query=query)
+        if plan.problems:
+            raise ValidationError(" ".join(plan.problems))
+        if not records:
+            return RecordMoveResultDTO(roots=0, records=0, collection=target.name)
+        stamp = _dt.now(timezone.utc)
+        root_ids = {r.id for r in roots}
+        if self._audit:
+            tree = _tree_actions(records)
+            with _audit_batch(self._audit, "move", len(records) > 1):
+                for record in records:
+                    after = dataclasses.replace(
+                        record,
+                        dataset_id=target.id,
+                        parent_record_id=(
+                            plan.parent_id
+                            if record.id in root_ids
+                            else record.parent_record_id
+                        ),
+                        updated_at=stamp,
+                    )
+                    self._audit.log_change(
+                        "update",
+                        "record",
+                        record.id,
+                        self._snapshot(record),
+                        self._snapshot(after),
+                        timestamp=stamp,
+                        op=tree[record.id],
+                    )
+        self._records.move(
+            [r.id for r in records], target.id, list(root_ids), plan.parent_id, stamp
+        )
+        return RecordMoveResultDTO(
+            roots=len(roots), records=len(records), collection=target.name
+        )
+
+    def _move_plan(
+        self,
+        to: str,
+        parent: str | None,
+        *,
+        ids: list[str] | None,
+        query: RecordQuery | None,
+    ) -> tuple[RecordMovePlanDTO, list[RecordDTO], list[RecordDTO], DatasetDTO]:
+        """The plan, the roots that would move, every record that would (roots
+        first, then the levels beneath, deleted descendants included: a
+        child can't stay behind in another collection than its parent) and the
+        target collection."""
+        target = self._datasets.get_by_name(to, with_count=False)
+        if target is None:
+            raise NotFoundError(f"Collection '{to}' not found")
+        above: RecordDTO | None = None
+        if parent:
+            above = self._records.get_by_prefix(parent)
+            if above is None:
+                raise NotFoundError(f"Record '{parent}' not found")
+            if above.dataset_id != target.id:
+                raise ValidationError(
+                    f"'{self._deleted_name(above)}' is not in collection '{to}'"
+                )
+        parent_id = above.id if above else None
+        self._permissions.require(permissions.WRITE_RECORDS, target.id)
+
+        chosen = self._chosen_records(ids, query)
+        # Already where they would go: nothing to do for them.
+        roots = [
+            r
+            for r in chosen
+            if not (r.dataset_id == target.id and r.parent_record_id == parent_id)
+        ]
+        skipped = len(chosen) - len(roots)
+        levels = self._records.subtree_levels([r.id for r in roots], deleted=None)
+        every = [rid for level in levels for rid in level]
+        moving = set(every)
+        # A record chosen along with one above it moves with that one.
+        roots = [r for r in roots if r.parent_record_id not in moving]
+        by_id = {r.id: r for r in self._records.list_by_ids(every)}
+        records = [by_id[rid] for rid in every if rid in by_id]
+        self._require_each(permissions.DELETE, records)
+        sources = sorted(
+            {
+                d.name
+                for did in {r.dataset_id for r in records}
+                if (d := self._datasets.get_by_id(did, with_count=False)) is not None
+                and d.id != target.id
+            }
+        )
+        problems: list[str] = []
+        if above is not None and above.id in moving:
+            problems.append("A record can't be moved inside itself.")
+        problems += self._move_kind_problems(roots, above)
+        problems += self._move_reference_problems(records, moving, target)
+        problems += self._move_unique_problems(roots, target, parent_id)
+        plan = RecordMovePlanDTO(
+            collection=target.name,
+            collection_id=target.id,
+            parent_id=parent_id,
+            parent_name=self._deleted_name(above) if above else None,
+            roots=len(roots),
+            records=len(records),
+            skipped=skipped,
+            sources=sources,
+            problems=problems,
+        )
+        return plan, roots, records, target
+
+    def _chosen_records(
+        self, ids: list[str] | None, query: RecordQuery | None
+    ) -> list[RecordDTO]:
+        """The live records a person picked: by id (full or prefix), or every
+        one a query lists."""
+        if ids is not None:
+            full: list[uuid.UUID] = []
+            for rid in ids:
+                try:
+                    full.append(uuid.UUID(rid))
+                except ValueError:
+                    record = self._records.get_by_prefix(rid)
+                    if record:
+                        full.append(record.id)
+            found = self._records.list_by_ids(list(dict.fromkeys(full)))
+        elif query is not None:
+            found = self._records.list_by_ids(
+                self._records.list_ids(self.resolve(query))
+            )
+        else:
+            raise ValidationError("Choose the records to move: ids, or a query")
+        return [r for r in found if r.deleted_at is None]
+
+    def _move_kind_problems(
+        self, roots: list[RecordDTO], above: RecordDTO | None
+    ) -> list[str]:
+        """Each root must be able to sit where it would go: inside `above`
+        only if its kind nests in that record's kind, at the top only if its
+        kind is a top-level one."""
+        problems: list[str] = []
+        for schema_id in dict.fromkeys(r.schema_id for r in roots):
+            schema = self._schema_svc.get_by_id(schema_id, include_deleted=True)
+            if schema is None:
+                continue
+            holder = (
+                self._schema_svc.get_by_id(schema.parent_id, include_deleted=True)
+                if schema.parent_id
+                else None
+            )
+            if above is None and holder is not None:
+                problems.append(
+                    f"A {schema.display_name} sits inside a {holder.display_name}: "
+                    f"choose the {holder.display_name} it goes in."
+                )
+            elif above is not None and schema.parent_id != above.schema_id:
+                problems.append(
+                    f"A {schema.display_name} can't go inside "
+                    f"'{self._deleted_name(above)}' ({above.schema_name}): "
+                    + (
+                        f"it sits inside a {holder.display_name}."
+                        if holder is not None
+                        else "it sits at the top of a collection."
+                    )
+                )
+        return problems
+
+    def _move_reference_problems(
+        self, records: list[RecordDTO], moving: set[uuid.UUID], target: DatasetDTO
+    ) -> list[str]:
+        """A reference reaches a record in the same collection or in a global
+        one. Moving must not break one: from a moved record to one staying
+        behind in a local collection, or from a record staying behind to one
+        moved into a local collection."""
+        problems: list[str] = []
+        live = [r.id for r in records if r.deleted_at is None]
+        target_global = target.scope == GLOBAL
+        collections: dict[uuid.UUID, DatasetDTO | None] = {}
+
+        def collection(dataset_id: uuid.UUID) -> DatasetDTO | None:
+            if dataset_id not in collections:
+                collections[dataset_id] = self._datasets.get_by_id(
+                    dataset_id, with_count=False
+                )
+            return collections[dataset_id]
+
+        outgoing = {
+            rid: tid
+            for rid, _, tid in self._records.references_of(live)
+            if tid not in moving
+        }
+        targets = {
+            r.id: r for r in self._records.list_by_ids(list(set(outgoing.values())))
+        }
+        broken_out: dict[str, set[uuid.UUID]] = {}
+        for rid, tid in outgoing.items():
+            other = targets.get(tid)
+            if other is None or other.dataset_id == target.id:
+                continue
+            holder = collection(other.dataset_id)
+            if holder is not None and holder.scope != GLOBAL:
+                broken_out.setdefault(holder.name, set()).add(rid)
+        for name, referrers in sorted(broken_out.items()):
+            problems.append(
+                f"{_count(len(referrers), 'record')} being moved "
+                f"reference{'s' if len(referrers) == 1 else ''} records that would "
+                f"stay behind in '{name}', which only its own records can "
+                f"reference. Move those too, or make '{name}' global."
+            )
+        if not target_global:
+            field_ids = [uuid.UUID(f) for f in self._reference_field_map()]
+            referrers = {
+                rid
+                for rid, _, _ in self._records.referrers_of(live, field_ids)
+                if rid not in moving
+            }
+            broken_in: dict[str, set[uuid.UUID]] = {}
+            for other in self._records.list_by_ids(list(referrers)):
+                if other.dataset_id == target.id:
+                    continue
+                holder = collection(other.dataset_id)
+                if holder is not None:
+                    broken_in.setdefault(holder.name, set()).add(other.id)
+            for name, found in sorted(broken_in.items()):
+                problems.append(
+                    f"{_count(len(found), 'record')} in '{name}' "
+                    f"reference{'s' if len(found) == 1 else ''} records being moved "
+                    f"and could no longer reach them in '{target.name}'. Move "
+                    f"those too, or make '{target.name}' global."
+                )
+        return problems
+
+    def _move_unique_problems(
+        self, roots: list[RecordDTO], target: DatasetDTO, parent_id: uuid.UUID | None
+    ) -> list[str]:
+        """A root lands in a new place (collection and parent): nothing there
+        may share a uniqueness key with it, and no two roots may share one."""
+        problems: list[str] = []
+        shapes = self._schema_svc.resolver()
+        seen: dict[tuple[uuid.UUID, tuple[str, ...], tuple[Any, ...]], RecordDTO] = {}
+        for root in roots:
+            shape = shapes(root.schema_id)
+            if shape is None or not shape.schema.unique_keys:
+                continue
+            try:
+                self._check_unique(
+                    shape, target.id, parent_id, root.data, exclude_id=root.id
+                )
+            except DuplicateRecordError as e:
+                problems.append(str(e))
+            for key in shape.schema.unique_keys:
+                values = key_values(root.data, key)
+                if values is None:
+                    continue
+                mark = (root.schema_id, tuple(key), tuple(values))
+                other = seen.setdefault(mark, root)
+                if other is not root:
+                    names = [shape.id_to_name.get(i, i) for i in key]
+                    problems.append(
+                        f"Two of the chosen {shape.schema.display_name} records "
+                        f"share the same {_join_names(names)} "
+                        f"('{self._deleted_name(other)}' and "
+                        f"'{self._deleted_name(root)}'): they can't both be "
+                        "in one place."
+                    )
+        return problems
+
+    def placed_with_parent(self, state: dict[str, Any]) -> dict[str, Any]:
+        """The record state with its collection made its parent's, when the
+        parent is held here in another one: a child's collection *is* its
+        parent's, so a change made against a parent that has since moved
+        follows the parent rather than being refused (the state the authority
+        settles on then differs from what was sent, and is sent back)."""
+        parent_id = state.get("parent_record_id")
+        if not parent_id or state.get("deleted_at"):
+            return state
+        try:
+            parent = self._records.get_by_id(
+                uuid.UUID(str(parent_id)), include_deleted=True
+            )
+        except ValueError:
+            return state
+        if parent is None or str(parent.dataset_id) == str(state.get("dataset_id")):
+            return state
+        return {**state, "dataset_id": str(parent.dataset_id)}
+
+    def placement_mismatches(self, record_ids: list[uuid.UUID]) -> int:
+        """How many of these records, or of the records directly beneath them,
+        are in another collection than the record above them: what the
+        database refuses when a transaction commits, asked beforehand."""
+        return self._records.dataset_mismatches(record_ids)
 
     def subtree_ids(self, record_id: str) -> list[uuid.UUID]:
         """A record and every record beneath it, live or deleted."""
@@ -2740,7 +3070,6 @@ class RecordService:
             record.dataset_id,
             include_deleted=True,
             with_count=False,
-            with_schemas=False,
         )
         group = self._restore_group(record)
         blocker = self._restore_blocker(record, dataset)
@@ -3157,9 +3486,7 @@ class RecordService:
         A record blocker carries no name (it takes a rendering per record);
         callers that need one use `restore_plan`."""
         datasets = {
-            did: self._datasets.get_by_id(
-                did, include_deleted=True, with_count=False, with_schemas=False
-            )
+            did: self._datasets.get_by_id(did, include_deleted=True, with_count=False)
             for did in {r.dataset_id for r in records}
         }
         schemas = {

@@ -252,7 +252,6 @@ class TransferService:
                     uuid.UUID(cid),
                     include_deleted=False,
                     with_count=False,
-                    with_schemas=False,
                 )
             except ValueError:
                 problems.append(f"'{cid}' is not a collection id.")

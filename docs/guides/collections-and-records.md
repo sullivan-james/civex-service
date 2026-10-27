@@ -36,9 +36,8 @@ A `reference` field links to records in its own collection or in a global one,
 never in another local collection. A global collection that others link to can't
 be made local or deleted.
 
-Every collection holds records of every schema. For a script that wants a
-collection limited to some, `--schema` (and `add-schema`) give it a list of
-its own; nothing in the app asks for one.
+Every collection holds records of every schema, including one made after the
+collection: there is no list of schemas on a collection to keep up to date.
 
 **In the app:** **Collections → New collection**, and **Edit** on a collection's
 page.
@@ -50,8 +49,8 @@ page.
     (**New ▸ New site**). Inside a record, it lists the types that go inside it
     (inside a visit: **New ▸ New sample**). This is the step you repeat; the
     schema is made once. **Add and add another** saves
-    and gives you a blank form. **New ▸ Import data…** brings in a spreadsheet or
-    a folder of files: see [Import data](../how-to/import-data.md).
+    and gives you a blank form. A folder of files comes in through a workflow:
+    see [Import files](../how-to/import-data.md).
 
 === "CLI"
     ```bash
@@ -132,6 +131,29 @@ civex record update f623        # asks for each field, current value as default
 In the app, edit on the record's page. With a file attached, text, number and
 date fields have **from filename** to fill them from the file's name.
 
+### Moving records to another collection
+
+A record can be moved to another collection, or inside another record there.
+It keeps its id, its values and its history, and takes everything beneath it
+along; its files stay where they are stored. In the app, tick the records in
+the explorer and choose **Move to…**; the dialog says how many records would
+go, with everything inside them, and whether anything is in the way, before
+you confirm. From the command line:
+
+```bash
+civex record move f623 a91c --to archive              # to the top of `archive`
+civex record move f623 --to archive --under 7b2e      # inside a record there
+civex record move f623 --to archive --dry-run         # say what would happen
+civex record move-all survey --schema visit --to archive       # every visit in `survey`
+```
+
+A move is refused whole, and the dialog or the command says why, when a record
+elsewhere references one being moved (a record may only reference its own
+collection's records or a global collection's), a uniqueness key is already
+taken where the records would land, or the kind of record can't sit where it
+would go. The move is one event in Activity, and a record's history reads it
+as a change of collection.
+
 ## Deleting and undoing
 
 ```bash
@@ -158,6 +180,8 @@ See [Undo a mistake](../how-to/undo-mistakes.md) and
 
 ## Copying a project's data
 
-`civex dump` writes schemas, collections, records and workflows to one YAML
-file, and `civex restore` reads it into another project. It leaves out files,
-history and settings. See [Back up a project](../how-to/back-up.md).
+`civex bundle export` writes schemas, collections, records (their ids kept),
+the files they cite and the project's workflows to one file, and `civex bundle
+import` reads it into another project; in the app, **Export bundle…** and
+**Import bundle…** on the Collections page. It leaves out history and
+settings. See [Back up a project](../how-to/back-up.md).

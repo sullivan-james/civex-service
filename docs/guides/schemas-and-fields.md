@@ -1,11 +1,11 @@
-# Schemas & fields
+# Record types & fields
 
-A **schema** is a blank form: the fields one kind of thing has, their types
-and the rules on each. You design it
+A **record type** is a blank form: the fields one kind of thing has, their types
+and the rules on each. The CLI and the API call it a *schema*. You design it
 once; every record of that type is one filled-in copy of the form, and lives in
 a [collection](collections-and-records.md). Types can go inside other types (a
 Site holds Visits, which hold Samples). New to these ideas? Start with
-[Schemas, collections and records](../getting-started/concepts.md).
+[Record types, collections and records](../getting-started/concepts.md).
 
 ## A worked example
 
@@ -44,15 +44,11 @@ Name        name        string    yes       ↑ site
 Location    location    geo                 ↑ site
 ```
 
-Three schemas, designed once. From here on the project only gets records:
+Three record types, designed once. From here on the project only gets records:
 sites, visits and samples.
 
-**In the app** a schema is made on the **Schemas** page. From a collection,
-**New schema…** (its own button, apart from New) takes you there with the collection remembered (and,
-inside a record, the schema the new one goes inside), so the new schema is
-listed where you were. Its page is where fields are added; **+ Add field** at
-the end of any record's form adds one from there too, to every record of the
-kind. Type the label and the name fills itself in; the rules offered depend on
+**In the app:** **Record types → New record type**, then **Add field** on its
+page. Type the label and the name fills itself in. The rules offered depend on
 the kind of field you pick.
 
 ## Field types
@@ -169,7 +165,7 @@ civex schema lint                                                # names that ar
 
 ## Naming records and files
 
-A record's name comes from its schema's **template**. It shows in lists,
+A record's name comes from its record type's **template**. It shows in lists,
 breadcrumbs, references and export folder names.
 
 ```bash
@@ -186,12 +182,12 @@ civex schema update sample --clear-display-template
 | `{visited_on:YYYY-MM-DD}` | a date pattern (`YYYY MM DD HH mm SS`) |
 | `{number:03}`, `{depth:.1f}` | `007`, `12.5` |
 | `{species.common}` | a field of the record the reference `species` points at |
-| `{schema}`, `{id}` | the schema's name, the record's short id |
+| `{schema}`, `{id}` | the record type's name, the record's short id |
 | `{{`, `}}` | literal braces |
 
 - A blank value is dropped with the separator beside it: `{team} - {number}` with
   no team gives just `7`.
-- The first nameable field you add becomes the template, so new schemas
+- The first nameable field you add becomes the template, so new record types
   name records from the start.
 - `{ref.field}` reaches one level through a single `reference` field that names
   its target schema. Editing the target renames at once.
@@ -215,7 +211,7 @@ filters, sorts, columns and templates can use its parents' fields, and parents
 can be filtered by their children ("sites that have a sample where…"). The
 parent can't be changed after creation.
 
-This is still three schemas and many records. Don't make a schema per
+This is still three record types and many records. Don't make a record type per
 site: *Site* is the type, and North Ridge and East Shore are two records of it.
 
 ## Keeping records unique
@@ -226,7 +222,7 @@ civex schema unique sample
 civex schema remove-unique sample number
 ```
 
-In the app: the schema's **Uniqueness** tab.
+In the app: the record type's **Uniqueness** tab.
 
 - Checked among records of that type **under the same parent** (the samples of
   one visit), or for top-level records **in the same collection**.
@@ -252,5 +248,5 @@ civex schema delete sample
 
 A field's type can't change. Removing a field is reversible: records keep their
 values, shown under **Deleted fields** on the record, and restoring the field
-brings them back. Deleting a schema takes its records to Recently Deleted. See
+brings them back. Deleting a record type takes its records to Recently Deleted. See
 [Deleting & restoring data](deleting-and-restoring.md).

@@ -29,7 +29,7 @@ def tree(ctx: AppContext, make_schema, make_collection, make_record):
         parent="recording",
     )
     make_schema("site", fields=[("sitename", "string"), ("scan", "file")])
-    make_collection("hb", schemas=["encounter", "recording", "selection", "site"])
+    make_collection("hb")
 
     class Tree:
         pass

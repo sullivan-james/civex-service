@@ -173,8 +173,8 @@ unhumanized" gap that ticket exists to close).
 - **Topological sort**: does not appear in the frontend, in any public
   (built) doc page, or in user-facing CLI help text — confirmed by
   reading the CLI source: the one hit that looked user-facing on a first
-  pass (`cli/dump.py:16`) is a docstring on a private helper
-  (`_sort_schemas`), not a Typer command, so it never renders as `--help`
+  pass (`domain/bundle.py`) is a docstring on a helper
+  (`sort_schemas`), not a Typer command, so it never renders as `--help`
   output. The only places the phrase survives are internal code
   (`workflows/executor.py`) and `docs/contributing/architecture.md`,
   which is maintainer-only and excluded from the built site

@@ -4,14 +4,11 @@ it in place on every copy."""
 
 from __future__ import annotations
 
-import pytest
 from sqlalchemy import update
 
 from civex.db.models import Record
 
 from civex.testing.peers import connect, device
-
-pytestmark = pytest.mark.usefixtures("strict_schema_lists")
 
 
 def test_a_refused_orphan_comes_back_with_what_it_sits_under(project, authority):
@@ -21,7 +18,6 @@ def test_a_refused_orphan_comes_back_with_what_it_sits_under(project, authority)
     laptop.schema_svc.create("selection", parent="recording")
     laptop.schema_svc.add_field("selection", "n", "integer")
     laptop.dataset_svc.create("survey")
-    laptop.dataset_svc.update("survey", schemas=["recording", "selection"])
     rec = laptop.record_svc.add("survey", "recording", {"label": "R"})
     sels = [
         laptop.record_svc.add(

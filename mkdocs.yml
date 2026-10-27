@@ -94,7 +94,7 @@ nav:
       - Schemas, collections, records: getting-started/concepts.md
       - Five-minute tour: getting-started/tour.md
   - How-to:
-      - Import data: how-to/import-data.md
+      - Import files: how-to/import-data.md
       - Fill fields from file names: how-to/fill-fields-from-filenames.md
       - Put files on another drive: how-to/storage-drives.md
       - Get files out: how-to/export-files.md
@@ -131,6 +131,7 @@ nav:
           - Top-level commands: reference/cli/top-level.md
           - civex ai: reference/cli/ai.md
           - civex automation: reference/cli/automation.md
+          - civex bundle: reference/cli/bundle.md
           - civex collection: reference/cli/collection.md
           - civex db: reference/cli/db.md
           - civex files: reference/cli/files.md

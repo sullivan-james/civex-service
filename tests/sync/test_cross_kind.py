@@ -8,16 +8,12 @@ B reaches the authority first. The random version of all of these is
 
 from __future__ import annotations
 
-import pytest
 
 from civex.testing.peers import connect, device, snapshots
 
 
 # The real "a collection only holds records of its listed schemas" rule, which
 # the rest of the suite switches off (tests/conftest.py).
-pytestmark = pytest.mark.usefixtures("strict_schema_lists")
-
-
 def setup(project, authority):
     a = device(project, authority, "a")
     a.schema_svc.create("site")
@@ -27,7 +23,6 @@ def setup(project, authority):
     a.schema_svc.add_field("visit", "when", "string")
     a.schema_svc.create("other")
     a.dataset_svc.create("survey")
-    a.dataset_svc.update("survey", schemas=["site", "visit", "other"])
     site = a.record_svc.add("survey", "site", {"name": "x", "code": "1"})
     visit = a.record_svc.add(
         "survey", "visit", {"when": "may"}, parent_record_id=str(site.id)
@@ -61,23 +56,6 @@ def test_an_edit_to_a_record_whose_schema_was_deleted_does_not_bring_it_back(
     assert record(authority, site.id)["deleted_at"] is not None
     (refused,) = refusals(b)
     assert "schema 'site' was deleted" in refused.message
-
-
-def test_a_collection_cannot_drop_a_schema_another_device_just_added_records_of(
-    project, authority
-):
-    a, b, _, _ = setup(project, authority)
-    b.record_svc.add("survey", "other", {})
-    b.commit()
-    a.dataset_svc.update("survey", schemas=["site", "visit"])  # none of 'other' here
-    a.commit()
-    b.sync_svc.sync()
-    a.sync_svc.sync()
-
-    listed = authority.dataset_svc.get("survey").schemas
-    assert "other" in listed
-    (refused,) = refusals(a)
-    assert "still has records of it" in refused.message
 
 
 def test_a_unique_key_is_not_set_over_a_duplicate_another_device_just_made(

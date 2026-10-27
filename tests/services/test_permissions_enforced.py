@@ -26,8 +26,8 @@ def study(tmp_path: Path):
     owner.schema_svc.create("sample")
     owner.schema_svc.add_field("sample", "label", "string")
     owner.schema_svc.add_field("sample", "scan", "file")
-    mine = owner.dataset_svc.create("mine", schemas=["sample"])
-    theirs = owner.dataset_svc.create("theirs", schemas=["sample"])
+    mine = owner.dataset_svc.create("mine")
+    theirs = owner.dataset_svc.create("theirs")
     kept = owner.record_svc.add("theirs", "sample", {"label": "kept"})
     owner.commit()
 

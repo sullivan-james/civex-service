@@ -15,7 +15,7 @@ database administrator are needed. Use it from the web app or the command line.
 
 | | Guide |
 |---|---|
-| Bring in a spreadsheet or a folder of files | [Import data](how-to/import-data.md) |
+| Bring in a folder of files | [Import files](how-to/import-data.md) |
 | Fill fields from file names automatically | [Fill fields from file names](how-to/fill-fields-from-filenames.md) |
 | Keep files on an external or network drive | [Put files on another drive](how-to/storage-drives.md) |
 | Hand over files as a folder, zip or table | [Get files out](how-to/export-files.md) |

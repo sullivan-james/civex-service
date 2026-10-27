@@ -11,6 +11,8 @@ import uuid
 from pathlib import Path
 
 import typer
+
+from civex import __version__
 from rich.markup import escape
 from rich.table import Table
 
@@ -111,11 +113,20 @@ def _fetch_history_showing_progress(c) -> None:
 
 def _fail(e: Exception) -> typer.Exit:
     console.print(f"[error]{escape(str(e))}[/error]")
+    if detail := getattr(e, "detail", ""):
+        console.print(f"[dim]{escape(detail)}[/dim]")
     return typer.Exit(1)
 
 
 def _describe(report) -> None:  # noqa: ANN001 — SyncReport
     console.print(f"Received {report.pulled}, sent {report.pushed}")
+    if report.server_version:
+        console.print(
+            f"[dim]civex {__version__} here, {report.server_version} on the "
+            "server[/dim]"
+        )
+    if report.notice:
+        console.print(f"[warning]{report.notice}[/warning]")
     if report.conflicts:
         console.print(
             f"[warning]{report.conflicts} value(s) did not go in as made; "
@@ -473,6 +484,7 @@ def status() -> None:
         console.print("Not following an authority.")
         return
     console.print(f"Authority   {s.remote}")
+    console.print(f"civex       {__version__} on this computer")
     console.print(f"Project     {s.project_id}")
     console.print(f"Paused      {'yes' if s.paused else 'no'}")
     console.print(f"Unsent      {s.pending}")

@@ -32,7 +32,13 @@ from civex.config import (
     ConfigStore,
 )
 from civex.domain import hlc
-from civex.domain.audit_diff import BEFORE, apply_delta, entry_snapshots
+from civex.domain.audit_diff import (
+    AFTER,
+    BEFORE,
+    PLACEMENT_KEYS,
+    apply_delta,
+    entry_snapshots,
+)
 from civex.domain.rates import RateWindow
 from civex.domain.exceptions import (
     NotFoundError,
@@ -60,7 +66,9 @@ from civex.domain.sync import (
     SyncError,
     SyncProgress,
     agree,
+    plain_failure,
     protocol_mismatch,
+    retiring_notice,
     not_on_server_yet,
     SyncTransport,
     snapshot_cursor,
@@ -102,6 +110,10 @@ class SyncReport:
     conflicts: int = 0  # values that did not go in as made
     rejected: int = 0  # changes the authority refused
     waiting: int = 0  # changes held back (a refusal waiting for review)
+    # The civex the server runs, and what to tell a person when it will stop
+    # accepting this one at its next update (`retiring_notice`), as it said.
+    server_version: str | None = None
+    notice: str | None = None
 
     @property
     def changed(self) -> bool:
@@ -658,7 +670,9 @@ class SyncService:
         theirs = (hello.protocol_min, hello.protocol_max)
         if agree(theirs) is None:
             raise SyncError(
-                protocol_mismatch(theirs, "the server", "this computer"),
+                protocol_mismatch(
+                    theirs, "the server", "this computer", hello.server_version
+                ),
                 retryable=False,
             )
 
@@ -696,17 +710,22 @@ class SyncService:
             log.info("sync with %s: starting", self._config.sync.remote)
             try:
                 report = self._sync()
-            except SyncError as e:
+            except Exception as raw:
+                e = plain_failure(raw)
                 log.warning(
-                    "sync with %s failed (%s): %s",
+                    "sync with %s failed (%s): %s%s",
                     self._config.sync.remote,
                     "will retry" if e.retryable else "will not retry until fixed",
                     e,
+                    f" [{e.detail}]" if e.detail else "",
+                    exc_info=e is not raw,
                 )
                 self._commit_quietly()
                 self._repo.record_outcome(str(e))
                 self._commit()
-                raise
+                if e is raw:
+                    raise
+                raise e from raw
             log.info(
                 "sync with %s: received %d, sent %d, conflicts %d, refused %d, "
                 "waiting %d",
@@ -742,7 +761,10 @@ class SyncService:
                 "to finish it.",
                 retryable=False,
             )
-        report = SyncReport()
+        report = SyncReport(
+            server_version=hello.server_version,
+            notice=retiring_notice(hello.protocol_retiring, hello.protocol_version),
+        )
         if meta.cursor < hello.feed_floor:
             self._copy_again(transport, hello, report)
         report.pulled += self._pull(transport)
@@ -763,33 +785,150 @@ class SyncService:
         applied = 0
         while True:
             page = transport.feed(cursor, FEED_PAGE)
-            for entry in page.entries:
-                if entry.hub_seq is None:
-                    raise SyncError("The server sent a change without a number")
-                if self._repo.has_entry(entry.id):
-                    # Ours, now numbered, and stamped with the device it came through.
-                    self._repo.mark_seq(entry.id, entry.hub_seq, entry.device)
-                else:
-                    self._take(entry, dirty)
-                    applied += 1
-                cursor = entry.hub_seq
-            self._repo.set_cursor(cursor)
+            # An action is taken whole or held whole: if one of its entries
+            # must wait for a push of this device's own, every entry of it
+            # waits with that one (a tree moved to another collection can't
+            # be half moved: a child's collection is its parent's).
+            above = self._above_dirty(dirty)
+            waiting = {
+                e.op for e in page.entries if e.op and self._waits(e, dirty, above)
+            }
+            touched: list[uuid.UUID] = []
+            try:
+                with self._repo.savepoint():
+                    for entry in page.entries:
+                        if entry.hub_seq is None:
+                            raise SyncError("The server sent a change without a number")
+                        if self._repo.has_entry(entry.id):
+                            # Ours, now numbered, and stamped with the device
+                            # it came through.
+                            self._repo.mark_seq(entry.id, entry.hub_seq, entry.device)
+                        else:
+                            self._take(
+                                entry,
+                                dirty,
+                                hold=entry.op in waiting
+                                or self._waits(entry, dirty, above),
+                            )
+                            applied += 1
+                            if entry.entity_type == "record":
+                                touched.append(entry.entity_id)
+                        cursor = entry.hub_seq
+                    self._repo.set_cursor(cursor)
+                    # What this page settled may have freed a held change (a
+                    # parent's move held while a child's change was unsent,
+                    # the child now settled by this page): it goes in with the
+                    # page, in the same transaction, since a child in another
+                    # collection than its parent is refused at commit.
+                    if touched:
+                        self._replay_held(dirty)
+                    if (
+                        not page.more
+                        and touched
+                        and self._records.placement_mismatches(touched)
+                    ):
+                        raise _NotYet()
+            except _NotYet:
+                raise SyncError(
+                    "The changes from the server left a record in another "
+                    "collection than the record above it"
+                ) from None
+            # A page may end between a parent's move and its child's: the
+            # next page settles it, and both are committed together.
+            if page.more and touched and self._records.placement_mismatches(touched):
+                continue
             self._commit()
             if not page.more:
                 return applied
 
-    def _take(self, entry: SyncEntry, dirty: set[tuple[str, uuid.UUID]]) -> None:
+    def _above_dirty(self, dirty: set[tuple[str, uuid.UUID]]) -> set[uuid.UUID]:
+        """Every record here that an unsent change is to or beneath: those
+        records, and the ones above them."""
+        ids = [eid for kind, eid in dirty if kind == "record"]
+        return set(ids) | self._tree(ids)
+
+    def _tree(self, ids: list[uuid.UUID]) -> set[uuid.UUID]:
+        """The records above these, here (deleted ones too)."""
+        if not ids:
+            return set()
+        trails = self._records.ancestor_trails(
+            self._records.labels([str(i) for i in ids])
+        )
+        return {above.id for trail in trails.values() for above in trail}
+
+    def _waits(
+        self,
+        entry: SyncEntry,
+        dirty: set[tuple[str, uuid.UUID]],
+        above: set[uuid.UUID],
+    ) -> bool:
+        """Whether a change from the authority must wait for a push of this
+        device's own: it is to a thing with an unsent change here, or it
+        places a record (makes, moves or brings one back) where an unsent
+        change is at or beneath: the record itself, where it is, or where it
+        goes. A child's collection is its parent's, so neither can go
+        without the other; the push settles where the unsent change ends
+        up, and the placement follows."""
+        if (entry.entity_type, entry.entity_id) in dirty:
+            return True
+        placed = self._places(entry)
+        if placed is None:
+            return False
+        record_id, parent_id = placed
+        if record_id in above or (parent_id is not None and parent_id in above):
+            return True
+        return bool(
+            self._tree([i for i in (record_id, parent_id) if i is not None]) & above
+        )
+
+    def _places(self, entry: SyncEntry) -> tuple[uuid.UUID, uuid.UUID | None] | None:
+        """The record and the parent it would sit under, when applying `entry`
+        puts a record somewhere: a new record, or one moved to another
+        collection or under another record. None for anything else."""
+        if entry.entity_type != "record" or entry.action not in (
+            "create",
+            "update",
+            "restore",
+        ):
+            return None
+        current = self._repo.snapshot("record", entry.entity_id)
+        if entry.delta is not None and current is not None:
+            state = apply_delta(current, entry.delta, AFTER)
+        else:
+            state = entry.new_data or {}
+        parent = state.get("parent_record_id")
+        try:
+            parent_id = uuid.UUID(str(parent)) if parent else None
+        except ValueError:
+            parent_id = None
+        if current is None:
+            return entry.entity_id, parent_id
+        if any(
+            str(state.get(key) or "") != str(current.get(key) or "")
+            for key in PLACEMENT_KEYS
+        ):
+            return entry.entity_id, parent_id
+        return None
+
+    def _take(
+        self,
+        entry: SyncEntry,
+        dirty: set[tuple[str, uuid.UUID]],
+        hold: bool = False,
+    ) -> None:
         """Bring in one change from the authority. It is kept in the history
         either way. It is applied unless the authority did not settle on it as
-        sent (a later entry carries what it settled on), or this device has a
-        change to the same thing it hasn't sent yet. That one is kept *unapplied*
-        and caught up once the push has settled the thing, whatever the outcome
-        (merged, or refused): applying it then is what keeps this device from
-        being left behind."""
+        sent (a later entry carries what it settled on), or it must wait
+        (`hold`, see `_waits`: this device has a change it hasn't sent yet to
+        the same thing, to a record beneath one this moves, or to a thing the
+        same action changed). That one is kept *unapplied* and caught up once
+        the push has settled the thing, whatever the outcome (merged, or
+        refused): applying it then is what keeps this device from being left
+        behind."""
         thing = (entry.entity_type, entry.entity_id)
         if entry.superseded:
             state = "superseded"
-        elif thing in dirty:
+        elif hold or thing in dirty:
             state = "held"
         else:
             state = "applied"
@@ -832,24 +971,41 @@ class SyncService:
         device's own changes numbered among them (`_replay`). Returns the things
         still waiting on a push of this device's own."""
         dirty = self._repo.dirty_entities()
+        if self._replay_held(dirty):
+            self._commit()
+        return dirty
+
+    def _replay_held(self, dirty: set[tuple[str, uuid.UUID]]) -> bool:
+        """Apply the held changes that no longer need to wait (see `_waits`),
+        each thing's in order from the first held. Nothing is committed here.
+        Returns whether anything was applied. The held changes stay held when
+        applying them would leave a record in another collection than the
+        record above it (a child still where a change of this device's own
+        put it, whose settled state is still to arrive)."""
+        every = self._repo.held_entries()
+        above = self._above_dirty(dirty)
+        # An action waits whole while any part of it must (`_waits`).
+        blocked = {e.op for e in every if e.op and self._waits(e, dirty, above)}
         held = [
-            e
-            for e in self._repo.held_entries()
-            if (e.entity_type, e.entity_id) not in dirty
+            e for e in every if not self._waits(e, dirty, above) and e.op not in blocked
         ]
         if not held:
-            return dirty
+            return False
         first: dict[tuple[str, uuid.UUID], int] = {}
         for e in held:
             thing = (e.entity_type, e.entity_id)
             first[thing] = min(first.get(thing, e.hub_seq or 0), e.hub_seq or 0)
-        for thing, seq in first.items():
-            self._replay(thing, seq)
+        try:
+            with self._repo.savepoint():
+                for thing, seq in first.items():
+                    self._replay(thing, seq)
+                records = [eid for kind, eid in first if kind == "record"]
+                if records and self._records.placement_mismatches(records):
+                    raise _NotYet()
+        except _NotYet:
+            return False
         self._repo.mark_applied([e.id for e in held])
-        self._commit()
-        return dirty
-
-    # -- push -------------------------------------------------------------
+        return True
 
     def _push(self, transport: SyncTransport, report: SyncReport) -> int:
         total = 0
@@ -1913,6 +2069,10 @@ def _field_id(conflict: SyncConflictDTO) -> str | None:
     """The field id a conflict is about (`data.<field id>`), if it is about one."""
     top, _, sub = (conflict.field or "").partition(".")
     return sub if top == "data" and sub else None
+
+
+class _NotYet(Exception):
+    """Held changes that must stay held a little longer (`_catch_up`)."""
 
 
 class _Counting:

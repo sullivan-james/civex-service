@@ -7,6 +7,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from civex import __version__
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
@@ -90,6 +91,11 @@ class RemoteStatusResponse(BaseModel):
     connect_error: str | None = Field(
         default=None, description="Why the last connect started here failed."
     )
+    connect_error_detail: str | None = Field(
+        default=None,
+        description="The technical text behind `connect_error`, for whoever needs it.",
+    )
+    version: str = Field(description="The civex this computer runs.")
     awaiting_approval: AwaitingApprovalResponse | None = Field(
         default=None,
         description="This computer asked to join and waits for a person to approve "
@@ -126,6 +132,14 @@ class SyncResultResponse(BaseModel):
     pushed: int = Field(description="Changes of this project's that were sent.")
     conflicts: int = Field(description="Values that did not go in as made.")
     rejected: int = Field(description="Changes the authority refused.")
+    server_version: str | None = Field(
+        default=None, description="The civex the server runs, as it said."
+    )
+    notice: str | None = Field(
+        default=None,
+        description="What a person should know about the server: that it will stop "
+        "accepting this civex at its next update.",
+    )
 
 
 class RemoteConnectRequest(BaseModel):
@@ -329,6 +343,8 @@ def _last_result() -> SyncResultResponse | None:
         pushed=r.pushed,
         conflicts=r.conflicts,
         rejected=r.rejected,
+        server_version=r.server_version,
+        notice=r.notice,
     )
 
 
@@ -373,6 +389,8 @@ def _status(ctx: AppContext) -> RemoteStatusResponse:
         ),
         connecting=sync_jobs.connecting,
         connect_error=sync_jobs.connect_error,
+        connect_error_detail=sync_jobs.connect_error_detail,
+        version=__version__,
         awaiting_approval=(
             AwaitingApprovalResponse(code=login.user_code, expires_at=login.expires_at)
             if (login := sync_jobs.awaiting) and sync_jobs.connecting

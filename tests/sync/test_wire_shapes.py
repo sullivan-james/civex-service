@@ -16,8 +16,8 @@ from civex.repositories.local.sync_repo import _MODELS, _NOT_WRITTEN
 
 from civex.testing.peers import build_study, new_id, principal
 
-# Carried for a collection beside its own columns: its schema list.
-NOT_COLUMNS = {"dataset": {"schema_ids", "schemas"}}
+# Carried beside a kind's own columns (nothing today).
+NOT_COLUMNS: dict[str, set[str]] = {}
 
 
 def test_what_travels_is_recorded_for_this_protocol_version():

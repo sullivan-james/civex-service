@@ -2,6 +2,10 @@ import type { AuditLogEntry } from '../api/audit'
 import { AuditChangeSummary } from '../components/audit/AuditChanges'
 import type { AuditSummary } from './schemaAudit'
 
+/** The changes an edit reports when a record was moved: its collection and
+ * the record it sits inside (`audit_diff.PLACEMENT_KEYS`). */
+const PLACEMENT = new Set(['dataset_id', 'parent_record_id'])
+
 /** Human-readable title + a one-line summary of what changed for a record
  * audit entry. The changes themselves are worked out by the server
  * (`entry.changes`), so a renamed or deleted field, or a delete that predates
@@ -24,7 +28,12 @@ export function describeAuditEntry(entry: AuditLogEntry): AuditSummary {
     case 'purge':
       return { title: 'Record permanently deleted', detail }
     case 'update':
-      return { title: 'Record updated', detail }
+      return {
+        title: entry.changes.some((c) => PLACEMENT.has(c.field))
+          ? 'Record moved'
+          : 'Record updated',
+        detail,
+      }
     default:
       return { title: `Record ${entry.action}`, detail: null }
   }

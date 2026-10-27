@@ -13,11 +13,12 @@ from civex.context import AppContext
 def _record(ctx: AppContext, make_schema, make_collection):
     make_schema("doc", fields=[("subject", "string")])
     make_collection("study")
-    ctx.dataset_svc.update("study", schemas=["doc"])
     return ctx.record_svc.add("study", "doc", {"subject": "x"})
 
 
-def test_a_deleted_waiting_run_never_starts(ctx: AppContext, make_schema, make_collection):
+def test_a_deleted_waiting_run_never_starts(
+    ctx: AppContext, make_schema, make_collection
+):
     record = _record(ctx, make_schema, make_collection)
     first = ctx.job_svc.enqueue_manual("tidy", record)
     second = ctx.job_svc.enqueue_manual("tidy", record)

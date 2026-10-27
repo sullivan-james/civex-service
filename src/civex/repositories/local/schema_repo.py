@@ -9,7 +9,7 @@ from civex.repositories.local.record_repo import parent_allows_restore
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from civex.repositories.local._jobs import bulk_delete_jobs
-from civex.db.models import DatasetSchema, Field, Record, Schema, View, WorkflowJob
+from civex.db.models import Field, Record, Schema, View, WorkflowJob
 from civex.domain.dtos import FieldDTO, SchemaDTO
 from civex.domain.exceptions import NotFoundError
 
@@ -193,11 +193,6 @@ class LocalSchemaRepository:
         )
         bulk_delete_jobs(self._s, WorkflowJob.record_id.in_(typed))
         self._s.query(Record).filter_by(schema_id=id).delete(synchronize_session=False)
-        # Collections that list it stop listing it: a purged schema leaves no
-        # trace (and the link would otherwise refuse the delete).
-        self._s.query(DatasetSchema).filter_by(schema_id=id).delete(
-            synchronize_session=False
-        )
         self._s.delete(row)  # cascades to Field rows via ORM relationship
         self._s.flush()
 

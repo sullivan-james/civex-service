@@ -5,8 +5,8 @@ lists, search and exports, and stays restorable until it is **purged**, which
 only happens when you choose to. For the short version, see
 [Undo a mistake](../how-to/undo-mistakes.md).
 
-(This is not `civex dump` / `civex restore`, which copy a whole project. See
-[Back up a project](../how-to/back-up.md).)
+(This is not `civex bundle export` / `civex bundle import`, which copy a whole
+project. See [Back up a project](../how-to/back-up.md).)
 
 ## What a delete takes with it
 

@@ -136,7 +136,7 @@ the run.
 
 | To… | Read |
 |---|---|
-| Bring in a spreadsheet or a folder of files | [Import data](../how-to/import-data.md) |
+| Bring in a folder of files | [Import files](../how-to/import-data.md) |
 | Put samples inside visits and sites | [Schemas & fields](../guides/schemas-and-fields.md#types-inside-other-types) |
 | Keep files on an external drive | [Put files on another drive](../how-to/storage-drives.md) |
 | Work on several computers | [Sync a project](../how-to/set-up-sync.md) |

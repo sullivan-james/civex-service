@@ -51,9 +51,7 @@ def test_seeding_sends_what_a_record_needs_before_the_record(project, authority)
     laptop.schema_svc.create("recording", parent="encounter")
     laptop.schema_svc.add_field("recording", "label", "string")
     laptop.dataset_svc.create("taxonomy", scope="global")
-    laptop.dataset_svc.update("taxonomy", schemas=["species"])
     laptop.dataset_svc.create("study")
-    laptop.dataset_svc.update("study", schemas=["encounter", "recording"])
 
     encounter = laptop.record_svc.add("study", "encounter", {})
     species = laptop.record_svc.add("taxonomy", "species", {"latin": "orcinus"})
@@ -86,7 +84,6 @@ def test_something_the_server_refuses_while_seeding_is_kept_for_review(
         "item", "grade", "string", restrictions={"choices": ["a", "b"]}
     )
     laptop.dataset_svc.create("things")
-    laptop.dataset_svc.update("things", schemas=["item"])
     fine = laptop.record_svc.add("things", "item", {"grade": "b"})
     odd = laptop.record_svc.add("things", "item", {"grade": "a"})
     laptop.schema_svc.update_field("item", "grade", restrictions={"choices": ["b"]})
@@ -114,7 +111,6 @@ def test_following_a_different_authority_forgets_the_old_ones_cursor_and_items(
         "item", "grade", "string", restrictions={"choices": ["a", "b"]}
     )
     laptop.dataset_svc.create("things")
-    laptop.dataset_svc.update("things", schemas=["item"])
     kept = laptop.record_svc.add("things", "item", {"grade": "b"})
     laptop.record_svc.add("things", "item", {"grade": "a"})
     laptop.schema_svc.update_field("item", "grade", restrictions={"choices": ["b"]})
@@ -273,7 +269,6 @@ def test_a_delete_and_its_restore_travel_as_a_group(pair, project):
     laptop, phone, record = pair
     laptop.schema_svc.create("recording", parent="encounter")
     laptop.schema_svc.add_field("recording", "rate", "integer")
-    laptop.dataset_svc.update("study", schemas=["encounter", "recording"])
     for rate in (1, 2, 3):
         laptop.record_svc.add(
             "study", "recording", {"rate": rate}, parent_record_id=str(record.id)
@@ -428,6 +423,70 @@ def test_a_change_of_a_kind_this_civex_does_not_know_stops_sync_before_anything_
         phone.sync_svc.sync()
     assert raised.value.retryable is False
     assert phone.sync_repo.meta().cursor == before
+
+
+def test_a_field_of_a_type_this_civex_does_not_know_stops_sync_the_same_way(
+    pair, authority, monkeypatch
+):
+    laptop, phone, _ = pair
+    laptop.schema_svc.add_field("encounter", "call", "string")
+    laptop.commit()
+    laptop.sync_svc.sync()
+    before = phone.sync_repo.meta().cursor
+    real = authority.sync_repo.entries_after
+
+    def newer(seq, limit):
+        entries, more = real(seq, limit)
+        return [
+            replace(e, new_data={**e.new_data, "dtype": "audio"})
+            if e.entity_type == "field"
+            else e
+            for e in entries
+        ], more
+
+    monkeypatch.setattr(authority.sync_repo, "entries_after", newer)
+    with pytest.raises(SyncError, match="type this civex doesn't know \\('audio'\\)"):
+        phone.sync_svc.sync()
+    assert phone.sync_repo.meta().cursor == before
+
+
+def test_a_server_says_its_version_and_warns_before_it_stops_accepting_this_one(
+    pair, monkeypatch
+):
+    from civex import __version__
+    from civex.domain.sync import PROTOCOL_MAX
+
+    laptop, _, _ = pair
+    report = laptop.sync_svc.sync()
+    assert (report.server_version, report.notice) == (__version__, None)
+    # The server's next release will drop the protocol this device speaks.
+    monkeypatch.setattr(
+        "civex.services.sync_authority.PROTOCOL_RETIRING", PROTOCOL_MAX
+    )
+    assert "stop accepting this version of civex" in laptop.sync_svc.sync().notice
+
+
+def test_an_unexpected_failure_is_said_in_plain_words_with_the_detail_kept(
+    pair, monkeypatch
+):
+    from sqlalchemy.exc import OperationalError
+
+    laptop, _, _ = pair
+
+    def broken():
+        raise OperationalError(
+            "SELECT views.files_layout", {}, Exception("no such column")
+        )
+
+    # The service itself, not the test's per-device wrapper around it.
+    service = object.__getattribute__(laptop.sync_svc, "_svc")
+    monkeypatch.setattr(service, "_sync", broken)
+    with pytest.raises(SyncError, match="civex doctor") as raised:
+        laptop.sync_svc.sync()
+    assert "files_layout" in raised.value.detail
+    assert raised.value.retryable is False
+    # What a person is shown is the sentence, not the SQL.
+    assert "SELECT" not in laptop.sync_svc.status().last_error
 
 
 @pytest.mark.parametrize(

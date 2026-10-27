@@ -447,9 +447,11 @@ def available_definitions(
         elif schema is not None:
             found = ctx.export_def_svc.available_on(schema)
         else:
-            found = ctx.export_def_svc.for_collection(
-                ctx.dataset_svc.get(collection or "").schemas
-            )
+            # A collection holds records of every schema: the exports to offer
+            # on it are those saved with a schema it has records of.
+            ctx.dataset_svc.get(collection or "")
+            present = ctx.record_svc.schema_counts(RecordQuery(dataset=collection))
+            found = ctx.export_def_svc.for_collection(sorted(present))
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     return [ExportDefinitionResponse.from_dto(d) for d in found]

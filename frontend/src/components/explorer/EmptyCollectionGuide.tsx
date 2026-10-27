@@ -47,15 +47,10 @@ export function EmptyCollectionGuide({
 
   const label = (s: Schema) => displayLabel(s.name, s.label)
   const live = schemas.filter((s) => !s.deleted_at)
-  // At the top: the top-level schemas (every one, unless the collection was
-  // given a list of its own). Inside a record: the schemas that go inside
-  // its kind.
+  // At the top: every top-level schema (a collection holds records of every
+  // schema). Inside a record: the schemas that go inside its kind.
   const here = live.filter((s) =>
-    within
-      ? s.parent_id === within.schema.id
-      : !s.parent_id &&
-        (collection.schemas.length === 0 ||
-          collection.schemas.includes(s.name)),
+    within ? s.parent_id === within.schema.id : !s.parent_id,
   )
   const kind = within ? ` inside ${label(within.schema).toLowerCase()}s` : ''
 
@@ -107,7 +102,7 @@ export function EmptyCollectionGuide({
             </p>
             <p className="text-sm text-fg-muted">
               {here.length
-                ? 'Add them one at a time, or bring in a spreadsheet from the New menu.'
+                ? 'Add them from the New menu.'
                 : 'Once there is a schema, add records of it here.'}
             </p>
             {here.length > 0 && newMenu}

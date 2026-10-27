@@ -179,11 +179,6 @@ export const auditApi = {
       batch: query.batch ?? null,
     }),
 
-  /** Start a batch for work done over many requests, such as an import; send
-   * its id as `X-Civex-Batch` on each of them. */
-  openBatch: (label: string) =>
-    api.post<AuditBatch>('/audit/batches', { kind: 'import', label }),
-
   /** What undoing the entry would do, without doing it. */
   revertPlan: (id: string) => api.get<RevertPlan>(`/audit/${id}/revert`),
 
@@ -216,7 +211,7 @@ export interface RestoreAllResult {
  * workflow run. */
 export interface AuditBatch {
   id: string
-  kind: 'import' | 'delete' | 'restore' | 'purge' | 'workflow'
+  kind: 'import' | 'delete' | 'restore' | 'purge' | 'workflow' | 'move'
   /** A workflow's name, or the file imported. */
   label: string | null
   /** What started it: a workflow run's id. */

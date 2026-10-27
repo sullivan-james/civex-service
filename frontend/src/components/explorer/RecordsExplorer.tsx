@@ -27,7 +27,7 @@ import {
   Field,
   Skeleton,
 } from '../ui'
-import { ChevronDown, Columns3, Download, Plus, Upload } from '../ui/icons'
+import { ChevronDown, Columns3, Download, Plus } from '../ui/icons'
 import { toTableRows } from '../records/tableRows'
 import {
   RecordsTable,
@@ -40,6 +40,7 @@ import { DrillLinks } from './DrillLinks'
 import { SavedViewBar } from './SavedViewBar'
 import { ScopeTrail, type TrailItem } from './ScopeTrail'
 import { SelectionBar } from './SelectionBar'
+import { MoveRecordsDialog } from './MoveRecordsDialog'
 import { FilesView } from '../files/FilesView'
 import { MoveToDriveButton } from '../files/MoveDialog'
 import { useBulkSelection } from '../../hooks/useBulkSelection'
@@ -121,6 +122,7 @@ export function RecordsExplorer({
   const [params, setParams] = useSearchParams()
   const showFiles = params.get('show') === 'files'
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [moving, setMoving] = useState(false)
   const deleteMany = useDeleteManyRecords(dataset ?? '')
   const deleteMatching = useDeleteMatchingRecords(dataset ?? '')
   const createView = useCreateView(listedName ?? '')
@@ -306,25 +308,16 @@ export function RecordsExplorer({
     else deleteMany.mutate([...selected], done)
   }
 
-  // The collection's own top-level schemas: where a record can start. Levels
-  // come from record counts, so a schema with no records yet has none, and
-  // without these there would be no way to create the first of its kind.
-  // A collection holds records of every schema, unless it was given a list
-  // of its own (the CLI's --schema), in which case only those.
-  const ownList = collection?.schemas ?? []
-  const enabledSchemas = new Set(
-    ownList.length ? ownList : (x.schemas ?? []).map((s) => s.name),
-  )
+  // The top-level schemas: where a record can start. Levels come from record
+  // counts, so a schema with no records yet has none, and without these there
+  // would be no way to create the first of its kind. A collection holds
+  // records of every schema.
   const navigate = useNavigate()
   // What this person may do here: the controls stay, off, saying why.
   const { can, why } = usePermissions()
   const mayWrite = can('write_records', collection?.id)
   const mayDelete = can('delete', collection?.id)
-  const starters = dataset
-    ? (x.schemas ?? []).filter(
-        (s) => !s.parent_id && enabledSchemas.has(s.name),
-      )
-    : []
+  const starters = dataset ? (x.schemas ?? []).filter((s) => !s.parent_id) : []
   // At the top of a collection, the starters other than the one being listed.
   const otherStarters = x.rootId
     ? []
@@ -336,10 +329,7 @@ export function RecordsExplorer({
   const childStarters =
     dataset && x.rootId && x.scopeSchema
       ? (x.schemas ?? []).filter(
-          (s) =>
-            s.parent_id === x.scopeSchema!.id &&
-            enabledSchemas.has(s.name) &&
-            s.name !== listed?.name,
+          (s) => s.parent_id === x.scopeSchema!.id && s.name !== listed?.name,
         )
       : []
 
@@ -373,11 +363,6 @@ export function RecordsExplorer({
               `/collections/${dataset}/new?${new URLSearchParams({ schema: s.name })}`,
             ),
         })),
-        {
-          label: 'Import data…',
-          icon: Upload,
-          onClick: () => navigate(`/collections/${dataset}/import`),
-        },
       ]
     : []
   const newMenu =
@@ -697,6 +682,18 @@ export function RecordsExplorer({
                         onStarted={picked.clear}
                       />
                     )}
+                    {listed && (
+                      // Moving takes the records out of this collection, so
+                      // it asks for the same permission as deleting here.
+                      <Button
+                        size="sm"
+                        disabled={!mayDelete}
+                        title={mayDelete ? undefined : why('delete')}
+                        onClick={() => setMoving(true)}
+                      >
+                        Move to…
+                      </Button>
+                    )}
                   </>
                 }
               />
@@ -783,6 +780,22 @@ export function RecordsExplorer({
           </p>
         )}
       </div>
+
+      {moving && dataset && listed && (
+        <MoveRecordsDialog
+          selection={
+            allMatching
+              ? { query: x.query, collection: dataset }
+              : { ids: [...selected] }
+          }
+          count={bulkCount}
+          listed={listed}
+          schemas={x.schemas}
+          from={dataset}
+          onClose={() => setMoving(false)}
+          onMoved={picked.clear}
+        />
+      )}
 
       {confirmDelete && (
         <ConfirmDialog

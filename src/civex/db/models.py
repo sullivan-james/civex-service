@@ -304,31 +304,10 @@ class Dataset(Base):
     records: Mapped[list[Record]] = relationship(
         "Record", back_populates="dataset", cascade="all, delete-orphan"
     )
-    schema_links: Mapped[list[DatasetSchema]] = relationship(
-        "DatasetSchema", cascade="all, delete-orphan"
-    )
 
     __table_args__ = (
         CheckConstraint("scope IN ('local', 'global')", name="ck_datasets_scope"),
     )
-
-
-class DatasetSchema(Base):
-    """A schema a collection is for: records in the collection can only be of
-    these schemas. Schemas are global, so this is many-to-many. A child
-    schema's parent must be listed too (its parent record lives in the same
-    collection) -- enforced by DatasetService."""
-
-    __tablename__ = "dataset_schemas"
-
-    dataset_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("datasets.id", ondelete="CASCADE"), primary_key=True
-    )
-    schema_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("schemas.id"), primary_key=True
-    )
-
-    __table_args__ = (Index("ix_dataset_schemas_schema", "schema_id"),)
 
 
 class Record(Base):
@@ -352,10 +331,17 @@ class Record(Base):
         # lets (id, dataset_id) be the target of the composite FK that ties
         # parent_record_id to the parent's dataset_id.
         UniqueConstraint("id", "dataset_id", name="uq_records_id_dataset"),
+        # Checked when the transaction commits, not after each statement: a
+        # tree moved to another collection changes the parent's dataset_id and
+        # the children's in separate statements (one UPDATE per record when
+        # sync applies the move's entries), and in between a child points at
+        # a parent in another collection.
         ForeignKeyConstraint(
             ["parent_record_id", "dataset_id"],
             ["records.id", "records.dataset_id"],
             name="fk_records_parent_same_dataset",
+            deferrable=True,
+            initially="DEFERRED",
         ),
         Index("ix_records_dataset_schema", "dataset_id", "schema_id"),
         Index("ix_records_dataset_created", "dataset_id", "created_at"),

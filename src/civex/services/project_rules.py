@@ -22,7 +22,7 @@ from collections.abc import Iterable
 from civex.domain.dtos import SchemaDTO
 from civex.domain.exceptions import ValidationError
 from civex.domain.templating import referenced_names
-from civex.repositories.protocols import DatasetRepository, RecordRepository
+from civex.repositories.protocols import RecordRepository
 from civex.services.schema_service import SchemaService
 
 # Names a template may use without a field of that name.
@@ -34,27 +34,25 @@ class ProjectRules:
     def __init__(
         self,
         schemas: SchemaService,
-        datasets: DatasetRepository,
         records: RecordRepository,
     ) -> None:
         self._schemas = schemas
-        self._datasets = datasets
         self._records = records
 
     def check(self, touched: Iterable[tuple[str, uuid.UUID]]) -> None:
         """Raise ValidationError, saying what would be wrong, if what these
         things are now breaks a rule. `touched` is (kind, id) of what changed."""
         schema_ids: set[uuid.UUID] = set()
-        dataset_ids: set[uuid.UUID] = set()
+        record_ids: set[uuid.UUID] = set()
         for kind, thing in touched:
+            if kind == "record":
+                record_ids.add(thing)
             if kind == "schema":
                 schema_ids.add(thing)
             elif kind == "field":
                 found = self._schemas.find_fields({thing}).get(thing)
                 if found is not None:
                     schema_ids.add(found[0].schema_id)
-            elif kind == "dataset":
-                dataset_ids.add(thing)
         for schema_id in list(schema_ids):
             schema = self._schemas.get_by_id(schema_id, include_deleted=True)
             if schema is not None:
@@ -64,8 +62,14 @@ class ProjectRules:
             schema = self._schemas.get_by_id(schema_id, include_deleted=True)
             if schema is not None and schema.deleted_at is None:
                 self._check_schema(schema)
-        for dataset_id in dataset_ids:
-            self._check_collection(dataset_id)
+        # A record is in its parent's collection. A move brings a tree whole,
+        # but a record added beneath one of them here meanwhile is not in it.
+        if record_ids and self._records.dataset_mismatches(list(record_ids)):
+            raise ValidationError(
+                "A record would be in another collection than the record it "
+                "sits under (something was added beneath it on the server "
+                "meanwhile)"
+            )
 
     def _check_schema(self, schema: SchemaDTO) -> None:
         names = {rf.field.name for rf in self._schemas.collect_fields(schema)}
@@ -97,33 +101,6 @@ class ProjectRules:
                     f"Records of '{schema.name}' already share the values a "
                     "uniqueness rule would make unique"
                 )
-
-    def _check_collection(self, dataset_id: uuid.UUID) -> None:
-        dataset = self._datasets.get_by_id(
-            dataset_id, include_deleted=True, with_count=False
-        )
-        if dataset is None or dataset.deleted_at is not None:
-            return
-        listed = {uuid.UUID(str(s)) for s in dataset.schema_ids or []}
-        if not listed:
-            return  # no list: the collection holds records of every schema
-        for schema_id in self._records.live_schema_ids(dataset.id) - listed:
-            schema = self._schemas.get_by_id(schema_id, include_deleted=True)
-            raise ValidationError(
-                f"Collection '{dataset.name}' would no longer allow "
-                f"'{schema.name if schema else schema_id}', and it still has "
-                "records of it"
-            )
-        for schema_id in listed:
-            schema = self._schemas.get_by_id(schema_id, include_deleted=True)
-            if schema is None or schema.deleted_at is not None:
-                continue
-            for ancestor in self._schemas.ancestors(schema):
-                if ancestor.id not in listed:
-                    raise ValidationError(
-                        f"Collection '{dataset.name}' would allow '{schema.name}' "
-                        f"but not '{ancestor.name}', which it sits under"
-                    )
 
 
 def _missing(template: str, names: set[str], builtins: frozenset[str]) -> list[str]:

@@ -341,8 +341,8 @@ class ExportDefinitionService:
         return out
 
     def for_collection(self, schema_names: list[str]) -> list[ExportDefinitionDTO]:
-        """The exports to offer on a collection that is for these schemas: those
-        saved with any of them, in one query."""
+        """The exports to offer on a collection with records of these schemas:
+        those saved with any of them, in one query."""
         ids = []
         for name in schema_names:
             try:

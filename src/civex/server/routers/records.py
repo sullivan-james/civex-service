@@ -12,7 +12,10 @@ from civex.server.deps import get_ctx
 from civex.server.downloads import new_temp_path, serve, temp_paths
 from civex.server.models import (
     CreateRecordRequest,
+    MoveRecordsRequest,
+    MoveRecordsResponse,
     PaginatedRecordResponse,
+    RecordMovePlanResponse,
     RecordLabelResponse,
     RecordLabelsRequest,
     RestoreSelectedRequest,
@@ -465,6 +468,61 @@ def bulk_delete_records(
     deleted = ctx.record_svc.delete_many(ids, force=force)
     ctx.commit()
     return {"deleted": deleted}
+
+
+def _move_selection(body: MoveRecordsRequest) -> dict:
+    if body.ids is not None:
+        return {"ids": body.ids}
+    if not body.collection:
+        raise HTTPException(
+            422,
+            detail="Choose the records to move: 'ids', or a query with 'collection'.",
+        )
+    return {
+        "query": RecordQuery(
+            dataset=body.collection,
+            schema=body.schema_name,
+            within=body.within,
+            filter_tree=body.filter,
+            where=body.where,
+            search=body.search,
+        )
+    }
+
+
+@router.post("/records/move/plan", response_model=RecordMovePlanResponse)
+def plan_move_records(body: MoveRecordsRequest, ctx: AppContext = Depends(get_ctx)):
+    """What moving these records to another collection would do, without
+    doing it: how many go (each with everything beneath it) and anything in
+    the way, such as references that would break or a uniqueness key already
+    taken there. The same rule as the move itself."""
+    try:
+        plan = ctx.record_svc.plan_move(body.to, body.parent, **_move_selection(body))
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except (ValueError, ValidationError) as e:
+        raise HTTPException(422, detail=str(e))
+    return RecordMovePlanResponse.from_dto(plan)
+
+
+@router.post("/records/move", response_model=MoveRecordsResponse)
+def move_records(body: MoveRecordsRequest, ctx: AppContext = Depends(get_ctx)):
+    """Move records to another collection, or inside another record, with
+    everything beneath them. A record keeps its id, values and history; the
+    move is logged as an edit of each record (one event), so it is undoable
+    from Activity. Files are not copied: they are stored by content. Refused
+    whole (422, saying why) when anything is in the way; `POST
+    /records/move/plan` says so beforehand."""
+    try:
+        result = ctx.record_svc.move(body.to, body.parent, **_move_selection(body))
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except (ValueError, ValidationError) as e:
+        raise HTTPException(422, detail=str(e))
+    ctx.commit()
+    return MoveRecordsResponse(
+        roots=result.roots, records=result.records, collection=result.collection
+    )
 
 
 @router.delete("/collections/{dataset_name}/records")

@@ -1,15 +1,12 @@
 """What devices agree on is a project one machine could hold (the invariants
 scenario).
 
-Three devices delete and restore schemas and collections, change a collection's
-schemas, add and drop unique keys, rename, add and delete fields, edit naming
-templates, and add, edit, delete and restore records (some under a parent),
-syncing at random through a network that drops replies. Afterwards every rule a
-single machine enforces must hold on the authority (`broken_rules`), and every
-copy must agree with it except for what has an open review item on that device.
-The authority must enforce the "a collection only holds records of its listed
-schemas" rule for this to mean anything; civex's own suite switches that off by
-default and asks for it here."""
+Three devices delete and restore schemas and collections, add and drop unique
+keys, rename, add and delete fields, edit naming templates, and add, edit,
+delete and restore records (some under a parent), syncing at random through a
+network that drops replies. Afterwards every rule a single machine enforces
+must hold on the authority (`broken_rules`), and every copy must agree with it
+except for what has an open review item on that device."""
 
 from __future__ import annotations
 
@@ -34,9 +31,7 @@ def populate(ctx) -> None:
     ctx.schema_svc.create("note")
     ctx.schema_svc.add_field("note", "text", "string")
     ctx.dataset_svc.create("study")
-    ctx.dataset_svc.update("study", schemas=["encounter", "sample", "note"])
     ctx.dataset_svc.create("extra")
-    ctx.dataset_svc.update("extra", schemas=["note"])
     for n in range(3):
         e = ctx.record_svc.add("study", "encounter", {"site": f"s{n}", "depth": 1.0})
         ctx.record_svc.add(
@@ -82,11 +77,11 @@ def act(ctx, rng: random.Random, step: int) -> None:
             "edit",
             "delete_record",
             "restore_record",
+            "move_record",
             "delete_schema",
             "restore_schema",
             "delete_collection",
             "restore_collection",
-            "collection_schemas",
             "unique",
             "rename_field",
             "add_field",
@@ -130,6 +125,15 @@ def act(ctx, rng: random.Random, step: int) -> None:
                 ctx.record_svc.delete(rng.choice(records)["id"])
         elif choice == "restore_record" and (gone := _deleted(ctx, "record")):
             ctx.record_svc.restore(rng.choice(gone)["id"])
+        elif choice == "move_record":
+            # An encounter (with its samples) or a note to the other collection.
+            schema = rng.choice(["encounter", "note"])
+            if records := _live_records(ctx, schema):
+                picked = ctx.record_svc.get(rng.choice(records)["id"])
+                here = ctx.dataset_svc.get_by_id(picked.dataset_id).name
+                ctx.record_svc.move(
+                    "extra" if here == "study" else "study", ids=[str(picked.id)]
+                )
         elif choice == "delete_schema":
             ctx.schema_svc.delete(rng.choice(["sample", "note"]))
         elif choice == "restore_schema" and (gone := _deleted(ctx, "schema")):
@@ -138,13 +142,6 @@ def act(ctx, rng: random.Random, step: int) -> None:
             ctx.dataset_svc.delete("extra")
         elif choice == "restore_collection" and (gone := _deleted(ctx, "dataset")):
             ctx.dataset_svc.restore(rng.choice(gone)["name"])
-        elif choice == "collection_schemas":
-            ctx.dataset_svc.update(
-                rng.choice(["study", "extra"]),
-                schemas=rng.choice(
-                    [["encounter", "sample", "note"], ["encounter", "sample"], ["note"]]
-                ),
-            )
         elif choice == "unique":
             ctx.schema_svc.set_unique_keys("encounter", rng.choice([[], [["site"]]]))
         elif choice == "rename_field":
@@ -201,11 +198,11 @@ def broken_rules(ctx) -> list[str]:
             problems.append(f"{what}: its schema is deleted")
         if dataset is None or dataset["deleted_at"]:
             problems.append(f"{what}: its collection is deleted")
-        elif r["schema_id"] not in (dataset.get("schema_ids") or []):
-            problems.append(f"{what}: its schema is not in its collection")
         parent = records.get(r["parent_record_id"]) if r["parent_record_id"] else None
         if r["parent_record_id"] and (parent is None or parent["deleted_at"]):
             problems.append(f"{what}: its parent record is deleted")
+        if parent is not None and parent["dataset_id"] != r["dataset_id"]:
+            problems.append(f"{what}: it is in another collection than its parent")
 
     for s in schemas.values():
         if s["deleted_at"]:

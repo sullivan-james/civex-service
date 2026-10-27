@@ -20,7 +20,6 @@ def populate(ctx):
     ctx.schema_svc.add_field("encounter", "site", "string")
     ctx.schema_svc.add_field("encounter", "depth", "float")
     ctx.dataset_svc.create("study")
-    ctx.dataset_svc.update("study", schemas=["encounter"])
     for n in range(4):
         ctx.record_svc.add("study", "encounter", {"site": f"s{n}", "depth": float(n)})
     ctx.commit()

@@ -24,7 +24,6 @@ from civex.db.models import (
     AuditBatch,
     AuditLog,
     Dataset,
-    DatasetSchema,
     Field,
     FileReference,
     Record,
@@ -1015,21 +1014,6 @@ class LocalSyncRepository:
                 # it with this machine's clock, and the copies drift apart.
                 flag_modified(row, "updated_at")
         self._s.flush()
-        if kind == "dataset" and "schema_ids" in snap:
-            self._set_schema_links(row, snap["schema_ids"])
-
-    def _set_schema_links(self, dataset: Dataset, schema_ids: list[str]) -> None:
-        wanted = {uuid.UUID(i) for i in schema_ids}
-        have = {link.schema_id for link in dataset.schema_links}
-        if wanted == have:
-            return
-        known = {
-            sid for (sid,) in self._s.query(Schema.id).filter(Schema.id.in_(wanted))
-        }
-        dataset.schema_links = [
-            DatasetSchema(dataset_id=dataset.id, schema_id=sid) for sid in known
-        ]
-        self._s.flush()
 
     def soft_delete(self, kind: str, id: uuid.UUID, stamp: datetime) -> None:
         """Delete as a person's delete does, but stamped `stamp`: a schema or
@@ -1428,7 +1412,11 @@ class LocalSyncRepository:
         return len(rows)
 
     def entries_after(self, seq: int, limit: int) -> tuple[list[SyncEntry], bool]:
-        """Numbered entries past `seq`, in order, and whether more follow."""
+        """Numbered entries past `seq`, in order, and whether more follow. A
+        page ends with the action its last entry belongs to, never inside
+        one: a device takes an action whole (a tree moved to another
+        collection is one), so a page that cut one in two would leave it
+        half done at the device's commit."""
         rows = (
             self._s.query(AuditLog)
             .filter(AuditLog.hub_seq > seq)
@@ -1437,7 +1425,21 @@ class LocalSyncRepository:
             .all()
         )
         more = len(rows) > limit
-        return self._entries(rows[:limit]), more
+        rows = rows[:limit]
+        if more and rows and rows[-1].op_id is not None:
+            rest = (
+                self._s.query(AuditLog)
+                .filter(AuditLog.hub_seq > rows[-1].hub_seq)
+                .order_by(AuditLog.hub_seq)
+                .limit(limit + 1)
+                .all()
+            )
+            same = 0
+            while same < len(rest) and rest[same].op_id == rows[-1].op_id:
+                same += 1
+            rows += rest[:same]
+            more = len(rest) > same
+        return self._entries(rows), more
 
     def _entries(self, rows: list[AuditLog]) -> list[SyncEntry]:
         batch_ids = {r.batch_id for r in rows if r.batch_id}

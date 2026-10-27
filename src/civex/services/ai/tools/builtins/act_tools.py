@@ -553,12 +553,6 @@ class CreateCollectionTool(AiTool):
                 "description": "'global' collections hold shared reference data "
                 "any collection's records may reference; default 'local'.",
             },
-            "schemas": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Schemas the collection is for. Records in it can "
-                "only be of these (a child schema's parent must be listed too).",
-            },
         },
         "required": ["name"],
     }
@@ -577,12 +571,11 @@ class CreateCollectionTool(AiTool):
             name,
             tool_input.get("description"),
             scope=tool_input.get("scope") or "local",
-            schemas=tool_input.get("schemas") or [],
         )
         if err:
             return err
         body: dict[str, Any] = {"name": name}
-        for key in ("description", "scope", "schemas"):
+        for key in ("description", "scope"):
             if tool_input.get(key):
                 body[key] = tool_input[key]
         return propose(
@@ -598,8 +591,8 @@ class CreateCollectionTool(AiTool):
 class UpdateCollectionTool(AiTool):
     name = "update_collection"
     description = (
-        "Propose renaming a collection or changing its description, scope or "
-        "schemas. Requires user approval."
+        "Propose renaming a collection or changing its description or scope. "
+        "Requires user approval."
     )
     mutating = True
     input_schema = {
@@ -612,11 +605,6 @@ class UpdateCollectionTool(AiTool):
             "rename": {"type": "string"},
             "description": {"type": "string"},
             "scope": {"type": "string", "enum": ["local", "global"]},
-            "schemas": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Limits the collection to these schemas; an empty list allows every schema (the default).",
-            },
         },
         "required": ["name"],
     }
@@ -628,12 +616,12 @@ class UpdateCollectionTool(AiTool):
             return tool_error(f"Collection '{name}' does not exist.")
         body = {
             k: tool_input[k]
-            for k in ("rename", "description", "scope", "schemas")
+            for k in ("rename", "description", "scope")
             if tool_input.get(k) is not None
         }
         if not body:
             return tool_error(
-                "Nothing to change (provide rename, description, scope or schemas)."
+                "Nothing to change (provide rename, description or scope)."
             )
         err = validate_via(
             ctx,
@@ -642,7 +630,6 @@ class UpdateCollectionTool(AiTool):
             new_name=body.get("rename"),
             description=body.get("description"),
             scope=body.get("scope"),
-            schemas=body.get("schemas"),
         )
         if err:
             return err

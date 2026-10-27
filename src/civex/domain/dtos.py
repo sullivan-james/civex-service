@@ -238,13 +238,6 @@ class DatasetDTO:
     timezone: str | None = None
     # "local" | "global" -- see civex.domain.scopes.
     scope: str = "local"
-    # Names of the schemas this collection is for; records here can only be
-    # of these. Sorted by name.
-    schemas: list[str] = field(default_factory=list)
-    # The same schemas by id, in the same order. History stores these too: a
-    # schema's name can change, its id can't, so an entry still says which
-    # schemas the collection was for after a rename.
-    schema_ids: list[uuid.UUID] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         # record_count excluded — it's a computed value, not stored on the entity
@@ -254,8 +247,6 @@ class DatasetDTO:
             "description": self.description,
             "timezone": self.timezone,
             "scope": self.scope,
-            "schemas": list(self.schemas),
-            "schema_ids": [str(i) for i in self.schema_ids],
             "created_at": self.created_at.isoformat(),
             "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
         }
@@ -273,8 +264,6 @@ class DatasetDTO:
             timezone=d.get("timezone"),
             # Likewise absent before collection scopes existed.
             scope=d.get("scope") or "local",
-            schemas=list(d.get("schemas") or []),
-            schema_ids=[uuid.UUID(i) for i in d.get("schema_ids") or []],
         )
 
 
@@ -1064,6 +1053,48 @@ class RestoreSetDTO:
     groups: dict[uuid.UUID, list[uuid.UUID]] = field(default_factory=dict)
     # Everything that would be live afterwards, counting each record once.
     coming: set[uuid.UUID] = field(default_factory=set)
+
+
+@dataclass
+class RecordMovePlanDTO:
+    """What moving some records to a collection would do, worked out without
+    doing it. A record moves with everything beneath it and keeps its id; its
+    files stay where they are stored."""
+
+    collection: str  # where they would go
+    collection_id: uuid.UUID
+    parent_id: uuid.UUID | None  # the record they would sit inside, if any
+    parent_name: str | None
+    roots: int  # chosen records that would move
+    records: int  # with everything beneath them
+    skipped: int  # chosen records already where they would go
+    sources: list[str]  # the collections they would leave
+    problems: list[str]  # why it can't be done, in plain words; empty when it can
+
+    @property
+    def can_move(self) -> bool:
+        return not self.problems and self.records > 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "collection": self.collection,
+            "collection_id": str(self.collection_id),
+            "parent_id": str(self.parent_id) if self.parent_id else None,
+            "parent_name": self.parent_name,
+            "roots": self.roots,
+            "records": self.records,
+            "skipped": self.skipped,
+            "sources": self.sources,
+            "problems": self.problems,
+            "can_move": self.can_move,
+        }
+
+
+@dataclass
+class RecordMoveResultDTO:
+    roots: int  # chosen records moved
+    records: int  # records moved in all, with everything beneath them
+    collection: str
 
 
 @dataclass

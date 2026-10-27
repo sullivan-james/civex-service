@@ -105,7 +105,7 @@ jobs:
         run: uv sync --extra server --extra workflows --extra dev
 
       - name: Run the PostgreSQL tests
-        run: uv run pytest tests/sync/test_postgres_authority.py tests/db -q -n 2
+        run: uv run pytest tests/sync/test_postgres_authority.py tests/db -q -n 2 --dist loadgroup
 
   sdk-sync:
     # civex and civex-plugin-sdk release separately; these keep them in step.

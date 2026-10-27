@@ -10,7 +10,6 @@ import uuid
 
 import pytest
 
-from civex.domain.audit_diff import entry_snapshots
 from civex.context import AppContext
 from civex.domain.exceptions import ValidationError
 
@@ -190,21 +189,3 @@ def test_a_field_whose_name_was_taken_is_left_and_counted(ctx, thing):
     plan = ctx.history_svc.plan_restore_all()
     assert plan.fields == 1 and plan.blocked == 1
     assert ctx.history_svc.restore_all().blocked == 1
-
-
-def test_a_collection_entry_names_its_schemas_by_id(ctx, thing):
-    ctx.dataset_svc.update("study", schemas=["thing"])
-    ctx.commit()
-    collection = ctx.dataset_svc.get("study")
-    schema = ctx.schema_svc.get("thing")
-    entries = ctx.history_svc.page(entity_id=collection.id, limit=10)
-    # The entry that listed the schema (make_record may already have done so).
-    listed = [
-        e
-        for e in entries
-        if "schema_ids" in (entry_snapshots(e.old_data, e.new_data, e.delta)[1] or {})
-    ]
-    latest = max(listed, key=lambda e: e.timestamp)
-    _, new = entry_snapshots(latest.old_data, latest.new_data, latest.delta)
-    assert new["schemas"] == ["thing"]
-    assert new["schema_ids"] == [str(schema.id)]

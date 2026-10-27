@@ -123,7 +123,6 @@ class FileInfoService:
                     dataset_id,
                     include_deleted=True,
                     with_count=False,
-                    with_schemas=False,
                 )
                 if dataset_id is not None
                 else None

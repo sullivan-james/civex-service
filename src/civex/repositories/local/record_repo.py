@@ -581,15 +581,30 @@ class LocalRecordRepository:
         schema_id: uuid.UUID,
         data: dict[str, Any],
         parent_record_id: uuid.UUID | None = None,
+        id: uuid.UUID | None = None,
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
     ) -> RecordDTO:
         # search_vector is maintained by a Postgres trigger (CIVEX-173) so it
         # can't go stale on writes that don't go through this repo; unused on
         # SQLite (see models._TSVECTOR).
+        # `id` and the dates are given when a record is brought in from another
+        # project (a bundle), so its parent and references still mean the same.
+        given = {
+            k: v
+            for k, v in (
+                ("id", id),
+                ("created_at", created_at),
+                ("updated_at", updated_at),
+            )
+            if v is not None
+        }
         row = Record(
             dataset_id=dataset_id,
             schema_id=schema_id,
             data=data,
             parent_record_id=parent_record_id,
+            **given,
         )
         self._s.add(row)
         self._s.flush()
@@ -726,6 +741,64 @@ class LocalRecordRepository:
                 update(Record)
                 .where(Record.id.in_(chunk), Record.deleted_at.is_(None))
                 .values(deleted_at=now, updated_at=Record.updated_at)
+                .execution_options(synchronize_session=False)
+            )
+        self._s.expire_all()
+
+    def references_of(
+        self, record_ids: list[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, uuid.UUID, uuid.UUID]]:
+        rr = RecordReference
+        return [
+            (row[0], row[1], row[2])
+            for chunk in _chunks(list(record_ids))
+            for row in self._s.execute(
+                select(rr.record_id, rr.field_id, rr.target_id).where(
+                    rr.record_id.in_(chunk)
+                )
+            )
+        ]
+
+    def dataset_mismatches(self, record_ids: list[uuid.UUID]) -> int:
+        parent = aliased(Record)
+        total = 0
+        for chunk in _chunks(list(record_ids)):
+            total += (
+                self._s.scalar(
+                    select(func.count(Record.id))
+                    .join(parent, parent.id == Record.parent_record_id)
+                    .where(
+                        or_(Record.id.in_(chunk), Record.parent_record_id.in_(chunk)),
+                        Record.dataset_id != parent.dataset_id,
+                    )
+                )
+                or 0
+            )
+        return total
+
+    def move(
+        self,
+        ids: list[uuid.UUID],
+        dataset_id: uuid.UUID,
+        root_ids: list[uuid.UUID],
+        parent_id: uuid.UUID | None,
+        stamp: datetime,
+    ) -> None:
+        """A bulk UPDATE per chunk. Between statements a child may sit in
+        another collection than its parent: the key that forbids it is checked
+        when the transaction commits (`fk_records_parent_same_dataset`)."""
+        for chunk in _chunks(list(ids)):
+            self._s.execute(
+                update(Record)
+                .where(Record.id.in_(chunk))
+                .values(dataset_id=dataset_id, updated_at=stamp)
+                .execution_options(synchronize_session=False)
+            )
+        for chunk in _chunks(list(root_ids)):
+            self._s.execute(
+                update(Record)
+                .where(Record.id.in_(chunk))
+                .values(parent_record_id=parent_id, updated_at=stamp)
                 .execution_options(synchronize_session=False)
             )
         self._s.expire_all()
@@ -917,30 +990,17 @@ def _to_dto(row: Record) -> RecordDTO:
 def parent_allows_restore(record_model, stamp):
     """A condition on records being brought back by a schema's or collection's
     restore: none above it, or the one above is live, or it was deleted at the
-    same moment (and so comes back in the same restore); and its collection
-    allows its schema: every schema unless it has a list of its own, which
-    may have lost this one while the record was deleted. The one rule both restores (and sync, which uses
-    them) follow: a record comes back only where it could be added."""
-    from sqlalchemy import and_, exists, or_
+    same moment (and so comes back in the same restore). The one rule both
+    restores (and sync, which uses them) follow: a record comes back only
+    where it could be added."""
+    from sqlalchemy import exists, or_
     from sqlalchemy.orm import aliased
 
-    from civex.db.models import DatasetSchema
-
     above = aliased(record_model)
-    return and_(
-        or_(
-            record_model.parent_record_id.is_(None),
-            exists().where(
-                above.id == record_model.parent_record_id,
-                or_(above.deleted_at.is_(None), above.deleted_at == stamp),
-            ),
-        ),
-        or_(
-            # no list: every schema is allowed
-            ~exists().where(DatasetSchema.dataset_id == record_model.dataset_id),
-            exists().where(
-                DatasetSchema.dataset_id == record_model.dataset_id,
-                DatasetSchema.schema_id == record_model.schema_id,
-            ),
+    return or_(
+        record_model.parent_record_id.is_(None),
+        exists().where(
+            above.id == record_model.parent_record_id,
+            or_(above.deleted_at.is_(None), above.deleted_at == stamp),
         ),
     )

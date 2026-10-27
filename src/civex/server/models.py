@@ -20,6 +20,7 @@ from civex.domain.dtos import (
     FieldDTO,
     NameIssue,
     RecordDTO,
+    RecordMovePlanDTO,
     ReferrerGroupDTO,
     RestoreAllPlanDTO,
     RestoreAllResultDTO,
@@ -452,13 +453,6 @@ class DatasetResponse(BaseModel):
             "collection)."
         ),
     )
-    schemas: list[str] = Field(
-        default_factory=list,
-        description=(
-            "Names of the schemas this collection is for. Records in it can "
-            "only be of these schemas."
-        ),
-    )
 
     @classmethod
     def from_dto(cls, dto: DatasetDTO) -> DatasetResponse:
@@ -470,7 +464,6 @@ class DatasetResponse(BaseModel):
             deleted_at=dto.deleted_at,
             timezone=dto.timezone,
             scope=dto.scope,
-            schemas=list(dto.schemas),
         )
 
 
@@ -484,13 +477,6 @@ class CreateDatasetRequest(BaseModel):
     scope: str = Field(
         default="local",
         description="'local' (default) or 'global' -- see the collection's `scope`.",
-    )
-    schemas: list[str] = Field(
-        default_factory=list,
-        description=(
-            "Names of the schemas the collection is for. A child schema's "
-            "parent schema must be listed too."
-        ),
     )
 
 
@@ -509,14 +495,6 @@ class UpdateDatasetRequest(BaseModel):
         description=(
             "'local' or 'global'. Omit or null to leave unchanged. A global "
             "collection that other collections reference can't become local."
-        ),
-    )
-    schemas: list[str] | None = Field(
-        default=None,
-        description=(
-            "Limit the collection to these schemas (an empty list allows every schema). Omit or null to leave "
-            "unchanged. A schema with records in the collection can't be "
-            "removed."
         ),
     )
 
@@ -566,6 +544,72 @@ class RestoreSelectedResponse(BaseModel):
         description="Records live again in all, counting the parents brought back."
     )
     left: int = Field(description="Chosen records still deleted, and why not.")
+
+
+class MoveRecordsRequest(BaseModel):
+    """Which records to move, and where to. Either exactly `ids`, or every
+    record the query (`collection`, `schema_name`, `within`, `filter`, `where`,
+    `search`) lists: the same selectors as listing records, so "move all N
+    matching" moves exactly what a list with those filters shows."""
+
+    to: str = Field(description="The collection to move them to.")
+    parent: str | None = Field(
+        default=None,
+        description="The record (id or prefix) in that collection they go inside. "
+        "Omit to put them at its top level.",
+    )
+    ids: list[str] | None = Field(
+        default=None,
+        description="Exactly these records (ids or prefixes), each with "
+        "everything beneath it. The query fields are then ignored.",
+    )
+    collection: str | None = Field(
+        default=None, description="With a query: the collection the records are in."
+    )
+    schema_name: str | None = Field(
+        default=None, description="With a query: only records of this schema."
+    )
+    within: str | None = Field(
+        default=None,
+        description="With a query: only records of 'schema_name' beneath this record.",
+    )
+    filter: dict[str, Any] | None = Field(
+        default=None, description="A filter tree, as for listing records."
+    )
+    where: list[str] = Field(default_factory=list, description="'field=value' terms.")
+    search: str | None = Field(default=None, description="Full-text search.")
+
+
+class RecordMovePlanResponse(BaseModel):
+    """What a move would do. `problems` says, in plain words, why it can't be
+    done; it is empty when `can_move`."""
+
+    collection: str = Field(description="Where the records would go.")
+    collection_id: str
+    parent_id: str | None = Field(
+        default=None, description="The record they would sit inside, if any."
+    )
+    parent_name: str | None = None
+    roots: int = Field(description="Chosen records that would move.")
+    records: int = Field(
+        description="Records that would move in all, with everything beneath them."
+    )
+    skipped: int = Field(description="Chosen records already where they would go.")
+    sources: list[str] = Field(description="The collections they would leave.")
+    problems: list[str]
+    can_move: bool
+
+    @classmethod
+    def from_dto(cls, dto: RecordMovePlanDTO) -> RecordMovePlanResponse:
+        return cls(**dto.to_dict())
+
+
+class MoveRecordsResponse(BaseModel):
+    roots: int = Field(description="Chosen records moved.")
+    records: int = Field(
+        description="Records moved in all, with everything beneath them."
+    )
+    collection: str = Field(description="Where they are now.")
 
 
 class RecordLabelsRequest(BaseModel):

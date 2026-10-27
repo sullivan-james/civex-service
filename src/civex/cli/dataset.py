@@ -42,16 +42,6 @@ def dataset_create(
             "collection, for shared reference data such as species or sites."
         ),
     ),
-    schemas: list[str] = typer.Option(
-        [],
-        "--schema",
-        "-s",
-        help=(
-            "Limit the collection to this schema; repeat for several. Without "
-            "any, it holds records of every schema. A child schema needs its parent "
-            "listed too."
-        ),
-    ),
 ) -> None:
     """Create a new collection."""
     ctx = _ctx()
@@ -61,7 +51,6 @@ def dataset_create(
             description=description,
             timezone=timezone,
             scope=scope,
-            schemas=schemas,
         )
         ctx.commit()
         console.print(f"[success]Created collection '{dataset.name}'.[/success]")
@@ -103,7 +92,6 @@ def dataset_show(name: str = typer.Argument(..., help="Collection name")) -> Non
         console.print(f"  {d.description}")
     console.print(f"  Timezone  {d.timezone or 'not set (UTC for input)'}")
     console.print(f"  Scope     {d.scope}")
-    console.print(f"  Schemas   {', '.join(d.schemas) or 'none'}")
 
     if d.record_count > 0:
         counts = ctx.record_svc.schema_counts(RecordQuery(dataset=name))
@@ -139,28 +127,12 @@ def dataset_update(
             "reference can't be made local."
         ),
     ),
-    schemas: list[str] = typer.Option(
-        [],
-        "--schema",
-        "-s",
-        help=(
-            "Limit the collection to these schemas; repeat for several. "
-            "Without a list a collection holds records of every schema. A "
-            "schema that still has records here can't be removed."
-        ),
-    ),
 ) -> None:
-    """Update a collection's name, description, timezone, scope or schemas."""
-    if (
-        rename is None
-        and description is None
-        and timezone is None
-        and scope is None
-        and not schemas
-    ):
+    """Update a collection's name, description, timezone or scope."""
+    if rename is None and description is None and timezone is None and scope is None:
         console.print(
-            "[error]Provide at least one of --rename, --description, --timezone, "
-            "--scope or --schema.[/error]"
+            "[error]Provide at least one of --rename, --description, --timezone "
+            "or --scope.[/error]"
         )
         raise typer.Exit(1)
     ctx = _ctx()
@@ -171,7 +143,6 @@ def dataset_update(
             description=description,
             timezone=timezone,
             scope=scope,
-            schemas=schemas or None,
         )
         ctx.commit()
         if rename and rename != name:
@@ -180,27 +151,6 @@ def dataset_update(
             )
         console.print(f"[success]Updated collection '{dataset.name}'.[/success]")
     except (NotFoundError, AlreadyExistsError, ValidationError) as e:
-        console.print(f"[error]{e}[/error]")
-        raise typer.Exit(1)
-
-
-@app.command("add-schema")
-def dataset_add_schema(
-    name: str = typer.Argument(..., help="Collection name"),
-    schemas: list[str] = typer.Argument(..., help="Schema name(s) to enable"),
-) -> None:
-    """Enable schemas on a collection, along with any parent schemas they need.
-
-    A collection only holds records of the schemas it is enabled for.
-    """
-    ctx = _ctx()
-    try:
-        dataset = ctx.dataset_svc.add_schemas(name, schemas)
-        ctx.commit()
-        console.print(
-            f"[success]'{dataset.name}' now has: {', '.join(dataset.schemas)}.[/success]"
-        )
-    except (NotFoundError, ValidationError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
 

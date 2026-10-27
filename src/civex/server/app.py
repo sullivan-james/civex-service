@@ -24,7 +24,7 @@ from civex.server.routers import (
     bucket,
     datasets,
     db,
-    dump,
+    bundle,
     export_definitions,
     file_access,
     files,
@@ -213,11 +213,12 @@ _OPENAPI_TAGS = [
         ),
     },
     {
-        "name": "dump",
+        "name": "bundle",
         "description": (
-            "Export a full project (schemas, datasets, records) to a single "
-            "portable archive, and restore a project from one — the basis for "
-            "backups and moving a project between machines."
+            "A project's data as one file another civex can read: schemas, "
+            "collections, records (ids kept), the files they cite (optional) "
+            "and the project's workflows and plugins. Export one, say what "
+            "one holds, or read one into this project."
         ),
     },
     {
@@ -402,7 +403,7 @@ def api_routers(
         (logs.router, features_.LOGS),
         (schemas.router, None),
         (datasets.router, None),
-        (dump.router, None),
+        (bundle.router, None),
         (plugins.router, features_.PLUGIN_EDITOR),
         (records.router, None),
         (record_files.router, None),

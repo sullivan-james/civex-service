@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import yaml
 from fastapi.testclient import TestClient
 
 
@@ -109,20 +108,3 @@ def test_patch_field_with_only_a_label_is_not_an_empty_update(client: TestClient
         "/api/schemas/trial/fields/subject", json={"label": "Subject ID"}
     )
     assert response.status_code == 200, response.text
-
-
-def test_dump_carries_labels(client: TestClient):
-    client.post(
-        "/api/schemas",
-        json={
-            "name": "trial",
-            "label": "Clinical Trial",
-            "fields": [{"name": "subject", "type": "string", "label": "Subject ID"}],
-        },
-    )
-    dumped = client.get("/api/dump")
-    assert dumped.status_code == 200, dumped.text
-    doc = yaml.safe_load(dumped.text)  # the endpoint serves YAML, not JSON
-    schema = next(s for s in doc["schemas"] if s["name"] == "trial")
-    assert schema["label"] == "Clinical Trial"
-    assert schema["fields"][0]["label"] == "Subject ID"

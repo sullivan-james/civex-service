@@ -142,11 +142,9 @@ class DatasetRepository(Protocol):
         name: str,
         include_deleted: bool = False,
         with_count: bool = True,
-        with_schemas: bool = True,
     ) -> DatasetDTO | None:
         """`with_count=False` skips the live-record count (an O(records) scan)
-        and leaves `record_count` at 0; `with_schemas=False` skips the schema
-        list lookup and leaves `schemas` empty -- for callers that don't read
+        and leaves `record_count` at 0 -- for callers that don't read
         them."""
         ...
 
@@ -155,7 +153,6 @@ class DatasetRepository(Protocol):
         id: uuid.UUID,
         include_deleted: bool = False,
         with_count: bool = True,
-        with_schemas: bool = True,
     ) -> DatasetDTO | None: ...
     def list_all(self, with_count: bool = True) -> list[DatasetDTO]: ...
     def list_deleted(self) -> list[DatasetDTO]: ...
@@ -174,13 +171,6 @@ class DatasetRepository(Protocol):
         timezone: str | None = None,
         scope: str | None = None,
     ) -> DatasetDTO: ...
-    def set_schemas(self, id: uuid.UUID, schema_names: list[str]) -> DatasetDTO:
-        """Replace the collection's schema list (names must be live schemas)."""
-        ...
-
-    def schemas_in_use(self, id: uuid.UUID) -> set[str]:
-        """Names of the schemas live records in the collection are typed by."""
-        ...
 
     def delete(self, id: uuid.UUID, stamp: datetime | None = None) -> None: ...
     def restore(self, id: uuid.UUID) -> DatasetDTO: ...
@@ -364,6 +354,9 @@ class RecordRepository(Protocol):
         schema_id: uuid.UUID,
         data: dict[str, Any],
         parent_record_id: uuid.UUID | None = None,
+        id: uuid.UUID | None = None,
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
     ) -> RecordDTO: ...
     def update(self, id: uuid.UUID, data: dict[str, Any]) -> RecordDTO: ...
     def delete(self, id: uuid.UUID) -> None: ...
@@ -383,6 +376,31 @@ class RecordRepository(Protocol):
         self, ids: list[uuid.UUID], stamp: datetime | None = None
     ) -> None: ...
     def restore_many(self, ids: list[uuid.UUID]) -> None: ...
+
+    def references_of(
+        self, record_ids: list[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, uuid.UUID, uuid.UUID]]:
+        """(record id, field id, target id) for every reference value these
+        records hold, live or deleted."""
+        ...
+
+    def dataset_mismatches(self, record_ids: list[uuid.UUID]) -> int:
+        """How many of `record_ids`, or of the records directly beneath them,
+        are in a different collection from the record above them."""
+        ...
+
+    def move(
+        self,
+        ids: list[uuid.UUID],
+        dataset_id: uuid.UUID,
+        root_ids: list[uuid.UUID],
+        parent_id: uuid.UUID | None,
+        stamp: datetime,
+    ) -> None:
+        """Put `ids` (whole trees: each root in `root_ids` and everything
+        beneath it) in collection `dataset_id`, the roots under `parent_id`."""
+        ...
+
     def live_under_deleted(self, limit: int) -> tuple[list[RecordDTO], int]: ...
     def purge_many(self, ids: list[uuid.UUID]) -> None: ...
 

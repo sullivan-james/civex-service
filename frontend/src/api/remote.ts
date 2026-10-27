@@ -34,8 +34,12 @@ export interface RemoteStatus {
   progress: SyncProgress | null
   /** A connect started here is still running (copying can take a while). */
   connecting: boolean
-  /** Why the last connect started here failed. */
+  /** Why the last connect started here failed, in a person's words, and the
+   * technical text behind it. */
   connect_error: string | null
+  connect_error_detail?: string | null
+  /** The civex this computer runs. */
+  version?: string
   /** This computer asked to join and waits for a person to approve the code
    * on the server. */
   awaiting_approval?: { code: string; expires_at: number } | null
@@ -188,6 +192,10 @@ export interface SyncResult {
   pushed: number
   conflicts: number
   rejected: number
+  /** The civex the server runs, as it said. */
+  server_version?: string | null
+  /** That the server will stop accepting this civex at its next update. */
+  notice?: string | null
 }
 
 /** How a conflict is settled. Which of these a row offers is the server's word

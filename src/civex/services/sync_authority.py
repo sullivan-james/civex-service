@@ -21,7 +21,13 @@ from typing import Any
 
 from civex import __version__
 from civex.domain import hlc
-from civex.domain.audit_diff import AFTER, BEFORE, apply_delta, identity
+from civex.domain.audit_diff import (
+    AFTER,
+    BEFORE,
+    PLACEMENT_KEYS,
+    apply_delta,
+    identity,
+)
 from civex.domain.exceptions import ValidationError
 from civex.domain.merge import LIFECYCLE_KEYS, DERIVED_KEYS, merge
 from civex.domain.sync import (
@@ -32,6 +38,7 @@ from civex.domain.sync import (
     ENTITY_ORDER,
     MERGED,
     PROTOCOL_MAX,
+    PROTOCOL_RETIRING,
     PROTOCOL_MIN,
     REJECTED,
     FeedPage,
@@ -118,6 +125,7 @@ class SyncAuthorityService:
             protocol_max=PROTOCOL_MAX,
             server_version=__version__,
             capabilities=list(self._capabilities),
+            protocol_retiring=PROTOCOL_RETIRING,
         )
 
     def snapshot(self, kind: str, after: str | None, limit: int) -> SnapshotPage:
@@ -223,9 +231,13 @@ class SyncAuthorityService:
                 result = self._take(who, entry)
                 self._rules.check(_changed([entry]))
         except ValidationError as e:
-            if entry.entity_type != "record" and self._applier.head(
-                entry.entity_type, entry.entity_id
+            head = self._applier.head(entry.entity_type, entry.entity_id)
+            if head is not None and (
+                entry.entity_type != "record" or _moves(entry, head)
             ):
+                # A record a refused change would have moved is put back too:
+                # left where the device put it, it would sit under a parent
+                # that is somewhere else.
                 return self._put_back(who, entry, str(e))
             return self._refuse(who, entry, str(e), getattr(e, "path", None))
         except (ValueError, TypeError, KeyError, AttributeError) as e:
@@ -452,6 +464,7 @@ class SyncAuthorityService:
                         )
                     )
             if kind == "record":
+                final = self._records.placed_with_parent(final)
                 self._records.check_incoming(final, head)
             self._applier.apply_state(kind, eid, final)
         elif entry.action == "delete":
@@ -779,6 +792,25 @@ def _differs(
     if final is None:
         return False
     return _comparable(final) != _comparable(incoming or {})
+
+
+def _moves(entry: SyncEntry, head: dict[str, Any]) -> bool:
+    """Whether the change puts the record elsewhere than it is held: in another
+    collection, or under another record."""
+    if entry.action not in ("create", "update", "restore"):
+        return False
+    _, incoming = _sides(entry, head)
+    for key in PLACEMENT_KEYS:
+        value = incoming.get(key)
+        if value is not None:
+            try:
+                uuid.UUID(str(value))
+            except ValueError:
+                return False  # not a place at all: refused as a bad value
+    return any(
+        str(incoming.get(key) or "") != str(head.get(key) or "")
+        for key in PLACEMENT_KEYS
+    )
 
 
 def _sides(

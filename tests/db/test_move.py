@@ -71,10 +71,6 @@ def populated(ctx: AppContext, make_schema, make_collection) -> Engine:
         )
 
     # The remaining tables, so a copy is checked against every one of them.
-    ctx.dataset_svc.update(
-        "study",
-        schemas=["patient", "encounter", "cohort", "recording", "selection", "scan"],
-    )
     ctx.view_svc.create("patient", "everyone", columns=["name"])
     # Exports saved with a schema: one naming a holder (a second foreign key to
     # schemas) with fields and a layout, one with none (a NULL there).
@@ -436,6 +432,10 @@ def test_tables_are_copied_parents_first(populated: Engine, tmp_path: Path):
 
 
 @pytest.mark.skipif(not _PG_URL, reason="set CIVEX_TEST_POSTGRES_URL to run")
+# The scratch database is one; every test that writes to it shares this group
+# so `-n 2 --dist loadgroup` never runs two of them at once (the search-vector
+# tests once wrote records between the copy to PostgreSQL and the copy back).
+@pytest.mark.xdist_group("postgres_scratch")
 def test_round_trip_through_postgres(populated: Engine, tmp_path: Path):
     assert _PG_URL
     pg = create_engine(_PG_URL)

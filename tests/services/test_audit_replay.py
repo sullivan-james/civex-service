@@ -109,11 +109,11 @@ def _wrong(ctx: AppContext) -> list[str]:
         if kind == "record":
             expected.pop("updated_at", None)
             now.pop("updated_at", None)
-        # A collection's schemas are its `schema_ids`; the names beside them are
-        # for reading, and a schema's rename is recorded as a change to the schema.
+        # A collection's schema list was dropped (migration b3c7d1e9f5a2); an
+        # entry from before still names it, and is read as it was written.
         if kind == "dataset":
             expected.pop("schemas", None)
-            now.pop("schemas", None)
+            expected.pop("schema_ids", None)
         if expected != now:
             differs = sorted(
                 k for k in set(expected) | set(now) if expected.get(k) != now.get(k)
@@ -133,7 +133,7 @@ def test_history_describes_everything_a_person_can_do(ctx: AppContext) -> None:
     svc.create("recording", parent="encounter")
     svc.add_field("recording", "rate", "integer")
     ctx.dataset_svc.create("c")
-    ctx.dataset_svc.update("c", schemas=["encounter", "recording"], timezone="UTC")
+    ctx.dataset_svc.update("c", timezone="UTC")
     ctx.commit()
 
     enc = ctx.record_svc.add("c", "encounter", {"site": "x", "depth": 1.0})
@@ -141,6 +141,12 @@ def test_history_describes_everything_a_person_can_do(ctx: AppContext) -> None:
         "c", "recording", {"rate": 1}, parent_record_id=str(enc.id)
     )
     ctx.record_svc.update(str(rec.id), {"rate": 2})
+    ctx.commit()
+
+    # Moving a record (with what is beneath it) to another collection and back.
+    ctx.dataset_svc.create("c2")
+    ctx.record_svc.move("c2", ids=[str(enc.id)])
+    ctx.record_svc.move("c", ids=[str(enc.id)])
     ctx.commit()
 
     # Schemas and fields: every kind of edit.
