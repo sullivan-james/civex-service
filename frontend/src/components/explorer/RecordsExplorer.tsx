@@ -27,7 +27,7 @@ import {
   Field,
   Skeleton,
 } from '../ui'
-import { ChevronDown, Columns3, Download, Plus, Upload } from '../ui/icons'
+import { ChevronDown, Columns3, Download, Plus } from '../ui/icons'
 import { toTableRows } from '../records/tableRows'
 import {
   RecordsTable,
@@ -373,11 +373,6 @@ export function RecordsExplorer({
               `/collections/${dataset}/new?${new URLSearchParams({ schema: s.name })}`,
             ),
         })),
-        {
-          label: 'Import data…',
-          icon: Upload,
-          onClick: () => navigate(`/collections/${dataset}/import`),
-        },
       ]
     : []
   const newMenu =

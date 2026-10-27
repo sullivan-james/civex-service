@@ -7,10 +7,8 @@ import { LoadingState } from './components/ui/States'
 
 const CollectionsPage = lazy(() => import('./pages/CollectionsPage'))
 const CollectionDetailPage = lazy(() => import('./pages/CollectionDetailPage'))
-const ImportPage = lazy(() => import('./pages/ImportPage'))
 const SchemasPage = lazy(() => import('./pages/SchemasPage'))
 const SchemaDetailPage = lazy(() => import('./pages/SchemaDetailPage'))
-const SchemaImportPage = lazy(() => import('./pages/SchemaImportPage'))
 const SchemaRecordsPage = lazy(() => import('./pages/SchemaRecordsPage'))
 const ViewRedirect = lazy(() => import('./pages/ViewRedirect'))
 const RecordDetailPage = lazy(() => import('./pages/RecordDetailPage'))
@@ -82,14 +80,12 @@ export default function App() {
             <Route path="/collections" element={<CollectionsPage />} />
             <Route path="/collections/:id" element={<CollectionDetailPage />} />
             <Route path="/collections/:id/new" element={<NewRecordPage />} />
-            <Route path="/collections/:id/import" element={<ImportPage />} />
             <Route
               path="/views"
               element={<Navigate replace to="/collections" />}
             />
             <Route path="/schemas" element={<SchemasPage />} />
             <Route path="/schemas/:id" element={<SchemaDetailPage />} />
-            <Route path="/schemas/:id/import" element={<SchemaImportPage />} />
             <Route path="/schemas/:id/views" element={<ViewRedirect />} />
             <Route
               path="/schemas/:id/records"

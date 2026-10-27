@@ -111,13 +111,6 @@ export interface RecordLabel {
   deleted_at?: string | null
 }
 
-/** The header that puts a request's changes in a batch (see `auditApi.openBatch`). */
-function batchHeaders(batchId?: string): Record<string, string> | undefined {
-  return batchId
-    ? { 'Content-Type': 'application/json', 'X-Civex-Batch': batchId }
-    : undefined
-}
-
 /** A file to send with a record, named for the field it goes in. */
 export interface FileUpload {
   field: string
@@ -167,17 +160,13 @@ export const recordsApi = {
   referrers: (id: string) =>
     api.get<ReferrerGroup[]>(`/records/${id}/referrers`),
 
-  /** `batchId` puts the change in a batch opened with `auditApi.openBatch`, so
-   * work done over many requests is one event in history. */
   create: (
     datasetName: string,
     body: { schema_name: string; data: object; parent_record_id?: string },
-    options?: { batchId?: string },
   ) =>
     api.post<CivexRecord>(
       `/collections/${encodeURIComponent(datasetName)}/records`,
       body,
-      batchHeaders(options?.batchId),
     ),
 
   /** A record and the files chosen for it, created as one request: the
@@ -197,16 +186,8 @@ export const recordsApi = {
     )
   },
 
-  update: (
-    id: string,
-    body: { data: object },
-    options?: { batchId?: string },
-  ) =>
-    api.patch<CivexRecord>(
-      `/records/${id}`,
-      body,
-      batchHeaders(options?.batchId),
-    ),
+  update: (id: string, body: { data: object }) =>
+    api.patch<CivexRecord>(`/records/${id}`, body),
 
   /** One file into a record's file field and the record saved, as one
    * request (`PUT /records/{id}/files/{field}`): appended to a list of files,
