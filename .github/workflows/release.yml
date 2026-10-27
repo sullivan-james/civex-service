@@ -95,7 +95,7 @@ jobs:
 
       - uses: astral-sh/setup-uv@v7
 
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: wheel
           path: dist
@@ -150,7 +150,7 @@ jobs:
       # The uv bundled into the app.
       - uses: astral-sh/setup-uv@v7
 
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: wheel
           path: dist
@@ -311,12 +311,12 @@ jobs:
       id-token: write
 
     steps:
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: wheel
           path: dist
 
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           pattern: civex-*
           path: desktop
