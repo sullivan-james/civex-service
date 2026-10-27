@@ -687,7 +687,6 @@ export function RecordsExplorer({
                       // it asks for the same permission as deleting here.
                       <Button
                         size="sm"
-                        variant="secondary"
                         disabled={!mayDelete}
                         title={mayDelete ? undefined : why('delete')}
                         onClick={() => setMoving(true)}

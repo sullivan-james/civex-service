@@ -37,10 +37,10 @@ export function ExportBundleDialog({ onClose }: { onClose: () => void }) {
             workflows and plugins.
           </p>
           {plan.error ? (
-            <FormError>{errorMessage(plan.error)}</FormError>
+            <FormError message={errorMessage(plan.error)} />
           ) : !p ? (
             <p className="flex items-center gap-2 text-fg-muted">
-              <Spinner size="sm" /> Working out what would go in…
+              <Spinner /> Working out what would go in…
             </p>
           ) : (
             <dl className="space-y-1" data-testid="bundle-plan">
@@ -70,9 +70,7 @@ export function ExportBundleDialog({ onClose }: { onClose: () => void }) {
         </div>
       </ModalBody>
       <ModalFooter>
-        <Button variant="secondary" onClick={onClose}>
-          Cancel
-        </Button>
+        <Button onClick={onClose}>Cancel</Button>
         <Button
           variant="primary"
           disabled={!p}

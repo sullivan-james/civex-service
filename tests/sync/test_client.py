@@ -454,12 +454,15 @@ def test_a_server_says_its_version_and_warns_before_it_stops_accepting_this_one(
     pair, monkeypatch
 ):
     from civex import __version__
+    from civex.domain.sync import PROTOCOL_MAX
 
     laptop, _, _ = pair
     report = laptop.sync_svc.sync()
     assert (report.server_version, report.notice) == (__version__, None)
     # The server's next release will drop the protocol this device speaks.
-    monkeypatch.setattr("civex.services.sync_authority.PROTOCOL_RETIRING", 2)
+    monkeypatch.setattr(
+        "civex.services.sync_authority.PROTOCOL_RETIRING", PROTOCOL_MAX
+    )
     assert "stop accepting this version of civex" in laptop.sync_svc.sync().notice
 
 

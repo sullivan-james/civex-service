@@ -135,8 +135,8 @@ export function MoveRecordsDialog({
               <RecordSearchPicker
                 key={target}
                 schemaName={holder.name}
-                collection={target}
-                value={parent}
+                collection={target ?? undefined}
+                value={parent ?? undefined}
                 onChange={setParent}
                 required
                 aria-label={`Inside which ${holder.label ?? holder.name}`}
@@ -150,11 +150,11 @@ export function MoveRecordsDialog({
             waiting={!body}
             plan={plan.data}
           />
-          {move.error && <FormError>{errorMessage(move.error)}</FormError>}
+          <FormError message={move.error ? errorMessage(move.error) : null} />
         </div>
       </ModalBody>
       <ModalFooter>
-        <Button variant="secondary" onClick={onClose} disabled={move.isPending}>
+        <Button onClick={onClose} disabled={move.isPending}>
           Cancel
         </Button>
         <Button onClick={confirm} disabled={!canMove}>
@@ -186,11 +186,11 @@ function PlanText({
         Choose where the records go to see what the move would do.
       </p>
     )
-  if (error) return <FormError>{errorMessage(error)}</FormError>
+  if (error) return <FormError message={errorMessage(error)} />
   if (loading || !plan)
     return (
       <p className="flex items-center gap-2 text-sm text-fg-muted">
-        <Spinner size="sm" /> Working out what would move…
+        <Spinner /> Working out what would move…
       </p>
     )
   const where = plan.parent_name
