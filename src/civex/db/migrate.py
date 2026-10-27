@@ -70,6 +70,28 @@ def ensure_schema_current(engine: Engine) -> None:
         _migrated_engines.add(engine)
 
 
+def missing_structure(engine: Engine) -> list[str]:
+    """Tables and columns this civex's models expect that the database at
+    `engine` lacks ("views.files_layout"), whatever revision it is stamped
+    at: a database stamped current but missing a migration's work (a
+    migration reordered after it ran) looks current to Alembic and fails
+    only when the missing part is used."""
+    from civex.db.models import Base
+
+    found = inspect(engine)
+    have = set(found.get_table_names())
+    missing: list[str] = []
+    for table in Base.metadata.sorted_tables:
+        if table.name not in have:
+            missing.append(table.name)
+            continue
+        columns = {c["name"] for c in found.get_columns(table.name)}
+        missing += [
+            f"{table.name}.{c.name}" for c in table.columns if c.name not in columns
+        ]
+    return missing
+
+
 def too_new_error(database: str, revisions: list[str]) -> Exception:
     """The error for a database at `revisions` this civex doesn't know.
 

@@ -109,6 +109,18 @@ from the next tag forward.
   record's) **Their files** filters by **On the server** / **Not on the server
   yet**, marks each file not sent yet, and shows files going up live, with
   **Send now**. A missing file says so, and which computer added it.
+- **Versions are shown, not enforced.** Settings → Sync and `civex sync
+  now|status` show the civex on this computer and on the server. Whether two
+  can sync is still decided by the sync protocol alone, so updating a server
+  doesn't cut devices off; a server that will stop accepting an older civex at
+  its next update says so first, and those devices show *Update civex soon*.
+  A field of a type this civex doesn't know stops a sync before anything is
+  applied.
+- **Sync and connect failures in plain words.** One sentence saying what to do
+  (a database problem points to `civex doctor`), with the technical text in
+  the log, behind *Technical details* in Settings → Sync, and dimmed in the
+  CLI. `civex doctor` now checks that the database has every table and column
+  this civex expects, whatever revision it is stamped at.
 - **Every collection in one view**: `/collections` has an **All records** tab,
   the records explorer across every collection, with **Their files** listing
   every file in the project (a filter or a record narrows it as usual).

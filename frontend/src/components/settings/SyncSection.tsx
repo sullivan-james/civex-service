@@ -15,6 +15,7 @@ import {
   Button,
   Card,
   ConfirmDialog,
+  Disclosure,
   Field,
   Input,
   ProgressBar,
@@ -166,6 +167,13 @@ function Copying({ s }: { s: RemoteStatus }) {
       <p role="alert" className="text-sm text-attention">
         {s.connect_error}
       </p>
+      {s.connect_error_detail && (
+        <Disclosure summary="Technical details" className="mt-2 text-xs">
+          <pre className="whitespace-pre-wrap break-all text-fg-muted">
+            {s.connect_error_detail}
+          </pre>
+        </Disclosure>
+      )}
       {again.error && (
         <p role="alert" className="mt-1 text-xs text-danger">
           {errorMessage(again.error)}
@@ -200,6 +208,13 @@ function Following({ s }: { s: RemoteStatus }) {
           <dd className="font-mono break-all">{s.remote}</dd>
           <dt className="text-fg-muted">Last synced</dt>
           <dd>{when(s.last_synced_at)}</dd>
+          <dt className="text-fg-muted">civex</dt>
+          <dd>
+            {s.version ?? '?'} here
+            {s.last_result?.server_version
+              ? `, ${s.last_result.server_version} on the server`
+              : ''}
+          </dd>
           <dt className="text-fg-muted">Not yet sent</dt>
           <dd>{s.pending}</dd>
           <dt className="text-fg-muted">State</dt>

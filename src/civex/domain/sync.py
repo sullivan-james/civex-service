@@ -17,6 +17,7 @@ from collections.abc import Iterator
 from typing import Any, Protocol
 
 from civex.domain import features
+from civex.domain.field_descriptors import FIELD_TYPES
 from civex.domain import hlc
 
 # The wire formats this civex speaks. MAX goes up when what travels changes in a
@@ -25,6 +26,11 @@ from civex.domain import hlc
 # authority is upgraded first and answers a device on any version both speak.
 PROTOCOL_MIN = 3
 PROTOCOL_MAX = 3
+# The oldest version this civex still serves but its next release will not, so
+# devices still on it are told to update before they are cut off (`Hello.
+# protocol_retiring`). None while nothing is being retired. Raise
+# `PROTOCOL_MIN` only in the release after one that set this.
+PROTOCOL_RETIRING: int | None = None
 # Optional features, by name, that a peer can look for in `Hello`. Adding one is
 # not a protocol change; an older peer just doesn't have it.
 CAPABILITIES: tuple[str, ...] = ("library", "device_login")
@@ -153,18 +159,57 @@ def agree(theirs: tuple[int, int]) -> int | None:
     return version if version >= max(theirs[0], PROTOCOL_MIN) else None
 
 
-def protocol_mismatch(theirs: tuple[int, int] | None, there: str, here: str) -> str:
+def protocol_mismatch(
+    theirs: tuple[int, int] | None,
+    there: str,
+    here: str,
+    their_version: str | None = None,
+) -> str:
     """Why two peers can't sync, saying which one to update. `there` and `here`
-    name the two sides ("the server", "this computer")."""
+    name the two sides ("the server", "this computer"); `their_version` is the
+    civex the other side runs, when it said."""
+    runs = f" ({there} runs civex {their_version})" if their_version else ""
     if theirs is None or theirs[1] < PROTOCOL_MIN:
         spoken = f"sync protocol {theirs[1]}" if theirs else "an older sync protocol"
         return (
-            f"Update civex on {there}: it speaks {spoken}, and {here} needs "
-            f"{PROTOCOL_MIN} or later."
+            f"Update civex on {there}{runs}: it speaks {spoken}, and {here} "
+            f"needs {PROTOCOL_MIN} or later."
         )
     return (
-        f"Update civex on {here}: {there} needs sync protocol {theirs[0]} or "
-        f"later, and {here} speaks up to {PROTOCOL_MAX}."
+        f"Update civex on {here}{runs}: {there} needs sync protocol {theirs[0]} "
+        f"or later, and {here} speaks up to {PROTOCOL_MAX}."
+    )
+
+
+def retiring_notice(retiring: int | None, agreed: int | None) -> str | None:
+    """What to tell a person when the server will stop accepting the protocol
+    this device speaks with it at its next update (None: nothing to say)."""
+    if retiring is None or agreed is None or agreed > retiring:
+        return None
+    return (
+        "The server will stop accepting this version of civex after its next "
+        "update. Update civex on this computer to keep syncing."
+    )
+
+
+def unreadable_field_type(kind: str, snapshot: Any, delta: Any = None) -> str | None:
+    """A field type this civex doesn't know, in a field's state or change from
+    another civex (None when there is none): such a field can't be applied
+    here, and the records using it couldn't be read."""
+    if kind != "field":
+        return None
+    seen = [snapshot.get("dtype") if isinstance(snapshot, dict) else None]
+    change = delta.get("dtype") if isinstance(delta, dict) else None
+    if isinstance(change, dict):
+        seen.append(change.get("after"))
+    return next((t for t in seen if t is not None and t not in FIELD_TYPES), None)
+
+
+def newer_field_type(dtype: str) -> SyncError:
+    return SyncError(
+        f"The server holds a field of a type this civex doesn't know ('{dtype}'). "
+        "Update civex on this computer to keep syncing.",
+        retryable=False,
     )
 
 
@@ -418,6 +463,12 @@ class FeedPage:
                     f"({entry.action} {entry.entity_type}). Update civex here.",
                     retryable=False,
                 )
+            # A field of a type added in a newer civex: stopped the same way.
+            dtype = unreadable_field_type(
+                entry.entity_type, entry.new_data, entry.delta
+            )
+            if dtype is not None:
+                raise newer_field_type(dtype)
         return cls(entries, int(d["head_seq"]), bool(d["more"]))
 
 
@@ -443,6 +494,9 @@ class Hello:
     protocol_max: int = 0
     server_version: str | None = None
     capabilities: list[str] = field(default_factory=list)
+    # The oldest version it still speaks but will stop accepting at its next
+    # update (`PROTOCOL_RETIRING`), so a device still on it can say so.
+    protocol_retiring: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -458,6 +512,7 @@ class Hello:
             "protocol_max": self.protocol_max,
             "server_version": self.server_version,
             "capabilities": self.capabilities,
+            "protocol_retiring": self.protocol_retiring,
         }
 
     @classmethod
@@ -477,6 +532,11 @@ class Hello:
             protocol_max=int(d.get("protocol_max") or version),
             server_version=d.get("server_version"),
             capabilities=[str(c) for c in d.get("capabilities") or []],
+            protocol_retiring=(
+                int(d["protocol_retiring"])
+                if d.get("protocol_retiring") is not None
+                else None
+            ),
         )
 
 
@@ -539,6 +599,12 @@ class SnapshotPage:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> SnapshotPage:
+        # A field of a type this civex doesn't know stops a copy before
+        # anything of the page is written, as it stops the feed.
+        for item in d["items"]:
+            dtype = unreadable_field_type(d["kind"], item)
+            if dtype is not None:
+                raise newer_field_type(dtype)
         return cls(
             d["kind"],
             list(d["items"]),
@@ -579,12 +645,43 @@ class SyncError(RuntimeError):
     """Sync could not finish. `retryable` is true for what trying again can fix
     (a network failure); a refused token or a protocol mismatch is not."""
 
-    def __init__(self, message: str, retryable: bool = True, status: int = 400) -> None:
+    def __init__(
+        self,
+        message: str,
+        retryable: bool = True,
+        status: int = 400,
+        detail: str = "",
+    ) -> None:
         super().__init__(message)
         self.retryable = retryable
         # How an authority reports it over HTTP: 401 no/invalid token, 403 a
         # token used from another device.
         self.status = status
+        # The technical text behind the message (an exception's own words),
+        # for whoever needs it; the message is what a person reads.
+        self.detail = detail
+
+
+def plain_failure(error: Exception) -> SyncError:
+    """Any failure while syncing or connecting as a `SyncError` a person can
+    read: one sentence saying what to do, with the technical text kept as its
+    `detail`. A `SyncError` is already that. The one place a raw error (a
+    database's SQL, a traceback's last line) becomes words."""
+    if isinstance(error, SyncError):
+        return error
+    technical = f"{type(error).__name__}: {error}"
+    if type(error).__module__.split(".")[0] == "sqlalchemy":
+        return SyncError(
+            "This computer's database isn't in the shape this civex expects, so "
+            "syncing stopped. Run `civex doctor` to check it.",
+            retryable=False,
+            detail=technical,
+        )
+    return SyncError(
+        "Syncing stopped because of an unexpected problem on this computer. "
+        "It is in the log; trying again may help.",
+        detail=technical,
+    )
 
 
 @dataclass
