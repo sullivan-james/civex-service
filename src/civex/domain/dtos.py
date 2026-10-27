@@ -238,13 +238,6 @@ class DatasetDTO:
     timezone: str | None = None
     # "local" | "global" -- see civex.domain.scopes.
     scope: str = "local"
-    # Names of the schemas this collection is for; records here can only be
-    # of these. Sorted by name.
-    schemas: list[str] = field(default_factory=list)
-    # The same schemas by id, in the same order. History stores these too: a
-    # schema's name can change, its id can't, so an entry still says which
-    # schemas the collection was for after a rename.
-    schema_ids: list[uuid.UUID] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         # record_count excluded — it's a computed value, not stored on the entity
@@ -254,8 +247,6 @@ class DatasetDTO:
             "description": self.description,
             "timezone": self.timezone,
             "scope": self.scope,
-            "schemas": list(self.schemas),
-            "schema_ids": [str(i) for i in self.schema_ids],
             "created_at": self.created_at.isoformat(),
             "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
         }
@@ -273,8 +264,6 @@ class DatasetDTO:
             timezone=d.get("timezone"),
             # Likewise absent before collection scopes existed.
             scope=d.get("scope") or "local",
-            schemas=list(d.get("schemas") or []),
-            schema_ids=[uuid.UUID(i) for i in d.get("schema_ids") or []],
         )
 
 

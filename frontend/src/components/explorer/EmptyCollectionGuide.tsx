@@ -47,15 +47,10 @@ export function EmptyCollectionGuide({
 
   const label = (s: Schema) => displayLabel(s.name, s.label)
   const live = schemas.filter((s) => !s.deleted_at)
-  // At the top: the top-level schemas (every one, unless the collection was
-  // given a list of its own). Inside a record: the schemas that go inside
-  // its kind.
+  // At the top: every top-level schema (a collection holds records of every
+  // schema). Inside a record: the schemas that go inside its kind.
   const here = live.filter((s) =>
-    within
-      ? s.parent_id === within.schema.id
-      : !s.parent_id &&
-        (collection.schemas.length === 0 ||
-          collection.schemas.includes(s.name)),
+    within ? s.parent_id === within.schema.id : !s.parent_id,
   )
   const kind = within ? ` inside ${label(within.schema).toLowerCase()}s` : ''
 

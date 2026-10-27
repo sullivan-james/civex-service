@@ -24,10 +24,7 @@ from civex.testing.convergence import differences
 from civex.testing.invariants import scenario
 
 _SERVER = os.environ.get("CIVEX_TEST_POSTGRES_URL")
-pytestmark = [
-    pytest.mark.skipif(not _SERVER, reason="CIVEX_TEST_POSTGRES_URL not set"),
-    pytest.mark.usefixtures("strict_schema_lists"),
-]
+pytestmark = pytest.mark.skipif(not _SERVER, reason="CIVEX_TEST_POSTGRES_URL not set")
 
 
 @pytest.fixture()

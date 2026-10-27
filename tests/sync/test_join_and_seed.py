@@ -66,7 +66,6 @@ def test_a_join_applies_a_record_after_the_one_it_sits_under(project, authority)
     build_study(authority)
     authority.schema_svc.create("sample", parent="encounter")
     authority.schema_svc.add_field("sample", "label", "string")
-    authority.dataset_svc.update("study", schemas=["encounter", "sample"])
     parent = authority.record_svc.add("study", "encounter", {"site": "late"})
     child = authority.record_svc.add(
         "study", "sample", {"label": "early"}, parent_record_id=str(parent.id)

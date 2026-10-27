@@ -11,7 +11,6 @@ def _tree(ctx: AppContext, make_schema, make_collection, make_record):
     make_schema("site", fields=[("name", "string")])
     make_schema("visit", fields=[("when", "string")], parent="site")
     make_collection("survey")
-    ctx.dataset_svc.update("survey", schemas=["site", "visit"])
     site = make_record("survey", "site", {"name": "a"})
     visit = make_record(
         "survey", "visit", {"when": "may"}, parent_record_id=str(site.id)

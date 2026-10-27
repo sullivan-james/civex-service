@@ -109,11 +109,10 @@ On PostgreSQL, JSON columns use `JSONB` via `with_variant`.
 
 Schema inheritance is resolved recursively by `SchemaService.collect_fields()` — parent fields are appended after own fields and labelled with their source schema.
 
-### Collection scope and schema lists
+### Collection scope
 
-A collection (`datasets` table) carries a `scope` (`local` | `global`, `domain/scopes.py`) and a schema list (`dataset_schemas`, surfaced as `DatasetDTO.schemas` — names). Both are managed by `DatasetService`:
+A collection (`datasets` table) carries a `scope` (`local` | `global`, `domain/scopes.py`), managed by `DatasetService`. **A collection holds records of every schema**: there is no per-collection schema list (the `dataset_schemas` table was dropped by migration `b3c7d1e9f5a2`; `civex collection ... --schema` and `add-schema` are gone), so a schema made after a collection can be used in it at once, and nothing about which schemas a collection takes is stored, synced or checked. The exports offered on a collection (`GET /file-access/definitions?collection=`) are those saved with a schema the collection has records of.
 
-- **A collection holds records of every schema** unless it was given a list of its own (`civex collection create|update --schema`, `add-schema`; nothing in the app sets one): `RecordService.add` rejects a record whose schema isn't in a non-empty list (`_check_schema_allowed`); an empty list allows everything. In a list, a child schema's ancestors must be listed too, and a schema with live records can't be removed, while clearing the list is always allowed (`DatasetService._check_schema_list`/`update`). `record_repo.parent_allows_restore` and `ProjectRules._check_collection` apply the list only where there is one.
 - `RecordService.add`/`update` check every `reference`/`reference_list` value (`_check_references`): the target must be a live record in the same collection or in a `global` one. Values equal to the stored ones are skipped on update. Schema-level reference restrictions are *not* checked against collections — schemas are global and can't know their collection.
 - A `global` collection that other collections' records reference can't be made `local` or deleted (`RecordService.collection_referrers`).
 - `find_by_schema(..., reachable_from=<collection>)` / `GET /records?reachable_from=` is what reference pickers search; `RecordDTO.dataset_name` and `reference_collections` (set in `_attach_reference_labels`) drive the "from collection X" marker in the UI.

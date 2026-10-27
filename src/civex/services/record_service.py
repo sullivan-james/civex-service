@@ -862,7 +862,6 @@ class RecordService:
                     dataset_id,
                     include_deleted=True,
                     with_count=False,
-                    with_schemas=False,
                 )
                 dataset_names[dataset_id] = ds.name if ds else None
             return dataset_names[dataset_id]
@@ -1263,16 +1262,6 @@ class RecordService:
                 ) from None
         return out
 
-    def _check_schema_allowed(self, dataset: DatasetDTO, schema: SchemaDTO) -> None:
-        """A collection holds records of every schema, unless it was given a
-        list of its own (`civex collection update --schema`), in which case
-        only those."""
-        if dataset.schemas and schema.name not in dataset.schemas:
-            raise ValidationError(
-                f"Schema '{schema.name}' is not enabled for collection "
-                f"'{dataset.name}' -- add it to the collection's schemas first"
-            )
-
     def _check_unique(
         self,
         shape: ResolvedSchema | None,
@@ -1378,7 +1367,6 @@ class RecordService:
                     target.dataset_id,
                     include_deleted=True,
                     with_count=False,
-                    with_schemas=False,
                 )
             owner = owners[target.dataset_id]
             if owner is None or not can_reference(dataset.id, owner.id, owner.scope):
@@ -1406,7 +1394,6 @@ class RecordService:
                     dataset_id,
                     include_deleted=True,
                     with_count=False,
-                    with_schemas=False,
                 )
             ds = datasets[dataset_id]
             field_name, dtype = field_map[str(field_id)]
@@ -1583,7 +1570,6 @@ class RecordService:
 
         if head is None or head.get("deleted_at"):
             # Made, or brought back: only where it could be added.
-            self._check_schema_allowed(dataset, shape.schema)
             if shape.schema.parent_id:
                 parent = self._records.get_by_id(parent_id) if parent_id else None
                 if parent is None:
@@ -1667,8 +1653,6 @@ class RecordService:
         self._permissions.require(permissions.WRITE_RECORDS, dataset.id)
 
         schema = self._schema_svc.get(schema_name)
-        self._check_schema_allowed(dataset, schema)
-
         shape = self._schema_svc.resolve(schema)
         parent_record = (
             self._records.get_by_prefix(parent_record_id)
@@ -1850,7 +1834,6 @@ class RecordService:
                 raw.dataset_id,
                 include_deleted=True,
                 with_count=False,
-                with_schemas=False,
             )
             if raw.dataset_id
             else None
@@ -1923,9 +1906,7 @@ class RecordService:
         resolve, so a bad query fails loudly instead of matching nothing."""
         dataset_id = None
         if query.dataset:
-            dataset = self._datasets.get_by_name(
-                query.dataset, with_count=False, with_schemas=False
-            )
+            dataset = self._datasets.get_by_name(query.dataset, with_count=False)
             if not dataset:
                 raise NotFoundError(f"Dataset '{query.dataset}' not found")
             dataset_id = dataset.id
@@ -2260,9 +2241,7 @@ class RecordService:
         schema = self._schema_svc.get(schema_name)
         dataset_ids = None
         if reachable_from:
-            source = self._datasets.get_by_name(
-                reachable_from, with_count=False, with_schemas=False
-            )
+            source = self._datasets.get_by_name(reachable_from, with_count=False)
             if not source:
                 raise NotFoundError(f"Dataset '{reachable_from}' not found")
             dataset_ids = [source.id] + [
@@ -2290,9 +2269,7 @@ class RecordService:
             return []
         dataset_id = None
         if collection:
-            dataset = self._datasets.get_by_name(
-                collection, with_count=False, with_schemas=False
-            )
+            dataset = self._datasets.get_by_name(collection, with_count=False)
             if not dataset:
                 raise NotFoundError(f"Dataset '{collection}' not found")
             dataset_id = dataset.id
@@ -2705,9 +2682,7 @@ class RecordService:
     ) -> list[RecordDTO]:
         dataset_id = None
         if dataset_name:
-            dataset = self._datasets.get_by_name(
-                dataset_name, with_count=False, with_schemas=False
-            )
+            dataset = self._datasets.get_by_name(dataset_name, with_count=False)
             if not dataset:
                 raise NotFoundError(f"Dataset '{dataset_name}' not found")
             dataset_id = dataset.id
@@ -2740,7 +2715,6 @@ class RecordService:
             record.dataset_id,
             include_deleted=True,
             with_count=False,
-            with_schemas=False,
         )
         group = self._restore_group(record)
         blocker = self._restore_blocker(record, dataset)
@@ -3157,9 +3131,7 @@ class RecordService:
         A record blocker carries no name (it takes a rendering per record);
         callers that need one use `restore_plan`."""
         datasets = {
-            did: self._datasets.get_by_id(
-                did, include_deleted=True, with_count=False, with_schemas=False
-            )
+            did: self._datasets.get_by_id(did, include_deleted=True, with_count=False)
             for did in {r.dataset_id for r in records}
         }
         schemas = {

@@ -23,7 +23,6 @@ def populated(project):
     a.schema_svc.create("recording", parent="encounter")
     a.schema_svc.add_field("recording", "rate", "integer")
     a.dataset_svc.create("study")
-    a.dataset_svc.update("study", schemas=["encounter", "recording"])
     a.view_svc.create("encounter", "all", columns=["site"])
     parent = a.record_svc.add("study", "encounter", {"site": "x", "depth": 1.5})
     a.record_svc.add(
@@ -55,7 +54,6 @@ def test_a_whole_project_copies_by_snapshot_and_reads_back_identically(populated
         ), kind
     # And the copy is a working project, not just rows.
     assert len(b.record_svc.find("study", "encounter")) == 1
-    assert b.dataset_svc.get("study").schemas == ["encounter", "recording"]
 
 
 def test_applying_a_snapshot_again_changes_nothing(populated):

@@ -118,10 +118,14 @@ from the next tag forward.
   uses the app's words, and when someone describes one thing rather than a kind
   of thing it proposes a record instead of a new schema.
 - **A collection holds records of every schema.** The schema checklist is gone
-  from the collection forms; nothing in the app picks schemas for a collection
-  any more. A list given from the command line (`civex collection create|update
-  --schema`, `add-schema`) still restricts, and an empty list means every
-  schema, so nothing existing changes and no migration is needed.
+  from the collection forms, the command line (`--schema` on `collection
+  create|update`, `collection add-schema`) and the API, and the list itself is
+  gone from the database (migration `b3c7d1e9f5a2` drops `dataset_schemas`,
+  with every list in it): a schema made after a collection can be used in it
+  at once, and nothing has to keep a list right. Collections made before this
+  release lose the list they were given when they were made. The sync
+  protocol is now 3 (a collection's change no longer carries `schema_ids` and
+  `schemas`); every machine on a project needs this release.
 - **Starting a collection no longer sends you to the Schemas page first.** An
   empty collection is a short two-step guide with its own **New schema…**
   button, apart from **New**; the same button sits under the schema rail of a

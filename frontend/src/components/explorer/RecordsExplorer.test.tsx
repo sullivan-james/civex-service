@@ -321,7 +321,7 @@ describe('RecordsExplorer', () => {
 
   describe('a collection with records at only one level', () => {
     const species = schema('species', null, ['common_name'])
-    const withEnabled = (schemas: string[]) => (url: URL) => {
+    const withSpecies = (url: URL) => {
       if (url.pathname === '/api/collections/hb')
         return json({
           id: 'c1',
@@ -331,7 +331,6 @@ describe('RecordsExplorer', () => {
           record_count: 2,
           deleted_at: null,
           scope: 'local',
-          schemas,
         })
       if (url.pathname === '/api/schemas') return json([...SCHEMAS, species])
       return undefined
@@ -340,7 +339,7 @@ describe('RecordsExplorer', () => {
     it('still offers to start a record of any other top-level schema it is for', async () => {
       // records exist at "encounter" only; "species" has none yet, so it has no
       // level of its own, and used to have no way to be created either.
-      override = withEnabled(['encounter', 'recording', 'selection', 'species'])
+      override = withSpecies
       renderExplorer({}, '/collections/hb')
 
       await openNew()
@@ -350,16 +349,8 @@ describe('RecordsExplorer', () => {
       expect(item(/New recording/)).toBeNull()
     })
 
-    it('does not offer a top-level schema the collection is not for', async () => {
-      override = withEnabled(['encounter'])
-      renderExplorer({}, '/collections/hb')
-      await openNew()
-      expect(item(/New encounter/)).toBeInTheDocument()
-      expect(item(/New species/)).toBeNull()
-    })
-
     it('offers them only at the top of the collection, not inside a record', async () => {
-      override = withEnabled(['encounter', 'recording', 'selection', 'species'])
+      override = withSpecies
       renderExplorer({}, '/collections/hb?schema=recording&within=e1')
       await openNew()
       expect(item(/New recording/)).toBeInTheDocument()
@@ -384,13 +375,7 @@ describe('RecordsExplorer', () => {
           return json({})
         if (url.pathname === '/api/schemas')
           return json([...SCHEMAS, species, annotation])
-        return withEnabled([
-          'encounter',
-          'recording',
-          'selection',
-          'species',
-          'annotation',
-        ])(url)
+        return withSpecies(url)
       }
 
       it('offers to add what goes in a record that has none yet, under that record', async () => {
@@ -423,18 +408,6 @@ describe('RecordsExplorer', () => {
           screen.getAllByRole('menuitem', { name: /New selection/ }),
         ).toHaveLength(1)
         expect(item(/New annotation/)).toBeInTheDocument()
-      })
-
-      it('does not offer a child schema the collection is not for', async () => {
-        override = (url) =>
-          url.pathname === '/api/collections/hb'
-            ? withEnabled(['encounter', 'recording', 'selection'])(url)
-            : inside(url)
-        renderExplorer({ root: { id: 'r2' }, scopeLabel: 'R2' }, '/records/r2')
-
-        await openNew()
-        expect(item(/New selection/)).toBeInTheDocument()
-        expect(item(/New annotation/)).toBeNull()
       })
     })
   })
@@ -1166,7 +1139,6 @@ describe('what this person may do', () => {
           record_count: 0,
           deleted_at: null,
           scope: 'local',
-          schemas: ['encounter'],
         })
       if (url.pathname.endsWith('/record-counts')) return json({})
       return undefined

@@ -18,7 +18,7 @@ def tree(ctx: AppContext, make_schema, make_collection, make_record):
         fields=[("sname", "string"), ("contour", "file"), ("table", "file")],
         parent="recording",
     )
-    make_collection("hb", schemas=["encounter", "recording", "selection"])
+    make_collection("hb")
     e7 = make_record("hb", "encounter", {"name": "Encounter 7"})
     rec = make_record(
         "hb", "recording", {"rname": "Rec A"}, parent_record_id=str(e7.id)

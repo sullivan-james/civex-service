@@ -71,10 +71,6 @@ def populated(ctx: AppContext, make_schema, make_collection) -> Engine:
         )
 
     # The remaining tables, so a copy is checked against every one of them.
-    ctx.dataset_svc.update(
-        "study",
-        schemas=["patient", "encounter", "cohort", "recording", "selection", "scan"],
-    )
     ctx.view_svc.create("patient", "everyone", columns=["name"])
     # Exports saved with a schema: one naming a holder (a second foreign key to
     # schemas) with fields and a layout, one with none (a NULL there).

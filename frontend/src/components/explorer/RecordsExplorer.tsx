@@ -306,25 +306,16 @@ export function RecordsExplorer({
     else deleteMany.mutate([...selected], done)
   }
 
-  // The collection's own top-level schemas: where a record can start. Levels
-  // come from record counts, so a schema with no records yet has none, and
-  // without these there would be no way to create the first of its kind.
-  // A collection holds records of every schema, unless it was given a list
-  // of its own (the CLI's --schema), in which case only those.
-  const ownList = collection?.schemas ?? []
-  const enabledSchemas = new Set(
-    ownList.length ? ownList : (x.schemas ?? []).map((s) => s.name),
-  )
+  // The top-level schemas: where a record can start. Levels come from record
+  // counts, so a schema with no records yet has none, and without these there
+  // would be no way to create the first of its kind. A collection holds
+  // records of every schema.
   const navigate = useNavigate()
   // What this person may do here: the controls stay, off, saying why.
   const { can, why } = usePermissions()
   const mayWrite = can('write_records', collection?.id)
   const mayDelete = can('delete', collection?.id)
-  const starters = dataset
-    ? (x.schemas ?? []).filter(
-        (s) => !s.parent_id && enabledSchemas.has(s.name),
-      )
-    : []
+  const starters = dataset ? (x.schemas ?? []).filter((s) => !s.parent_id) : []
   // At the top of a collection, the starters other than the one being listed.
   const otherStarters = x.rootId
     ? []
@@ -336,10 +327,7 @@ export function RecordsExplorer({
   const childStarters =
     dataset && x.rootId && x.scopeSchema
       ? (x.schemas ?? []).filter(
-          (s) =>
-            s.parent_id === x.scopeSchema!.id &&
-            enabledSchemas.has(s.name) &&
-            s.name !== listed?.name,
+          (s) => s.parent_id === x.scopeSchema!.id && s.name !== listed?.name,
         )
       : []
 

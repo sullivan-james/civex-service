@@ -21,7 +21,6 @@ SEEDS = range(
 
 # The real "a collection only holds records of its listed schemas" rule, which
 # the rest of the suite switches off (tests/conftest.py).
-pytestmark = pytest.mark.usefixtures("strict_schema_lists")
 
 
 @pytest.mark.parametrize("seed", SEEDS)

@@ -231,7 +231,6 @@ def test_the_inventory_answers_where_without_asking_the_bucket(s3_project):
         ctx.schema_svc.create("doc")
         ctx.schema_svc.add_field("doc", "scan", "file")
         ctx.dataset_svc.create("study")
-        ctx.dataset_svc.update("study", schemas=["doc"])
         record = ctx.record_svc.add("study", "doc", {"scan": ref.to_dict()})
         ctx.commit()
         shown = ctx.record_svc.get(str(record.id))

@@ -125,12 +125,6 @@ def _never_a_real_project(
             module.find_project_root = real  # type: ignore[attr-defined]
 
 
-@pytest.fixture()
-def strict_schema_lists() -> None:
-    """Request this to run a test with the real "a collection only holds
-    records of its enabled schemas" check (see the autouse fixture below)."""
-
-
 @pytest.fixture(autouse=True)
 def _stop_the_transfer_worker() -> Iterator[None]:
     """The server's transfer worker is a process-wide singleton that starts the
@@ -140,23 +134,6 @@ def _stop_the_transfer_worker() -> Iterator[None]:
     from civex.services.transfer_jobs import jobs
 
     jobs.shutdown()
-
-
-@pytest.fixture(autouse=True)
-def _schema_lists_not_enforced(
-    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Most tests are about something else and create collections without
-    enabling schemas on them, so the schema-list check is off unless a test
-    asks for `strict_schema_lists`. The rule has its own tests
-    (tests/services/test_collection_scope.py)."""
-    if "strict_schema_lists" in request.fixturenames:
-        return
-    from civex.services.record_service import RecordService
-
-    monkeypatch.setattr(
-        RecordService, "_check_schema_allowed", lambda self, dataset, schema: None
-    )
 
 
 @pytest.fixture()
@@ -221,16 +198,6 @@ def make_record(ctx: AppContext):
         data: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> RecordDTO:
-        # As in the app, a collection holds only records of the schemas it
-        # lists, so list this one (and those above it) first. The check itself
-        # is off for most tests, but restoring follows the list.
-        listed = ctx.dataset_svc.get(collection_name).schemas
-        schema = ctx.schema_svc.get(schema_name)
-        wanted = [schema_name] + [a.name for a in ctx.schema_svc.ancestors(schema)]
-        if any(name not in listed for name in wanted):
-            ctx.dataset_svc.update(
-                collection_name, schemas=sorted(set(listed) | set(wanted))
-            )
         record = ctx.record_svc.add(collection_name, schema_name, data or {}, **kwargs)
         ctx.commit()
         return record

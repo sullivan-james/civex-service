@@ -25,7 +25,6 @@ def world(project):
     laptop.schema_svc.add_field("encounter", "site", "string")
     laptop.schema_svc.add_field("encounter", "depth", "float")
     laptop.dataset_svc.create("study")
-    laptop.dataset_svc.update("study", schemas=["encounter"])
     record = laptop.record_svc.add("study", "encounter", {"site": "x", "depth": 1.0})
     laptop.commit()
     first = push(authority, laptop, "laptop")
@@ -45,7 +44,6 @@ def test_a_devices_changes_arrive_whole_and_the_authority_holds_the_same_things(
     laptop.schema_svc.create("encounter")
     laptop.schema_svc.add_field("encounter", "site", "string")
     laptop.dataset_svc.create("study")
-    laptop.dataset_svc.update("study", schemas=["encounter"])
     laptop.record_svc.add("study", "encounter", {"site": "x"})
     laptop.commit()
 
@@ -411,7 +409,6 @@ def unique_world(project):
     laptop.schema_svc.add_field("encounter", "depth", "float")
     laptop.schema_svc.set_unique_keys("encounter", [["site"]])
     laptop.dataset_svc.create("study")
-    laptop.dataset_svc.update("study", schemas=["encounter"])
     laptop.commit()
     push(authority, laptop, "laptop")
     join(authority, phone)
@@ -444,7 +441,6 @@ def test_a_value_outside_its_restriction_is_refused(project):
         "encounter", "depth", "float", restrictions={"min": 0, "max": 10}
     )
     laptop.dataset_svc.create("study")
-    laptop.dataset_svc.update("study", schemas=["encounter"])
     record = laptop.record_svc.add("study", "encounter", {"depth": 5.0})
     laptop.commit()
     # The device's own copy of the rule changed after it saved, so what it holds
@@ -519,8 +515,8 @@ def test_a_persons_permissions_are_the_policy_a_device_is_held_to(project, monke
 
     authority, laptop = project("authority"), project("laptop")
     laptop.schema_svc.create("sample")
-    mine = laptop.dataset_svc.create("mine", schemas=["sample"])
-    laptop.dataset_svc.create("theirs", schemas=["sample"])
+    mine = laptop.dataset_svc.create("mine")
+    laptop.dataset_svc.create("theirs")
     laptop.commit()
     assert set(statuses(push(authority, laptop, "laptop"))) == {"applied"}
 
