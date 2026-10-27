@@ -108,10 +108,13 @@ def test_it_starts_again_as_it_was(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_the_stop_endpoint_needs_the_servers_own_token(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from civex.server.app import create_app
 
+    # The route asks which project it serves; from here there is none, which
+    # is fine, rather than whatever project sits above the checkout.
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(running.atexit, "register", lambda *a: None)
     mine = running.register("127.0.0.1", 8000)
     stopped: list[bool] = []
