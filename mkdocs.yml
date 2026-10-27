@@ -131,6 +131,7 @@ nav:
           - Top-level commands: reference/cli/top-level.md
           - civex ai: reference/cli/ai.md
           - civex automation: reference/cli/automation.md
+          - civex bundle: reference/cli/bundle.md
           - civex collection: reference/cli/collection.md
           - civex db: reference/cli/db.md
           - civex files: reference/cli/files.md

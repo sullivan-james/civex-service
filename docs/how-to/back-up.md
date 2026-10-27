@@ -51,26 +51,44 @@ civex db status                         # shows the connection URL
 pg_dump --format=custom --file civex.pgdump "postgresql://…"
 ```
 
-## A portable copy: `civex dump`
+## A portable copy: `civex bundle`
 
-`civex dump` writes schemas, collections, records, workflows and plugins to one
-YAML file that any civex can read, whatever its database:
+`civex bundle export` writes schemas, collections, records, the stored files
+the records cite, and the project's workflows and plugins to one file that
+any civex can read, whatever its database. Records keep their ids, so a record
+inside another, and one that references another, still line up in the project
+the bundle is read into. In the app it is **Export bundle…** and **Import
+bundle…** on the Collections page.
 
 ```bash
-civex dump --output backup.yaml
-civex dump --no-data --output structure.yaml   # schemas and workflows only
+civex bundle export --output backup.civex.zip
+civex bundle export --no-files --output light.civex.zip   # records cite the files, bytes left out
+civex bundle export --no-data --output structure.civex.zip # schemas and workflows only
+civex bundle export --collection survey-2024               # one collection (repeatable)
+civex bundle show backup.civex.zip                         # what a bundle holds
 
-# into a new, empty project
+# into another project
 civex init other-project && cd other-project
-civex restore backup.yaml
+civex bundle import backup.civex.zip
 ```
 
-It is **not** a full backup. It leaves out:
+Importing matches schemas and collections by name (one already there is
+reused, and a schema gains only the fields it lacks) and records by id (one
+already there, live or deleted, is left as it is), so a bundle can be imported
+again after more records were added. The import is one event in Activity.
+A bundle's plugins are code: read what lands in `_civex/plugins/` before
+running workflows.
 
-- stored files (copy the volumes),
+A bundle is **not** a full backup. It leaves out:
+
 - change history and Activity,
 - saved views and saved exports,
-- settings in `config.toml`.
+- settings in `config.toml`,
+- files on a drive that can't be reached when it is written (the records
+  still cite them; `civex bundle show` lists how many were left out).
+
+A YAML dump written by `civex dump` in an older release is read by that
+release's `civex restore`; export a bundle from there.
 
 ## Projects that sync
 

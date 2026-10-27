@@ -354,6 +354,9 @@ class RecordRepository(Protocol):
         schema_id: uuid.UUID,
         data: dict[str, Any],
         parent_record_id: uuid.UUID | None = None,
+        id: uuid.UUID | None = None,
+        created_at: datetime | None = None,
+        updated_at: datetime | None = None,
     ) -> RecordDTO: ...
     def update(self, id: uuid.UUID, data: dict[str, Any]) -> RecordDTO: ...
     def delete(self, id: uuid.UUID) -> None: ...

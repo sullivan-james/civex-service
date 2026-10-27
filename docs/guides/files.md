@@ -120,5 +120,6 @@ background for collections this computer keeps. See
 
 ## Backing up
 
-Files aren't in `civex dump`. Back up `_civex/objects/` and every volume folder.
+A bundle (`civex bundle export`) carries the files the records cite unless
+`--no-files`; for a full backup copy `_civex/objects/` and every volume folder.
 See [Back up a project](../how-to/back-up.md).
