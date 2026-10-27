@@ -432,6 +432,10 @@ def test_tables_are_copied_parents_first(populated: Engine, tmp_path: Path):
 
 
 @pytest.mark.skipif(not _PG_URL, reason="set CIVEX_TEST_POSTGRES_URL to run")
+# The scratch database is one; every test that writes to it shares this group
+# so `-n 2 --dist loadgroup` never runs two of them at once (the search-vector
+# tests once wrote records between the copy to PostgreSQL and the copy back).
+@pytest.mark.xdist_group("postgres_scratch")
 def test_round_trip_through_postgres(populated: Engine, tmp_path: Path):
     assert _PG_URL
     pg = create_engine(_PG_URL)

@@ -28,10 +28,13 @@ from civex.repositories.local.record_repo import LocalRecordRepository
 
 _PG_URL = os.environ.get("CIVEX_TEST_POSTGRES_URL")
 
-pytestmark = pytest.mark.skipif(
-    not _PG_URL,
-    reason="set CIVEX_TEST_POSTGRES_URL to a scratch PostgreSQL DB to run this test",
-)
+pytestmark = [
+    pytest.mark.xdist_group("postgres_scratch"),  # one scratch DB: see test_move.py
+    pytest.mark.skipif(
+        not _PG_URL,
+        reason="set CIVEX_TEST_POSTGRES_URL to a scratch PostgreSQL DB to run this test",
+    ),
+]
 
 
 @pytest.fixture()
