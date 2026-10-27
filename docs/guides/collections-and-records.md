@@ -49,8 +49,8 @@ page.
     (**New ▸ New site**). Inside a record, it lists the types that go inside it
     (inside a visit: **New ▸ New sample**). This is the step you repeat; the
     schema is made once. **Add and add another** saves
-    and gives you a blank form. **New ▸ Import data…** brings in a spreadsheet or
-    a folder of files: see [Import data](../how-to/import-data.md).
+    and gives you a blank form. A folder of files comes in through a workflow:
+    see [Import files](../how-to/import-data.md).
 
 === "CLI"
     ```bash

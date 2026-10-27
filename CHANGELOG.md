@@ -60,6 +60,13 @@ from the next tag forward.
   record waits for its push before taking the move, a child's collection
   follows its parent on the authority when the parent moved meanwhile, and a
   refused move is put back on the device that made it.
+- **The guided import is gone.** The spreadsheet and folder wizard
+  (**New ▸ Import data…**, a schema page's **Import data**) read the file in
+  the browser, guessed a schema from it and made a request per row, and led
+  people to shape their records around a file rather than the other way
+  round. Records are added from the **New** menu; a folder of files comes in
+  through a workflow (`civex.create_records_from_files`,
+  `civex.match_files_to_records`), which can be saved and run again.
 - A server serves the project it is asked for, not the one in its working
   directory: `deps.current_project` resolves it once per request (a host
   serving many projects installs `app.state.project_resolver`), a context is

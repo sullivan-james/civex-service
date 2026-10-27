@@ -28,7 +28,6 @@ import {
   useTabParam,
 } from '../components/ui'
 import { displayLabel, nameError } from '../utils/naming'
-import { Upload } from '../components/ui/icons'
 import { SchemaFieldsSection } from '../components/schemas/SchemaFieldsSection'
 import { NamingSection } from '../components/schemas/NamingSection'
 import { UniquenessSection } from '../components/schemas/UniquenessSection'
@@ -241,18 +240,9 @@ export default function SchemaDetailPage() {
       ]}
       action={
         !editing && (
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="primary"
-              to={`/schemas/${schema.id}/import`}
-            >
-              <Upload size={14} /> Import data
-            </Button>
-            <Button size="sm" onClick={() => setEditing(true)}>
-              Edit
-            </Button>
-          </div>
+          <Button size="sm" onClick={() => setEditing(true)}>
+            Edit
+          </Button>
         )
       }
     >

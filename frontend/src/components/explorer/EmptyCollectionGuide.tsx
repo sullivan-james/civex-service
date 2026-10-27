@@ -102,7 +102,7 @@ export function EmptyCollectionGuide({
             </p>
             <p className="text-sm text-fg-muted">
               {here.length
-                ? 'Add them one at a time, or bring in a spreadsheet from the New menu.'
+                ? 'Add them from the New menu.'
                 : 'Once there is a schema, add records of it here.'}
             </p>
             {here.length > 0 && newMenu}
