@@ -67,6 +67,13 @@ from the next tag forward.
   round. Records are added from the **New** menu; a folder of files comes in
   through a workflow (`civex.create_records_from_files`,
   `civex.match_files_to_records`), which can be saved and run again.
+- **The desktop app installs civex onto a pinned Python (3.13).** The
+  launcher and the in-app updater used to let uv pick the newest CPython it
+  could download; once that became 3.15, which PyYAML has no wheel for, a
+  fresh install on Windows tried to compile it and failed asking for Visual
+  C++ Build Tools. Both now set `UV_PYTHON` (the launcher's `PYTHON`,
+  `updates.APP_PYTHON`), so a new setup exe is needed for the fix to reach a
+  first install.
 - A server serves the project it is asked for, not the one in its working
   directory: `deps.current_project` resolves it once per request (a host
   serving many projects installs `app.state.project_resolver`), a context is

@@ -40,6 +40,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REQUIREMENT = "civex[desktop]"
+#: The Python uv installs civex onto. Pinned, because with only a lower bound
+#: uv takes the newest CPython it can download, and a Python newer than the
+#: dependencies' wheels makes uv build them from source (PyYAML on 3.15 asked a
+#: user's computer for a C compiler). Move it only once every dependency has
+#: wheels for the next version. civex.updates.APP_PYTHON is the same value.
+PYTHON = "3.13"
 #: No windows at all (--install-only): a dialog in CI would wait forever.
 HEADLESS = False
 REQUEST_ENV = "CIVEX_UPDATE_REQUEST"  # civex.updates.REQUEST_ENV
@@ -132,6 +138,7 @@ def environment(home: Path, uv: Path) -> dict[str, str]:
             "UV_PYTHON_INSTALL_DIR": str(home / "python"),
             "UV_CACHE_DIR": str(home / "cache"),
             "UV_PYTHON_PREFERENCE": "only-managed",
+            "UV_PYTHON": PYTHON,
             # civex runs custom plugins with uv (plugins/subprocess_runtime.py).
             "CIVEX_UV_BIN": str(uv),
             # The desktop app's log goes beside this one (desktop/tray.py).
