@@ -143,6 +143,12 @@ def test_history_describes_everything_a_person_can_do(ctx: AppContext) -> None:
     ctx.record_svc.update(str(rec.id), {"rate": 2})
     ctx.commit()
 
+    # Moving a record (with what is beneath it) to another collection and back.
+    ctx.dataset_svc.create("c2")
+    ctx.record_svc.move("c2", ids=[str(enc.id)])
+    ctx.record_svc.move("c", ids=[str(enc.id)])
+    ctx.commit()
+
     # Schemas and fields: every kind of edit.
     svc.update("encounter", description="a visit", label="Encounter")
     svc.update("recording", display_template="{site} {rate}")

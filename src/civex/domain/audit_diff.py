@@ -74,7 +74,18 @@ def diff_entry(
         was, now = strip_derived(before.get(key)), strip_derived(after.get(key))
         if was != now:
             changes.append(Change(key, was, now))
+    if entity_type == "record" and action == "update":
+        # Where the record is: a move changes these and no value.
+        for key in PLACEMENT_KEYS:
+            was, now = (old or {}).get(key), (new or {}).get(key)
+            if was != now:
+                changes.insert(0, Change(key, was, now))
     return changes
+
+
+# A record's place: its collection and the record it sits inside. Reported as
+# changes of an edit (a move) and labelled by whoever can name them.
+PLACEMENT_KEYS = ("dataset_id", "parent_record_id")
 
 
 def _record_values(snapshot: dict[str, Any] | None) -> dict[str, Any]:

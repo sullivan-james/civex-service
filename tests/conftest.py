@@ -66,8 +66,9 @@ OS_SENSITIVE = {
     "test_migrate.py",
     "test_db_move_service.py",
     "test_init.py",
-    "test_dump.py",
-    "test_dump_service.py",
+    "test_bundle.py",
+    "test_bundle_service.py",
+    "test_bundle_router.py",
     "test_view.py",
     # plugin subprocesses and the plugin folder
     "test_subprocess_runtime.py",

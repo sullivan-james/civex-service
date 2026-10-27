@@ -18,7 +18,7 @@ from civex.domain.run_filters import RunField as AuditField
 KINDS = ["record", "schema", "field", "dataset", "view"]
 CHANGES = ["create", "update", "delete", "restore", "purge"]
 # How a change came about: on its own, or as part of a batch of this kind.
-HOWS = ["single", "import", "delete", "restore", "purge", "workflow"]
+HOWS = ["single", "import", "delete", "restore", "purge", "move", "workflow"]
 # Where the record a change is about is now.
 NOWS = ["live", "deleted", "gone"]
 
@@ -33,7 +33,8 @@ AUDIT_FIELDS: list[AuditField] = [
         "how",
         "How",
         "enum",
-        "On its own, or as part of an import, a delete, a restore or a workflow run.",
+        "On its own, or as part of an import, a delete, a restore, a move or a "
+        "workflow run.",
         HOWS,
         _CHOICE_OPS,
     ),

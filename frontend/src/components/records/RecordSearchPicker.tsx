@@ -9,8 +9,15 @@ export function recordLabel(r: CivexRecord): string {
   return r.natural_name ?? r.id.slice(0, 8)
 }
 
-/** Debounced schema-scoped record search, shared by the single- and multi-select pickers below. */
-export function useRecordSearch(schemaName: string, search: string) {
+/** Debounced schema-scoped record search, shared by the single- and multi-select
+ * pickers below. With `collection`, only that collection's records (picking a
+ * record *in* a place, as a move does); without it, what a record in the
+ * current collection may reference. */
+export function useRecordSearch(
+  schemaName: string,
+  search: string,
+  collection?: string,
+) {
   const [results, setResults] = useState<CivexRecord[]>([])
   const [loading, setLoading] = useState(false)
   // Only what a record in this collection may reference: its own and global
@@ -25,12 +32,20 @@ export function useRecordSearch(schemaName: string, search: string) {
     const timer = setTimeout(async () => {
       setLoading(true)
       try {
-        const records = await recordsApi.searchBySchema(
-          schemaName,
-          search || undefined,
-          undefined,
-          reachableFrom,
-        )
+        const records = collection
+          ? (
+              await recordsApi.list(collection, {
+                schema: schemaName,
+                search: search || undefined,
+                limit: 20,
+              })
+            ).items
+          : await recordsApi.searchBySchema(
+              schemaName,
+              search || undefined,
+              undefined,
+              reachableFrom,
+            )
         if (!stale) setResults(records)
       } finally {
         if (!stale) setLoading(false)
@@ -40,7 +55,7 @@ export function useRecordSearch(schemaName: string, search: string) {
       stale = true
       clearTimeout(timer)
     }
-  }, [schemaName, search, reachableFrom])
+  }, [schemaName, search, reachableFrom, collection])
 
   return { results, loading }
 }
@@ -99,6 +114,9 @@ interface SingleProps {
   required?: boolean
   placeholder?: string
   className?: string
+  /** Only this collection's records (a place to put something), instead of
+   * what the current collection's records may reference. */
+  collection?: string
 }
 
 /** Search-as-you-type picker for a single record reference, scoped to one schema. */
@@ -113,6 +131,7 @@ export function RecordSearchPicker({
   required,
   placeholder,
   className,
+  collection,
 }: SingleProps) {
   const [search, setSearch] = useState('')
   const [open, setOpen] = useState(false)
@@ -120,7 +139,7 @@ export function RecordSearchPicker({
   // results — e.g. right after loading a record whose reference points
   // outside the default/unfiltered first page.
   const [fetchedRecord, setFetchedRecord] = useState<CivexRecord | null>(null)
-  const { results, loading } = useRecordSearch(schemaName, search)
+  const { results, loading } = useRecordSearch(schemaName, search, collection)
   const currentCollection = useCollectionName()
 
   const selectedRecord = value

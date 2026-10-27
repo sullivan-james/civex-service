@@ -47,6 +47,7 @@ const BATCH_LABEL: Record<string, string> = {
   delete: 'delete',
   restore: 'restore',
   purge: 'purge',
+  move: 'move',
   workflow: 'workflow',
 }
 

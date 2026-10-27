@@ -7,10 +7,6 @@ import {
   CreateResourceModal,
   Field,
   TimeZoneSelect,
-  Modal,
-  ModalBody,
-  ModalFooter,
-  ModalHeader,
   MonoId,
   Page,
   DataTable,
@@ -21,7 +17,11 @@ import {
 import { RecordsExplorer } from '../components/explorer/RecordsExplorer'
 import { pluralise } from '../lib/utils'
 import { errorMessage } from '../lib/errors'
-import { dumpApi, type RestoreResult } from '../api/dump'
+import { bundleApi, type BundleImportResult } from '../api/bundle'
+import {
+  BundleImportResultModal,
+  ExportBundleDialog,
+} from '../components/collections/BundleDialogs'
 import { CollectionScopeFields } from '../components/collections/CollectionScopeFields'
 import type { CollectionScope } from '../api/collections'
 
@@ -67,63 +67,16 @@ function CreateCollectionModal({ onClose }: { onClose: () => void }) {
   )
 }
 
-function ImportResultModal({
-  result,
-  onClose,
-}: {
-  result: RestoreResult
-  onClose: () => void
-}) {
-  return (
-    <Modal onClose={onClose} size="sm">
-      <ModalHeader>Import complete</ModalHeader>
-      <ModalBody>
-        <dl className="text-sm space-y-1">
-          <div className="flex justify-between">
-            <dt className="text-fg-muted">Schemas</dt>
-            <dd className="font-medium">{result.schemas}</dd>
-          </div>
-          <div className="flex justify-between">
-            <dt className="text-fg-muted">Collections</dt>
-            <dd className="font-medium">{result.datasets}</dd>
-          </div>
-          <div className="flex justify-between">
-            <dt className="text-fg-muted">Records</dt>
-            <dd className="font-medium">
-              {result.records_restored}/{result.records_total}
-              {result.records_restored < result.records_total && (
-                <span className="ml-1 text-attention">
-                  ({result.records_total - result.records_restored} skipped)
-                </span>
-              )}
-            </dd>
-          </div>
-          <div className="flex justify-between">
-            <dt className="text-fg-muted">Workflows</dt>
-            <dd className="font-medium">{result.workflows}</dd>
-          </div>
-          <div className="flex justify-between">
-            <dt className="text-fg-muted">Plugins</dt>
-            <dd className="font-medium">{result.plugins}</dd>
-          </div>
-        </dl>
-      </ModalBody>
-      <ModalFooter>
-        <Button variant="primary" onClick={onClose}>
-          Done
-        </Button>
-      </ModalFooter>
-    </Modal>
-  )
-}
-
 export default function CollectionsPage() {
   const { data, isLoading, error } = useCollections()
   const queryClient = useQueryClient()
   const [showCreate, setShowCreate] = useState(false)
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
-  const [importResult, setImportResult] = useState<RestoreResult | null>(null)
+  const [importResult, setImportResult] = useState<BundleImportResult | null>(
+    null,
+  )
+  const [showExport, setShowExport] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // The collections, or every collection's records (and their files) in the
   // one explorer, so the whole project can be searched and triaged at once.
@@ -136,7 +89,7 @@ export default function CollectionsPage() {
     setImporting(true)
     setImportError(null)
     try {
-      const result = await dumpApi.importDump(file)
+      const result = await bundleApi.import(file)
       setImportResult(result)
       queryClient.invalidateQueries()
     } catch (err) {
@@ -166,9 +119,9 @@ export default function CollectionsPage() {
         </Button>
       }
       secondaryActions={[
-        { label: 'Export dump', onClick: () => dumpApi.exportDump() },
+        { label: 'Export bundle…', onClick: () => setShowExport(true) },
         {
-          label: importing ? 'Importing…' : 'Import dump',
+          label: importing ? 'Importing…' : 'Import bundle…',
           onClick: () => fileInputRef.current?.click(),
           disabled: importing,
         },
@@ -177,8 +130,11 @@ export default function CollectionsPage() {
       {showCreate && (
         <CreateCollectionModal onClose={() => setShowCreate(false)} />
       )}
+      {showExport && (
+        <ExportBundleDialog onClose={() => setShowExport(false)} />
+      )}
       {importResult && (
-        <ImportResultModal
+        <BundleImportResultModal
           result={importResult}
           onClose={() => setImportResult(null)}
         />
@@ -188,7 +144,7 @@ export default function CollectionsPage() {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".yaml,.yml"
+        accept=".zip"
         className="hidden"
         onChange={handleImportFile}
       />

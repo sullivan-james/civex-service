@@ -43,7 +43,10 @@ class ProjectRules:
         """Raise ValidationError, saying what would be wrong, if what these
         things are now breaks a rule. `touched` is (kind, id) of what changed."""
         schema_ids: set[uuid.UUID] = set()
+        record_ids: set[uuid.UUID] = set()
         for kind, thing in touched:
+            if kind == "record":
+                record_ids.add(thing)
             if kind == "schema":
                 schema_ids.add(thing)
             elif kind == "field":
@@ -59,6 +62,14 @@ class ProjectRules:
             schema = self._schemas.get_by_id(schema_id, include_deleted=True)
             if schema is not None and schema.deleted_at is None:
                 self._check_schema(schema)
+        # A record is in its parent's collection. A move brings a tree whole,
+        # but a record added beneath one of them here meanwhile is not in it.
+        if record_ids and self._records.dataset_mismatches(list(record_ids)):
+            raise ValidationError(
+                "A record would be in another collection than the record it "
+                "sits under (something was added beneath it on the server "
+                "meanwhile)"
+            )
 
     def _check_schema(self, schema: SchemaDTO) -> None:
         names = {rf.field.name for rf in self._schemas.collect_fields(schema)}

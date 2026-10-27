@@ -23,6 +23,43 @@ from the next tag forward.
 
 ## Unreleased
 
+### Breaking
+
+- Migration `c4d8e2f6a9b3`: the key that holds a record to its parent's
+  collection is now checked when a transaction commits rather than at each
+  statement (`DEFERRABLE INITIALLY DEFERRED`), so a tree of records can move
+  one record at a time. On SQLite the `records` table is rebuilt. Nothing
+  to do by hand.
+
+- **`civex dump`/`civex restore` are replaced by bundles.** `civex bundle
+  export|show|import`, `GET /bundle`, `GET /bundle/plan`, `POST /bundle/import`,
+  and **Export bundle…** / **Import bundle…** on the Collections page. A bundle
+  is a zip (`bundle.json`, `records.jsonl`, `files/<sha256>`, `workflows/`,
+  `plugins/`) that keeps record ids, so records inside others and references
+  survive the move to another project, and carries the stored files the
+  records cite unless `--no-files` (the app's dialog says how many files and
+  bytes that is). Importing matches schemas and collections by name and records
+  by id (what is already there is left alone, so a bundle can be imported
+  again), writes each record through the usual checks and history, defers a
+  record until the record it sits inside and the records it references are
+  there, and is one `import` event in Activity. A file whose bytes don't hash
+  to their name is refused. `civex dump`/`restore` and `GET /dump`, `POST
+  /restore` are gone; a YAML dump from an older release is read by that
+  release.
+- **Records can be moved to another collection**, or inside another record
+  there: `civex record move <ids> --to <collection> [--under <record>]`,
+  `civex record move-all` for everything a query lists, `POST
+  /records/move` (and `/records/move/plan`, the same rule as a preview), and
+  **Move to…** on the explorer's selection bar beside Delete. A record keeps
+  its id, values and history and takes everything beneath it along; files are
+  stored by content and stay where they are; the move is one event in
+  Activity (`move`), reads in a record's history as "Collection: a → b", and
+  is refused whole when a reference would break, a uniqueness key is taken
+  where it would land, or the kind can't sit there. Over sync a move is one
+  action, taken or held whole: a device with an unsent change beneath a moved
+  record waits for its push before taking the move, a child's collection
+  follows its parent on the authority when the parent moved meanwhile, and a
+  refused move is put back on the device that made it.
 - A server serves the project it is asked for, not the one in its working
   directory: `deps.current_project` resolves it once per request (a host
   serving many projects installs `app.state.project_resolver`), a context is
