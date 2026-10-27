@@ -1412,7 +1412,11 @@ class LocalSyncRepository:
         return len(rows)
 
     def entries_after(self, seq: int, limit: int) -> tuple[list[SyncEntry], bool]:
-        """Numbered entries past `seq`, in order, and whether more follow."""
+        """Numbered entries past `seq`, in order, and whether more follow. A
+        page ends with the action its last entry belongs to, never inside
+        one: a device takes an action whole (a tree moved to another
+        collection is one), so a page that cut one in two would leave it
+        half done at the device's commit."""
         rows = (
             self._s.query(AuditLog)
             .filter(AuditLog.hub_seq > seq)
@@ -1421,7 +1425,21 @@ class LocalSyncRepository:
             .all()
         )
         more = len(rows) > limit
-        return self._entries(rows[:limit]), more
+        rows = rows[:limit]
+        if more and rows and rows[-1].op_id is not None:
+            rest = (
+                self._s.query(AuditLog)
+                .filter(AuditLog.hub_seq > rows[-1].hub_seq)
+                .order_by(AuditLog.hub_seq)
+                .limit(limit + 1)
+                .all()
+            )
+            same = 0
+            while same < len(rest) and rest[same].op_id == rows[-1].op_id:
+                same += 1
+            rows += rest[:same]
+            more = len(rest) > same
+        return self._entries(rows), more
 
     def _entries(self, rows: list[AuditLog]) -> list[SyncEntry]:
         batch_ids = {r.batch_id for r in rows if r.batch_id}

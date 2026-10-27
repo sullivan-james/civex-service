@@ -359,6 +359,100 @@ def record_purge(
         raise typer.Exit(1)
 
 
+def _print_move_plan(plan) -> None:
+    where = f"'{plan.collection}'" + (
+        f" inside '{plan.parent_name}'" if plan.parent_name else ""
+    )
+    console.print(
+        f"{plan.roots} record(s) chosen, {plan.records} with everything inside "
+        f"them, would move to {where}"
+        + (f" from {', '.join(repr(s) for s in plan.sources)}" if plan.sources else "")
+        + "."
+    )
+    if plan.skipped:
+        console.print(f"{plan.skipped} already there, left as they are.")
+    for problem in plan.problems:
+        console.print(f"[error]{problem}[/error]")
+
+
+def _move(
+    *, to: str, under: Optional[str], dry_run: bool, ids=None, query=None
+) -> None:
+    ctx = _ctx()
+    try:
+        if dry_run:
+            plan = ctx.record_svc.plan_move(to, under, ids=ids, query=query)
+            _print_move_plan(plan)
+            if not plan.can_move:
+                raise typer.Exit(1)
+            return
+        result = ctx.record_svc.move(to, under, ids=ids, query=query)
+        ctx.commit()
+        console.print(
+            f"[success]Moved {result.roots} record(s), {result.records} with "
+            f"everything inside them, to '{result.collection}'.[/success]"
+        )
+    except (NotFoundError, ValidationError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+
+
+@app.command("move")
+def record_move(
+    record_ids: list[str] = typer.Argument(
+        ...,
+        help="Records to move (ids or unique prefixes), with everything inside them",
+    ),
+    to: str = typer.Option(..., "--to", help="The collection to move them to"),
+    under: Optional[str] = typer.Option(
+        None,
+        "--under",
+        help="The record in that collection they go inside (omit for its top level)",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Say what would move and what is in the way, only"
+    ),
+) -> None:
+    """Move records to another collection, or inside another record.
+
+    A record keeps its id, its values and its history, and takes everything
+    beneath it along; the move is one event in Activity. It is refused whole
+    when a reference would break (a record may only reference its own
+    collection's records or a global collection's), a uniqueness key is taken
+    where it would land, or its kind can't sit there.
+    """
+    _move(to=to, under=under, dry_run=dry_run, ids=record_ids)
+
+
+@app.command("move-all")
+def record_move_all(
+    dataset_name: str = typer.Argument(..., help="Collection to move records from"),
+    to: str = typer.Option(..., "--to", help="The collection to move them to"),
+    schema: Optional[str] = typer.Option(
+        None, "--schema", "-s", help="Only records of this schema"
+    ),
+    under: Optional[str] = typer.Option(
+        None,
+        "--under",
+        help="The record in that collection they go inside (omit for its top level)",
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Say what would move and what is in the way, only"
+    ),
+) -> None:
+    """Move every record of a collection (or of one schema in it) to another."""
+    from civex.domain.query import RecordQuery
+
+    query = RecordQuery(dataset=dataset_name, schema=schema)
+    if not yes and not dry_run:
+        target = f"all '{schema}' records" if schema else "ALL records"
+        typer.confirm(f"Move {target} from '{dataset_name}' to '{to}'?", abort=True)
+    _move(to=to, under=under, dry_run=dry_run, query=query)
+
+
 @app.command("delete-all")
 def record_delete_all(
     dataset_name: str = typer.Argument(..., help="Dataset to delete records from"),

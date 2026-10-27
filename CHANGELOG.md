@@ -23,6 +23,28 @@ from the next tag forward.
 
 ## Unreleased
 
+### Breaking
+
+- Migration `c4d8e2f6a9b3`: the key that holds a record to its parent's
+  collection is now checked when a transaction commits rather than at each
+  statement (`DEFERRABLE INITIALLY DEFERRED`), so a tree of records can move
+  one record at a time. On SQLite the `records` table is rebuilt. Nothing
+  to do by hand.
+
+- **Records can be moved to another collection**, or inside another record
+  there: `civex record move <ids> --to <collection> [--under <record>]`,
+  `civex record move-all` for everything a query lists, `POST
+  /records/move` (and `/records/move/plan`, the same rule as a preview), and
+  **Move to…** on the explorer's selection bar beside Delete. A record keeps
+  its id, values and history and takes everything beneath it along; files are
+  stored by content and stay where they are; the move is one event in
+  Activity (`move`), reads in a record's history as "Collection: a → b", and
+  is refused whole when a reference would break, a uniqueness key is taken
+  where it would land, or the kind can't sit there. Over sync a move is one
+  action, taken or held whole: a device with an unsent change beneath a moved
+  record waits for its push before taking the move, a child's collection
+  follows its parent on the authority when the parent moved meanwhile, and a
+  refused move is put back on the device that made it.
 - A server serves the project it is asked for, not the one in its working
   directory: `deps.current_project` resolves it once per request (a host
   serving many projects installs `app.state.project_resolver`), a context is

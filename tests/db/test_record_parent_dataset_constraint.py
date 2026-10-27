@@ -29,6 +29,8 @@ def test_repository_write_with_cross_dataset_parent_fails_at_db_layer(
     )
     ctx.commit()
 
+    # The key is checked when the transaction commits (a move changes a
+    # parent's collection and its children's in separate statements).
     with pytest.raises(IntegrityError):
         ctx.record_svc._records.create(
             dataset_id=ds2.id,
@@ -36,6 +38,7 @@ def test_repository_write_with_cross_dataset_parent_fails_at_db_layer(
             data={},
             parent_record_id=parent.id,
         )
+        ctx.commit()
 
 
 def test_repository_write_with_matching_dataset_parent_succeeds(

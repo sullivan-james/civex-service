@@ -115,6 +115,11 @@ export function describeAuditEvent(event: AuditEvent): AuditSummary {
         title: `Permanently deleted ${describeParts(event.parts).replace(/ permanently deleted/g, '')}`,
         detail: null,
       }
+    case 'move':
+      return {
+        title: `Moved ${describeParts(event.parts).replace(/ updated/g, '')}`,
+        detail: null,
+      }
     default:
       return {
         title: `${batch.kind} (${items(total)})`,

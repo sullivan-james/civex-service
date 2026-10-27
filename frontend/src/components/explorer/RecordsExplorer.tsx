@@ -40,6 +40,7 @@ import { DrillLinks } from './DrillLinks'
 import { SavedViewBar } from './SavedViewBar'
 import { ScopeTrail, type TrailItem } from './ScopeTrail'
 import { SelectionBar } from './SelectionBar'
+import { MoveRecordsDialog } from './MoveRecordsDialog'
 import { FilesView } from '../files/FilesView'
 import { MoveToDriveButton } from '../files/MoveDialog'
 import { useBulkSelection } from '../../hooks/useBulkSelection'
@@ -121,6 +122,7 @@ export function RecordsExplorer({
   const [params, setParams] = useSearchParams()
   const showFiles = params.get('show') === 'files'
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [moving, setMoving] = useState(false)
   const deleteMany = useDeleteManyRecords(dataset ?? '')
   const deleteMatching = useDeleteMatchingRecords(dataset ?? '')
   const createView = useCreateView(listedName ?? '')
@@ -685,6 +687,19 @@ export function RecordsExplorer({
                         onStarted={picked.clear}
                       />
                     )}
+                    {listed && (
+                      // Moving takes the records out of this collection, so
+                      // it asks for the same permission as deleting here.
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={!mayDelete}
+                        title={mayDelete ? undefined : why('delete')}
+                        onClick={() => setMoving(true)}
+                      >
+                        Move to…
+                      </Button>
+                    )}
                   </>
                 }
               />
@@ -771,6 +786,22 @@ export function RecordsExplorer({
           </p>
         )}
       </div>
+
+      {moving && dataset && listed && (
+        <MoveRecordsDialog
+          selection={
+            allMatching
+              ? { query: x.query, collection: dataset }
+              : { ids: [...selected] }
+          }
+          count={bulkCount}
+          listed={listed}
+          schemas={x.schemas}
+          from={dataset}
+          onClose={() => setMoving(false)}
+          onMoved={picked.clear}
+        />
+      )}
 
       {confirmDelete && (
         <ConfirmDialog

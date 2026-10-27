@@ -730,6 +730,64 @@ class LocalRecordRepository:
             )
         self._s.expire_all()
 
+    def references_of(
+        self, record_ids: list[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, uuid.UUID, uuid.UUID]]:
+        rr = RecordReference
+        return [
+            (row[0], row[1], row[2])
+            for chunk in _chunks(list(record_ids))
+            for row in self._s.execute(
+                select(rr.record_id, rr.field_id, rr.target_id).where(
+                    rr.record_id.in_(chunk)
+                )
+            )
+        ]
+
+    def dataset_mismatches(self, record_ids: list[uuid.UUID]) -> int:
+        parent = aliased(Record)
+        total = 0
+        for chunk in _chunks(list(record_ids)):
+            total += (
+                self._s.scalar(
+                    select(func.count(Record.id))
+                    .join(parent, parent.id == Record.parent_record_id)
+                    .where(
+                        or_(Record.id.in_(chunk), Record.parent_record_id.in_(chunk)),
+                        Record.dataset_id != parent.dataset_id,
+                    )
+                )
+                or 0
+            )
+        return total
+
+    def move(
+        self,
+        ids: list[uuid.UUID],
+        dataset_id: uuid.UUID,
+        root_ids: list[uuid.UUID],
+        parent_id: uuid.UUID | None,
+        stamp: datetime,
+    ) -> None:
+        """A bulk UPDATE per chunk. Between statements a child may sit in
+        another collection than its parent: the key that forbids it is checked
+        when the transaction commits (`fk_records_parent_same_dataset`)."""
+        for chunk in _chunks(list(ids)):
+            self._s.execute(
+                update(Record)
+                .where(Record.id.in_(chunk))
+                .values(dataset_id=dataset_id, updated_at=stamp)
+                .execution_options(synchronize_session=False)
+            )
+        for chunk in _chunks(list(root_ids)):
+            self._s.execute(
+                update(Record)
+                .where(Record.id.in_(chunk))
+                .values(parent_record_id=parent_id, updated_at=stamp)
+                .execution_options(synchronize_session=False)
+            )
+        self._s.expire_all()
+
     def live_under_deleted(self, limit: int) -> tuple[list[RecordDTO], int]:
         """Live records whose parent record is deleted, oldest change first, at
         most `limit`, and how many there are. Such a record is out of sight:

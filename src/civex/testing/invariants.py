@@ -77,6 +77,7 @@ def act(ctx, rng: random.Random, step: int) -> None:
             "edit",
             "delete_record",
             "restore_record",
+            "move_record",
             "delete_schema",
             "restore_schema",
             "delete_collection",
@@ -124,6 +125,15 @@ def act(ctx, rng: random.Random, step: int) -> None:
                 ctx.record_svc.delete(rng.choice(records)["id"])
         elif choice == "restore_record" and (gone := _deleted(ctx, "record")):
             ctx.record_svc.restore(rng.choice(gone)["id"])
+        elif choice == "move_record":
+            # An encounter (with its samples) or a note to the other collection.
+            schema = rng.choice(["encounter", "note"])
+            if records := _live_records(ctx, schema):
+                picked = ctx.record_svc.get(rng.choice(records)["id"])
+                here = ctx.dataset_svc.get_by_id(picked.dataset_id).name
+                ctx.record_svc.move(
+                    "extra" if here == "study" else "study", ids=[str(picked.id)]
+                )
         elif choice == "delete_schema":
             ctx.schema_svc.delete(rng.choice(["sample", "note"]))
         elif choice == "restore_schema" and (gone := _deleted(ctx, "schema")):
@@ -191,6 +201,8 @@ def broken_rules(ctx) -> list[str]:
         parent = records.get(r["parent_record_id"]) if r["parent_record_id"] else None
         if r["parent_record_id"] and (parent is None or parent["deleted_at"]):
             problems.append(f"{what}: its parent record is deleted")
+        if parent is not None and parent["dataset_id"] != r["dataset_id"]:
+            problems.append(f"{what}: it is in another collection than its parent")
 
     for s in schemas.values():
         if s["deleted_at"]:

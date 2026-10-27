@@ -14,6 +14,7 @@ import {
   type FileUpload,
   type PaginatedRecords,
   type ListParams,
+  type MoveRecordsRequest,
 } from '../api/records'
 import type { RecordQueryParams } from '../api/query'
 import { ApiError } from '../api/client'
@@ -340,6 +341,39 @@ export function useDeleteMatchingRecords(datasetName: string) {
       qc.invalidateQueries({ queryKey: ['collections'] })
       toast.success(
         `${result.deleted} record${result.deleted === 1 ? '' : 's'} deleted`,
+      )
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  })
+}
+
+/** What a move would do, worked out by the server as the choices change;
+ * nothing is asked while `body` is null (the choices are incomplete). */
+export function useMovePlan(body: MoveRecordsRequest | null) {
+  return useQuery({
+    queryKey: ['record-move-plan', body],
+    queryFn: () => recordsApi.movePlan(body!),
+    enabled: body !== null,
+    placeholderData: keepPreviousData,
+  })
+}
+
+/** Moves records to another collection (or inside another record). Every
+ * list of records may have changed: the ones they left, the ones they
+ * joined, and the counts of both. */
+export function useMoveRecords() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  return useMutation({
+    mutationFn: (body: MoveRecordsRequest) => recordsApi.move(body),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ['records'] })
+      qc.invalidateQueries({ queryKey: ['record'] })
+      qc.invalidateQueries({ queryKey: ['record-counts'] })
+      qc.invalidateQueries({ queryKey: ['collections'] })
+      qc.invalidateQueries({ queryKey: ['record-move-plan'] })
+      toast.success(
+        `${result.records} record${result.records === 1 ? '' : 's'} moved to ${result.collection}`,
       )
     },
     onError: (err) => toast.error(errorMessage(err)),

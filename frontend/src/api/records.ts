@@ -8,6 +8,46 @@ import {
   type PageParams,
   type RecordQueryParams,
 } from './query'
+import type { FilterTreeWire } from '../utils/filterTree'
+
+/** Which records to move and where: exactly `ids`, or every record the query
+ * (`collection` with the list's selectors) shows. */
+export interface MoveRecordsRequest {
+  to: string
+  /** The record in `to` they go inside; omit for its top level. */
+  parent?: string | null
+  ids?: string[] | null
+  collection?: string | null
+  schema_name?: string | null
+  within?: string | null
+  filter?: FilterTreeWire | null
+  where?: string[]
+  search?: string | null
+}
+
+export interface RecordMovePlan {
+  collection: string
+  collection_id: string
+  parent_id: string | null
+  parent_name: string | null
+  /** Chosen records that would move. */
+  roots: number
+  /** Records that would move in all, with everything beneath them. */
+  records: number
+  /** Chosen records already where they would go. */
+  skipped: number
+  /** The collections they would leave. */
+  sources: string[]
+  /** Why it can't be done, in plain words; empty when `can_move`. */
+  problems: string[]
+  can_move: boolean
+}
+
+export interface MoveRecordsResult {
+  roots: number
+  records: number
+  collection: string
+}
 
 export interface CivexRecord {
   id: string
@@ -279,6 +319,18 @@ export const recordsApi = {
     api.delete<{ deleted: number }>(
       `/collections/${encodeURIComponent(datasetName)}/records${recordQueryString(params)}`,
     ),
+
+  /** What moving the chosen records (ids, or everything a query lists) to
+   * another collection would do: how many go, with everything beneath
+   * them, and anything in the way. The same rule as the move itself. */
+  movePlan: (body: MoveRecordsRequest) =>
+    api.post<RecordMovePlan>('/records/move/plan', body),
+
+  /** Re-points the chosen records (with everything beneath them) at another
+   * collection, or inside another record. Refused whole (422) when
+   * anything is in the way. */
+  move: (body: MoveRecordsRequest) =>
+    api.post<MoveRecordsResult>('/records/move', body),
 
   /** `reachableFrom` (a collection name) limits results to records a record
    * there may reference: its own collection's and global collections'. */

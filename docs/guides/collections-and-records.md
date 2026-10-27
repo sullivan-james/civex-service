@@ -131,6 +131,29 @@ civex record update f623        # asks for each field, current value as default
 In the app, edit on the record's page. With a file attached, text, number and
 date fields have **from filename** to fill them from the file's name.
 
+### Moving records to another collection
+
+A record can be moved to another collection, or inside another record there.
+It keeps its id, its values and its history, and takes everything beneath it
+along; its files stay where they are stored. In the app, tick the records in
+the explorer and choose **Move to…**; the dialog says how many records would
+go, with everything inside them, and whether anything is in the way, before
+you confirm. From the command line:
+
+```bash
+civex record move f623 a91c --to archive              # to the top of `archive`
+civex record move f623 --to archive --under 7b2e      # inside a record there
+civex record move f623 --to archive --dry-run         # say what would happen
+civex record move-all survey --schema visit --to archive       # every visit in `survey`
+```
+
+A move is refused whole, and the dialog or the command says why, when a record
+elsewhere references one being moved (a record may only reference its own
+collection's records or a global collection's), a uniqueness key is already
+taken where the records would land, or the kind of record can't sit where it
+would go. The move is one event in Activity, and a record's history reads it
+as a change of collection.
+
 ## Deleting and undoing
 
 ```bash
