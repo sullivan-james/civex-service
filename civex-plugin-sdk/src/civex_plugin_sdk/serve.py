@@ -22,7 +22,7 @@ from pydantic import ValidationError
 
 from civex_plugin_sdk.ctx import Ctx
 from civex_plugin_sdk.errors import ConfigValidationError, PluginError
-from civex_plugin_sdk.io import FrameReader, FrameWriter, isolate_stdout
+from civex_plugin_sdk.io import FrameReader, FrameWriter, LogStream, isolate_stdout
 from civex_plugin_sdk.io_convert import convert_inputs, convert_outputs
 from civex_plugin_sdk.protocol import (
     DescribeRequest,
@@ -45,6 +45,7 @@ def serve(plugin_cls: "type[Plugin]") -> None:
     """
     out = isolate_stdout()
     writer = FrameWriter.for_stream(out)
+    sys.stdout = LogStream(writer)  # print() reaches the run's log
     reader = FrameReader.for_stream(sys.stdin)
     serve_loop(plugin_cls, reader, writer)
 
@@ -57,6 +58,7 @@ def serve_container(plugin_cls: "type[Plugin]") -> None:
     """
     out = isolate_stdout()
     writer = FrameWriter.for_stream(out)
+    sys.stdout = LogStream(writer)  # print() reaches the run's log
     reader = FrameReader.for_stream(sys.stdin)
     mode = sys.argv[1] if len(sys.argv) > 1 else None
     serve_container_once(plugin_cls, mode, reader, writer)
@@ -164,7 +166,9 @@ def _handle_run(
     # back as an absolute path.
     scratch_dir = Path(".")
     try:
-        inputs = convert_inputs(plugin_cls.inputs, frame.inputs, scratch_dir=scratch_dir)
+        inputs = convert_inputs(
+            plugin_cls.inputs, frame.inputs, scratch_dir=scratch_dir
+        )
     except Exception as e:
         # A malformed/unreadable `table`/`bytes` envelope is the host's or an
         # upstream step's fault, not this plugin author's -- classified as a
@@ -193,10 +197,20 @@ def _handle_run(
         _send_error(writer, PluginError(str(e)))
         return
 
+    _flush_stdout()
     writer.send(RunResult(outputs=outputs).model_dump())
 
 
+def _flush_stdout() -> None:
+    """Send a half-printed line before the run's answer, so it lands in this run's log."""
+    try:
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+
 def _send_error(writer: FrameWriter, error: PluginError) -> None:
+    _flush_stdout()
     writer.send(
         ErrorFrame(
             error=ErrorPayload(

@@ -3,7 +3,11 @@ import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, RefreshCw } from '../../components/ui/icons'
 import { StopAutomationDialog } from '../../components/workflows/StopAutomationDialog'
 import type { BackgroundTask } from '../../utils/backgroundTasks'
-import { jobsApi, type AutomationBatch } from '../../api/workflows'
+import {
+  jobsApi,
+  type AutomationBatch,
+  type RunStep,
+} from '../../api/workflows'
 import {
   allOf,
   failedRuns,
@@ -38,6 +42,21 @@ function useBatchOutcome(since: string | null) {
 }
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many)
+
+/** What the run going on is doing, in its plugin's words: the step, and the
+ * message or count it last reported ("tidy: Reading sel_03.txt (3 of 12)"). */
+export function describeStep(step: RunStep): string {
+  const count =
+    step.done !== null && step.total !== null
+      ? `${step.done.toLocaleString()} of ${step.total.toLocaleString()}`
+      : step.done !== null
+        ? step.done.toLocaleString()
+        : ''
+  const said = [step.message, count && (step.message ? `(${count})` : count)]
+    .filter(Boolean)
+    .join(' ')
+  return said ? `${step.step}: ${said}` : `Step ${step.step}`
+}
 
 /** Workflow runs, as tasks: a pause that must not be forgotten (and answers
  * "why did nothing run?"); the runs going on, as a batch counted by the server
@@ -94,6 +113,12 @@ export function useAutomationTasks(): BackgroundTask[] {
 
   if (batch && active > 0 && (batch.total > 1 || busy)) {
     const done = batch.total - active
+    // Runs go one at a time: this is the one going on, if it runs here.
+    const step = data.steps?.[0]
+    const stepFraction =
+      step && step.done !== null && step.total
+        ? Math.min(1, step.done / step.total)
+        : null
     return [
       {
         id: 'automation',
@@ -102,17 +127,21 @@ export function useAutomationTasks(): BackgroundTask[] {
         spinning: true,
         title: 'Workflows are running',
         // A bar only for a batch: one run alone has nothing to measure.
+        // For one run alone, the step's own count when its plugin gives one.
         progress:
           batch.total > 1
             ? {
                 fraction: done / batch.total,
                 label: 'Workflow runs finished',
               }
-            : undefined,
+            : stepFraction !== null
+              ? { fraction: stepFraction, label: 'Step finished' }
+              : undefined,
         // Runs go one at a time, so "1 running" would add nothing: say how far
         // through the batch it is, how it has gone so far, and what waits.
         detail:
           [
+            step && describeStep(step),
             batch.total > 1 && `${done} of ${batch.total} done`,
             batch.completed > 0 && `${batch.completed} succeeded`,
             batch.failed > 0 && `${batch.failed} failed`,

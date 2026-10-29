@@ -250,6 +250,12 @@ from the next tag forward.
   open a console window for every step when civex runs from the desktop app.
 - A plugin's stderr is read while it runs, so one that writes a lot of it no
   longer stops, waiting for a reader.
+- **A plugin's output reaches the run's log.** Its `print()`s and whatever it
+  writes to stderr are written to the run's log as they come (they were thrown
+  away). A plugin can say how far it has got with `ctx.progress(done, total,
+  message)`, and the status bar shows the step a run is on and that progress
+  (`GET /automation`'s new `steps`). Plugins speak wire protocol 2 (SDK
+  unreleased); civex still runs plugins on 1.
 
 ## v2.0.0 — syncing between machines, updates from the app (2026-10-07)
 

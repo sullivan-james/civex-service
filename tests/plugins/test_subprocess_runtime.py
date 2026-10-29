@@ -444,6 +444,12 @@ def test_newer_plugin_protocol_tells_user_to_update_civex() -> None:
     assert exc.value.kind == "protocol_mismatch"
 
 
+def test_a_plugin_on_an_older_protocol_this_host_still_speaks_runs() -> None:
+    """Protocol 2 only added what a plugin may send, so a plugin on 1 runs."""
+    described = _described(1)
+    assert rt.check_protocol_version(described) is described
+
+
 def test_older_plugin_protocol_tells_author_to_upgrade_sdk() -> None:
     with pytest.raises(PluginExecutionError, match="upgrade the plugin's"):
         rt.check_protocol_version(_described(0))

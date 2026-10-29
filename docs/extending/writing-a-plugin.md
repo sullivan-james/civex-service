@@ -101,6 +101,13 @@ Return a dict of output values. These are referenced by downstream steps as `thi
 | `ctx.get_collection(name: str) → dict`, `ctx.list_collections() → list[dict]` | `get_collection`, `list_collections` | Read-only collection introspection. |
 | `ctx.commit()` | `commit` | Flush pending changes to the database. The executor also commits once at the end of a successful run; call this yourself only if you need an intermediate commit. |
 
+Two more need no capability, since they read and change nothing:
+
+| Method | Description |
+|---|---|
+| `ctx.progress(done, total=None, message="")` | Say how far the run has got ("Reading sel_03.txt", 3 of 12). The app shows it in the status bar while the run lasts. |
+| `print(...)` | Goes to the run's log (see the run's page), as does anything written to stderr. |
+
 Declare each one you use in `capabilities` — see the table above for the exact capability name per method. See the [SDK reference](sdk-reference.md) for the full generated API, including exact signatures and return types.
 
 ### Reading and writing the trigger record

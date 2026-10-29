@@ -255,3 +255,46 @@ def test_container_missing_mode_yields_protocol_error():
     sent = _run_container(GreetPlugin, None, [])
     assert sent[0]["type"] == "error"
     assert sent[0]["error"]["kind"] == "protocol_error"
+
+
+# -- output and progress (protocol 2) -----------------------------------------
+
+
+class ChattyPlugin(Plugin):
+    id = "test.chatty"
+    name = "Chatty"
+
+    class Config(BaseModel):
+        pass
+
+    def invoke(self, inputs, config, ctx):
+        print("two lines\nof output")
+        print("and half a line", end="")
+        ctx.progress(1, 4, "first of four")
+        return {}
+
+
+def test_print_becomes_log_frames_before_the_answer(monkeypatch):
+    import sys
+
+    from civex_plugin_sdk.io import LogStream
+
+    sent: list[dict] = []
+    writer = FrameWriter(lambda line: sent.append(json.loads(line)))
+    monkeypatch.setattr(sys, "stdout", LogStream(writer))
+    reader = FrameReader([json.dumps({"type": "run", "inputs": {}, "config": {}})])
+    serve_loop(ChattyPlugin, reader, writer)
+
+    assert [f["type"] for f in sent] == ["log", "log", "progress", "log", "result"]
+    assert [f["text"] for f in sent if f["type"] == "log"] == [
+        "two lines",
+        "of output",
+        "and half a line",  # flushed before the result, so in this run's log
+    ]
+    progress = next(f for f in sent if f["type"] == "progress")
+    assert progress == {
+        "type": "progress",
+        "done": 1,
+        "total": 4,
+        "message": "first of four",
+    }

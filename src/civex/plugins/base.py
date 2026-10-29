@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from civex.domain.dtos import DatasetDTO, FileRef, RecordDTO, SchemaDTO
 from civex.domain.exceptions import DuplicateRecordError
 from civex.domain.file_refs import without_file_locations
+from civex.workflows.progress import RUNS
 from civex_plugin_sdk.plugin_base import PluginBase
 
 if TYPE_CHECKING:
@@ -173,6 +174,15 @@ class WorkflowContext:
                 "existing_record": e.existing_name,
             }
         )
+
+    def progress(
+        self, done: float, total: float | None = None, message: str = ""
+    ) -> None:
+        """Say how far the step running now has got (the status bar shows it
+        while the run lasts; `civex.workflows.progress`). A context with no
+        run (`job_id` None) shows it nowhere."""
+        if self.job_id is not None:
+            RUNS.report(self.job_id, done, total, message)
 
     def take_duplicates(self) -> list[dict[str, Any]]:
         """The refused writes noted since the last call, clearing the list."""
