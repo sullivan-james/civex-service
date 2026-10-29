@@ -104,3 +104,55 @@ def _print_config_section(config_schema: dict[str, Any]) -> None:
             prop.get("description") or "",
         )
     console.print(table)
+
+
+@app.command("check")
+def plugin_check(
+    filename: str = typer.Argument(
+        ..., help="A plugin file in _civex/plugins/, e.g. tidy.py (or just tidy)."
+    ),
+    write: bool = typer.Option(
+        False,
+        "--write",
+        help="Write the header from what the code says, and lock its dependencies.",
+    ),
+) -> None:
+    """Check that a plugin's header says what its code does.
+
+    A plugin declares its id, capabilities, inputs, outputs and config in its
+    header, under [tool.civex], so civex knows it without running it. This
+    runs the plugin once to ask, and compares. With --write it writes the
+    header from the code's answer and locks the plugin's dependencies, so it
+    runs exactly what was resolved now. Saving a plugin from the app does the
+    same. Exits 1 when the header is missing or disagrees (without --write).
+    """
+    from civex.domain.exceptions import CivexError
+
+    ctx = _ctx()
+    try:
+        result = ctx.plugin_svc.check(filename, write=write)
+    except CivexError as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+    if write:
+        console.print(
+            "[success]Header written.[/success]"
+            if result["written"]
+            else "[info]The header already says what the code does.[/info]"
+        )
+        if result["locked"]:
+            console.print("[dim]Dependencies locked.[/dim]")
+        return
+    if not result["differences"]:
+        console.print("[success]The header says what the code does.[/success]")
+        return
+    from rich.markup import escape
+
+    for problem in result["differences"]:
+        console.print(f"  [warning]•[/warning] {escape(problem)}")
+    console.print(
+        "[dim]Run again with --write to write the header from the code.[/dim]"
+    )
+    raise typer.Exit(1)

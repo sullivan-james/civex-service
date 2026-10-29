@@ -247,6 +247,18 @@ from the next tag forward.
   on purpose still keeps what it got through. Plugins no longer commit:
   `ctx.commit()` does nothing (and warns) and the host answers a `commit`
   call from an older plugin with nothing.
+- **A plugin says what it is in its header, and is locked.** Saving a plugin
+  (or `civex plugin check --write`) writes its contract, from the code's own
+  answer, into the script block under `[tool.civex]`, so discovery, workflow
+  checks and the library read it without running the plugin; when its
+  process starts the code is asked again and a plugin whose code no longer
+  matches its header is refused (`contract_mismatch`). A plugin with no
+  header is described by running it, as before. The first time a plugin is
+  started its dependencies are locked (`<plugin>.py.lock`, `uv lock
+  --script`), and a locked plugin runs from its lock without the exact SDK
+  pin, so updating civex no longer rebuilds every plugin's environment.
+  Installing from the library still runs the code (and checks it against
+  its header).
 - **Every plugin runs the same way.** A tier is now only how a plugin is
   started (`civex.plugins.launchers`: uv, Docker, or a thread in civex), and
   `civex.plugins.runtime` drives all of them over the wire protocol. The

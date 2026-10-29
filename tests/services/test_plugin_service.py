@@ -92,10 +92,43 @@ def test_list_raw_empty_when_no_plugins_dir_populated(ctx: AppContext) -> None:
     assert ctx.plugin_svc.list_raw() == []
 
 
+def _as_saved(code: str) -> str:
+    """What saving writes: the code with the header the code describes."""
+    from civex.plugins import manifest
+
+    described = manifest.read(_SAVED_HEADER_SOURCE)
+    assert described is not None
+    return manifest.write(code, described)
+
+
+_SAVED_HEADER_SOURCE = """\
+# /// script
+# [tool.civex]
+# id = "project.my_plugin"
+# name = "My Plugin"
+# category = "general"
+# capabilities = []
+# protocol_version = 2
+# config_schema = "{\\"properties\\":{},\\"title\\":\\"Config\\",\\"type\\":\\"object\\"}"
+# ///
+"""
+
+
 def test_save_then_list_raw_returns_full_source(ctx: AppContext) -> None:
     ctx.plugin_svc.save("my_plugin", _VALID_CODE)
     raw = ctx.plugin_svc.list_raw()
-    assert raw == [{"filename": "my_plugin.py", "code": _VALID_CODE}]
+    assert raw == [{"filename": "my_plugin.py", "code": _as_saved(_VALID_CODE)}]
+
+
+def test_saving_writes_the_header_from_what_the_code_says(ctx: AppContext) -> None:
+    from civex.plugins import manifest
+
+    ctx.plugin_svc.save("my_plugin", _VALID_CODE)
+    saved = ctx.plugin_svc.get_source("my_plugin.py")
+    declared = manifest.read(saved)
+    assert declared is not None and declared.id == "project.my_plugin"
+    assert saved.endswith(_VALID_CODE.split("# ///\n", 1)[1])  # the code itself
+    assert ctx.plugin_svc.check("my_plugin")["differences"] == []
 
 
 def test_save_registers_the_plugin_immediately(ctx: AppContext) -> None:
@@ -134,7 +167,7 @@ def test_save_uploaded_writes_and_returns_plugin_id(ctx: AppContext) -> None:
     plugin_id = ctx.plugin_svc.save_uploaded("my_plugin.py", _VALID_CODE.encode())
     assert plugin_id == "project.my_plugin"
     assert ctx.plugin_svc.list_raw() == [
-        {"filename": "my_plugin.py", "code": _VALID_CODE}
+        {"filename": "my_plugin.py", "code": _as_saved(_VALID_CODE)}
     ]
 
 
@@ -150,7 +183,7 @@ def test_list_registered_reports_filename_for_user_plugins_only(
 
 def test_get_source_returns_saved_code(ctx: AppContext) -> None:
     ctx.plugin_svc.save("my_plugin", _VALID_CODE)
-    assert ctx.plugin_svc.get_source("my_plugin.py") == _VALID_CODE
+    assert ctx.plugin_svc.get_source("my_plugin.py") == _as_saved(_VALID_CODE)
 
 
 def test_get_source_rejects_missing_file(ctx: AppContext) -> None:
@@ -198,7 +231,7 @@ def test_delete_refuses_a_plugin_still_used_by_a_workflow(
 
     # Still on disk and registered -- the delete never happened.
     assert ctx.plugin_svc.list_raw() == [
-        {"filename": "my_plugin.py", "code": _VALID_CODE}
+        {"filename": "my_plugin.py", "code": _as_saved(_VALID_CODE)}
     ]
 
 

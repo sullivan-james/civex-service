@@ -32,17 +32,34 @@ Use it in a workflow:
 !!! note "Which SDK version does my plugin get?"
     `civex-plugin-sdk` is a normal PyPI package (MIT licensed), so the plain
     `dependencies = ["civex-plugin-sdk"]` line resolves like any other. When
-    civex runs your plugin it pins the SDK to the version civex itself uses,
-    so the host and your plugin always speak the same wire protocol — you
-    don't need to pin it yourself. If a plugin was written against an SDK
-    that speaks a different protocol version, civex refuses it with a message
-    saying which side to upgrade.
+    civex first starts your plugin it **locks** its dependencies
+    (`uv lock --script`, a `<plugin>.py.lock` file beside it), and from then
+    on runs exactly those versions, without asking a package index, until you
+    change the dependencies. Updating civex doesn't rebuild the plugin's
+    environment: civex speaks every wire protocol version from 1 to its own,
+    and refuses a plugin on a newer one with a message saying which side to
+    upgrade. Delete the lockfile to take newer versions.
+
+## The header: what civex knows without running the plugin
+
+When you save a plugin from the app (or run `civex plugin check --write
+<plugin>.py`), civex asks it once what it is and writes the answer into the
+script block at the top of the file, under `[tool.civex]`: its id, name,
+capabilities, inputs, outputs and config schema. From then on civex knows the
+plugin by reading that, without running it (discovery, the workflow checks,
+the shared library). Don't edit it by hand: change the code and save again.
+
+When the plugin's process starts, civex asks the code again, and refuses to
+run a plugin whose code no longer says what its header does (it asks for a
+capability the header doesn't grant, say) until the header is written again
+from the code. `civex plugin check <plugin>.py` says whether they agree. A
+plugin with no header is described by running it, as before.
 
 ## Plugin structure
 
 Every plugin file must:
 
-1. Start with a [PEP 723](https://peps.python.org/pep-0723/) inline script metadata block declaring `civex-plugin-sdk` as a dependency (plus anything else the plugin needs — `pandas`, `requests`, whatever). `uv run` resolves and caches an isolated venv for it automatically, the first time it's used.
+1. Start with a [PEP 723](https://peps.python.org/pep-0723/) inline script metadata block declaring `civex-plugin-sdk` as a dependency (plus anything else the plugin needs — `pandas`, `requests`, whatever). `uv run` resolves and caches an isolated venv for it automatically, the first time it's used, and civex locks what it resolved (see above). civex adds the `[tool.civex]` header to this block when you save.
 2. Define a class subclassing the SDK's `Plugin` ABC (import it directly, or under an alias like `Plugin as PluginBase` if you want to name your own subclass `Plugin` too).
 3. Call `serve(YourPluginClass)` inside `if __name__ == "__main__":`.
 

@@ -29,7 +29,7 @@ from civex.domain.exceptions import ConfigError
 from civex.plugins import runtime
 from civex.plugins.base import StepResult, WorkflowContext
 from civex.plugins.runtime import plugin_output
-from civex.processes import new_group_kwargs, terminate_tree
+from civex.processes import new_group_kwargs, no_window_kwargs, terminate_tree
 
 # -- uv / SDK resolution ------------------------------------------------------
 
@@ -112,25 +112,60 @@ def _sdk_pin_version(find_links: Path | None) -> str | None:
     return _installed_sdk_version()
 
 
+def lockfile_of(plugin_path: Path) -> Path:
+    """Where uv keeps a script's lockfile: beside it, `<name>.py.lock`."""
+    return plugin_path.with_name(plugin_path.name + ".lock")
+
+
 def _build_command(uv_bin: str, plugin_path: Path) -> list[str]:
     argv = [uv_bin, "run", "--no-project"]
     find_links = _sdk_find_links_dir()
+    if find_links is None and lockfile_of(plugin_path).is_file():
+        # Locked when it was saved (`lock_plugin`): uv runs what the lock
+        # says without asking a package index (it relocks only if the
+        # header's dependencies were edited since). Its SDK is the one it was
+        # saved with; the protocol version agreed at `describe` is what keeps
+        # that and this host compatible, so no pin is added and an update of
+        # civex doesn't rebuild the plugin's environment.
+        return [*argv, str(plugin_path)]
     if find_links is not None:
         argv += ["--find-links", str(find_links)]
-    # Pin the SDK the *host* speaks. `uv run` caches a per-script
-    # environment keyed on the requirements it was given, and a plugin's
-    # own header asks for `civex-plugin-sdk` unpinned -- which whatever
-    # version that cached environment already holds satisfies forever.
-    # So without this pin, a plugin that resolved once against an older
-    # SDK keeps using it after the SDK changes, and silently disagrees
-    # with the host about the wire format (a `table` input arriving as a
-    # raw envelope dict instead of a DataFrame, say). Naming the version
-    # makes it part of the cache key, so a new SDK release re-resolves.
+    # Not locked: pin the SDK the *host* speaks. `uv run` caches a
+    # per-script environment keyed on the requirements it was given, and a
+    # plugin's own header asks for `civex-plugin-sdk` unpinned -- which
+    # whatever version that cached environment already holds satisfies
+    # forever. Naming the version makes it part of the cache key, so a new
+    # SDK release re-resolves.
     version = _sdk_pin_version(find_links)
     if version is not None:
         argv += ["--with", f"civex-plugin-sdk=={version}"]
     argv.append(str(plugin_path))
     return argv
+
+
+def lock_plugin(plugin_path: Path, timeout: float = 300.0) -> Path | None:
+    """Write `plugin_path`'s lockfile (`uv lock --script`): the exact
+    versions its header's dependencies resolve to now, so every later run
+    uses those without asking a package index. Returns the lockfile, or None
+    in a development checkout, where plugins resolve the SDK being worked on
+    from a wheel built per process (a lock would name a file that goes)."""
+    if _sdk_find_links_dir() is not None:
+        return None
+    result = subprocess.run(
+        [find_uv_binary(), "lock", "--script", str(plugin_path)],
+        cwd=str(plugin_path.parent),
+        env=sandboxed_env(),
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        **no_window_kwargs(),
+    )
+    if result.returncode != 0:
+        raise ConfigError(
+            f"Couldn't lock {plugin_path.name}'s dependencies: "
+            f"{result.stderr.strip() or result.stdout.strip()}"
+        )
+    return lockfile_of(plugin_path)
 
 
 # -- sandboxed spawn (CIVEX-139) ----------------------------------------------
