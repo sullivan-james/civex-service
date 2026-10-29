@@ -12,6 +12,7 @@ machine, or a bucket with `[store.s3]`).
 
 from __future__ import annotations
 
+import os
 import uuid
 
 from contextlib import contextmanager
@@ -174,6 +175,20 @@ class AppContext:
     def close(self) -> None:
         self._session.close()
 
+    def __enter__(self) -> AppContext:
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        """Commit what the block did, or forget it if the block raised; then
+        close."""
+        try:
+            if exc_type is None:
+                self.commit()
+            else:
+                self.rollback()
+        finally:
+            self.close()
+
     @contextmanager
     def validation_scope(self) -> Iterator[None]:
         """Run code inside a SQL SAVEPOINT that is always rolled back on exit,
@@ -223,6 +238,29 @@ def make_store(config: Config, session: "Session | None" = None) -> "ObjectStore
     return VolumeAwareFileObjectStore(
         config.store_config, config.project_root, session=session
     )
+
+
+def open_project(path: str | os.PathLike[str] | None = None) -> AppContext:
+    """The project in the folder `path` (or a folder above it; the current
+    directory by default), opened in this process: the same services the CLI
+    and the server use, with no server running. `civex.open` is this.
+
+    Use it as a context manager to commit on success and roll back on an
+    error, or call `commit()` and `close()` yourself. Raises ConfigError when
+    there is no project there and DatabaseTooNewError when the database was
+    upgraded by a newer civex."""
+    from civex.config import find_project_root, load_config_at
+    from civex.domain.exceptions import ConfigError
+
+    start = Path(path).expanduser() if path is not None else None
+    root = find_project_root(start)
+    if root is None:
+        where = start or Path.cwd()
+        raise ConfigError(
+            f"No civex project at or above {where}. Run `civex init` there to "
+            "create one."
+        )
+    return build_local_context(load_config_at(root))
 
 
 def build_local_context(
