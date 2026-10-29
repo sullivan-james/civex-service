@@ -6,13 +6,16 @@ from typing import Any
 from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel, ConfigDict, Field
 
-from civex.domain.exceptions import ValidationError
-from civex.plugins.base import Tier0Plugin, WorkflowContext
+from civex_plugin_sdk import RpcError
+
+from civex.plugins.builtins._refusals import refused
+from civex_plugin_sdk import Ctx
+from civex_plugin_sdk import Plugin as PluginBase
 
 log = logging.getLogger(__name__)
 
 
-class Plugin(Tier0Plugin):
+class Plugin(PluginBase):
     id = "civex.create_records_from_files"
     name = "Create Records from Files"
     description = (
@@ -20,7 +23,7 @@ class Plugin(Tier0Plugin):
         "against existing records; use Match Files to Records for that."
     )
     category = "outputs"
-    capabilities: list[str] = ["create_record"]
+    capabilities: list[str] = ["read", "write_records"]
     inputs = [
         IOSpec(
             name="files",
@@ -60,10 +63,10 @@ class Plugin(Tier0Plugin):
         )
 
     def invoke(
-        self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
+        self, inputs: dict[str, Any], config: Config, ctx: Ctx
     ) -> dict[str, Any]:
         files: list[dict[str, Any]] = inputs["files"]
-        dataset_name = config.dataset or ctx.dataset.name
+        dataset_name = config.dataset or ctx.get_context_dataset()["name"]
 
         log.info(
             "Creating %d %s record(s) in dataset '%s'",
@@ -87,7 +90,9 @@ class Plugin(Tier0Plugin):
                     ref.get("filename", "?"),
                 )
                 created += 1
-            except ValidationError as e:
+            except RpcError as e:
+                if not refused(e):
+                    raise
                 log.warning("  ✗ skipped '%s': %s", ref.get("filename", "?"), e)
                 skipped += 1
 

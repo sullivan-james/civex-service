@@ -36,6 +36,7 @@ from civex_plugin_sdk.protocol import (
 
 if TYPE_CHECKING:
     from civex_plugin_sdk.plugin import Plugin
+    from civex_plugin_sdk.plugin_base import PluginBase
 
 
 def serve(plugin_cls: "type[Plugin]") -> None:
@@ -109,9 +110,17 @@ def serve_container_once(
 
 
 def serve_loop(
-    plugin_cls: "type[Plugin]", reader: FrameReader, writer: FrameWriter
+    plugin_cls: "type[Plugin]",
+    reader: FrameReader,
+    writer: FrameWriter,
+    scratch_dir: Path | None = Path("."),
 ) -> None:
-    """The dispatch loop itself, decoupled from real stdio so it's unit-testable against injected reader/writer."""
+    """The dispatch loop itself, over any reader/writer pair (real stdio, or civex's in-process streams for its built-ins).
+
+    `scratch_dir` is where values too large to inline are written: the
+    process's own working folder by default (the host made it for this
+    plugin), or None to inline everything.
+    """
     for raw in reader:
         try:
             frame = parse_frame(raw)
@@ -122,7 +131,7 @@ def serve_loop(
         if isinstance(frame, DescribeRequest):
             _handle_describe(plugin_cls, writer)
         elif isinstance(frame, RunRequest):
-            _handle_run(plugin_cls, frame, reader, writer)
+            _handle_run(plugin_cls, frame, reader, writer, scratch_dir)
         else:
             _send_error(
                 writer,
@@ -133,19 +142,22 @@ def serve_loop(
             )
 
 
-def _handle_describe(plugin_cls: "type[Plugin]", writer: FrameWriter) -> None:
-    writer.send(
-        DescribeResult(
-            id=plugin_cls.id,
-            name=plugin_cls.name,
-            description=plugin_cls.description,
-            category=plugin_cls.category,
-            capabilities=list(plugin_cls.capabilities),
-            inputs=None if plugin_cls.inputs is None else list(plugin_cls.inputs),
-            outputs=None if plugin_cls.outputs is None else list(plugin_cls.outputs),
-            config_schema=plugin_cls.Config.model_json_schema(),
-        ).model_dump()
+def describe_result(plugin_cls: "type[PluginBase]") -> DescribeResult:
+    """A plugin class's `describe_result`: what `describe` answers, read off its declarations (and what civex registers its built-ins from, without starting them)."""
+    return DescribeResult(
+        id=plugin_cls.id,
+        name=plugin_cls.name,
+        description=plugin_cls.description,
+        category=plugin_cls.category,
+        capabilities=list(plugin_cls.capabilities),
+        inputs=None if plugin_cls.inputs is None else list(plugin_cls.inputs),
+        outputs=None if plugin_cls.outputs is None else list(plugin_cls.outputs),
+        config_schema=plugin_cls.Config.model_json_schema(),
     )
+
+
+def _handle_describe(plugin_cls: "type[Plugin]", writer: FrameWriter) -> None:
+    writer.send(describe_result(plugin_cls).model_dump())
 
 
 def _handle_run(
@@ -153,6 +165,7 @@ def _handle_run(
     frame: RunRequest,
     reader: FrameReader,
     writer: FrameWriter,
+    scratch_dir: Path | None = Path("."),
 ) -> None:
     try:
         config = plugin_cls.Config.model_validate(frame.config)
@@ -160,11 +173,9 @@ def _handle_run(
         _send_error(writer, ConfigValidationError(str(e)))
         return
 
-    # A plugin's cwd already *is* the host-managed, per-run scratch dir (see
-    # civex-service's subprocess_runtime._spawn), so it needs no scratch path
-    # of its own -- anything too large to inline is written here and crosses
-    # back as an absolute path.
-    scratch_dir = Path(".")
+    # By default a plugin's cwd already *is* the host-managed scratch folder
+    # (see civex's launchers), so anything too large to inline is written
+    # there and crosses back as an absolute path.
     try:
         inputs = convert_inputs(
             plugin_cls.inputs, frame.inputs, scratch_dir=scratch_dir
@@ -190,11 +201,20 @@ def _handle_run(
         _send_error(writer, e)
         return
     except Exception as e:
-        # An exception the plugin didn't classify. Reported as the generic
-        # kind and never as retryable -- the SDK has no basis to guess, and
-        # guessing wrong in that direction means re-running a permanently
-        # broken step.
-        _send_error(writer, PluginError(str(e)))
+        # An exception that isn't the SDK's own. One carrying a `kind` (an
+        # error type with its own classification) keeps it; otherwise it is
+        # the generic kind. Never retryable unless it says so -- the SDK has
+        # no basis to guess, and guessing wrong in that direction means
+        # re-running a permanently broken step.
+        kind = getattr(e, "kind", None)
+        _send_error(
+            writer,
+            PluginError(
+                str(e) or type(e).__name__,
+                kind=kind if isinstance(kind, str) else None,
+                retryable=getattr(e, "retryable", False) is True,
+            ),
+        )
         return
 
     _flush_stdout()

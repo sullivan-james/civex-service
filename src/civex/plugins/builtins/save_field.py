@@ -5,15 +5,16 @@ from typing import Any
 from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel, Field
 
-from civex.plugins.base import Tier0Plugin, WorkflowContext
+from civex_plugin_sdk import Ctx
+from civex_plugin_sdk import Plugin as PluginBase
 
 
-class Plugin(Tier0Plugin):
+class Plugin(PluginBase):
     id = "civex.save_field"
     name = "Save Field"
     description = "Write a value to a single field on the trigger record."
     category = "outputs"
-    capabilities: list[str] = ["update_record"]
+    capabilities: list[str] = ["read", "write_records"]
     inputs = [IOSpec(name="value", type="any", description="The value to write.")]
     outputs: list[IOSpec] = []
 
@@ -23,9 +24,10 @@ class Plugin(Tier0Plugin):
         )
 
     def invoke(
-        self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
+        self, inputs: dict[str, Any], config: Config, ctx: Ctx
     ) -> dict[str, Any]:
         # Only this field changes; the others are read as they are now, not as
         # they were when the workflow started.
-        ctx.patch_record(str(ctx.record.id), {config.field: inputs["value"]})
+        record_id = ctx.get_context_record()["id"]
+        ctx.patch_record(record_id, {config.field: inputs["value"]})
         return {}

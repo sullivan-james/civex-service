@@ -36,7 +36,7 @@ def test_plugin_info_shows_description_inputs_outputs_and_config(
 def test_plugin_info_shows_capabilities_when_declared(project_dir: Path) -> None:
     result = runner.invoke(app, ["plugin", "info", "civex.save_field"])
     assert result.exit_code == 0
-    assert "update_record" in result.output
+    assert "write_records" in result.output
 
 
 def test_plugin_info_unknown_plugin_exits_nonzero(project_dir: Path) -> None:

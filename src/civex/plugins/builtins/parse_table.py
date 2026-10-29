@@ -8,7 +8,8 @@ from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel, Field, field_validator
 
 from civex.domain.exceptions import ValidationError
-from civex.plugins.base import Tier0Plugin, WorkflowContext
+from civex_plugin_sdk import Ctx
+from civex_plugin_sdk import Plugin as PluginBase
 
 log = logging.getLogger(__name__)
 
@@ -81,7 +82,7 @@ def detect_delimiter(text: str, candidates: list[str]) -> str:
     return best[1] if score(best)[1] > 0 else candidates[0]
 
 
-class Plugin(Tier0Plugin):
+class Plugin(PluginBase):
     id = "civex.parse_table"
     name = "Parse Table"
     description = (
@@ -134,7 +135,7 @@ class Plugin(Tier0Plugin):
             return value
 
     def invoke(
-        self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
+        self, inputs: dict[str, Any], config: Config, ctx: Ctx
     ) -> dict[str, Any]:
         try:
             import pandas as pd

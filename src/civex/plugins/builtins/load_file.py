@@ -7,19 +7,20 @@ from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel, Field
 
 from civex.domain.dtos import FileRef
-from civex.plugins.base import Tier0Plugin, WorkflowContext
+from civex_plugin_sdk import Ctx
+from civex_plugin_sdk import Plugin as PluginBase
 
 log = logging.getLogger(__name__)
 
 
-class Plugin(Tier0Plugin):
+class Plugin(PluginBase):
     id = "civex.load_file"
     name = "Load File"
     description = (
         "Load the bytes of a file stored in a `file` field on the trigger record."
     )
     category = "data-sources"
-    capabilities: list[str] = ["get_file"]
+    capabilities: list[str] = ["read"]
     inputs: list[IOSpec] = []
     outputs = [
         IOSpec(name="bytes", type="bytes", description="The file's raw contents."),
@@ -33,9 +34,9 @@ class Plugin(Tier0Plugin):
         )
 
     def invoke(
-        self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
+        self, inputs: dict[str, Any], config: Config, ctx: Ctx
     ) -> dict[str, Any]:
-        raw = ctx.record.data.get(config.field)
+        raw = ctx.get_context_record()["data"].get(config.field)
         if raw is None:
             raise ValueError(f"Field '{config.field}' not found on record")
         if not isinstance(raw, dict) or "sha256" not in raw:

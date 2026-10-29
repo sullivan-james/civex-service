@@ -60,7 +60,11 @@ src/civex/
     models.py    # SQLAlchemy 2.0 ORM models (Schema, Field, Dataset, Record)
     session.py   # Engine factory; engine is cached, session is per-request
   plugins/
-    base.py      # BasePlugin ABC + WorkflowContext dataclass
+    base.py      # WorkflowContext (the host side of a run) + PluginTier
+    runtime.py   # Drives any plugin over the wire protocol: describe/run, host calls, timeout
+    launchers.py # How each tier starts: UvLauncher, DockerLauncher, InProcessLauncher (built-ins)
+    workers.py   # Plugin processes/threads kept warm between runs
+    host_api.py  # The one table of functions a plugin may call, by permission action
     registry.py  # Discovers built-ins and user plugins from _civex/plugins/
     builtins/    # Built-in plugins (see Built-in plugins section below)
   workflows/
@@ -265,7 +269,7 @@ Each field carries a `restrictions: dict[str, Any]` validated at write time by `
 
 ### Workflow execution
 
-`executor.run()` topologically sorts steps (Kahn's algorithm), resolves `step_id.output_name` input references, and calls each plugin's `run()` in order. It commits nothing: both drains (`background.run_pending_jobs`, `cli.utils.drain_jobs`) run it inside `AppContext.all_or_nothing()` (a SAVEPOINT) and commit once with the run's outcome, so a failed run keeps none of its writes (a cancelled one keeps what it got through). **What a plugin may ask of civex is one table**, `plugins/host_api.HOST_API` (name, permission action, call): the subprocess/container dispatcher answers every `rpc_call`/`call_tool` from it, a plugin's `capabilities` are permission actions (`read`, `write_records`, `manage_files`, `delete`; a bare function name still grants just that one), `granted()` works out the set at discovery, and `test_host_api` holds `docs/extending/writing-a-plugin.md`'s table to it. A new host function is an entry there plus the SDK `Ctx` method. `commit` is answered as a no-op for old plugins. Custom plugins are discovered from `_civex/plugins/*.py` and must define a class named `Plugin` subclassing `BasePlugin`.
+`executor.run()` topologically sorts steps (Kahn's algorithm), resolves `step_id.output_name` input references, and calls each plugin's `run()` in order. It commits nothing: both drains (`background.run_pending_jobs`, `cli.utils.drain_jobs`) run it inside `AppContext.all_or_nothing()` (a SAVEPOINT) and commit once with the run's outcome, so a failed run keeps none of its writes (a cancelled one keeps what it got through). **What a plugin may ask of civex is one table**, `plugins/host_api.HOST_API` (name, permission action, call): the subprocess/container dispatcher answers every `rpc_call`/`call_tool` from it, a plugin's `capabilities` are permission actions (`read`, `write_records`, `manage_files`, `delete`; a bare function name still grants just that one), `granted()` works out the set at discovery, and `test_host_api` holds `docs/extending/writing-a-plugin.md`'s table to it. A new host function is an entry there plus the SDK `Ctx` method. `commit` is answered as a no-op for old plugins. **Every plugin, built-in or not, is run the same way**: `runtime.run(launcher, ...)` over the SDK wire protocol; a tier is only a `Launcher` (`launchers.py`: `UvLauncher` for `_civex/plugins/*.py`, `DockerLauncher` one container per request, `InProcessLauncher` a built-in's `serve_loop` on a thread here, not stopped by a timeout). Built-ins subclass the SDK's `Plugin` and get an SDK `Ctx`, never a `WorkflowContext`; a write the host refuses reaches them as `RpcError` (`builtins/_refusals.refused`). Custom plugins are discovered from `_civex/plugins/*.py` and must define a class named `Plugin` subclassing `civex_plugin_sdk.Plugin`.
 
 Workflow triggers fire via `trigger_for_record()` in `WorkflowJobService`. When a record is **created**, both `record_created` and `record_updated` are fired — but `record_updated` only includes fields with non-null values in `changed_fields`, so field-restricted triggers (`fields: [some_field]`) do not fire unless that field was actually set to a non-null value on creation.
 

@@ -1,12 +1,9 @@
 """Host side of the container (Tier 2) plugin runtime: spawns
 `docker run -i --rm --name <n> [--memory M] [--cpus C] <image> <mode>` and
-drives the identical civex-plugin-sdk wire protocol over its stdin/stdout
-that subprocess_runtime.py drives for Tier 1 (CIVEX-133: same describe/run
-frames, same fd-dup stdout isolation on the plugin side -- see
-plugin-templates/{r,java}/entrypoint.sh). Frame parsing, RPC dispatch, and
-the wall-clock timeout watchdog are the exact same functions
-(civex.plugins.subprocess_runtime), reused rather than reimplemented, so
-the two tiers can never drift in how they interpret a frame.
+is the process side of `launchers.DockerLauncher` (CIVEX-133: the same
+describe/run frames and fd-dup stdout isolation on the plugin side -- see
+plugin-templates/{r,java}/entrypoint.sh). Frame parsing, RPC dispatch and
+the timeout are `runtime`'s, the same for every tier.
 
 The one thing that has to be tier-specific is how a stuck run gets killed:
 Tier 1 kills the subprocess's own process group directly. Here, the local
@@ -27,22 +24,14 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-import tempfile
-import uuid
-from pathlib import Path
 from typing import Any
 
 from civex_plugin_sdk.protocol import DescribeResult
 
 from civex.domain.exceptions import ConfigError
+from civex.plugins import runtime
 from civex.plugins.base import StepResult, WorkflowContext
 from civex.processes import no_window_kwargs
-from civex.plugins.subprocess_runtime import (
-    _drive_describe,
-    _drive_run,
-    _HostRpcDispatcher,
-    _run_with_timeout,
-)
 
 # -- docker resolution ---------------------------------------------------
 
@@ -153,34 +142,15 @@ def _ensure_terminated(
     _kill_container(proc, container_name, grace_seconds=grace_seconds)
 
 
-# -- public entrypoints ---------------------------------------------------
-
-
-def _container_name() -> str:
-    return f"civex-plugin-{uuid.uuid4().hex}"
+# -- entry points ----------------------------------------------------------------
 
 
 def describe_container(image: str, timeout: float = 20.0) -> DescribeResult:
-    """Spawn the image in "describe" mode and ask it to describe itself --
-    used by discovery to learn a plugin's id/name/category/capabilities/
-    config_schema without running it. Mirrors
-    subprocess_runtime.describe_plugin()."""
-    docker_bin = find_docker_binary()
-    name = _container_name()
-    proc: subprocess.Popen | None = None
-    try:
-        argv = _build_command(docker_bin, image, "describe", name)
-        proc = _spawn(argv)
-        return _run_with_timeout(
-            proc,
-            lambda: _drive_describe(proc),
-            timeout,
-            label=image,
-            kill_fn=lambda: _kill_container(proc, name),
-        )
-    finally:
-        if proc is not None:
-            _ensure_terminated(proc, name)
+    """Run the image in "describe" mode and ask it to describe itself
+    (`runtime.describe` with a `DockerLauncher`)."""
+    from civex.plugins.launchers import DockerLauncher
+
+    return runtime.describe(DockerLauncher(image), timeout)
 
 
 def run_container(
@@ -194,34 +164,16 @@ def run_container(
     memory: str | None = None,
     cpus: float | None = None,
 ) -> StepResult:
-    """Spawn a fresh container and send `run` directly -- no redundant
-    `describe` round-trip, exactly like subprocess_runtime.run_plugin().
-    `capabilities` is what discovery already learned and cached on this
-    plugin's PluginRegistration. `memory`/`cpus` are docker's own
-    --memory/--cpus values (already resolved by the caller from a step's
-    override or [plugins]'s global default -- same global-default +
-    per-step-override mechanism as `timeout`, CIVEX-137); None means no
-    limit is passed, i.e. docker's own default. Raises
-    PluginExecutionError/PluginTimeoutError on any failure, exactly like a
-    tier-BUILTIN or tier-SUBPROCESS plugin failing -- executor.py needs no
-    tier-specific branch to abort the workflow on a failed step."""
-    docker_bin = find_docker_binary()
-    name = _container_name()
-    scratch_dir = Path(tempfile.mkdtemp(prefix="civex-plugin-container-"))
-    proc: subprocess.Popen | None = None
-    try:
-        argv = _build_command(docker_bin, image, "run", name, memory=memory, cpus=cpus)
-        proc = _spawn(argv)
-        dispatcher = _HostRpcDispatcher(ctx, capabilities, scratch_dir)
-        outputs = _run_with_timeout(
-            proc,
-            lambda: _drive_run(proc, inputs, config, dispatcher),
-            timeout,
-            label=image,
-            kill_fn=lambda: _kill_container(proc, name),
-        )
-        return StepResult(outputs=outputs)
-    finally:
-        if proc is not None:
-            _ensure_terminated(proc, name)
-        shutil.rmtree(scratch_dir, ignore_errors=True)
+    """Run one step in a fresh container (`runtime.run` with a
+    `DockerLauncher`). `memory`/`cpus` are docker's own --memory/--cpus
+    values; None passes no limit."""
+    from civex.plugins.launchers import DockerLauncher
+
+    return runtime.run(
+        DockerLauncher(image, memory=memory, cpus=cpus),
+        inputs,
+        config,
+        ctx,
+        capabilities,
+        timeout,
+    )

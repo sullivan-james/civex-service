@@ -3,15 +3,12 @@
 `id`/`name`/`description`/`category`/`capabilities`/`inputs`/`outputs`/
 `Config` mean the same thing whether a plugin ends up executing
 out-of-process (this package's `Plugin`, tier SUBPROCESS/CONTAINER) or
-in-process (civex-service's own `Tier0Plugin`, tier BUILTIN) -- so they're
+in civex's own process (its built-ins, which are `Plugin`s too) -- so they're
 declared exactly once here, instead of on two independently-maintained
 classes that could quietly drift apart.
 
-What's tier-specific is only the shape of `ctx` that `invoke()` receives
-(the out-of-process `Ctx` deliberately exposes *less* than civex-service's
-in-process `WorkflowContext` -- no ambient `.record`/`.dataset`, only what a
-plugin explicitly asked for) -- so `invoke()` itself is declared separately
-by each tier's own subclass, not here.
+Every plugin, built-in or not, implements `invoke()` against the same
+`Ctx` (see this package's `Plugin`): only how civex starts it differs.
 
 This module has no dependency beyond pydantic, so importing it (e.g. from
 civex-service) doesn't pull in the RPC/subprocess machinery in ctx.py,

@@ -5,15 +5,16 @@ from typing import Any
 from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel, Field
 
-from civex.plugins.base import Tier0Plugin, WorkflowContext
+from civex_plugin_sdk import Ctx
+from civex_plugin_sdk import Plugin as PluginBase
 
 
-class Plugin(Tier0Plugin):
+class Plugin(PluginBase):
     id = "civex.get_field"
     name = "Get Field"
     description = "Read a single field from the record that triggered the workflow."
     category = "data-access"
-    capabilities: list[str] = []
+    capabilities: list[str] = ["read"]
     inputs: list[IOSpec] = []
     outputs = [
         IOSpec(
@@ -29,7 +30,7 @@ class Plugin(Tier0Plugin):
         )
 
     def invoke(
-        self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
+        self, inputs: dict[str, Any], config: Config, ctx: Ctx
     ) -> dict[str, Any]:
-        value = ctx.record.data.get(config.field)
+        value = ctx.get_context_record()["data"].get(config.field)
         return {"value": value}

@@ -6,13 +6,16 @@ from typing import Any
 from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel, ConfigDict, Field
 
-from civex.domain.exceptions import NotFoundError, ValidationError
-from civex.plugins.base import Tier0Plugin, WorkflowContext
+from civex_plugin_sdk import RpcError
+
+from civex.plugins.builtins._refusals import GONE, refused
+from civex_plugin_sdk import Ctx
+from civex_plugin_sdk import Plugin as PluginBase
 
 log = logging.getLogger(__name__)
 
 
-class Plugin(Tier0Plugin):
+class Plugin(PluginBase):
     id = "civex.upsert_records"
     name = "Upsert Records"
     description = (
@@ -21,7 +24,7 @@ class Plugin(Tier0Plugin):
         "record's other fields are kept, and an empty cell never clears a value."
     )
     category = "outputs"
-    capabilities: list[str] = ["create_record", "update_record", "find_records"]
+    capabilities: list[str] = ["read", "write_records"]
     inputs = [
         IOSpec(
             name="table",
@@ -62,7 +65,7 @@ class Plugin(Tier0Plugin):
         )
 
     def invoke(
-        self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
+        self, inputs: dict[str, Any], config: Config, ctx: Ctx
     ) -> dict[str, Any]:
         try:
             import pandas as pd
@@ -72,8 +75,8 @@ class Plugin(Tier0Plugin):
             )
 
         df: pd.DataFrame = inputs["table"]
-        dataset_name = config.dataset or ctx.dataset.name
-        parent_id = config.parent_record_id or str(ctx.record.id)
+        dataset_name = config.dataset or ctx.get_context_dataset()["name"]
+        parent_id = config.parent_record_id or ctx.get_context_record()["id"]
 
         log.info(
             "Upserting %d rows → dataset '%s', schema '%s', key '%s'",
@@ -109,7 +112,7 @@ class Plugin(Tier0Plugin):
                     # Only the fields the row has: the record's other fields (a
                     # file, computed values) stay, and an empty cell leaves its
                     # field alone rather than clearing it.
-                    ctx.patch_record(str(existing[0].id), data)
+                    ctx.patch_record(existing[0]["id"], data)
                     updated += 1
                 else:
                     ctx.create_record(
@@ -119,7 +122,9 @@ class Plugin(Tier0Plugin):
                         context_record_id=parent_id,
                     )
                     created += 1
-            except (ValidationError, NotFoundError) as e:
+            except RpcError as e:
+                if not refused(e, GONE):
+                    raise
                 # NotFoundError alongside ValidationError: the matched record
                 # can be deleted between find_records() above and this
                 # update() (e.g. another workflow step, or a concurrent

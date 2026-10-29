@@ -146,7 +146,7 @@ def _assert_json_safe_outputs(
 
     A subprocess/container-tier step's outputs came off a JSON wire and so are
     serializable by construction. A BUILTIN step's didn't: only its declared
-    `table`/`bytes` values are converted (registry._registration_for_tier0),
+    `table`/`bytes` values are converted (the SDK's serve_loop),
     and anything else it returns would otherwise fail somewhere else entirely
     -- when the next step happens to be out-of-process, or when the job record
     is written -- rather than at the step that produced it.

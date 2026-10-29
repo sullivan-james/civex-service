@@ -22,12 +22,12 @@ from __future__ import annotations
 
 import atexit
 import shutil
-import subprocess
 import threading
 import time
 from collections.abc import Callable, Hashable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 #: How long a worker nobody has used is kept before it is stopped.
 IDLE_SECONDS = 300.0
@@ -37,36 +37,38 @@ MAX_IDLE_PER_KEY = 2
 
 @dataclass(eq=False)
 class Worker:
-    """One plugin process and the folder it runs in."""
+    """One running plugin (`runtime.Connection`) kept for its key."""
 
     key: Hashable
-    proc: subprocess.Popen
-    scratch_dir: Path
-    stop: Callable[["Worker"], None]
+    conn: Any  # runtime.Connection (not imported: runtime imports this)
     idle_since: float = field(default=0.0)
     #: Requests it finished and was kept after.
     runs: int = 0
 
+    @property
+    def scratch_dir(self) -> Path | None:
+        return self.conn.scratch_dir
+
     def alive(self) -> bool:
-        return self.proc.poll() is None
+        return bool(self.conn.alive())
 
     def empty_scratch(self) -> None:
-        """Remove what an earlier run left in the folder (the folder stays:
+        """Remove what an earlier run left in its folder (the folder stays:
         it is the process's working directory)."""
-        if not self.scratch_dir.is_dir():
-            self.scratch_dir.mkdir(parents=True, exist_ok=True)
+        folder = self.scratch_dir
+        if folder is None:
             return
-        for child in self.scratch_dir.iterdir():
+        if not folder.is_dir():
+            folder.mkdir(parents=True, exist_ok=True)
+            return
+        for child in folder.iterdir():
             if child.is_dir() and not child.is_symlink():
                 shutil.rmtree(child, ignore_errors=True)
             else:
                 child.unlink(missing_ok=True)
 
     def close(self) -> None:
-        try:
-            self.stop(self)
-        finally:
-            shutil.rmtree(self.scratch_dir, ignore_errors=True)
+        self.conn.close()
 
 
 class WorkerPool:
