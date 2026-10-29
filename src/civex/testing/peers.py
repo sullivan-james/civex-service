@@ -337,7 +337,7 @@ def device(project, authority, name, *, flaky: bool = False):
     authority.commit()
     ctx._holder = {}  # type: ignore[attr-defined]
     _use(ctx, authority, flaky)
-    root = ctx.sync_svc._config.project_root
+    root = ctx.config.project_root
     ctx.sync_svc = AsDevice(ctx.sync_svc, root.parent / f"{name}-user-state.toml")
     ctx._invite = invite  # type: ignore[attr-defined]
     return ctx

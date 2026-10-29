@@ -66,7 +66,7 @@ def schema_list() -> None:
     for s in schemas:
         parent_name = "-"
         if s.parent_id:
-            parent_dto = ctx.schema_svc._repo.get_by_id(s.parent_id)
+            parent_dto = ctx.schema_svc.get_by_id(s.parent_id)
             parent_name = parent_dto.name if parent_dto else "-"
         all_fields = ctx.schema_svc.collect_fields(s)
         table.add_row(
@@ -93,7 +93,7 @@ def schema_show(name: str = typer.Argument(..., help="Schema name")) -> None:
     if schema.description:
         console.print(f"  {schema.description}")
     if schema.parent_id:
-        parent = ctx.schema_svc._repo.get_by_id(schema.parent_id)
+        parent = ctx.schema_svc.get_by_id(schema.parent_id)
         if parent:
             console.print(f"  Inherits: {parent.name}")
 

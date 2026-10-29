@@ -112,14 +112,7 @@ def create_schema(body: CreateSchemaRequest, ctx: AppContext = Depends(get_ctx))
 @router.get("/{name_or_id}", response_model=SchemaResponse)
 def get_schema(name_or_id: str, ctx: AppContext = Depends(get_ctx)):
     try:
-        uid = uuid.UUID(name_or_id)
-        dto = ctx.schema_svc._repo.get_by_id(uid)
-        if dto:
-            return SchemaResponse.from_dto(dto)
-    except ValueError:
-        pass
-    try:
-        return SchemaResponse.from_dto(ctx.schema_svc.get(name_or_id))
+        return SchemaResponse.from_dto(ctx.schema_svc.lookup(name_or_id))
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
 
