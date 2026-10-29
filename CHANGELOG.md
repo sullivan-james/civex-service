@@ -247,6 +247,15 @@ from the next tag forward.
   on purpose still keeps what it got through. Plugins no longer commit:
   `ctx.commit()` does nothing (and warns) and the host answers a `commit`
   call from an older plugin with nothing.
+- **Files go to plugins by path, in one folder per run.** Each workflow run
+  gets a folder (in the user's cache, `CIVEX_RUNS_DIR` to move it; removed
+  when the run ends). A file a plugin asks for is copied there and handed
+  over by path instead of base64 in the protocol, new `ctx.file_path` and
+  `ctx.store_path` pass large files without reading them into memory, and a
+  large `table`/`bytes` value a step produces stays there until a later
+  step reads it (it used to be deleted when the step that wrote it ended).
+  A container gets the folder mounted. A path a plugin hands back outside
+  the run's folder is refused (`path_refused`).
 - **A plugin says what it is in its header, and is locked.** Saving a plugin
   (or `civex plugin check --write`) writes its contract, from the code's own
   answer, into the script block under `[tool.civex]`, so discovery, workflow

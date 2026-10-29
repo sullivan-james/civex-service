@@ -108,7 +108,7 @@ class CommandLauncher(Launcher):
     def argv(self) -> list[str]:
         return self._argv
 
-    def start(self, mode: str) -> Connection:
+    def start(self, mode: str, run_dir: Path | None = None) -> Connection:
         from civex.plugins import subprocess_runtime as sr
 
         scratch_dir = Path(tempfile.mkdtemp(prefix="civex-plugin-"))
@@ -141,7 +141,7 @@ class UvLauncher(CommandLauncher):
 
         return sr._build_command(sr.find_uv_binary(), self.plugin_path)
 
-    def start(self, mode: str) -> Connection:
+    def start(self, mode: str, run_dir: Path | None = None) -> Connection:
         """Lock the script the first time it is started, however it arrived
         (saved, uploaded, installed from the library, copied in by hand), so
         from then on it runs exactly what was resolved now. Offline, it runs
@@ -154,7 +154,7 @@ class UvLauncher(CommandLauncher):
                 sr.lock_plugin(self.plugin_path)
             except (ConfigError, OSError, subprocess.TimeoutExpired) as e:
                 log.warning("Running %s unlocked: %s", self.plugin_path.name, e)
-        return super().start(mode)
+        return super().start(mode, run_dir)
 
     @property
     def key(self) -> Hashable:
@@ -214,7 +214,7 @@ class DockerLauncher(Launcher):
     def label(self) -> str:
         return self.image
 
-    def start(self, mode: str) -> Connection:
+    def start(self, mode: str, run_dir: Path | None = None) -> Connection:
         from civex.plugins import container_runtime as cr
 
         name = f"civex-plugin-{uuid.uuid4().hex}"
@@ -225,6 +225,9 @@ class DockerLauncher(Launcher):
             name,
             memory=self.memory,
             cpus=self.cpus,
+            # The run's folder at the same path inside, so the paths both
+            # sides write in frames name the same files.
+            mounts=[run_dir] if run_dir is not None else [],
         )
         scratch_dir = Path(tempfile.mkdtemp(prefix="civex-plugin-container-"))
         try:
@@ -335,5 +338,5 @@ class InProcessLauncher(Launcher):
     def label(self) -> str:
         return self.plugin_cls.id
 
-    def start(self, mode: str) -> Connection:
+    def start(self, mode: str, run_dir: Path | None = None) -> Connection:
         return InProcessConnection(self.plugin_cls)

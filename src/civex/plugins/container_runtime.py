@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from pathlib import Path
 from typing import Any
 
 from civex_plugin_sdk.protocol import DescribeResult
@@ -60,8 +61,11 @@ def _build_command(
     *,
     memory: str | None = None,
     cpus: float | None = None,
+    mounts: list[Path] | None = None,
 ) -> list[str]:
     argv = [docker_bin, "run", "-i", "--rm", "--name", container_name]
+    for folder in mounts or []:
+        argv += ["--volume", f"{folder}:{folder}"]
     if memory is not None:
         argv += ["--memory", memory]
     if cpus is not None:

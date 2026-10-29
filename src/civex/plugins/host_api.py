@@ -55,6 +55,71 @@ def _record(dto: Any) -> dict[str, Any]:
     return dto.to_dict()
 
 
+def _folder(scratch: Path | None) -> Path:
+    if scratch is None:
+        raise PluginExecutionError(
+            "this run has no folder to put files in", kind="protocol_error"
+        )
+    return scratch
+
+
+def _copy_in(ctx: WorkflowContext, sha256: str, scratch: Path | None) -> Path:
+    """A read-only copy of a stored file in the run's folder (once per run:
+    asked again, the same copy). A copy, never a link: a plugin writing to
+    it must not change what is stored."""
+    folder = _folder(scratch) / "files"
+    dest = folder / sha256
+    if not dest.is_file():
+        folder.mkdir(parents=True, exist_ok=True)
+        ctx.copy_file(sha256, dest)
+        dest.chmod(0o444)
+    return dest
+
+
+def _file_envelope(
+    ctx: WorkflowContext, sha256: str, scratch: Path | None
+) -> dict[str, Any]:
+    """`get_file`'s answer: the copy in the run's folder by path, or (no
+    folder: an exchange outside a run) the bytes inline."""
+    if scratch is None:
+        return encode_binary(ctx.get_file(sha256), None)
+    return {"encoding": "path", "path": str(_copy_in(ctx, sha256, scratch))}
+
+
+def _path_inside(raw: str, *roots: Path | None) -> Path:
+    """`raw` resolved, if it is inside one of `roots`; refused otherwise.
+    Paths come from the plugin, and the host reads what they name: a plugin
+    may hand over only what it wrote where it was told to."""
+    path = Path(raw).resolve()
+    for root in roots:
+        if root is not None and path.is_relative_to(root.resolve()):
+            return path
+    raise PluginExecutionError(
+        f"the plugin named a file outside the run's folder: {raw}",
+        kind="path_refused",
+    )
+
+
+#: The wire forms of a value written to a file instead of inlined.
+_PATH_ENCODINGS = frozenset({"path", "ndjson_path"})
+
+
+def inside_run(value: Any, *roots: Path | None) -> Any:
+    """`value` unchanged, after checking every file it points at (a `path`
+    or `ndjson_path` envelope, at any depth) is inside one of `roots`."""
+    if isinstance(value, dict):
+        if value.get("encoding") in _PATH_ENCODINGS and isinstance(
+            value.get("path"), str
+        ):
+            _path_inside(value["path"], *roots)
+        for item in value.values():
+            inside_run(item, *roots)
+    elif isinstance(value, list):
+        for item in value:
+            inside_run(item, *roots)
+    return value
+
+
 def _delete_record(
     ctx: WorkflowContext, args: dict[str, Any], scratch: Path | None
 ) -> dict[str, Any]:
@@ -129,8 +194,14 @@ _FNS = [
     HostFn(
         "get_file",
         READ,
-        lambda ctx, a, s: encode_binary(ctx.get_file(a["sha256"]), s),
+        lambda ctx, a, s: _file_envelope(ctx, a["sha256"], s),
         "A stored file's bytes, by hash.",
+    ),
+    HostFn(
+        "file_path",
+        READ,
+        lambda ctx, a, s: {"path": str(_copy_in(ctx, a["sha256"], s))},
+        "A read-only copy of a stored file in the run's folder, by hash.",
     ),
     HostFn(
         "create_record",
@@ -164,9 +235,19 @@ _FNS = [
         "store_file",
         MANAGE_FILES,
         lambda ctx, a, s: {
-            "file": ctx.store_file(decode_binary(a["data"]), a["filename"]).to_dict()
+            "file": ctx.store_file(
+                decode_binary(inside_run(a["data"], s)), a["filename"]
+            ).to_dict()
         },
         "Store bytes as a file in the run's collection.",
+    ),
+    HostFn(
+        "store_path",
+        MANAGE_FILES,
+        lambda ctx, a, s: {
+            "file": ctx.store_path(_path_inside(a["path"], s), a["filename"]).to_dict()
+        },
+        "Store the file at a path in the run's folder, in the run's collection.",
     ),
     HostFn(
         "delete_record",

@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import time
 from collections import deque
+from pathlib import Path
 from typing import Any, Callable
 
 from civex.domain.dtos import ErrorEnvelope, StepExecution
 from civex.domain.exceptions import JobCancelled, PluginContractError
 from civex.plugins.base import WorkflowContext
 from civex.plugins.registry import PluginRegistration
+from civex.plugins.runtime import new_run_dir
 from civex.workflows.conditions import (
     SKIPPED_OUTPUTS,
     condition_refs,
@@ -213,6 +216,12 @@ def run(
     running is not interrupted: it finishes, or hits its own timeout.
     """
     job_id = getattr(ctx, "job_id", None)
+    # One folder for the whole run: files plugins ask for and values too
+    # large to send inline are kept here, so a later step can read what an
+    # earlier one wrote; removed when the run ends, however it ends.
+    made: Path | None = None
+    if getattr(ctx, "run_dir", None) is None:
+        made = ctx.run_dir = new_run_dir()
     try:
         return _run(
             wf,
@@ -226,6 +235,9 @@ def run(
     finally:
         if job_id is not None:
             RUNS.finished(job_id)
+        if made is not None:
+            shutil.rmtree(made, ignore_errors=True)
+            ctx.run_dir = None
 
 
 def _run(

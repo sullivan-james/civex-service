@@ -30,11 +30,19 @@ class FileService:
     # VolumeAwareFileObjectStore._write_candidates -- and never causes content
     # that already exists to be stored again.
 
-    def store(self, path: Path, collection_id: str | None = None) -> FileRef:
+    def store(
+        self,
+        path: Path,
+        collection_id: str | None = None,
+        filename: str | None = None,
+    ) -> FileRef:
         """Copy a file from disk into the object store in fixed-size chunks
-        (never reading the whole file into memory)."""
+        (never reading the whole file into memory). `filename` is the name it
+        is stored under (default: the file's own)."""
         self._permissions.require(permissions.MANAGE_FILES)
-        return self._store.put_path(path, collection_id=collection_id)
+        return self._store.put_path(
+            path, original_filename=filename, collection_id=collection_id
+        )
 
     def store_bytes(
         self, data: bytes, filename: str, collection_id: str | None = None

@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from civex.domain.dtos import DatasetDTO, FileRef, RecordDTO, SchemaDTO
@@ -94,6 +95,10 @@ class WorkflowContext:
     # carries on would otherwise leave no trace of *which* record it collided
     # with; the executor adds these to that step's outputs.
     duplicates: list[dict[str, Any]] = field(default_factory=list)
+    # The run's folder (`executor.run` makes it and removes it when the run
+    # ends): files a plugin asks for, and values too large to send inline, are
+    # kept here for every step of the run.
+    run_dir: Path | None = None
 
     def __post_init__(self) -> None:
         # However the record was built, a workflow sees a file's identity, not
@@ -130,6 +135,19 @@ class WorkflowContext:
 
     def store_file(self, data: bytes, filename: str) -> FileRef:
         return self._app_ctx.file_svc.store_bytes(data, filename, str(self.dataset.id))
+
+    def store_path(self, path: Path, filename: str) -> FileRef:
+        """Store the file at `path` (read in chunks, never whole) in the run's
+        collection, named `filename`."""
+        return self._app_ctx.file_svc.store(
+            path, str(self.dataset.id), filename=filename
+        )
+
+    def copy_file(self, sha256: str, dest: Path) -> None:
+        """Write a stored file's bytes to `dest`, a chunk at a time."""
+        with open(dest, "wb") as out:
+            for chunk in self._app_ctx.file_svc.stream(sha256):
+                out.write(chunk)
 
     @property
     def _cause(self) -> dict[str, Any] | None:

@@ -132,6 +132,9 @@ class _FakeWorkflowContext:
     def get_file(self, sha256: str) -> bytes:
         return b"file-bytes"
 
+    def copy_file(self, sha256: str, dest: Path) -> None:
+        dest.write_bytes(self.get_file(sha256))
+
     def store_file(self, data: bytes, filename: str) -> FileRef:
         return FileRef(sha256="abc123", filename=filename, size=len(data))
 
@@ -267,12 +270,14 @@ def test_dispatch_unknown_tool_raises() -> None:
         dispatcher.dispatch("call_tool", {"tool": "not_a_real_tool", "args": {}})
 
 
-def test_dispatch_get_file_encodes_binary(tmp_path: Path) -> None:
-    dispatcher = runtime._HostRpcDispatcher(
-        _FakeWorkflowContext(), ["get_file"], tmp_path
-    )
+def test_dispatch_get_file_copies_the_file_into_the_run_folder(tmp_path: Path) -> None:
+    ctx = _FakeWorkflowContext()
+    dispatcher = runtime._HostRpcDispatcher(ctx, ["get_file"], tmp_path)
     result = dispatcher.dispatch("get_file", {"sha256": "deadbeef"})
-    assert result["encoding"] == "base64"
+    assert result == {"encoding": "path", "path": str(tmp_path / "files" / "deadbeef")}
+    copy = tmp_path / "files" / "deadbeef"
+    assert copy.read_bytes() == b"file-bytes"
+    assert not copy.stat().st_mode & 0o222  # read-only: writing it changes nothing
 
 
 # -- real subprocess frame-driving (plain python, no uv) --------------------

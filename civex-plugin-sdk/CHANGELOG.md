@@ -14,6 +14,11 @@ fixes that change neither. A change to the wire protocol itself also bumps
 
 ## Unreleased
 
+- `PROTOCOL_VERSION` is 3: `RunRequest.run_dir` names the run's folder,
+  which `serve_loop` and `Ctx` use for values too large to inline (it lives
+  for the whole workflow run). New `Ctx.file_path(sha256)` (a read-only copy
+  of a stored file, by path), `Ctx.store_path(path, filename)` and
+  `Ctx.run_dir`.
 - `serve_loop` takes `scratch_dir` (default the working folder; None inlines
   everything), and new `serve.describe_result(plugin_cls)` builds a plugin
   class's `describe_result` (what `describe` answers).
