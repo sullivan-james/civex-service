@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 from contextlib import nullcontext
+import numbers
 import re
 import uuid
 from datetime import date as _date, datetime as _dt, timezone
@@ -149,12 +150,21 @@ def _check_restrictions(
             except ValidationError as e:
                 raise ValidationError(f"Field '{field_name}': {e}") from None
 
+    if dtype in ("integer", "float"):
+        # Checked whatever the restrictions: a field with none once stored
+        # any value at all. A whole float (2.0, as pandas reads an integer
+        # column with gaps) is a whole number.
+        if isinstance(value, bool) or not isinstance(value, numbers.Real):
+            raise ValidationError(f"Field '{field_name}': '{value}' is not a number")
+        if dtype == "integer" and not float(value).is_integer():
+            raise ValidationError(
+                f"Field '{field_name}': {value} is not a whole number"
+            )
+
     if not restrictions:
         return
 
     if dtype in ("integer", "float"):
-        if isinstance(value, str) or isinstance(value, bool):
-            raise ValidationError(f"Field '{field_name}': '{value}' is not a number")
         mn = restrictions.get("min")
         mx = restrictions.get("max")
         if mn is not None and value < mn:
@@ -1973,6 +1983,13 @@ class RecordService:
                 )
             within = (ancestor.id, hops)
 
+        if query.where and schema is None:
+            # A field's name means something only within its schema; without
+            # one, `field=value` would quietly match nothing.
+            raise ValidationError(
+                "To filter by a field, also choose a schema. To match text in "
+                "any field, search instead."
+            )
         name_map = self._schema_svc.name_to_id_map(schema) if schema else {}
         field_filters: list[tuple[str, str]] = []
         for condition in query.where:

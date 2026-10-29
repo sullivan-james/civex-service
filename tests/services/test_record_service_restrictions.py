@@ -42,6 +42,27 @@ def test_numeric_at_boundary_passes(dtype: str, value) -> None:
     _check_restrictions(value, dtype, {"min": value, "max": value}, "f")
 
 
+@pytest.mark.parametrize("dtype", ["integer", "float"])
+@pytest.mark.parametrize("value", ["deep", "12", True, [1], {"n": 1}])
+def test_a_number_field_takes_only_numbers_even_with_no_restrictions(
+    dtype: str, value
+) -> None:
+    with pytest.raises(ValidationError, match="not a number"):
+        _check_restrictions(value, dtype, {}, "f")
+
+
+def test_an_integer_field_takes_only_whole_numbers() -> None:
+    with pytest.raises(ValidationError, match="not a whole number"):
+        _check_restrictions(1.5, "integer", {}, "f")
+    _check_restrictions(2.0, "integer", {}, "f")  # pandas: an int column with gaps
+
+
+def test_numpy_numbers_are_numbers() -> None:
+    np = pytest.importorskip("numpy")
+    _check_restrictions(np.int64(3), "integer", {}, "f")
+    _check_restrictions(np.float64(1.5), "float", {}, "f")
+
+
 def test_numeric_below_min_raises() -> None:
     with pytest.raises(ValidationError, match="below minimum"):
         _check_restrictions(-1, "integer", {"min": 0}, "f")

@@ -54,8 +54,9 @@ samples = pd.DataFrame(rows)
 ```
 
 To narrow the list, pass `filters=["site=A3"]` (each entry is `field=value`)
-together with `schema_name`, since a field's name only means something within
-its schema. `search="..."` searches the records' text.
+together with `schema_name`. A field's name only means something within its
+schema, so a filter without one raises `ValidationError`. `search="..."`
+searches the records' text.
 
 ## Writing results back
 
