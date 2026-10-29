@@ -84,6 +84,18 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_warm_plugin_processes() -> Iterator[None]:
+    """Plugin processes are kept between runs (`civex.plugins.workers`); no
+    test may find one an earlier test left, and none outlives its test (each
+    test's plugin is a new file, so they would pile up until the idle timeout)."""
+    from civex.plugins.workers import POOL
+
+    POOL.close()
+    yield
+    POOL.close()
+
+
+@pytest.fixture(autouse=True)
 def _never_a_real_project(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[None]:

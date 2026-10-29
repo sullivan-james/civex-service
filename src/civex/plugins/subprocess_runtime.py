@@ -20,12 +20,15 @@ failed step.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import threading
+import weakref
+from collections import deque
 from functools import lru_cache
 from importlib.metadata import PackageNotFoundError, version as _dist_version
 from pathlib import Path
@@ -55,6 +58,7 @@ from civex.domain.exceptions import (
     PluginExecutionError,
     PluginTimeoutError,
 )
+from civex.plugins import workers
 from civex.plugins.base import StepResult, WorkflowContext
 from civex.processes import new_group_kwargs, terminate_tree
 
@@ -62,18 +66,12 @@ from civex.processes import new_group_kwargs, terminate_tree
 
 
 def find_uv_binary() -> str:
-    """CIVEX_UV_BIN env var -> a vendored binary next to a frozen desktop
-    bundle (see desktop/tray.py's own `sys.frozen` check -- there's no `uv`
-    on PATH, or even a Python interpreter to pip-install into, inside a
-    frozen app) -> `uv` on PATH. Raises ConfigError with an actionable
-    message if none is found."""
+    """CIVEX_UV_BIN (the desktop app's launcher sets it to the uv it carries),
+    else `uv` on PATH. Raises ConfigError with an actionable message if
+    neither is there."""
     env_override = os.environ.get("CIVEX_UV_BIN")
     if env_override:
         return env_override
-    if getattr(sys, "frozen", False):
-        vendored = Path(sys.executable).parent / "civex-vendor" / _uv_binary_name()
-        if vendored.is_file():
-            return str(vendored)
     found = shutil.which("uv")
     if found:
         return found
@@ -82,10 +80,6 @@ def find_uv_binary() -> str:
         "CIVEX_UV_BIN to its path -- required to run custom (subprocess-tier) "
         "plugins."
     )
-
-
-def _uv_binary_name() -> str:
-    return "uv.exe" if sys.platform == "win32" else "uv"
 
 
 def _find_sdk_source() -> Path | None:
@@ -225,11 +219,14 @@ def sandboxed_env() -> dict[str, str]:
 def _spawn(argv: list[str], scratch_dir: Path) -> subprocess.Popen:
     """cwd is a throwaway scratch dir, never `_civex/` or the project root --
     a plugin gets no ambient filesystem path into real project data, only
-    what it fetches over the RPC capability calls it declared. `start_new_
-    session=True` gives the process (and anything uv itself spawns under it)
-    its own process group, so a runaway/forked plugin can be killed as a
-    unit (CIVEX-138) rather than leaving orphans behind."""
-    return subprocess.Popen(
+    what it fetches over the RPC capability calls it declared. The process
+    (and anything uv itself spawns under it) gets its own process group, so a
+    runaway/forked plugin can be killed as a unit (CIVEX-138) rather than
+    leaving orphans behind, and no console window on Windows.
+
+    stderr is read as it comes (`_StderrTail`): a process that lives for many
+    runs would otherwise fill the pipe and stop, waiting for a reader."""
+    proc = subprocess.Popen(
         argv,
         cwd=str(scratch_dir),
         env=sandboxed_env(),
@@ -240,6 +237,46 @@ def _spawn(argv: list[str], scratch_dir: Path) -> subprocess.Popen:
         bufsize=1,
         **new_group_kwargs(),
     )
+    _TAILS[proc] = _StderrTail(proc)
+    return proc
+
+
+class _StderrTail:
+    """Reads a process's stderr on a thread of its own, keeping the last
+    `LINES` lines for the message when the process dies."""
+
+    LINES = 200
+
+    def __init__(self, proc: subprocess.Popen) -> None:
+        self._lines: deque[str] = deque(maxlen=self.LINES)
+        self._done = threading.Event()
+        stream = proc.stderr
+        if stream is None:
+            self._done.set()
+            return
+        threading.Thread(
+            target=self._read, args=(stream,), name="civex-plugin-stderr", daemon=True
+        ).start()
+
+    def _read(self, stream: TextIO) -> None:
+        try:
+            for line in stream:
+                self._lines.append(line)
+        except (OSError, ValueError):
+            pass  # closed under us: the process is being stopped
+        finally:
+            self._done.set()
+
+    def text(self, wait: float = 1.0) -> str:
+        """What the process wrote to stderr, once it has finished writing
+        (waiting up to `wait` seconds for the end)."""
+        self._done.wait(wait)
+        return "".join(self._lines)
+
+
+_TAILS: weakref.WeakKeyDictionary[subprocess.Popen, _StderrTail] = (
+    weakref.WeakKeyDictionary()
+)
 
 
 def _kill_process_group(proc: subprocess.Popen, grace_seconds: float = 2.0) -> None:
@@ -267,7 +304,10 @@ def _ensure_terminated(proc: subprocess.Popen, grace_seconds: float = 2.0) -> No
 
 def _dead_process_message(proc: subprocess.Popen) -> str:
     stderr = ""
-    if proc.stderr is not None:
+    tail = _TAILS.get(proc)
+    if tail is not None:
+        stderr = tail.text()
+    elif proc.stderr is not None:
         try:
             stderr = proc.stderr.read()
         except Exception:
@@ -550,22 +590,72 @@ def _drive_run(
 # -- public entrypoints ---------------------------------------------------------
 
 
-def describe_plugin(plugin_path: Path, timeout: float = 20.0) -> DescribeResult:
-    """Spawn the plugin and ask it to describe itself -- used by discovery to
-    learn a plugin's id/name/category/capabilities/config_schema without
-    running it."""
-    scratch_dir = Path(tempfile.mkdtemp(prefix="civex-plugin-describe-"))
-    proc: subprocess.Popen | None = None
+def _start_worker(argv: list[str], key: tuple[str, ...]) -> workers.Worker:
+    scratch_dir = Path(tempfile.mkdtemp(prefix="civex-plugin-"))
     try:
-        argv = _build_command(find_uv_binary(), plugin_path)
         proc = _spawn(argv, scratch_dir)
-        return _run_with_timeout(
-            proc, lambda: _drive_describe(proc), timeout, label=str(plugin_path)
-        )
-    finally:
-        if proc is not None:
-            _ensure_terminated(proc)
+    except BaseException:
         shutil.rmtree(scratch_dir, ignore_errors=True)
+        raise
+    return workers.Worker(
+        key=key,
+        proc=proc,
+        scratch_dir=scratch_dir,
+        stop=lambda w: _ensure_terminated(w.proc),
+    )
+
+
+def _worker_key(argv: list[str], plugin_path: Path) -> tuple[str, ...]:
+    """What a worker was started from: the command line and the plugin's
+    contents, so an edited plugin never reaches an old process."""
+    digest = hashlib.sha256(plugin_path.read_bytes()).hexdigest()
+    return (digest, *argv)
+
+
+#: Failures that leave the process in an unknown state: it is stopped rather
+#: than handed the next request. Anything else came back as the plugin's own
+#: error frame, after which `serve_loop` is waiting for the next request.
+_BROKEN_KINDS = frozenset({"process_exit", "protocol_error", "timeout"})
+
+
+def _use_worker(plugin_path: Path, exchange: Callable[[workers.Worker], Any]) -> Any:
+    """Run `exchange` against a warm worker for `plugin_path` (starting one
+    if none is idle), then give the worker back, or stop it if the exchange
+    broke it. A kept worker that has gone away since (the pipe is closed when
+    the request is written) is replaced once by a new one: nothing was asked
+    of it, so nothing is repeated."""
+    argv = _build_command(find_uv_binary(), plugin_path)
+    key = _worker_key(argv, plugin_path)
+    for attempt in (1, 2):
+        worker = workers.POOL.checkout(key, lambda: _start_worker(argv, key))
+        healthy = False
+        try:
+            result = exchange(worker)
+            healthy = True
+            return result
+        except PluginExecutionError as e:
+            healthy = e.kind not in _BROKEN_KINDS
+            raise
+        except OSError:
+            if attempt == 1 and worker.runs > 0:
+                continue
+            raise
+        finally:
+            workers.POOL.checkin(worker, healthy)
+    raise AssertionError("unreachable")
+
+
+def describe_plugin(plugin_path: Path, timeout: float = 20.0) -> DescribeResult:
+    """Ask the plugin to describe itself -- used by discovery to learn a
+    plugin's id/name/category/capabilities/config_schema without running it.
+    The process is kept (`workers`), so the first run after discovery finds
+    it started."""
+    return _use_worker(
+        plugin_path,
+        lambda w: _run_with_timeout(
+            w.proc, lambda: _drive_describe(w.proc), timeout, label=str(plugin_path)
+        ),
+    )
 
 
 def run_plugin(
@@ -576,26 +666,22 @@ def run_plugin(
     capabilities: list[str],
     timeout: float,
 ) -> StepResult:
-    """Spawn a fresh subprocess and send `run` directly -- no redundant
-    `describe` round-trip; `capabilities` is what discovery already learned
-    and cached on this plugin's PluginRegistration. Raises
-    PluginExecutionError/PluginTimeoutError on any failure, exactly like a
-    tier-BUILTIN plugin raising from invoke() -- executor.py needs no
-    tier-specific branch to abort the workflow on a failed step."""
-    scratch_dir = Path(tempfile.mkdtemp(prefix="civex-plugin-"))
-    proc: subprocess.Popen | None = None
-    try:
-        argv = _build_command(find_uv_binary(), plugin_path)
-        proc = _spawn(argv, scratch_dir)
-        dispatcher = _HostRpcDispatcher(ctx, capabilities, scratch_dir)
+    """Send `run` to a warm process for this plugin (`workers`), starting one
+    if none is idle -- no redundant `describe` round-trip; `capabilities` is
+    what discovery already learned and cached on this plugin's
+    PluginRegistration. Raises PluginExecutionError/PluginTimeoutError on any
+    failure, exactly like a tier-BUILTIN plugin raising from invoke() --
+    executor.py needs no tier-specific branch to abort the workflow on a
+    failed step."""
+
+    def exchange(worker: workers.Worker) -> StepResult:
+        dispatcher = _HostRpcDispatcher(ctx, capabilities, worker.scratch_dir)
         outputs = _run_with_timeout(
-            proc,
-            lambda: _drive_run(proc, inputs, config, dispatcher),
+            worker.proc,
+            lambda: _drive_run(worker.proc, inputs, config, dispatcher),
             timeout,
             label=str(plugin_path),
         )
         return StepResult(outputs=outputs)
-    finally:
-        if proc is not None:
-            _ensure_terminated(proc)
-        shutil.rmtree(scratch_dir, ignore_errors=True)
+
+    return _use_worker(plugin_path, exchange)

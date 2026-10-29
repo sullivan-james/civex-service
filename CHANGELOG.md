@@ -238,6 +238,19 @@ from the next tag forward.
 - Dependencies: certifi 2026.10.19, virtualenv 21.14.12 and vite 8.3.4, for
   advisories pip-audit and npm audit raised.
 
+### Changed
+
+- **Custom plugins start once, not for every step.** A plugin's process is
+  kept after it answers (its `describe` at discovery included) and handed the
+  next run of that plugin, until it has been idle for five minutes or civex
+  stops; editing the file starts a new one, and one that timed out or died is
+  not reused (`civex.plugins.workers`). A plugin's module-level state now
+  lives from one run to the next; its working folder is emptied before each.
+- On Windows, plugin processes (and Docker for container plugins) no longer
+  open a console window for every step when civex runs from the desktop app.
+- A plugin's stderr is read while it runs, so one that writes a lot of it no
+  longer stops, waiting for a reader.
+
 ## v2.0.0 — syncing between machines, updates from the app (2026-10-07)
 
 ### Breaking
