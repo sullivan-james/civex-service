@@ -226,9 +226,11 @@ class CapabilityDeniedError(PluginExecutionError):
 
     kind = "capability_denied"
 
-    def __init__(self, method: str) -> None:
+    def __init__(self, method: str, action: str | None = None) -> None:
         self.method = method
-        super().__init__(f"plugin is not declared to use capability '{method}'")
+        self.action = action
+        fix = f": add '{action}' (or '{method}') to its capabilities" if action else ""
+        super().__init__(f"plugin is not declared to use capability '{method}'{fix}")
 
 
 class PluginContractError(CivexError):

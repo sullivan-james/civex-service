@@ -48,6 +48,16 @@ def _capture_output():
         root.setLevel(prev_level)
 
 
+def _with_nothing_kept(log_text: str, wf_ctx) -> str | None:
+    """A failed run's log, saying that what it changed was undone."""
+    if wf_ctx is not None and wf_ctx.affected_records:
+        log_text += (
+            f"Nothing this run changed was kept: its {len(wf_ctx.affected_records)} "
+            "record change(s) were undone when it failed.\n"
+        )
+    return log_text or None
+
+
 def run_pending_jobs(make_context: ContextFactory | None = None) -> None:
     """Drain the job queue of the project `make_context` opens (the one in the
     current directory when None). Safe to call as a FastAPI BackgroundTask;
@@ -112,9 +122,13 @@ def run_pending_jobs(make_context: ContextFactory | None = None) -> None:
                         workflow_name=job.workflow_name,
                     )
                     initial_outputs = job.input_data or None
-                    # Whatever the run writes is one event in history.
-                    with ctx.history_svc.batch(
-                        "workflow", job.workflow_name, str(job.id)
+                    # Whatever the run writes is one event in history, and
+                    # is kept only if the run gets to the end.
+                    with (
+                        ctx.all_or_nothing(),
+                        ctx.history_svc.batch(
+                            "workflow", job.workflow_name, str(job.id)
+                        ),
                     ):
                         step_executions = executor.run(
                             wf_def,
@@ -165,9 +179,10 @@ def run_pending_jobs(make_context: ContextFactory | None = None) -> None:
                     ctx.job_svc.mark_failed(
                         job.id,
                         envelope,
-                        log=log_buf.getvalue() or None,
+                        log=_with_nothing_kept(log_buf.getvalue(), wf_ctx),
                         step_executions=getattr(failure, "step_executions", None),
-                        affected_records=wf_ctx.affected_records if wf_ctx else None,
+                        # Rolled back with the rest of the run.
+                        affected_records=[] if wf_ctx else None,
                     )
                 ctx.commit()
             except Exception:

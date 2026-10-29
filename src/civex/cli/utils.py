@@ -207,8 +207,12 @@ def run_job(job: WorkflowJobDTO, ctx: AppContext) -> tuple[list[dict], str, list
                 workflow_name=job.workflow_name,
             )
             try:
-                # Whatever the run writes is one event in history.
-                with ctx.history_svc.batch("workflow", job.workflow_name, str(job.id)):
+                # Whatever the run writes is one event in history, and is
+                # kept only if the run gets to the end.
+                with (
+                    ctx.all_or_nothing(),
+                    ctx.history_svc.batch("workflow", job.workflow_name, str(job.id)),
+                ):
                     step_executions = executor.run(
                         wf_def,
                         wf_ctx,
@@ -217,10 +221,8 @@ def run_job(job: WorkflowJobDTO, ctx: AppContext) -> tuple[list[dict], str, list
                         default_timeout_seconds=config.plugins.default_timeout_seconds,
                         should_stop=lambda: ctx.job_svc.should_stop(job.id),
                     )
-            except Exception as e:
-                # Mirrors executor.run()'s own .step_executions attachment --
-                # whatever records the run touched before the failing step
-                # are still real writes the caller's mark_failed() should see.
+            except JobCancelled as e:
+                # Stopped on purpose: what it touched before stopping is kept.
                 e.affected_records = wf_ctx.affected_records  # type: ignore[attr-defined]
                 raise
     finally:

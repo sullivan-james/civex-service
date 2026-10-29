@@ -17,8 +17,8 @@ class GreetPlugin(Plugin):
     name = "Greet"
     description = "Echoes its config text back."
     category = "test"
-    capabilities = ["commit"]
-    inputs = [IOSpec(name="call_commit", type="boolean", required=False)]
+    capabilities = ["write_records"]
+    inputs = [IOSpec(name="call_host", type="boolean", required=False)]
     outputs = [
         IOSpec(name="echo", type="string"),
         IOSpec(name="inputs", type="mapping"),
@@ -28,8 +28,8 @@ class GreetPlugin(Plugin):
         text: str
 
     def invoke(self, inputs: dict[str, Any], config: Config, ctx: Ctx) -> dict:
-        if inputs.get("call_commit"):
-            ctx.commit()
+        if inputs.get("call_host"):
+            ctx.update_record("r1", {})
         return {"echo": config.text, "inputs": inputs}
 
 
@@ -72,10 +72,10 @@ def test_describe_reports_the_plugins_whole_declared_contract():
             "name": "Greet",
             "description": "Echoes its config text back.",
             "category": "test",
-            "capabilities": ["commit"],
+            "capabilities": ["write_records"],
             "inputs": [
                 {
-                    "name": "call_commit",
+                    "name": "call_host",
                     "type": "boolean",
                     "required": False,
                     "description": "",
@@ -157,21 +157,21 @@ def test_unexpected_frame_type_on_control_channel_yields_protocol_error():
 
 def test_run_with_nested_rpc_call_is_answered_mid_dispatch():
     """The reader is asked for a second frame *during* invoke() (from
-    inside ctx.commit()), before serve_loop's own top-level iteration
+    inside ctx.update_record("r1", {})), before serve_loop's own top-level iteration
     resumes -- this is the interleaving the wire protocol depends on."""
     sent: list[dict] = []
     writer = FrameWriter(lambda line: sent.append(json.loads(line)))
 
     def lines():
         yield json.dumps(
-            {"type": "run", "inputs": {"call_commit": True}, "config": {"text": "hi"}}
+            {"type": "run", "inputs": {"call_host": True}, "config": {"text": "hi"}}
         )
         call = sent[-1]
         assert call == {
             "type": "rpc_call",
             "call_id": call["call_id"],
-            "method": "commit",
-            "params": {},
+            "method": "update_record",
+            "params": {"record_id": "r1", "data": {}},
         }
         yield json.dumps(
             {"type": "rpc_result", "call_id": call["call_id"], "result": {}}
@@ -182,7 +182,7 @@ def test_run_with_nested_rpc_call_is_answered_mid_dispatch():
 
     assert sent[-1] == {
         "type": "result",
-        "outputs": {"echo": "hi", "inputs": {"call_commit": True}},
+        "outputs": {"echo": "hi", "inputs": {"call_host": True}},
     }
 
 
@@ -215,11 +215,11 @@ def test_container_run_mode_handles_nested_rpc_call_mid_dispatch():
 
     def lines():
         yield json.dumps(
-            {"type": "run", "inputs": {"call_commit": True}, "config": {"text": "hi"}}
+            {"type": "run", "inputs": {"call_host": True}, "config": {"text": "hi"}}
         )
         call = sent[-1]
         assert call["type"] == "rpc_call"
-        assert call["method"] == "commit"
+        assert call["method"] == "update_record"
         yield json.dumps(
             {"type": "rpc_result", "call_id": call["call_id"], "result": {}}
         )
@@ -229,7 +229,7 @@ def test_container_run_mode_handles_nested_rpc_call_mid_dispatch():
 
     assert sent[-1] == {
         "type": "result",
-        "outputs": {"echo": "hi", "inputs": {"call_commit": True}},
+        "outputs": {"echo": "hi", "inputs": {"call_host": True}},
     }
 
 
@@ -298,3 +298,21 @@ def test_print_becomes_log_frames_before_the_answer(monkeypatch):
         "total": 4,
         "message": "first of four",
     }
+
+
+def test_stderr_is_sent_as_log_frames_too(monkeypatch):
+    import sys
+
+    from civex_plugin_sdk.serve import _relay_output
+
+    sent: list[dict] = []
+    writer = FrameWriter(lambda line: sent.append(json.loads(line)))
+    monkeypatch.setattr(sys, "stdout", sys.stdout)
+    monkeypatch.setattr(sys, "stderr", sys.stderr)
+    _relay_output(writer)
+    sys.stderr.write("a warning\n")
+    print("said")
+    assert sent == [
+        {"type": "log", "stream": "stderr", "text": "a warning"},
+        {"type": "log", "stream": "stdout", "text": "said"},
+    ]

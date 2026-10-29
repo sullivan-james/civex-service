@@ -75,17 +75,12 @@ def test_create_record_returns_host_result():
     }
 
 
-def test_commit_sends_empty_params():
-    ctx, sent = make_ctx(
-        lambda call: {"type": "rpc_result", "call_id": call["call_id"], "result": {}}
-    )
-    ctx.commit()
-    assert sent[-1] == {
-        "type": "rpc_call",
-        "call_id": sent[-1]["call_id"],
-        "method": "commit",
-        "params": {},
-    }
+def test_commit_sends_nothing_and_warns():
+    """A run's writes are kept or dropped whole by the host: commit is gone."""
+    ctx, sent = make_ctx(lambda call: pytest.fail("commit must send nothing"))
+    with pytest.warns(DeprecationWarning, match="does nothing"):
+        ctx.commit()
+    assert sent == []
 
 
 def test_error_response_raises_rpc_error_with_host_code_and_message():
@@ -97,7 +92,7 @@ def test_error_response_raises_rpc_error_with_host_code_and_message():
         }
     )
     with pytest.raises(RpcError) as exc_info:
-        ctx.commit()
+        ctx.update_record("r1", {})
     assert exc_info.value.kind == "capability_denied"
     assert exc_info.value.message == "nope"
 
@@ -111,7 +106,7 @@ def test_mismatched_call_id_raises_rpc_error():
         }
     )
     with pytest.raises(RpcError):
-        ctx.commit()
+        ctx.update_record("r1", {})
 
 
 def _tool_result(result: dict[str, Any]):

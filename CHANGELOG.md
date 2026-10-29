@@ -240,6 +240,20 @@ from the next tag forward.
 
 ### Changed
 
+- **A workflow run that fails keeps none of its writes.** Both drains run a
+  workflow inside a savepoint and commit once with its outcome: if a step
+  fails, every record change the run made is undone (its log says so), where
+  it used to keep whatever the steps before the failure wrote. A run stopped
+  on purpose still keeps what it got through. Plugins no longer commit:
+  `ctx.commit()` does nothing (and warns) and the host answers a `commit`
+  call from an older plugin with nothing.
+- **Plugin capabilities are permission actions.** A plugin lists what it
+  needs, `read`, `write_records`, `manage_files` or `delete`, and each grants
+  every `ctx` method needing it; naming single methods (the older form) still
+  works. Every function a plugin may call is one entry in
+  `civex.plugins.host_api`, with the action it needs. New `ctx.patch_record`
+  for plugins (change only some fields, as built-ins do). A refusal says what
+  to add; a capability civex doesn't know is warned about at discovery.
 - **Custom plugins start once, not for every step.** A plugin's process is
   kept after it answers (its `describe` at discovery included) and handed the
   next run of that plugin, until it has been idle for five minutes or civex

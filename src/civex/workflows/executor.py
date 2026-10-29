@@ -339,6 +339,8 @@ def _run(
             ).to_dict()
         )
 
-    ctx.commit()
+    # Nothing is committed here: whoever ran the workflow keeps its writes
+    # with the run's outcome, or drops them all if it failed
+    # (`AppContext.all_or_nothing`).
     log.info("✓ done (%.3fs total)", time.perf_counter() - wf_start)
     return step_executions

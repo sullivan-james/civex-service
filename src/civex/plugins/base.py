@@ -278,6 +278,3 @@ class WorkflowContext:
 
     def list_collections(self) -> list[DatasetDTO]:
         return self._app_ctx.dataset_svc.list_all()
-
-    def commit(self) -> None:
-        self._app_ctx.commit()

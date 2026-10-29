@@ -45,7 +45,7 @@ def serve(plugin_cls: "type[Plugin]") -> None:
     """
     out = isolate_stdout()
     writer = FrameWriter.for_stream(out)
-    sys.stdout = LogStream(writer)  # print() reaches the run's log
+    _relay_output(writer)
     reader = FrameReader.for_stream(sys.stdin)
     serve_loop(plugin_cls, reader, writer)
 
@@ -58,7 +58,7 @@ def serve_container(plugin_cls: "type[Plugin]") -> None:
     """
     out = isolate_stdout()
     writer = FrameWriter.for_stream(out)
-    sys.stdout = LogStream(writer)  # print() reaches the run's log
+    _relay_output(writer)
     reader = FrameReader.for_stream(sys.stdin)
     mode = sys.argv[1] if len(sys.argv) > 1 else None
     serve_container_once(plugin_cls, mode, reader, writer)
@@ -201,12 +201,19 @@ def _handle_run(
     writer.send(RunResult(outputs=outputs).model_dump())
 
 
+def _relay_output(writer: FrameWriter) -> None:
+    """Send what the plugin prints, and what it writes to `sys.stderr` (warnings, `logging`), as `log` frames: in order with the run's answer, so it lands in that run's log. Output written straight to the file descriptors (C code, a crash before `serve()`) still goes to fd 2, which the host also reads."""
+    sys.stdout = LogStream(writer, "stdout")
+    sys.stderr = LogStream(writer, "stderr")
+
+
 def _flush_stdout() -> None:
-    """Send a half-printed line before the run's answer, so it lands in this run's log."""
-    try:
-        sys.stdout.flush()
-    except Exception:
-        pass
+    """Send a half-written line before the run's answer, so it lands in this run's log."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except Exception:
+            pass
 
 
 def _send_error(writer: FrameWriter, error: PluginError) -> None:

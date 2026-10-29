@@ -14,13 +14,21 @@ fixes that change neither. A change to the wire protocol itself also bumps
 
 ## Unreleased
 
+- `Ctx.commit()` does nothing and warns (`DeprecationWarning`): the host
+  keeps a run's writes when it ends, or none of them if a step fails.
+- New `Ctx.patch_record(record_id, fields)`: change only these fields.
+  `update_record`'s docstring now says it replaces the record's data.
+- `capabilities` are permission actions (`read`, `write_records`,
+  `manage_files`, `delete`), each granting every `Ctx` method needing it;
+  single method names still work.
 - `PROTOCOL_VERSION` is 2: a plugin may send `progress` frames.
   `Ctx.progress(done, total=None, message="")` says how far a run has got;
   the civex app shows it in the status bar. A host speaking 2 still runs
   plugins on 1.
 - `print()` from a plugin is no longer thrown away: `serve()` and
-  `serve_container()` replace `sys.stdout` with `io.LogStream`, which sends
-  each line as a `log` frame (a half-printed line before the run's answer).
+  `serve_container()` replace `sys.stdout` and `sys.stderr` with
+  `io.LogStream`, which sends each line as a `log` frame (`stream` says
+  which; a half-written line before the run's answer).
 - `FrameWriter.send` holds a lock, so frames sent from two threads never
   interleave.
 - `parse_frame` reads a `describe_result` with no `protocol_version` as 1
