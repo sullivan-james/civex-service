@@ -116,6 +116,7 @@ nav:
           - Runs & automation: guides/automation.md
       - Running civex:
           - Server & web UI: guides/server-and-web-ui.md
+          - From Python: guides/python.md
           - Syncing between machines: guides/sync.md
           - PostgreSQL: guides/postgresql.md
           - Logging & telemetry: guides/logging-and-telemetry.md

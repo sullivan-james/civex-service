@@ -100,8 +100,8 @@ def _never_a_real_project(
     real = config.find_project_root
     base = tmp_path_factory.getbasetemp().resolve()
 
-    def only_test_projects():
-        root = real()
+    def only_test_projects(start: Path | None = None):
+        root = real(start)
         if root is not None:
             resolved = root.resolve()
             if resolved != base and base not in resolved.parents:
