@@ -154,9 +154,10 @@ def run_job(job: WorkflowJobDTO, ctx: AppContext) -> tuple[list[dict], str, list
             f"The record this run was for ({str(job.record_id)[:8]}…) is deleted "
             "or no longer exists, so the run can't start."
         ) from None
-    dataset = ctx.dataset_svc._datasets.get_by_id(record.dataset_id)
-    if dataset is None:
-        raise ValueError(f"Dataset for record '{job.record_id}' not found")
+    try:
+        dataset = ctx.dataset_svc.get_by_id(record.dataset_id)
+    except NotFoundError:
+        raise ValueError(f"Dataset for record '{job.record_id}' not found") from None
 
     _NOISY = (
         "sqlalchemy",

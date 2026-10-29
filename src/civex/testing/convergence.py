@@ -135,7 +135,7 @@ def scenario(project, authority, seed, steps: int = 40) -> list[str]:
     expected = snapshots(authority)
     problems: list[str] = []
     for ctx in devices:
-        name = ctx.sync_svc._config.project_root.name
+        name = ctx.config.project_root.name
         problems += [
             f"{name} differs from the authority: {d}"
             for d in differences(expected, snapshots(ctx))

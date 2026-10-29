@@ -273,7 +273,7 @@ def scenario(project, authority, seed, steps: int = 40) -> list[str]:
     problems = [f"authority: {p}" for p in broken_rules(authority)]
     expected = snapshots(authority)
     for ctx in devices:
-        name = ctx.sync_svc._config.project_root.name
+        name = ctx.config.project_root.name
         # A change the authority refused stays on the device that made it until
         # a person settles it: that difference is the point, not a fault.
         waiting = {str(c.entity_id)[:8] for c in ctx.sync_svc.conflicts()}
