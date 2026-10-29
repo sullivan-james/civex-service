@@ -173,9 +173,11 @@ def _handle_run(
         _send_error(writer, ConfigValidationError(str(e)))
         return
 
-    # By default a plugin's cwd already *is* the host-managed scratch folder
-    # (see civex's launchers), so anything too large to inline is written
-    # there and crosses back as an absolute path.
+    # The run's folder when the host names one (protocol 3): what is too large
+    # to inline is written there and crosses as an absolute path, and lives
+    # for the whole run. Else the default: the plugin's own working folder.
+    if frame.run_dir:
+        scratch_dir = Path(frame.run_dir)
     try:
         inputs = convert_inputs(
             plugin_cls.inputs, frame.inputs, scratch_dir=scratch_dir
@@ -190,7 +192,7 @@ def _handle_run(
         )
         return
 
-    ctx = Ctx(writer, reader)
+    ctx = Ctx(writer, reader, Path(frame.run_dir) if frame.run_dir else None)
     try:
         outputs = plugin_cls().invoke(inputs, config, ctx) or {}
         # Declared `table`/`bytes` outputs become the always-JSON-safe wire

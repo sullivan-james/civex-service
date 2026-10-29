@@ -32,7 +32,10 @@ from civex_plugin_sdk.plugin_base import IOSpec
 #
 # 2: plugins may send `progress` frames during a run (a host speaking only 1
 # would refuse them as unknown). A host speaking 2 still runs a plugin on 1.
-PROTOCOL_VERSION = 2
+# 3: a `run` names the run's folder (`run_dir`), where large values and the
+# files a plugin asks for are kept for the whole run; the host functions
+# `file_path` and `store_path` pass files by path.
+PROTOCOL_VERSION = 3
 
 RpcMethod = Literal["get_file", "update_record", "create_record", "commit", "call_tool"]
 
@@ -100,6 +103,12 @@ class RunRequest(BaseModel):
     type: Literal["run"] = "run"
     inputs: dict[str, Any] = Field(default_factory=dict)
     config: dict[str, Any] = Field(default_factory=dict)
+    # The run's folder (protocol 3): values too large to inline, and files the
+    # plugin asks for, are written here and live until the whole run ends, so
+    # a later step can read what an earlier one wrote. Paths the plugin sends
+    # back must be inside it. None from an older host: the plugin's own
+    # working folder is used.
+    run_dir: str | None = None
 
 
 class RunResult(BaseModel):

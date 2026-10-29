@@ -107,9 +107,9 @@ Return a dict of output values. These are referenced by downstream steps as `thi
 
 | Needs | Methods |
 |---|---|
-| `read` | `ctx.get_context_record()` (the record the run is for: `id`, `schema_id`, `data`, ...; the only way to learn it), `ctx.get_context_dataset()` (its collection), `ctx.get_record(record_id)`, `ctx.find_records(dataset_name, schema_name=None, parent_record_id=None, filters=None, search=None, limit=50, offset=0)`, `ctx.get_file(sha256)` (a stored file's bytes), `ctx.get_schema(name)`, `ctx.list_schemas()`, `ctx.get_collection(name)`, `ctx.list_collections()` |
+| `read` | `ctx.get_context_record()` (the record the run is for: `id`, `schema_id`, `data`, ...; the only way to learn it), `ctx.get_context_dataset()` (its collection), `ctx.get_record(record_id)`, `ctx.find_records(dataset_name, schema_name=None, parent_record_id=None, filters=None, search=None, limit=50, offset=0)`, `ctx.get_file(sha256)` (a stored file's bytes), `ctx.file_path(sha256)` (a read-only copy of a stored file in the run's folder, as a path: nothing read into memory; use this for large files), `ctx.get_schema(name)`, `ctx.list_schemas()`, `ctx.get_collection(name)`, `ctx.list_collections()` |
 | `write_records` | `ctx.patch_record(record_id, fields)` (change only these fields; writes nothing when they already hold these values: use this), `ctx.update_record(record_id, data)` (**replaces** the record's data: fields left out are cleared), `ctx.create_record(dataset_name, schema_name, data, context_record_id=None)` (inside the run's record unless told otherwise; triggers fire for it as usual) |
-| `manage_files` | `ctx.store_file(data, filename)` (store bytes in the run's collection; returns a `FileRef`-shaped dict) |
+| `manage_files` | `ctx.store_file(data, filename)` (store bytes in the run's collection; returns a `FileRef`-shaped dict), `ctx.store_path(path, filename)` (store a file you wrote in the run's folder, `ctx.run_dir`; read by civex itself, so large files never pass through the protocol) |
 | `delete` | `ctx.delete_record(record_id)` (it can be restored from Activity) |
 
 These need nothing, since they read and change nothing of the project's:
@@ -133,6 +133,10 @@ ctx.patch_record(record["id"], {"duration": 42.5})   # only this field changes
 ```
 
 Or use `civex.save_field` / `civex.save_fields` as separate workflow steps instead of calling `ctx.update_record` directly.
+
+### The run's folder
+
+Each workflow run has a folder of its own, removed when the run ends (`ctx.run_dir`). The files a plugin asks for (`ctx.file_path`, `ctx.get_file`) are copied there, and any `table` or `bytes` value too large to send inline is written there, so a later step can read what an earlier one wrote. A plugin may hand back only files inside that folder (or its own working folder): civex refuses a path anywhere else (`path_refused`).
 
 ### Accessing files
 

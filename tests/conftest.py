@@ -84,6 +84,15 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _run_folders_in_the_test_dir(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Workflow run folders (`civex.plugins.runtime.new_run_dir`) go under
+    pytest's own temp dir, never the user's cache."""
+    monkeypatch.setenv("CIVEX_RUNS_DIR", str(tmp_path_factory.getbasetemp() / "runs"))
+
+
+@pytest.fixture(autouse=True)
 def _no_warm_plugin_processes() -> Iterator[None]:
     """Plugin processes are kept between runs (`civex.plugins.workers`); no
     test may find one an earlier test left, and none outlives its test (each

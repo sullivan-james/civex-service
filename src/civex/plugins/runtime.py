@@ -26,7 +26,12 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
+import shutil
+import sys
+import tempfile
 import threading
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Hashable, Iterator
 from pathlib import Path
@@ -63,6 +68,41 @@ plugin_output = logging.getLogger("civex.plugins.output")
 #: own. A newer one only adds what a plugin *may* send (2: `progress`), so a
 #: plugin built on an older SDK still runs.
 PROTOCOL_MIN = 1
+
+
+def runs_folder() -> Path:
+    """Where run folders are made: `CIVEX_RUNS_DIR`, else civex's folder in
+    the user's cache (on disk: files a plugin asks for can be large, and
+    `/tmp` is often memory), never the project."""
+    if override := os.environ.get("CIVEX_RUNS_DIR"):
+        return Path(override)
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData/Local")
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Caches"
+    else:
+        base = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    return base / "civex" / "runs"
+
+
+#: A run folder left by a process that died is removed by the next one made
+#: after this long.
+STALE_RUN_SECONDS = 24 * 3600
+
+
+def new_run_dir() -> Path:
+    """A new, empty run folder (`runs_folder`). Folders left there by a
+    process that crashed are removed once a day old."""
+    root = runs_folder()
+    root.mkdir(parents=True, exist_ok=True)
+    cutoff = time.time() - STALE_RUN_SECONDS
+    for old in root.iterdir():
+        try:
+            if old.stat().st_mtime < cutoff:
+                shutil.rmtree(old, ignore_errors=True)
+        except OSError:
+            pass
+    return Path(tempfile.mkdtemp(prefix="run-", dir=root))
 
 
 class Connection(ABC):
@@ -119,9 +159,11 @@ class Launcher(ABC):
         return str(self.key)
 
     @abstractmethod
-    def start(self, mode: str) -> Connection:
+    def start(self, mode: str, run_dir: Path | None = None) -> Connection:
         """A new connection. `mode` is the request it is started for
-        ("describe" or "run"); a reusable launcher ignores it."""
+        ("describe" or "run") and `run_dir` the run's folder, for a launcher
+        that starts one per request (a container mounts it); a reusable
+        launcher ignores both."""
 
     def check(self, conn: Connection) -> None:
         """Asked of a newly started connection before it is handed any
@@ -262,8 +304,15 @@ def drive_run(
     inputs: dict[str, Any],
     config: dict[str, Any],
     dispatcher: _HostRpcDispatcher,
+    run_dir: Path | None = None,
 ) -> dict[str, Any]:
-    conn.writer.send(RunRequest(inputs=inputs, config=config).model_dump())
+    conn.writer.send(
+        RunRequest(
+            inputs=inputs,
+            config=config,
+            run_dir=None if run_dir is None else str(run_dir),
+        ).model_dump()
+    )
     while True:
         raw, frame = _next_frame(conn)
         if isinstance(frame, RunResult):
@@ -339,7 +388,12 @@ def _start(launcher: Launcher, mode: str) -> workers.Worker:
     return workers.Worker(key=launcher.key, conn=conn)
 
 
-def _use(launcher: Launcher, mode: str, exchange: Callable[[Connection], Any]) -> Any:
+def _use(
+    launcher: Launcher,
+    mode: str,
+    exchange: Callable[[Connection], Any],
+    run_dir: Path | None = None,
+) -> Any:
     """Run `exchange` against a connection from `launcher`: a kept worker
     (starting one if none is idle) given back afterwards, or stopped if the
     exchange broke it; or, for a launcher that isn't reusable, a new one,
@@ -347,7 +401,7 @@ def _use(launcher: Launcher, mode: str, exchange: Callable[[Connection], Any]) -
     when the request is written) is replaced once by a new one: nothing was
     asked of it, so nothing is repeated."""
     if not launcher.reusable:
-        conn = launcher.start(mode)
+        conn = launcher.start(mode, run_dir)
         try:
             return exchange(conn)
         finally:
@@ -401,18 +455,31 @@ def run(
     """Run one step: send `run` and answer the plugin until it answers.
     `capabilities` is what discovery learned, never re-asked. Declared
     `table`/`bytes` inputs still in their in-process form (a DataFrame a
-    caller passed) are put in wire form first (`input_specs`)."""
-    inputs = convert_outputs(input_specs, inputs)
+    caller passed) are put in wire form first (`input_specs`).
 
-    def exchange(conn: Connection) -> StepResult:
-        dispatcher = _HostRpcDispatcher(ctx, capabilities, conn.scratch_dir)
-        with conn.relaying():
-            outputs = run_with_timeout(
-                conn,
-                lambda: drive_run(conn, inputs, config, dispatcher),
-                timeout if launcher.bounded else None,
-                label=launcher.label,
-            )
-        return StepResult(outputs=outputs)
+    Files and large values go by path, in the run's folder (`ctx.run_dir`,
+    made by the executor for the whole run; a step run on its own gets one
+    for the step). Every file the plugin's answer points at must be inside
+    it (or its own working folder): the next step, maybe in this process,
+    reads what they name."""
+    own = getattr(ctx, "run_dir", None)
+    run_dir = Path(own) if own else new_run_dir()
+    try:
+        wire_inputs = convert_outputs(input_specs, inputs, scratch_dir=run_dir)
 
-    return _use(launcher, "run", exchange)
+        def exchange(conn: Connection) -> StepResult:
+            dispatcher = _HostRpcDispatcher(ctx, capabilities, run_dir)
+            with conn.relaying():
+                outputs = run_with_timeout(
+                    conn,
+                    lambda: drive_run(conn, wire_inputs, config, dispatcher, run_dir),
+                    timeout if launcher.bounded else None,
+                    label=launcher.label,
+                )
+            host_api.inside_run(outputs, run_dir, conn.scratch_dir)
+            return StepResult(outputs=outputs)
+
+        return _use(launcher, "run", exchange, run_dir)
+    finally:
+        if not own:
+            shutil.rmtree(run_dir, ignore_errors=True)

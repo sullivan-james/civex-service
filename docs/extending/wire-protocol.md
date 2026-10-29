@@ -54,10 +54,11 @@ Before any plugin code runs, the SDK duplicates the real stdout file descriptor 
 |---|---|
 | 1 | The frames above, less `progress`. |
 | 2 | `progress` frames. |
+| 3 | `run` names the run's folder (`run_dir`); host functions `file_path` and `store_path`. |
 
-## Binary payloads: inline or scratch file
+## Binary payloads: inline or a file in the run's folder
 
-Binary values (`bytes` outputs, `get_file` results) are base64-inlined directly in the frame when they're small, and above `BINARY_INLINE_THRESHOLD` (1 MB) written to a scratch path instead — the frame then carries `{"encoding": "path", "path": "..."}` rather than the bytes themselves. Below the threshold, the envelope is `{"encoding": "base64", "data": "..."}`. This keeps a single oversized file from blowing up an otherwise-small JSON line, while small payloads avoid a filesystem round-trip.
+Small `bytes` values cross inline as base64. Each `run` names the run's folder (`run_dir`, protocol 3), shared by every step of a workflow run and removed when it ends: a value above the inline threshold is written there and the frame carries its path, and the files a plugin asks for (`get_file`, `file_path`) are copied there (read-only copies, never links to what is stored) and handed over by path. A container gets the folder mounted at the same path. Every path a plugin sends back (a value in its answer, a file to store) must be inside the run's folder or its own working folder; civex refuses any other (`path_refused`), since the next step may run inside civex and read what the path names.
 
 ## `table` and `bytes` on the wire
 

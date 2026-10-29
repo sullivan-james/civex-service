@@ -127,6 +127,32 @@ class Ctx:
         result = self._call("get_file", {"sha256": sha256})
         return decode_binary(result)
 
+    def file_path(self, sha256: str) -> Path:
+        """Return a path to a read-only copy of a stored file, in the run's folder.
+
+        Prefer this to `get_file` for anything large: nothing is read into
+        memory or sent over the protocol. The copy is removed when the run
+        ends. Needs `read` (protocol 3).
+        """
+        result = self._call_tool("file_path", {"sha256": sha256})
+        return Path(result["path"])
+
+    def store_path(self, path: str | Path, filename: str) -> dict[str, Any]:
+        """Store the file at `path` (which must be in the run's folder: `run_dir`) and return its `FileRef` dict.
+
+        Prefer this to `store_file` for anything large: the host reads the
+        file itself. Needs `manage_files` (protocol 3).
+        """
+        result = self._call_tool(
+            "store_path", {"path": str(Path(path).resolve()), "filename": filename}
+        )
+        return result["file"]
+
+    @property
+    def run_dir(self) -> Path | None:
+        """The run's folder, where a plugin may write files to `store_path` (None from an older host)."""
+        return self._scratch_dir
+
     def store_file(self, data: bytes, filename: str) -> dict[str, Any]:
         """Write `data` to the object store and return its `FileRef` dict (`{sha256, filename, size}`)."""
         result = self._call_tool(
