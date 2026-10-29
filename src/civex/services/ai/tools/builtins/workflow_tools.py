@@ -206,6 +206,8 @@ File: _civex/plugins/{name}.py — a real OS-process script (Tier 1, uv-managed 
 NOT imported into civex-service's own process. Must:
   1. Start with a PEP 723 inline metadata block declaring `civex-plugin-sdk` as a dependency
      (uv resolves/caches an isolated venv for it automatically — no pyproject.toml edits, ever).
+     Don't write a [tool.civex] table in it: civex writes that header from the code when the
+     plugin is saved.
   2. Define a class named exactly `Plugin` (subclassing the SDK's own `Plugin` ABC, imported
      under an alias to avoid the name collision).
   3. Declare what it needs in `capabilities`, as permission actions: "read" (records, schemas,

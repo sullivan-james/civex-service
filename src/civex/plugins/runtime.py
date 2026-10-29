@@ -123,6 +123,11 @@ class Launcher(ABC):
         """A new connection. `mode` is the request it is started for
         ("describe" or "run"); a reusable launcher ignores it."""
 
+    def check(self, conn: Connection) -> None:
+        """Asked of a newly started connection before it is handed any
+        request: raise PluginExecutionError to refuse it. Nothing by default;
+        a script with a declared header checks its code agrees with it."""
+
 
 # -- one exchange ------------------------------------------------------------
 
@@ -325,7 +330,13 @@ _BROKEN_KINDS = frozenset({"process_exit", "protocol_error", "timeout"})
 
 
 def _start(launcher: Launcher, mode: str) -> workers.Worker:
-    return workers.Worker(key=launcher.key, conn=launcher.start(mode))
+    conn = launcher.start(mode)
+    try:
+        launcher.check(conn)
+    except BaseException:
+        conn.close()
+        raise
+    return workers.Worker(key=launcher.key, conn=conn)
 
 
 def _use(launcher: Launcher, mode: str, exchange: Callable[[Connection], Any]) -> Any:

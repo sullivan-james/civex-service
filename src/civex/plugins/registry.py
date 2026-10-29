@@ -219,8 +219,16 @@ def discover_user_plugins(plugins_dir: Path) -> None:
             _LOAD_FAILURES.pop(resolved, None)
             continue
         try:
-            describe_result = _describe_with_disk_cache(path, content_hash)
-            registration = _registration_for_subprocess(path, describe_result)
+            declared = _declared(path)
+            if declared is not None:
+                # Its header says what it is: nothing is run to find out. Its
+                # code is checked against the header when its process starts.
+                registration = _registration(
+                    UvLauncher(path, declared=declared), declared
+                )
+            else:
+                describe_result = _describe_with_disk_cache(path, content_hash)
+                registration = _registration_for_subprocess(path, describe_result)
         except Exception as exc:
             # A single broken plugin file (bad PEP 723 deps, a describe()
             # that raises, a timeout, ...) must not stop discovery of every
@@ -236,6 +244,16 @@ def discover_user_plugins(plugins_dir: Path) -> None:
         p for p in _LOAD_FAILURES if p.parent == resolved_dir and p not in seen
     ]:
         _LOAD_FAILURES.pop(stale, None)
+
+
+def _declared(path: Path) -> DescribeResult | None:
+    """The contract `path`'s header declares (`manifest`), checked against
+    the protocol versions this civex speaks; None if it declares none."""
+    from civex.plugins.manifest import read
+    from civex.plugins.runtime import check_protocol_version
+
+    declared = read(path.read_text(encoding="utf-8"))
+    return None if declared is None else check_protocol_version(declared)
 
 
 def _content_hash(path: Path) -> str:
@@ -300,10 +318,32 @@ def _write_describe_cache(cache_path: Path, cache: dict[str, Any]) -> None:
 
 
 def describe_file(plugin_path: Path) -> DescribeResult:
-    """Describe one plugin file (which runs it), reusing the on-disk cache when
-    its contents were described before. Registers nothing: the library uses it
-    to check a version before installing it."""
+    """What one plugin file is: the contract its header declares, read
+    without running it; else its `describe` answer (which runs it), reusing
+    the on-disk cache when its contents were described before. Registers
+    nothing: the library uses it to check a version before installing it."""
+    declared = _declared(plugin_path)
+    if declared is not None:
+        return declared
     return _describe_with_disk_cache(plugin_path, _content_hash(plugin_path))
+
+
+def describe_code(plugin_path: Path) -> DescribeResult:
+    """What one plugin file's *code* says it is (its `describe` answer,
+    which runs it; cached by contents), for whoever must not take its header
+    on trust (the library installing someone else's plugin). When the
+    header declares a contract too, the two must agree."""
+    from civex.plugins.manifest import differences
+
+    described = _describe_with_disk_cache(plugin_path, _content_hash(plugin_path))
+    declared = _declared(plugin_path)
+    if declared is not None:
+        problems = differences(declared, described)
+        if problems:
+            raise ValueError(
+                "its code doesn't do what its header says: " + "; ".join(problems)
+            )
+    return described
 
 
 def registration_from_contract(

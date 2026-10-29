@@ -17,6 +17,7 @@ WASM) is one class here.
 from __future__ import annotations
 
 import hashlib
+import logging
 import queue
 import shutil
 import subprocess
@@ -28,6 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, TextIO, cast
 
 from civex_plugin_sdk.io import FrameReader, FrameWriter
+from civex_plugin_sdk.protocol import DescribeResult
 from civex_plugin_sdk.serve import serve_loop
 
 from civex.plugins.base import PluginTier
@@ -35,6 +37,8 @@ from civex.plugins.runtime import Connection, Launcher
 
 if TYPE_CHECKING:
     from civex_plugin_sdk.plugin import Plugin
+
+log = logging.getLogger(__name__)
 
 
 # -- a process -----------------------------------------------------------------
@@ -118,16 +122,39 @@ class CommandLauncher(Launcher):
 
 class UvLauncher(CommandLauncher):
     """A plugin script, run by `uv run --no-project` (`_build_command`).
-    Its key is the command line and the file's contents, so an edited
-    plugin never reaches a process started from the old one."""
+    Its key is the command line and the file's contents (its dependencies
+    included), so an edited plugin never reaches a process started from the
+    old one.
 
-    def __init__(self, plugin_path: Path) -> None:
+    `declared` is the contract the script's header states (`manifest`),
+    when it states one: the code is then asked to `describe` itself once,
+    as its process starts, and refused if it says otherwise."""
+
+    def __init__(
+        self, plugin_path: Path, declared: DescribeResult | None = None
+    ) -> None:
         self.plugin_path = plugin_path
+        self.declared = declared
 
     def argv(self) -> list[str]:
         from civex.plugins import subprocess_runtime as sr
 
         return sr._build_command(sr.find_uv_binary(), self.plugin_path)
+
+    def start(self, mode: str) -> Connection:
+        """Lock the script the first time it is started, however it arrived
+        (saved, uploaded, installed from the library, copied in by hand), so
+        from then on it runs exactly what was resolved now. Offline, it runs
+        unlocked and is locked next time."""
+        from civex.domain.exceptions import ConfigError
+        from civex.plugins import subprocess_runtime as sr
+
+        if not sr.lockfile_of(self.plugin_path).is_file():
+            try:
+                sr.lock_plugin(self.plugin_path)
+            except (ConfigError, OSError, subprocess.TimeoutExpired) as e:
+                log.warning("Running %s unlocked: %s", self.plugin_path.name, e)
+        return super().start(mode)
 
     @property
     def key(self) -> Hashable:
@@ -137,6 +164,26 @@ class UvLauncher(CommandLauncher):
     @property
     def label(self) -> str:
         return str(self.plugin_path)
+
+    def check(self, conn: Connection) -> None:
+        if self.declared is None:
+            return
+        from civex.domain.exceptions import PluginExecutionError
+        from civex.plugins import manifest
+        from civex.plugins.runtime import drive_describe, run_with_timeout
+
+        described = run_with_timeout(
+            conn, lambda: drive_describe(conn), 20.0, label=self.label
+        )
+        problems = manifest.differences(self.declared, described)
+        if problems:
+            raise PluginExecutionError(
+                f"{self.plugin_path.name} no longer does what its header says "
+                f"({'; '.join(problems)}). Run `civex plugin check --write "
+                f"{self.plugin_path.name}` to write the header from the code, "
+                "after checking the change is meant.",
+                kind="contract_mismatch",
+            )
 
 
 # -- a container ---------------------------------------------------------------

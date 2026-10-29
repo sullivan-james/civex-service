@@ -13,12 +13,15 @@ files for the AI assistant to read.
 from __future__ import annotations
 
 import ast
+import logging
 import re
 from collections.abc import Callable
 from pathlib import Path
 
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.workflows.definition import WorkflowDef
+
+log = logging.getLogger(__name__)
 
 _SAFE_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 
@@ -223,7 +226,59 @@ class PluginService:
         self._dir.mkdir(exist_ok=True)
         path = self._dir / f"{name}.py"
         path.write_text(code, encoding="utf-8")
+        self._declare_quietly(path)
         self._register()
+        return path
+
+    def check(self, filename: str, write: bool = False) -> dict:
+        """Whether a plugin file's header (`[tool.civex]`, `manifest`) says
+        what its code does: runs the code to ask (`describe`), compares, and
+        with `write` writes the header from the code's answer and locks its
+        dependencies (`lock_plugin`). Returns `{declared, differences,
+        written, locked}`: `declared` False when the file has no header."""
+        from civex.plugins import manifest, subprocess_runtime as sr
+
+        path = self._path_of(filename)
+        text = path.read_text(encoding="utf-8")
+        locked = sr.lock_plugin(path) if write else None
+        described = sr.describe_plugin(path)
+        try:
+            declared = manifest.read(text)
+        except ValueError:
+            declared = None  # a broken header is rewritten like a missing one
+        problems = (
+            ["no [tool.civex] header"]
+            if declared is None
+            else manifest.differences(declared, described)
+        )
+        written = False
+        if write:
+            new_text = manifest.write(text, described)
+            if new_text != text:
+                path.write_text(new_text, encoding="utf-8")
+                written = True
+        return {
+            "declared": declared is not None,
+            "differences": problems,
+            "written": written,
+            "locked": locked is not None,
+        }
+
+    def _declare_quietly(self, path: Path) -> None:
+        """On save: write the header from what the code says and lock it, so
+        the plugin is known without running it and runs without resolving.
+        A plugin that doesn't load, or no network, leaves the file as saved
+        (discovery then reports why it doesn't load, as before)."""
+        try:
+            self.check(path.name, write=True)
+        except Exception as e:  # noqa: BLE001 -- the save itself succeeded
+            log.warning("Saved %s without its header: %s", path.name, e)
+
+    def _path_of(self, filename: str) -> Path:
+        name = filename if filename.endswith(".py") else f"{filename}.py"
+        path = self._dir / name
+        if "/" in name or "\\" in name or not path.is_file():
+            raise NotFoundError(f"Plugin file '{name}' not found")
         return path
 
     def save_uploaded(self, filename: str, content: bytes) -> str:
@@ -238,6 +293,7 @@ class PluginService:
         self._dir.mkdir(exist_ok=True)
         dest = self._dir / filename
         dest.write_bytes(content)
+        self._declare_quietly(dest)
         registered = self._register()
         stem = filename[:-3]
         dest_resolved = dest.resolve()

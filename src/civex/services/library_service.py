@@ -664,7 +664,7 @@ class LibraryService:
         the person installing has said they trust them), so the check after
         is against what the code really declares, not what its publisher said.
         The staging folder is outside `_civex/plugins`, so nothing loads it."""
-        from civex.plugins.registry import describe_file, registration_from_contract
+        from civex.plugins.registry import describe_code, registration_from_contract
 
         out: dict[str, PluginRegistration] = {}
         if not plugins:
@@ -676,7 +676,7 @@ class LibraryService:
                 path = staging / item.filename
                 path.write_text(texts[(PLUGIN, item.name)], encoding="utf-8")
                 try:
-                    described = describe_file(path)
+                    described = describe_code(path)
                 except Exception as e:
                     raise ValidationError(f"{item.filename} doesn't load here: {e}")
                 if described.id != item.provides:
