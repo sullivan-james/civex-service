@@ -4,7 +4,7 @@
 # dependencies = ["civex-plugin-sdk"]
 # ///
 """Minimal reference plugin exercising the full protocol surface: describe,
-run, config validation, and one rpc_call (commit) when asked to.
+run, config validation, and one rpc_call (update_record) when asked to.
 
 In a real subprocess-tier deployment this file is invoked via
 `uv run --script echo_plugin.py`, which resolves `civex-plugin-sdk` from the
@@ -27,7 +27,7 @@ class EchoPlugin(Plugin):
     id = "example.echo"
     name = "Echo"
     category = "example"
-    capabilities = ["commit"]
+    capabilities = ["write_records"]
 
     class Config(BaseModel):
         text: str
@@ -35,8 +35,8 @@ class EchoPlugin(Plugin):
     def invoke(
         self, inputs: dict[str, Any], config: Config, ctx: Ctx
     ) -> dict[str, Any]:
-        if inputs.get("call_commit"):
-            ctx.commit()
+        if inputs.get("call_host"):
+            ctx.update_record("r1", {})
         return {"echo": config.text, "inputs": inputs}
 
 

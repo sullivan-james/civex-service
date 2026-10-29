@@ -208,8 +208,10 @@ NOT imported into civex-service's own process. Must:
      (uv resolves/caches an isolated venv for it automatically — no pyproject.toml edits, ever).
   2. Define a class named exactly `Plugin` (subclassing the SDK's own `Plugin` ABC, imported
      under an alias to avoid the name collision).
-  3. Declare every `ctx.*` RPC method it calls in `capabilities` — undeclared calls are refused
-     at run time with a capability_denied error, even if the method exists on Ctx.
+  3. Declare what it needs in `capabilities`, as permission actions: "read" (records, schemas,
+     collections, files), "write_records" (create/update/patch_record), "manage_files"
+     (store_file), "delete" (delete_record). A call it wasn't granted is refused at run time
+     with a capability_denied error.
   4. Call `serve(Plugin)` under an `if __name__ == "__main__":` guard.
 
 ```python
@@ -225,7 +227,7 @@ class Plugin(PluginBase):
     id = "project.my_plugin"   # convention: project.{name}
     name = "Human readable name"
     category = "general"
-    capabilities = ["update_record"]   # every ctx.* call this plugin makes, by name
+    capabilities = ["read", "write_records"]   # what its ctx.* calls need
 
     class Config(BaseModel):
         my_param: str          # Pydantic model; all config comes through this
@@ -236,16 +238,21 @@ class Plugin(PluginBase):
         #                                      old in-process contract; these are the only
         #                                      way to learn what triggered the workflow.
         # ctx.get_file(sha256) → bytes
-        # ctx.update_record(record_id, data)  — writes any record by id, not just the trigger
+        # ctx.patch_record(record_id, fields) → dict  — change only these fields (prefer this)
+        # ctx.update_record(record_id, data)  — REPLACES a record's data; fields left out are cleared
         # ctx.create_record(dataset_name, schema_name, data, context_record_id=None) → dict
         #   (context_record_id defaults to the trigger record when omitted)
+        # ctx.progress(done, total, message)  — how far it has got (shown while it runs)
+        # print(...) goes to the run's log. There is no commit: the run's writes are kept
+        # when every step succeeds and all undone if one fails.
         return {"output_name": value}
 
 if __name__ == "__main__":
     serve(Plugin)
 ```
 
-Each `uv run` invocation is a fresh, sandboxed subprocess: its own process group (killed as a
+The plugin runs as a sandboxed `uv run` subprocess, kept between runs (module-level state
+survives from one run to the next): its own process group (killed as a
 unit if it exceeds its timeout — default 60s from [plugins].default_timeout_seconds in
 config.toml, or override per-step with `timeout: <seconds>` on the workflow step), a scratch
 cwd with no ambient path into the real project, and a minimal environment — it can only reach
@@ -261,9 +268,9 @@ project data through the declared `ctx.*` capability calls, nothing else.
 6. match_files_to_records config.pattern is a Python regex applied to the filename to extract the key.
 7. dataset="" in plugin config means "use the trigger record's collection" — leave empty unless targeting a different one.
 8. Custom plugins are auto-discovered on workflow run — no registration needed after saving.
-9. A custom plugin's `capabilities` list must name every `ctx.*` method it calls (by method
-   name, e.g. "find_records", not the literal string "call_tool") — an omitted one fails at
-   run time with capability_denied, not at save time.
+9. A custom plugin's `capabilities` must grant every `ctx.*` call it makes ("read",
+   "write_records", "manage_files", "delete") — a call it wasn't granted fails at run time
+   with capability_denied, not at save time.
 
 ## CIRCULAR LOOP PREVENTION — MANDATORY
 

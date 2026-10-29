@@ -201,16 +201,27 @@ def _is_uuid(s: str) -> bool:
 
 def test_dispatch_denies_undeclared_capability() -> None:
     dispatcher = rt._HostRpcDispatcher(_FakeWorkflowContext(), [], Path("/tmp"))
-    with pytest.raises(CapabilityDeniedError):
-        dispatcher.dispatch("commit", {})
+    with pytest.raises(CapabilityDeniedError, match="add 'write_records'"):
+        dispatcher.dispatch("update_record", {"record_id": "r", "data": {}})
 
 
-def test_dispatch_allows_declared_direct_method() -> None:
+def test_commit_is_answered_and_does_nothing() -> None:
+    """Plugins written before a run's writes were kept whole still call it."""
     ctx = _FakeWorkflowContext()
-    dispatcher = rt._HostRpcDispatcher(ctx, ["commit"], Path("/tmp"))
-    result = dispatcher.dispatch("commit", {})
-    assert result == {}
-    assert ctx.committed is True
+    dispatcher = rt._HostRpcDispatcher(ctx, [], Path("/tmp"))
+    assert dispatcher.dispatch("commit", {}) == {}
+    assert ctx.committed is False
+
+
+def test_an_action_grants_every_function_needing_it() -> None:
+    ctx = _FakeWorkflowContext()
+    dispatcher = rt._HostRpcDispatcher(ctx, ["read"], Path("/tmp"))
+    for tool in ("get_context_record", "find_records", "list_schemas"):
+        dispatcher.dispatch(
+            "call_tool", {"tool": tool, "args": {"dataset_name": "study"}}
+        )
+    with pytest.raises(CapabilityDeniedError):
+        dispatcher.dispatch("call_tool", {"tool": "delete_record", "args": {}})
 
 
 def test_dispatch_update_record_returns_dto_dict() -> None:
@@ -269,14 +280,14 @@ from civex_plugin_sdk import Ctx, Plugin, serve
 class TestPlugin(Plugin):
     id = "test.plugin"
     name = "Test"
-    capabilities = ["commit", "update_record"]
+    capabilities = ["update_record"]
 
     class Config(BaseModel):
         pass
 
     def invoke(self, inputs, config, ctx: Ctx) -> dict:
-        if inputs.get("call_commit"):
-            ctx.commit()
+        if inputs.get("call_host"):
+            ctx.update_record("r1", {"x": 1})
         if inputs.get("call_denied"):
             ctx.get_file("deadbeef")  # not declared -> capability_denied
         return {"saw": inputs.get("value")}
@@ -318,7 +329,7 @@ def test_drive_describe_returns_metadata(tmp_path: Path) -> None:
     try:
         result = rt._drive_describe(proc)
         assert result.id == "test.plugin"
-        assert result.capabilities == ["commit", "update_record"]
+        assert result.capabilities == ["update_record"]
     finally:
         rt._ensure_terminated(proc)
 
@@ -328,13 +339,11 @@ def test_drive_run_dispatches_declared_rpc_call(tmp_path: Path) -> None:
     script.write_text(_TEST_PLUGIN_SOURCE)
     proc = _spawn_plain(script, tmp_path)
     ctx = _FakeWorkflowContext()
-    dispatcher = rt._HostRpcDispatcher(ctx, ["commit", "update_record"], tmp_path)
+    dispatcher = rt._HostRpcDispatcher(ctx, ["update_record"], tmp_path)
     try:
-        outputs = rt._drive_run(
-            proc, {"call_commit": True, "value": "x"}, {}, dispatcher
-        )
+        outputs = rt._drive_run(proc, {"call_host": True, "value": "x"}, {}, dispatcher)
         assert outputs == {"saw": "x"}
-        assert ctx.committed is True
+        assert ctx.updated == [("r1", {"x": 1})]
     finally:
         rt._ensure_terminated(proc)
 
@@ -348,7 +357,7 @@ def test_drive_run_undeclared_capability_fails_the_run(tmp_path: Path) -> None:
     # though the plugin's own declared capabilities list (used only for
     # discovery/display) doesn't include it either -- this is exactly what
     # enforcement is supposed to catch.
-    dispatcher = rt._HostRpcDispatcher(ctx, ["commit", "update_record"], tmp_path)
+    dispatcher = rt._HostRpcDispatcher(ctx, ["update_record"], tmp_path)
     try:
         with pytest.raises(PluginExecutionError) as excinfo:
             rt._drive_run(proc, {"call_denied": True}, {}, dispatcher)

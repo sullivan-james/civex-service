@@ -51,13 +51,12 @@ CAPABILITIES: tuple[RpcMethod, ...] = (
 # host-side without another protocol change. Its `params` always have the
 # shape {"tool": <tool name>, "args": {...}}.
 #
-# Even so, a plugin's declared `capabilities` list (both here and on
-# civex-service's Tier0Plugin) names the *tool*, not the literal string
-# "call_tool" -- e.g. a plugin using Ctx.find_records() declares
-# capabilities = ["find_records"], not ["call_tool"]. Enforcement (not
-# wired yet -- there's no out-of-process executor to enforce it against;
-# see CIVEX-127) checks `params["tool"]` against the declared list for a
-# `call_tool` rpc_call, and the bare method name for the original four.
+# A plugin's declared `capabilities` don't name these methods: they name the
+# permission actions it needs ("read", "write_records", "manage_files",
+# "delete"), or, in the older form, single tools ("find_records"). The host
+# checks each rpc_call's tool (for `call_tool`) or method name against what
+# those grant (civex.plugins.host_api). `commit` is still accepted and does
+# nothing: the host keeps or drops a run's writes whole.
 
 
 class DescribeRequest(BaseModel):

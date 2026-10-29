@@ -85,8 +85,14 @@ class PluginBase:
     name: str
     description: str = ""
     category: str = "general"
-    # Subset of civex_plugin_sdk.protocol.CAPABILITIES this plugin actually
-    # calls on ctx.
+    # What this plugin may ask of civex through `ctx`: permission actions,
+    # each granting every `ctx` method that needs it --
+    #   "read"           records, collections, kinds of record, files
+    #   "write_records"  create_record, update_record, patch_record
+    #   "manage_files"   store_file
+    #   "delete"         delete_record
+    # -- or single method names ("find_records"), which grant just that one
+    # (the older form; still read). `progress` and `print` need nothing.
     capabilities: list[str] = []
     # The step-wiring contract: which `inputs:` keys a workflow step may
     # supply, and which output names other steps may reference as

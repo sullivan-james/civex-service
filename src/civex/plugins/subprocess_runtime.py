@@ -49,19 +49,16 @@ from civex_plugin_sdk.protocol import (
     RpcResult,
     RunRequest,
     RunResult,
-    decode_binary,
-    encode_binary,
     parse_frame,
 )
 
 from civex.domain.dtos import ErrorEnvelope
 from civex.domain.exceptions import (
-    CapabilityDeniedError,
     ConfigError,
     PluginExecutionError,
     PluginTimeoutError,
 )
-from civex.plugins import workers
+from civex.plugins import host_api, workers
 from civex.plugins.base import StepResult, WorkflowContext
 from civex.processes import new_group_kwargs, terminate_tree
 
@@ -400,15 +397,16 @@ def _run_with_timeout(
 
 
 class _HostRpcDispatcher:
-    """Maps incoming rpc_call frames to the real WorkflowContext, checking
-    each call against the capabilities captured at discovery time before
-    doing anything (see module docstring)."""
+    """Answers a run's rpc_call frames from the one table of host functions
+    (`host_api`), allowing what the capabilities captured at discovery grant
+    (see module docstring). A direct method (`get_file`, `update_record`,
+    ...) and a `call_tool` tool are the same thing: a name and its args."""
 
     def __init__(
         self, ctx: WorkflowContext, capabilities: list[str], scratch_dir: Path
     ) -> None:
         self._ctx = ctx
-        self._capabilities = set(capabilities)
+        self._allowed = host_api.granted(capabilities)
         self._scratch_dir = scratch_dir
 
     def dispatch(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -416,21 +414,16 @@ class _HostRpcDispatcher:
             tool = params.get("tool")
             if not tool:
                 raise PluginExecutionError("call_tool rpc_call missing 'tool' param")
-            self._check(tool)
-            handler = getattr(self, f"_tool_{tool}", None)
-            if handler is None:
-                raise PluginExecutionError(f"unknown tool '{tool}'")
-            return handler(params.get("args") or {})
-
-        self._check(method)
-        handler = getattr(self, f"_rpc_{method}", None)
-        if handler is None:
-            raise PluginExecutionError(f"unknown rpc method '{method}'")
-        return handler(params)
-
-    def _check(self, name: str) -> None:
-        if name not in self._capabilities:
-            raise CapabilityDeniedError(name)
+            return host_api.dispatch(
+                self._ctx,
+                self._allowed,
+                tool,
+                params.get("args") or {},
+                self._scratch_dir,
+            )
+        return host_api.dispatch(
+            self._ctx, self._allowed, method, params, self._scratch_dir
+        )
 
     def progress(self, done: float, total: float | None, message: str) -> None:
         """A plugin's `progress` frame: no capability needed (it reads and
@@ -438,71 +431,6 @@ class _HostRpcDispatcher:
         report = getattr(self._ctx, "progress", None)
         if callable(report):
             report(done, total, message)
-
-    # -- direct RpcMethod handlers ---------------------------------------
-
-    def _rpc_get_file(self, params: dict[str, Any]) -> dict[str, Any]:
-        data = self._ctx.get_file(params["sha256"])
-        return encode_binary(data, self._scratch_dir)
-
-    def _rpc_update_record(self, params: dict[str, Any]) -> dict[str, Any]:
-        return self._ctx.update_record(params["record_id"], params["data"]).to_dict()
-
-    def _rpc_create_record(self, params: dict[str, Any]) -> dict[str, Any]:
-        record = self._ctx.create_record(
-            params["dataset_name"],
-            params["schema_name"],
-            params["data"],
-            context_record_id=params.get("context_record_id"),
-        )
-        return record.to_dict()
-
-    def _rpc_commit(self, params: dict[str, Any]) -> dict[str, Any]:
-        self._ctx.commit()
-        return {}
-
-    # -- call_tool-routed handlers ----------------------------------------
-
-    def _tool_get_context_record(self, args: dict[str, Any]) -> dict[str, Any]:
-        return {"record": self._ctx.get_context_record().to_dict()}
-
-    def _tool_get_context_dataset(self, args: dict[str, Any]) -> dict[str, Any]:
-        return {"dataset": self._ctx.get_context_dataset().to_dict()}
-
-    def _tool_store_file(self, args: dict[str, Any]) -> dict[str, Any]:
-        data = decode_binary(args["data"])
-        return {"file": self._ctx.store_file(data, args["filename"]).to_dict()}
-
-    def _tool_get_record(self, args: dict[str, Any]) -> dict[str, Any]:
-        return {"record": self._ctx.get_record(args["record_id"]).to_dict()}
-
-    def _tool_find_records(self, args: dict[str, Any]) -> dict[str, Any]:
-        records = self._ctx.find_records(
-            args["dataset_name"],
-            schema_name=args.get("schema_name"),
-            parent_record_id=args.get("parent_record_id"),
-            filters=args.get("filters"),
-            search=args.get("search"),
-            limit=args.get("limit", 50),
-            offset=args.get("offset", 0),
-        )
-        return {"records": [r.to_dict() for r in records]}
-
-    def _tool_delete_record(self, args: dict[str, Any]) -> dict[str, Any]:
-        self._ctx.delete_record(args["record_id"])
-        return {}
-
-    def _tool_get_schema(self, args: dict[str, Any]) -> dict[str, Any]:
-        return {"schema": self._ctx.get_schema(args["name"]).to_dict()}
-
-    def _tool_list_schemas(self, args: dict[str, Any]) -> dict[str, Any]:
-        return {"schemas": [s.to_dict() for s in self._ctx.list_schemas()]}
-
-    def _tool_get_collection(self, args: dict[str, Any]) -> dict[str, Any]:
-        return {"collection": self._ctx.get_collection(args["name"]).to_dict()}
-
-    def _tool_list_collections(self, args: dict[str, Any]) -> dict[str, Any]:
-        return {"collections": [c.to_dict() for c in self._ctx.list_collections()]}
 
 
 # -- frame-exchange drivers ----------------------------------------------------
@@ -523,7 +451,7 @@ def _drive_describe(proc: subprocess.Popen) -> DescribeResult:
             ) from None
         frame = parse_frame(raw)
         if isinstance(frame, LogFrame):
-            plugin_output.info("│ %s", frame.text)
+            _log_line(frame)
             continue
         break
     if isinstance(frame, DescribeResult):
@@ -558,6 +486,14 @@ def check_protocol_version(described: DescribeResult) -> DescribeResult:
         f"but this civex speaks v{PROTOCOL_MIN} to v{PROTOCOL_VERSION}: {fix}",
         kind="protocol_mismatch",
     )
+
+
+def _log_line(frame: LogFrame) -> None:
+    """A line the plugin wrote, into the run's log (stderr as a warning)."""
+    if frame.stream == "stderr":
+        plugin_output.warning("│ %s", frame.text)
+    else:
+        plugin_output.info("│ %s", frame.text)
 
 
 def _error_from_frame(frame: ErrorFrame) -> PluginExecutionError:
@@ -626,7 +562,7 @@ def _drive_run(
             _handle_rpc_call(writer, frame, dispatcher)
             continue
         if isinstance(frame, LogFrame):
-            plugin_output.info("│ %s", frame.text)
+            _log_line(frame)
             continue
         if isinstance(frame, ProgressFrame):
             dispatcher.progress(frame.done, frame.total, frame.message)

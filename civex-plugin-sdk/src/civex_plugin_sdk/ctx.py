@@ -15,6 +15,7 @@ must answer an rpc_call before sending anything else.
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -135,7 +136,11 @@ class Ctx:
         return result["file"]
 
     def update_record(self, record_id: str, data: dict[str, Any]) -> dict[str, Any]:
-        """Merge `data` into the record identified by `record_id` and return the updated record."""
+        """Replace the values of the record identified by `record_id` with `data` and return it.
+
+        Fields not in `data` are cleared; to change only some fields use
+        `patch_record`. Needs `write_records`.
+        """
         return self._call("update_record", {"record_id": record_id, "data": data})
 
     def create_record(
@@ -160,6 +165,19 @@ class Ctx:
                 "context_record_id": context_record_id,
             },
         )
+
+    def patch_record(self, record_id: str, fields: dict[str, Any]) -> dict[str, Any]:
+        """Change only `fields` of a record and return it; every other field stays as it is now.
+
+        Prefer this to `update_record`, which replaces the record's whole
+        data with what it is given (so fields left out are cleared). Nothing
+        is written, and nothing is triggered, when the fields already hold
+        these values. Needs `write_records`.
+        """
+        result = self._call_tool(
+            "patch_record", {"record_id": record_id, "fields": fields}
+        )
+        return result["record"]
 
     def get_record(self, record_id: str) -> dict[str, Any]:
         """Return the record identified by `record_id`."""
@@ -230,12 +248,16 @@ class Ctx:
         return result["collections"]
 
     def commit(self) -> None:
-        """Persist every write this `Ctx` made so far.
+        """Do nothing (deprecated).
 
-        Mirrors `AppContext.commit()`'s in-process contract: nothing a
-        plugin writes via `update_record`/`create_record`/`store_file`/the
-        `call_tool` mutators is guaranteed durable until this is called (or
-        the workflow step ends and the executor commits on the plugin's
-        behalf).
+        A run's writes are kept or dropped whole when it ends: civex keeps
+        them if every step succeeds and undoes them all if one fails, so a
+        plugin no longer commits part of a run. Kept so plugins that call it
+        still run; it sends nothing.
         """
-        self._call("commit", {})
+        warnings.warn(
+            "Ctx.commit() does nothing: civex keeps a run's writes when the run "
+            "ends, or none of them if it fails.",
+            DeprecationWarning,
+            stacklevel=2,
+        )

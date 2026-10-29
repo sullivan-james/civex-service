@@ -175,6 +175,31 @@ class AppContext:
         self._session.close()
 
     @contextmanager
+    def all_or_nothing(self) -> Iterator[None]:
+        """Keep everything done inside it, or, when it raises, nothing: a SQL
+        SAVEPOINT, rolled back on an exception and released otherwise.
+        Nothing is committed either way, so what came before it (a workflow
+        run's claim) stays, and the caller commits once with the outcome.
+        `JobCancelled` keeps what was done: a run stopped on purpose keeps
+        what it got through."""
+        from civex.domain.exceptions import JobCancelled
+
+        nested = self._session.begin_nested()
+        try:
+            yield
+        except JobCancelled:
+            if nested.is_active:
+                nested.commit()
+            raise
+        except BaseException:
+            if nested.is_active:
+                nested.rollback()
+            raise
+        else:
+            if nested.is_active:
+                nested.commit()
+
+    @contextmanager
     def validation_scope(self) -> Iterator[None]:
         """Run code inside a SQL SAVEPOINT that is always rolled back on exit,
         even on success -- for validating a real service call's side effects

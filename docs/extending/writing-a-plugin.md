@@ -51,7 +51,7 @@ Every plugin file must:
 | `id` | string | Unique identifier used in workflow YAML. Prefix with your project name to avoid collisions. |
 | `name` | string | Human-readable name shown in the UI. |
 | `category` | string | Informational grouping. No functional effect. |
-| `capabilities` | list[string] | Every `ctx.*` method this plugin calls, by name (e.g. `"find_records"`, not the literal string `"call_tool"`). A call to an undeclared capability fails at run time with a `capability_denied` error — the host enforces this against the list your plugin declared at discovery time, not anything the running process claims about itself. See [Capabilities](wire-protocol.md#capabilities) for how this is enforced on the wire. |
+| `capabilities` | list[string] | The permission actions the plugin needs (`"read"`, `"write_records"`, `"manage_files"`, `"delete"`; see [The Ctx API](#the-ctx-api)). A call it wasn't granted fails at run time with a `capability_denied` error — the host enforces this against the list your plugin declared at discovery time, not anything the running process claims about itself. See [Capabilities](wire-protocol.md#capabilities) for how this is enforced on the wire. |
 
 ### Config
 
@@ -84,31 +84,27 @@ Return a dict of output values. These are referenced by downstream steps as `thi
 
 ## The Ctx API
 
-`Ctx` is deliberately more restrictive than a plain in-process object: it has **no ambient `.record`/`.dataset`** — a plugin can't accidentally read anything it wasn't given a capability for. Everything goes over an RPC call to the host, capability-checked before it's allowed to run.
+`Ctx` is deliberately more restrictive than a plain in-process object: it has **no ambient `.record`/`.dataset`** — a plugin can't accidentally read anything it wasn't granted. Everything goes over an RPC call to the host, checked against what the plugin's `capabilities` grant before it runs.
 
-| Method | Capability name | Description |
-|---|---|---|
-| `ctx.get_context_record() → dict` | `get_context_record` | The record that triggered this workflow (`id`, `schema_id`, `data`, ...). This is how a plugin learns what triggered it — there's no ambient `.record` field. |
-| `ctx.get_context_dataset() → dict` | `get_context_dataset` | The collection the trigger record belongs to. |
-| `ctx.get_file(sha256: str) → bytes` | `get_file` | Retrieve a stored file's bytes by hash. |
-| `ctx.store_file(data: bytes, filename: str) → dict` | `store_file` | Store bytes as a new file object; returns a `FileRef`-shaped dict. |
-| `ctx.update_record(record_id: str, data: dict) → dict` | `update_record` | Write `data` into any record by id (not just the trigger — pass the trigger's id from `get_context_record()` to update it). Merges into existing data. |
-| `ctx.create_record(dataset_name, schema_name, data, context_record_id=None) → dict` | `create_record` | Create a new record; triggers fire for it as normal. `context_record_id` defaults to the trigger record when omitted. |
-| `ctx.get_record(record_id: str) → dict` | `get_record` | Fetch any record by id. |
-| `ctx.find_records(dataset_name, schema_name=None, parent_record_id=None, filters=None, search=None, limit=50, offset=0) → list[dict]` | `find_records` | Query records. |
-| `ctx.delete_record(record_id: str)` | `delete_record` | Delete a record. |
-| `ctx.get_schema(name: str) → dict`, `ctx.list_schemas() → list[dict]` | `get_schema`, `list_schemas` | Read-only schema introspection. |
-| `ctx.get_collection(name: str) → dict`, `ctx.list_collections() → list[dict]` | `get_collection`, `list_collections` | Read-only collection introspection. |
-| `ctx.commit()` | `commit` | Flush pending changes to the database. The executor also commits once at the end of a successful run; call this yourself only if you need an intermediate commit. |
+**Capabilities are permission actions.** List the ones your plugin needs; each grants every method in its row below. (Naming a single method instead, `capabilities = ["find_records"]`, grants just that one: the older form, still read.) Whatever is granted, the call is also held to what the person running the workflow may do in the project.
 
-Two more need no capability, since they read and change nothing:
+| Needs | Methods |
+|---|---|
+| `read` | `ctx.get_context_record()` (the record the run is for: `id`, `schema_id`, `data`, ...; the only way to learn it), `ctx.get_context_dataset()` (its collection), `ctx.get_record(record_id)`, `ctx.find_records(dataset_name, schema_name=None, parent_record_id=None, filters=None, search=None, limit=50, offset=0)`, `ctx.get_file(sha256)` (a stored file's bytes), `ctx.get_schema(name)`, `ctx.list_schemas()`, `ctx.get_collection(name)`, `ctx.list_collections()` |
+| `write_records` | `ctx.patch_record(record_id, fields)` (change only these fields; writes nothing when they already hold these values: use this), `ctx.update_record(record_id, data)` (**replaces** the record's data: fields left out are cleared), `ctx.create_record(dataset_name, schema_name, data, context_record_id=None)` (inside the run's record unless told otherwise; triggers fire for it as usual) |
+| `manage_files` | `ctx.store_file(data, filename)` (store bytes in the run's collection; returns a `FileRef`-shaped dict) |
+| `delete` | `ctx.delete_record(record_id)` (it can be restored from Activity) |
+
+These need nothing, since they read and change nothing of the project's:
 
 | Method | Description |
 |---|---|
 | `ctx.progress(done, total=None, message="")` | Say how far the run has got ("Reading sel_03.txt", 3 of 12). The app shows it in the status bar while the run lasts. |
 | `print(...)` | Goes to the run's log (see the run's page), as does anything written to stderr. |
 
-Declare each one you use in `capabilities` — see the table above for the exact capability name per method. See the [SDK reference](sdk-reference.md) for the full generated API, including exact signatures and return types.
+**There is no commit.** A run's writes are kept when every step succeeds and all undone if one fails, so a failed run never leaves records half-changed. (`ctx.commit()` still exists for plugins written before, and does nothing.)
+
+See the [SDK reference](sdk-reference.md) for the full generated API, including exact signatures and return types.
 
 ### Reading and writing the trigger record
 
@@ -116,7 +112,7 @@ Declare each one you use in `capabilities` — see the table above for the exact
 record = ctx.get_context_record()
 value = record["data"].get("reading")   # None if not set
 
-ctx.update_record(record["id"], {"duration": 42.5})   # merges into existing data
+ctx.patch_record(record["id"], {"duration": 42.5})   # only this field changes
 ```
 
 Or use `civex.save_field` / `civex.save_fields` as separate workflow steps instead of calling `ctx.update_record` directly.

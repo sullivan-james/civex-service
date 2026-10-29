@@ -139,6 +139,17 @@ def _registration_for_subprocess(
     declares are closed over here and used to enforce the RPC allowlist at
     run time — never re-derived from the run's own (separate) subprocess."""
     capabilities = list(describe_result.capabilities)
+    from civex.plugins.host_api import unknown_capabilities
+
+    unknown = unknown_capabilities(capabilities)
+    if unknown:
+        # Not refused: it may name a function a newer civex has. A call it
+        # makes is checked against what it was granted anyway.
+        log.warning(
+            "Plugin %s lists capabilities this civex doesn't know: %s",
+            describe_result.id,
+            ", ".join(unknown),
+        )
 
     def invoke(
         inputs: dict[str, Any], config: Any, ctx: WorkflowContext, timeout: float
