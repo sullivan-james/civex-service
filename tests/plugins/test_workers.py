@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -216,3 +217,60 @@ def test_checkout_starts_one_when_none_is_idle_for_that_key(tmp_path: Path) -> N
     assert pool.checkout("a", start) is kept
     for w in (kept, *started):
         w.close()
+
+
+# -- a plugin's output and progress ---------------------------------------------
+
+_TALKATIVE = """\
+import sys
+from pydantic import BaseModel
+from civex_plugin_sdk import Ctx, Plugin, serve
+
+class P(Plugin):
+    id = "test.talk"
+    name = "Talk"
+
+    class Config(BaseModel):
+        pass
+
+    def invoke(self, inputs, config, ctx: Ctx) -> dict:
+        print("hello from print")
+        print("no newline yet", end="")
+        sys.stderr.write("a warning on stderr\\n")
+        sys.stderr.flush()
+        ctx.progress(3, 12, "Reading sel_03.txt")
+        return {}
+
+if __name__ == "__main__":
+    serve(P)
+"""
+
+
+class _Watching:
+    def __init__(self) -> None:
+        self.reported: list[tuple] = []
+
+    def progress(self, done, total=None, message="") -> None:
+        self.reported.append((done, total, message))
+
+
+def test_a_plugins_output_goes_to_the_log_and_its_progress_to_the_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    path = tmp_path / "talk.py"
+    path.write_text(_TALKATIVE)
+    monkeypatch.setattr(rt, "_build_command", lambda uv, p: [sys.executable, str(p)])
+    monkeypatch.setattr(rt, "find_uv_binary", lambda: "uv")
+    watching = _Watching()
+    caplog.set_level("INFO", logger="civex.plugins.output")
+
+    rt.run_plugin(path, {}, {}, watching, [], timeout=20)  # type: ignore[arg-type]
+
+    # stderr is read on a thread of its own: give it a moment.
+    deadline = time.monotonic() + 5
+    while "a warning on stderr" not in caplog.text and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert "│ hello from print" in caplog.text
+    assert "│ no newline yet" in caplog.text  # sent before the answer
+    assert "│ a warning on stderr" in caplog.text
+    assert watching.reported == [(3, 12, "Reading sel_03.txt")]

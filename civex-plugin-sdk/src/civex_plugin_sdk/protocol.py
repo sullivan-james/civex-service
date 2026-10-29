@@ -29,7 +29,10 @@ from civex_plugin_sdk.plugin_base import IOSpec
 # The host reads `DescribeResult.protocol_version` and refuses a plugin whose
 # version it doesn't speak, naming the side to upgrade. Older SDKs predate the
 # field and omit it; that is read as 1.
-PROTOCOL_VERSION = 1
+#
+# 2: plugins may send `progress` frames during a run (a host speaking only 1
+# would refuse them as unknown). A host speaking 2 still runs a plugin on 1.
+PROTOCOL_VERSION = 2
 
 RpcMethod = Literal["get_file", "update_record", "create_record", "commit", "call_tool"]
 
@@ -139,6 +142,19 @@ class LogFrame(BaseModel):
     text: str
 
 
+class ProgressFrame(BaseModel):
+    """Plugin -> host: how far the current `run` has got, for whoever is watching it (protocol 2).
+
+    No answer is sent. `total` is None when the plugin can't say how much
+    there is; `message` says what it is doing now ("Reading sel_03.txt").
+    """
+
+    type: Literal["progress"] = "progress"
+    done: float = 0
+    total: float | None = None
+    message: str = ""
+
+
 class RpcCall(BaseModel):
     """Plugin -> host: invoke one `RpcMethod`, blocking for the matching `RpcResult`/`ErrorFrame`."""
 
@@ -163,6 +179,7 @@ FRAME_TYPES: dict[str, type[BaseModel]] = {
     "result": RunResult,
     "error": ErrorFrame,
     "log": LogFrame,
+    "progress": ProgressFrame,
     "rpc_call": RpcCall,
     "rpc_result": RpcResult,
 }
@@ -174,6 +191,10 @@ def parse_frame(raw: dict[str, Any]) -> BaseModel:
     model = FRAME_TYPES.get(frame_type)  # type: ignore[arg-type]
     if model is None:
         raise ValueError(f"Unknown frame type: {frame_type!r}")
+    if model is DescribeResult and "protocol_version" not in raw:
+        # An SDK older than the field omits it: that one spoke version 1, not
+        # whatever this SDK's default is now.
+        raw = {**raw, "protocol_version": 1}
     return model.model_validate(raw)
 
 

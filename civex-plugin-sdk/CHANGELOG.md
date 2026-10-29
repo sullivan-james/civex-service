@@ -12,6 +12,20 @@ civex host could observe (wire format, IO conversion, public API), patch for
 fixes that change neither. A change to the wire protocol itself also bumps
 `PROTOCOL_VERSION` (see `civex_plugin_sdk.protocol`).
 
+## Unreleased
+
+- `PROTOCOL_VERSION` is 2: a plugin may send `progress` frames.
+  `Ctx.progress(done, total=None, message="")` says how far a run has got;
+  the civex app shows it in the status bar. A host speaking 2 still runs
+  plugins on 1.
+- `print()` from a plugin is no longer thrown away: `serve()` and
+  `serve_container()` replace `sys.stdout` with `io.LogStream`, which sends
+  each line as a `log` frame (a half-printed line before the run's answer).
+- `FrameWriter.send` holds a lock, so frames sent from two threads never
+  interleave.
+- `parse_frame` reads a `describe_result` with no `protocol_version` as 1
+  (it read the SDK's own version).
+
 ## v0.2.0 (2026-09-30)
 
 First release published to PyPI (planned tag `sdk-v0.2.0`), under the MIT

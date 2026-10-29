@@ -120,7 +120,13 @@ def test_stop_pauses_and_cancels_everything_active(ctx, record) -> None:
     ctx.commit()
 
     state = ctx.job_svc.automation_state()
-    assert state == {"paused": True, "pending": 0, "running": 0, "batch": None}
+    assert state == {
+        "paused": True,
+        "pending": 0,
+        "running": 0,
+        "batch": None,
+        "steps": [],
+    }
     assert ctx.job_svc.should_stop(running.id) is True  # the running one stops
 
 
@@ -136,3 +142,27 @@ def test_pausing_closes_every_gate_and_resume_opens_them(ctx, record) -> None:
 
     assert ctx.job_svc.is_paused() is False
     assert ctx.job_svc.enqueue_manual("wf", record).status == "pending"
+
+
+def test_automation_state_says_which_step_a_running_run_is_on(ctx, record) -> None:
+    from civex.workflows.progress import RUNS
+
+    job = _job(ctx, record)
+    claimed = ctx.job_svc.claim_pending()
+    assert claimed is not None and claimed.id == job.id
+    RUNS.step_started(str(job.id), "wf", "parse", "project.parse")
+    RUNS.report(str(job.id), 3, 12, "Reading sel_03.txt")
+    try:
+        (step,) = ctx.job_svc.automation_state()["steps"]
+        assert step == {
+            "job_id": str(job.id),
+            "workflow": "wf",
+            "step": "parse",
+            "plugin": "project.parse",
+            "done": 3,
+            "total": 12,
+            "message": "Reading sel_03.txt",
+        }
+    finally:
+        RUNS.finished(str(job.id))
+    assert ctx.job_svc.automation_state()["steps"] == []

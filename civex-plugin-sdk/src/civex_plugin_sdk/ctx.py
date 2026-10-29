@@ -21,6 +21,7 @@ from typing import Any
 from civex_plugin_sdk.errors import RpcError
 from civex_plugin_sdk.io import FrameReader, FrameWriter
 from civex_plugin_sdk.protocol import (
+    ProgressFrame,
     RpcCall,
     RpcMethod,
     RpcResult,
@@ -86,6 +87,24 @@ class Ctx:
         protocol.py's note above CAPABILITIES.
         """
         return self._call("call_tool", {"tool": tool, "args": args})
+
+    def progress(
+        self, done: float, total: float | None = None, message: str = ""
+    ) -> None:
+        """Say how far this run has got, for whoever is watching it.
+
+        The civex app shows it in the status bar while the run lasts. Cheap
+        (one line to the host, no answer), but there is no point in calling
+        it more than a few times a second.
+
+        Args:
+            done: How much is done (items, bytes, ...).
+            total: How much there is in all, or None if unknown.
+            message: What it is doing now, e.g. "Reading sel_03.txt".
+        """
+        self._writer.send(
+            ProgressFrame(done=done, total=total, message=message).model_dump()
+        )
 
     def get_context_record(self) -> dict[str, Any]:
         """Return the record that triggered this workflow step.

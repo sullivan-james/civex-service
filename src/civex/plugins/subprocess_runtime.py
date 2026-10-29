@@ -20,7 +20,9 @@ failed step.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import logging
 import os
 import shutil
 import subprocess
@@ -32,7 +34,7 @@ from collections import deque
 from functools import lru_cache
 from importlib.metadata import PackageNotFoundError, version as _dist_version
 from pathlib import Path
-from typing import Any, Callable, TextIO, cast
+from typing import Any, Callable, Iterator, TextIO, cast
 
 from civex_plugin_sdk.io import FrameReader, FrameWriter
 from civex_plugin_sdk.protocol import (
@@ -42,6 +44,7 @@ from civex_plugin_sdk.protocol import (
     ErrorFrame,
     ErrorPayload,
     LogFrame,
+    ProgressFrame,
     RpcCall,
     RpcResult,
     RunRequest,
@@ -61,6 +64,10 @@ from civex.domain.exceptions import (
 from civex.plugins import workers
 from civex.plugins.base import StepResult, WorkflowContext
 from civex.processes import new_group_kwargs, terminate_tree
+
+#: Where a plugin's own output goes: its print()s and its stderr, one log
+#: line each, into whatever log the run is captured in.
+plugin_output = logging.getLogger("civex.plugins.output")
 
 # -- uv / SDK resolution ------------------------------------------------------
 
@@ -250,6 +257,8 @@ class _StderrTail:
     def __init__(self, proc: subprocess.Popen) -> None:
         self._lines: deque[str] = deque(maxlen=self.LINES)
         self._done = threading.Event()
+        #: Told each line as it comes, while a run is going on (`_relaying`).
+        self.listener: Callable[[str], None] | None = None
         stream = proc.stderr
         if stream is None:
             self._done.set()
@@ -262,6 +271,9 @@ class _StderrTail:
         try:
             for line in stream:
                 self._lines.append(line)
+                listener = self.listener
+                if listener is not None:
+                    listener(line.rstrip("\n"))
         except (OSError, ValueError):
             pass  # closed under us: the process is being stopped
         finally:
@@ -272,6 +284,21 @@ class _StderrTail:
         (waiting up to `wait` seconds for the end)."""
         self._done.wait(wait)
         return "".join(self._lines)
+
+
+@contextlib.contextmanager
+def _relaying(proc: subprocess.Popen) -> Iterator[None]:
+    """While a run lasts, the plugin's stderr (warnings, `logging`, a
+    traceback) goes to the run's log line by line, as its print()s do."""
+    tail = _TAILS.get(proc)
+    if tail is None:
+        yield
+        return
+    tail.listener = lambda line: plugin_output.info("│ %s", line)
+    try:
+        yield
+    finally:
+        tail.listener = None
 
 
 _TAILS: weakref.WeakKeyDictionary[subprocess.Popen, _StderrTail] = (
@@ -405,6 +432,13 @@ class _HostRpcDispatcher:
         if name not in self._capabilities:
             raise CapabilityDeniedError(name)
 
+    def progress(self, done: float, total: float | None, message: str) -> None:
+        """A plugin's `progress` frame: no capability needed (it reads and
+        changes nothing), and a context that can't show it ignores it."""
+        report = getattr(self._ctx, "progress", None)
+        if callable(report):
+            report(done, total, message)
+
     # -- direct RpcMethod handlers ---------------------------------------
 
     def _rpc_get_file(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -480,13 +514,18 @@ def _drive_describe(proc: subprocess.Popen) -> DescribeResult:
     writer = FrameWriter.for_stream(cast(TextIO, proc.stdin))
     reader = FrameReader.for_stream(cast(TextIO, proc.stdout))
     writer.send(DescribeRequest().model_dump())
-    try:
-        raw = next(reader)
-    except StopIteration:
-        raise PluginExecutionError(
-            _dead_process_message(proc), kind="process_exit"
-        ) from None
-    frame = parse_frame(raw)
+    while True:
+        try:
+            raw = next(reader)
+        except StopIteration:
+            raise PluginExecutionError(
+                _dead_process_message(proc), kind="process_exit"
+            ) from None
+        frame = parse_frame(raw)
+        if isinstance(frame, LogFrame):
+            plugin_output.info("│ %s", frame.text)
+            continue
+        break
     if isinstance(frame, DescribeResult):
         return check_protocol_version(frame)
     if isinstance(frame, ErrorFrame):
@@ -496,13 +535,19 @@ def _drive_describe(proc: subprocess.Popen) -> DescribeResult:
     )
 
 
+#: The wire protocol versions this host speaks: everything up to the SDK's
+#: own. A newer one only adds what a plugin *may* send (2: `progress`), so a
+#: plugin built on an older SDK still runs.
+PROTOCOL_MIN = 1
+
+
 def check_protocol_version(described: DescribeResult) -> DescribeResult:
     """Refuse a plugin whose SDK speaks a wire protocol this host doesn't,
     naming the side that needs upgrading -- instead of letting the two
     disagree mid-run with an opaque parse error. Shared by the subprocess and
     container tiers, which both learn a plugin's version from `describe`."""
     theirs = described.protocol_version
-    if theirs == PROTOCOL_VERSION:
+    if PROTOCOL_MIN <= theirs <= PROTOCOL_VERSION:
         return described
     if theirs > PROTOCOL_VERSION:
         fix = "update civex (`civex update`)"
@@ -510,7 +555,7 @@ def check_protocol_version(described: DescribeResult) -> DescribeResult:
         fix = "upgrade the plugin's civex-plugin-sdk (or rebuild its image)"
     raise PluginExecutionError(
         f"plugin '{described.id}' speaks civex-plugin-sdk wire protocol v{theirs}, "
-        f"but this civex speaks v{PROTOCOL_VERSION}: {fix}",
+        f"but this civex speaks v{PROTOCOL_MIN} to v{PROTOCOL_VERSION}: {fix}",
         kind="protocol_mismatch",
     )
 
@@ -581,6 +626,10 @@ def _drive_run(
             _handle_rpc_call(writer, frame, dispatcher)
             continue
         if isinstance(frame, LogFrame):
+            plugin_output.info("│ %s", frame.text)
+            continue
+        if isinstance(frame, ProgressFrame):
+            dispatcher.progress(frame.done, frame.total, frame.message)
             continue
         raise PluginExecutionError(
             f"unexpected frame during run: {raw!r}", kind="protocol_error"
@@ -676,12 +725,13 @@ def run_plugin(
 
     def exchange(worker: workers.Worker) -> StepResult:
         dispatcher = _HostRpcDispatcher(ctx, capabilities, worker.scratch_dir)
-        outputs = _run_with_timeout(
-            worker.proc,
-            lambda: _drive_run(worker.proc, inputs, config, dispatcher),
-            timeout,
-            label=str(plugin_path),
-        )
+        with _relaying(worker.proc):
+            outputs = _run_with_timeout(
+                worker.proc,
+                lambda: _drive_run(worker.proc, inputs, config, dispatcher),
+                timeout,
+                label=str(plugin_path),
+            )
         return StepResult(outputs=outputs)
 
     return _use_worker(plugin_path, exchange)

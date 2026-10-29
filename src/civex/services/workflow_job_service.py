@@ -13,6 +13,7 @@ from civex.domain.filters import FilterNode
 from civex.domain.run_filters import parse_run_filter
 from civex.repositories.protocols import WorkflowJobRepository
 from civex.workflows.definition import WorkflowDef, load_workflow
+from civex.workflows.progress import RUNS
 
 log = logging.getLogger(__name__)
 
@@ -162,7 +163,28 @@ class WorkflowJobService:
             "pending": self._repo.count(status="pending"),
             "running": self._repo.count(status="running"),
             "batch": None if self.is_paused() else self._repo.batch_stats(),
+            "steps": self.running_steps(),
         }
+
+    def running_steps(self) -> list[dict]:
+        """Which step each running run is on and how far it has got, for the
+        runs this process is running (`civex.workflows.progress`; a run in
+        another process, such as `civex automation run`, isn't known here)."""
+        running = self._repo.list_all(status="running", limit=20)
+        if not running:
+            return []
+        return [
+            {
+                "job_id": p.job_id,
+                "workflow": p.workflow,
+                "step": p.step,
+                "plugin": p.plugin,
+                "done": p.done,
+                "total": p.total,
+                "message": p.message,
+            }
+            for p in RUNS.of([str(j.id) for j in running])
+        ]
 
     def trigger_for_record(
         self,

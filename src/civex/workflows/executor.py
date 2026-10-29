@@ -17,6 +17,7 @@ from civex.workflows.conditions import (
 )
 from civex.workflows.contract_validation import validate_workflow_contracts
 from civex.workflows.definition import StepDef, WorkflowDef
+from civex.workflows.progress import RUNS
 
 log = logging.getLogger(__name__)
 
@@ -211,6 +212,31 @@ def run(
     `JobCancelled` (carrying the steps that already ran). A step that is already
     running is not interrupted: it finishes, or hits its own timeout.
     """
+    job_id = getattr(ctx, "job_id", None)
+    try:
+        return _run(
+            wf,
+            ctx,
+            plugins,
+            initial_outputs,
+            default_timeout_seconds,
+            should_stop,
+            job_id,
+        )
+    finally:
+        if job_id is not None:
+            RUNS.finished(job_id)
+
+
+def _run(
+    wf: WorkflowDef,
+    ctx: WorkflowContext,
+    plugins: dict[str, PluginRegistration],
+    initial_outputs: dict[str, dict[str, Any]] | None,
+    default_timeout_seconds: float,
+    should_stop: Callable[[], bool] | None,
+    job_id: str | None,
+) -> list[dict[str, Any]]:
     log.info(wf)
     _validate_contracts(wf, plugins)
     virtual_ids = set(initial_outputs.keys()) if initial_outputs else None
@@ -255,6 +281,8 @@ def run(
             continue
 
         log.info("  [%s] → %s", step.id, step.plugin)
+        if job_id is not None:
+            RUNS.step_started(job_id, wf.name, step.id, step.plugin)
         t = time.perf_counter()
         config = registration.config_model(**step.config)
         inputs = _resolve_inputs(step.inputs, step_outputs)

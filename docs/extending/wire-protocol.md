@@ -24,7 +24,8 @@ Every frame has a `"type"` field naming which of the following it is.
 | `describe_result` | The plugin's complete contract: `id`, `name`, `description`, `category`, `capabilities`, `inputs`/`outputs`, `config_schema`. Identical in shape for every tier, so no consumer (CLI `plugin info`, `GET /plugins`, the frontend plugin panel, the AI authoring guide) needs a per-tier branch. |
 | `result` | `invoke()` succeeded: `{"type":"result","outputs":{...}}`. |
 | `error` | A `run` (or `rpc_call`) failed: `{"type":"error","call_id":null,"error":{"kind":...,"message":...,"retryable":...}}`. `call_id` is set when this is a response to a specific `rpc_call`, unset for a top-level `run` failure. |
-| `log` | A line of stdout/stderr output captured during `run`, relayed rather than left to corrupt the protocol stream. |
+| `log` | A line the plugin printed: `{"type":"log","stream":"stdout","text":"..."}`. The host writes it to the run's log. No answer. |
+| `progress` | How far the current `run` has got: `{"type":"progress","done":3,"total":12,"message":"Reading sel_03.txt"}` (`total` may be null). The app shows it in the status bar while the run lasts. No answer. Protocol 2. |
 | `rpc_call` | Invoke one RPC method, blocking for the matching `rpc_result`/`error`: `{"type":"rpc_call","call_id":"...","method":"...","params":{...}}`. |
 
 `error` is genuinely bidirectional — the host sends it in response to a failed `rpc_call`, the plugin sends it in response to a failed `describe`/`run` or to report an RPC failure it can't otherwise express. Both directions share the one `ErrorFrame` shape.
@@ -39,9 +40,18 @@ Both tiers speak identical frames; only *how the process is invoked* differs.
 
 ## `isolate_stdout()`: keeping stray output off the wire
 
-Before any plugin code runs, the SDK duplicates the real stdout file descriptor (fd 1) to a private fd, then redirects the *public* fd 1 to `/dev/null`. Every protocol frame is written through that private duped fd (`FrameWriter`), never through the public one. A stray `print()`, a warning from an imported library, or debug output from your own code all go to `/dev/null` — they can never interleave with, or corrupt, the JSON on the wire. `ctx.log()` is the supported replacement for anything you actually want the host to see: it sends a `log` frame down the real protocol channel instead.
+Before any plugin code runs, the SDK duplicates the real stdout file descriptor (fd 1) to a private fd, then redirects the *public* fd 1 to `/dev/null`. Every protocol frame is written through that private duped fd (`FrameWriter`), never through the public one, so output can never interleave with, or corrupt, the JSON on the wire.
 
-Every language's starter (including the non-Python ones — see [Container plugins](container-plugins.md)) reimplements this same fd-dup trick before any author code runs, since it's what makes the wire safe regardless of what libraries a plugin happens to import.
+`sys.stdout` is then replaced by a `LogStream`, which sends each line written to it as a `log` frame: a `print()` from your plugin reaches the run's log, in order with the run's other frames (a half-printed line is sent before the run's answer). Only output written straight to fd 1 by C code is lost. Anything written to stderr (warnings, the `logging` module's default handler, a traceback) is read by the host as it comes and also goes to the run's log; the last lines of it are kept for the message when a plugin process dies.
+
+## Versions
+
+`describe_result` carries the `protocol_version` the plugin's SDK speaks (absent means 1). The host runs a plugin whose version is anywhere from 1 to its own, since each version so far only added what a plugin *may* send; it refuses a newer one with a message saying to update civex.
+
+| Version | Change |
+|---|---|
+| 1 | The frames above, less `progress`. |
+| 2 | `progress` frames. |
 
 ## Binary payloads: inline or scratch file
 
