@@ -125,9 +125,10 @@ if ref:
 
 ## Isolation and timeouts
 
-- Each run is a fresh `uv run --no-project` subprocess with its own process group, killed as a unit (SIGTERM, then SIGKILL if it doesn't exit) if it exceeds its timeout.
+- A plugin runs as a `uv run --no-project` subprocess with its own process group, killed as a unit (SIGTERM, then SIGKILL if it doesn't exit) if it exceeds its timeout.
+- The process is **kept between runs**: once started (or asked to describe itself), it answers the next run of the same plugin too, until it has been idle for five minutes or civex stops. Editing the file starts a new one. So module-level state in your plugin lives from one run to the next; anything a run must not see from the last belongs inside `invoke()`. A process that times out or dies is not reused.
 - Default timeout is `[plugins].default_timeout_seconds` in `_civex/config.toml` (60s if unset); override per step with `timeout: <seconds>` on the workflow step.
-- The subprocess's working directory is a throwaway scratch dir, never your project's `_civex/` — a plugin has no ambient filesystem path into real project data, only what it fetches over the `ctx.*` capability calls it declared.
+- The subprocess's working directory is a throwaway scratch dir, emptied before each run, never your project's `_civex/` — a plugin has no ambient filesystem path into real project data, only what it fetches over the `ctx.*` capability calls it declared.
 - The subprocess's environment is minimal (`PATH`, `HOME`, a few uv/Python variables) — it can't read civex's own environment (database URL, AI API keys, ...).
 
 ## Constraints

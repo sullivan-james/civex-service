@@ -36,3 +36,18 @@ def test_terminate_tree_on_an_already_finished_process_is_harmless() -> None:
     proc = subprocess.Popen([sys.executable, "-c", "pass"], **new_group_kwargs())
     proc.wait()
     terminate_tree(proc)
+
+
+def test_on_windows_a_child_gets_no_console_window(monkeypatch) -> None:
+    """The desktop app runs under pythonw: a console child (uv, a plugin's
+    python) would otherwise open a window of its own for each step."""
+    from civex.processes import no_window_kwargs
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(
+        subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200, raising=False
+    )
+    assert no_window_kwargs() == {"creationflags": 0x08000000}
+    assert new_group_kwargs()["creationflags"] & 0x08000000
+    assert new_group_kwargs()["creationflags"] & 0x00000200

@@ -36,6 +36,7 @@ from civex_plugin_sdk.protocol import DescribeResult
 
 from civex.domain.exceptions import ConfigError
 from civex.plugins.base import StepResult, WorkflowContext
+from civex.processes import no_window_kwargs
 from civex.plugins.subprocess_runtime import (
     _drive_describe,
     _drive_run,
@@ -94,6 +95,7 @@ def _spawn(argv: list[str]) -> subprocess.Popen:
         stderr=subprocess.PIPE,
         text=True,
         bufsize=1,
+        **no_window_kwargs(),
     )
 
 
@@ -108,6 +110,7 @@ def _kill_container(
     subprocess.run(
         [docker_bin, "kill", "--signal", "TERM", container_name],
         capture_output=True,
+        **no_window_kwargs(),
     )
     try:
         proc.wait(timeout=grace_seconds)
@@ -117,6 +120,7 @@ def _kill_container(
     subprocess.run(
         [docker_bin, "kill", "--signal", "KILL", container_name],
         capture_output=True,
+        **no_window_kwargs(),
     )
     try:
         proc.wait(timeout=grace_seconds)
