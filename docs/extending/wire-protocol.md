@@ -30,9 +30,11 @@ Every frame has a `"type"` field naming which of the following it is.
 
 `error` is genuinely bidirectional — the host sends it in response to a failed `rpc_call`, the plugin sends it in response to a failed `describe`/`run` or to report an RPC failure it can't otherwise express. Both directions share the one `ErrorFrame` shape.
 
-## Two dispatch models
+## How a plugin is started
 
-Both tiers speak identical frames; only *how the process is invoked* differs.
+Every plugin speaks identical frames; only *how it is started* differs, and that is all a tier is in civex (a *launcher*, `civex.plugins.launchers`). The host drives every one the same way (`civex.plugins.runtime`).
+
+**Built-in — a thread in civex.** civex's own plugins are SDK `Plugin`s served by `serve_loop` on a thread of civex's process, over in-memory streams of the same JSON frames, kept between runs like a subprocess. Trusted code: not stopped by a step's timeout.
 
 **Tier 1 (subprocess) — persistent process.** The host spawns `uv run --no-project <plugin>.py` once and keeps it alive across runs: the same process answers the `describe` at discovery and every later `run` of that plugin, until it has been idle for a while (`civex.plugins.workers`). A process that timed out, died or sent a malformed frame is stopped instead of reused. The plugin loops reading frames off real stdin, dispatching on each one's `type` (`describe` or `run`), and can be asked to describe itself and then run in the same process lifetime. This is `civex_plugin_sdk.serve()` (`serve_loop` internally).
 
@@ -72,4 +74,4 @@ A plugin declares what it needs via its `capabilities` list, returned as part of
 
 RPC methods on the wire are `get_file`, `update_record`, `create_record`, `commit`, plus one generic **`call_tool`** that carries every other host function (`get_context_record`, `find_records`, `patch_record`, `store_file`, ...) without a protocol change — `call_tool`'s `params` are always `{"tool": <name>, "args": {...}}`. On the host a method and a tool are the same thing: a name in one table of host functions (`civex.plugins.host_api`), each needing a permission action. A plugin's `capabilities` list those actions (`read`, `write_records`, `manage_files`, `delete`), or, in the older form, single function names; the host works out once, at discovery, which functions that grants, and refuses any other with `capability_denied`. `commit` is answered and does nothing: the host keeps a run's writes when it ends, or none of them if a step failed.
 
-For tier BUILTIN (in-process built-in plugins), capabilities are metadata only — there's no RPC boundary to intercept, since a built-in's `invoke()` calls the real `WorkflowContext` directly rather than going over stdin/stdout. Declaring `capabilities` on a built-in documents what it does but doesn't gate anything at run time.
+Built-in plugins are held to the same rule. They are SDK `Plugin`s too, run in civex's own process by the SDK's `serve_loop` on a thread, over in-memory streams carrying the same JSON frames (`civex.plugins.launchers.InProcessLauncher`), so a built-in reaches the project only through the host functions its `capabilities` grant, exactly as a plugin in a process does. Unlike one, it isn't stopped by a step's timeout: a thread can't be killed.

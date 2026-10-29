@@ -102,10 +102,10 @@ def test_a_timed_out_process_is_not_kept(plugin: Path) -> None:
 def test_a_kept_process_that_died_is_replaced(plugin: Path) -> None:
     _run(plugin)
     (worker,) = [w for ws in workers.POOL._idle.values() for w in ws]
-    worker.proc.kill()
-    worker.proc.wait()
+    worker.conn.proc.kill()
+    worker.conn.proc.wait()
     outputs = _run(plugin)
-    assert outputs["pid"] != worker.proc.pid
+    assert outputs["pid"] != worker.conn.proc.pid
 
 
 def test_a_kept_process_whose_pipe_broke_is_replaced_once(
@@ -115,10 +115,10 @@ def test_a_kept_process_whose_pipe_broke_is_replaced_once(
     written to a closed pipe, and a fresh process is asked instead."""
     _run(plugin)
     (worker,) = [w for ws in workers.POOL._idle.values() for w in ws]
-    worker.proc.kill()
-    worker.proc.wait()
+    worker.conn.proc.kill()
+    worker.conn.proc.wait()
     monkeypatch.setattr(Worker, "alive", lambda self: True)  # it looks alive
-    assert _run(plugin)["pid"] != worker.proc.pid
+    assert _run(plugin)["pid"] != worker.conn.proc.pid
 
 
 def test_stderr_is_read_while_the_process_runs(tmp_path: Path) -> None:
@@ -148,19 +148,18 @@ class _Clock:
 
 
 def _sleeper(tmp_path: Path, key: str = "k") -> Worker:
+    """A worker around a real process that waits for its stdin to close."""
+    from civex.plugins.launchers import ProcessConnection
+
     proc = subprocess.Popen(
         [sys.executable, "-c", "import sys; sys.stdin.read()"],
         stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
     )
     scratch = tmp_path / f"scratch-{proc.pid}"
     scratch.mkdir()
-
-    def stop(w: Worker) -> None:
-        if w.proc.stdin:
-            w.proc.stdin.close()
-        w.proc.wait(timeout=5)
-
-    return Worker(key=key, proc=proc, scratch_dir=scratch, stop=stop)
+    return Worker(key=key, conn=ProcessConnection(proc, scratch))
 
 
 def test_idle_workers_are_stopped_after_the_idle_time(tmp_path: Path) -> None:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 import dataclasses
 from dataclasses import dataclass, field
 from enum import Enum
@@ -10,16 +9,15 @@ from civex.domain.dtos import DatasetDTO, FileRef, RecordDTO, SchemaDTO
 from civex.domain.exceptions import DuplicateRecordError
 from civex.domain.file_refs import without_file_locations
 from civex.workflows.progress import RUNS
-from civex_plugin_sdk.plugin_base import PluginBase
 
 if TYPE_CHECKING:
     from civex.context import AppContext
 
 
 class PluginTier(str, Enum):
-    """Which runtime executes a plugin. BUILTIN (in-process) and SUBPROCESS
-    (uv-managed, CIVEX-127) are populated; CONTAINER is structurally
-    reserved for a later story."""
+    """Which launcher runs a plugin (`civex.plugins.launchers`): BUILTIN in
+    this process, SUBPROCESS by uv, CONTAINER by Docker. Shown to people;
+    nothing branches on it."""
 
     BUILTIN = "builtin"
     SUBPROCESS = "subprocess"
@@ -38,32 +36,6 @@ class StepResult:
     outputs: dict[str, Any] = field(default_factory=dict)
     logs: list[str] = field(default_factory=list)
     error: Any | None = None
-
-
-class Tier0Plugin(PluginBase, ABC):
-    """New-style in-process plugin contract that all built-in plugins
-    implement. Shares its id/name/category/capabilities/Config declarations
-    with civex-plugin-sdk's out-of-process `Plugin` (via the common
-    `PluginBase`) so that shape can't drift between tiers -- only `invoke()`
-    itself is declared separately per tier, since the in-process
-    WorkflowContext and out-of-process Ctx deliberately expose different
-    surfaces (WorkflowContext gives ambient `.record`/`.dataset` access that
-    Ctx intentionally withholds from untrusted out-of-process code; several
-    built-ins rely on that ambient access, e.g. get_field/save_field/
-    extract_from_filename).
-
-    Capability declarations are metadata only here — not enforced for tier
-    BUILTIN, since capability allowlisting is an RPC-boundary control for
-    untrusted out-of-process tiers, and there's no RPC call to intercept for
-    in-process execution."""
-
-    @abstractmethod
-    def invoke(
-        self,
-        inputs: dict[str, Any],
-        config: Any,
-        ctx: "WorkflowContext",
-    ) -> dict[str, Any]: ...
 
 
 @dataclass

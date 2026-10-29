@@ -38,18 +38,20 @@ _BUILTIN_CONTRACTS = {
     "civex.upsert_records": (("table",), ("created", "updated", "skipped")),
 }
 
+# Built-ins run through the host functions like any plugin, so what they
+# declare is what they are allowed (permission actions, `host_api`).
 _ALL_BUILTIN_IDS_AND_CAPABILITIES = {
-    "civex.get_field": [],
-    "civex.save_field": ["update_record"],
-    "civex.save_fields": ["update_record"],
-    "civex.load_file": ["get_file"],
-    "civex.load_file_list": [],
-    "civex.extract_from_filename": [],
+    "civex.get_field": ["read"],
+    "civex.save_field": ["read", "write_records"],
+    "civex.save_fields": ["read", "write_records"],
+    "civex.load_file": ["read"],
+    "civex.load_file_list": ["read"],
+    "civex.extract_from_filename": ["read"],
     "civex.parse_table": [],
-    "civex.create_records_from_files": ["create_record"],
-    "civex.match_files_to_records": ["create_record", "update_record", "find_records"],
-    "civex.rows_to_records": ["create_record"],
-    "civex.upsert_records": ["create_record", "update_record", "find_records"],
+    "civex.create_records_from_files": ["read", "write_records"],
+    "civex.match_files_to_records": ["read", "write_records"],
+    "civex.rows_to_records": ["read", "write_records"],
+    "civex.upsert_records": ["read", "write_records"],
 }
 
 
@@ -109,10 +111,12 @@ def test_builtin_invoke_returns_step_result_wrapping_outputs():
     config = registration.config_model(field="anything")
 
     class _FakeRecord:
-        data = {"anything": "value"}
+        def to_dict(self) -> dict:
+            return {"id": "r1", "data": {"anything": "value"}}
 
     class _FakeCtx:
-        record = _FakeRecord()
+        def get_context_record(self) -> _FakeRecord:
+            return _FakeRecord()
 
     result = registration.invoke({}, config, _FakeCtx(), 60.0)
     assert isinstance(result, StepResult)

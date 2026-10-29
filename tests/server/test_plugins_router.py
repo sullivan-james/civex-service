@@ -58,7 +58,7 @@ def test_list_plugins_returns_the_full_declared_contract(client: TestClient) -> 
     assert get_field["config_schema"]["properties"]["field"]["type"] == "string"
 
     save_field = plugins["civex.save_field"]
-    assert save_field["capabilities"] == ["update_record"]
+    assert save_field["capabilities"] == ["read", "write_records"]
 
 
 def test_list_plugin_load_errors_empty_by_default(client: TestClient) -> None:

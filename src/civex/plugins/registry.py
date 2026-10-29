@@ -12,12 +12,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from civex_plugin_sdk.io_convert import convert_inputs, convert_outputs
+from civex_plugin_sdk.plugin import Plugin
 from civex_plugin_sdk.plugin_base import IOSpec
+from civex_plugin_sdk.serve import describe_result
 from civex_plugin_sdk.protocol import DescribeResult
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from civex.plugins.base import PluginTier, StepResult, Tier0Plugin, WorkflowContext
+from civex.plugins import runtime
+from civex.plugins.base import PluginTier, StepResult, WorkflowContext
+from civex.plugins.launchers import InProcessLauncher, Launcher, UvLauncher
 
 log = logging.getLogger(__name__)
 
@@ -88,56 +91,21 @@ _SUBPROCESS_DESCRIBED: dict[Path, tuple[str, str]] = {}
 _LOAD_FAILURES: dict[Path, str] = {}
 
 
-def _registration_for_tier0(plugin_cls: type[Tier0Plugin]) -> PluginRegistration:
-    def invoke(
-        inputs: dict[str, Any], config: Any, ctx: WorkflowContext, timeout: float
-    ) -> StepResult:
-        # The same declared-`table`/`bytes` conversion the out-of-process
-        # tiers get in civex_plugin_sdk.serve._handle_run, applied here so a
-        # BUILTIN plugin's author code sees the identical invoke-time values
-        # (a real DataFrame, real `bytes`) while its *outputs* still leave in
-        # the always-JSON-safe wire form. Without this, a step like
-        # civex.parse_table would hand a live DataFrame to the next step -- fine
-        # for another in-process step, but a TypeError the moment that step is
-        # a subprocess/container one whose RunRequest has to json.dumps it.
-        #
-        # scratch_dir=None: tier BUILTIN has no per-run scratch dir to write
-        # into (nothing spawns a process here), so values always inline.
-        converted = convert_inputs(plugin_cls.inputs, inputs)
-        outputs = plugin_cls().invoke(converted, config, ctx) or {}
-        return StepResult(outputs=convert_outputs(plugin_cls.outputs, outputs))
-
-    return PluginRegistration(
-        id=plugin_cls.id,
-        name=plugin_cls.name,
-        category=plugin_cls.category,
-        tier=PluginTier.BUILTIN,
-        capabilities=list(plugin_cls.capabilities),
-        description=plugin_cls.description,
-        inputs=None if plugin_cls.inputs is None else list(plugin_cls.inputs),
-        outputs=None if plugin_cls.outputs is None else list(plugin_cls.outputs),
-        config_model=plugin_cls.Config,
-        module_name=plugin_cls.__module__,
-        invoke=invoke,
-    )
-
-
 class _PassthroughConfig(BaseModel):
-    """Placeholder config_model for subprocess/container-tier registrations —
-    real validation happens inside the plugin's own subprocess via its
-    Config.model_validate() (see civex_plugin_sdk.serve._handle_run); the
-    host only needs to pass step.config through untouched."""
+    """config_model for every registration: real validation happens where the
+    plugin runs (its own `Config.model_validate`, in `serve_loop`), so the
+    host only passes `step.config` through. `config_schema` (from
+    `describe`) is the real schema, for whoever shows or checks it."""
 
     model_config = ConfigDict(extra="allow")
 
 
-def _registration_for_subprocess(
-    plugin_path: Path, describe_result: Any
-) -> PluginRegistration:
-    """Wraps a Tier 1 (uv-managed subprocess) plugin. `describe_result` is
-    the DescribeResult obtained once at discovery time; the capabilities it
-    declares are closed over here and used to enforce the RPC allowlist at
-    run time — never re-derived from the run's own (separate) subprocess."""
+def _registration(launcher: Launcher, describe_result: Any) -> PluginRegistration:
+    """One plugin of any tier, behind one `invoke()`: `runtime.run` with its
+    launcher. `describe_result` was obtained once (at discovery, or read off
+    a built-in's class); the capabilities it declares are closed over here
+    and are what the host functions it calls are checked against, never
+    re-derived from the running plugin."""
     capabilities = list(describe_result.capabilities)
     from civex.plugins.host_api import unknown_capabilities
 
@@ -150,43 +118,61 @@ def _registration_for_subprocess(
             describe_result.id,
             ", ".join(unknown),
         )
+    input_specs = (
+        None if describe_result.inputs is None else list(describe_result.inputs)
+    )
 
     def invoke(
         inputs: dict[str, Any], config: Any, ctx: WorkflowContext, timeout: float
     ) -> StepResult:
-        from civex.plugins.subprocess_runtime import run_plugin
-
         config_dict = (
             config.model_dump() if isinstance(config, BaseModel) else dict(config)
         )
-        return run_plugin(plugin_path, inputs, config_dict, ctx, capabilities, timeout)
+        return runtime.run(
+            launcher,
+            inputs,
+            config_dict,
+            ctx,
+            capabilities,
+            timeout,
+            input_specs=input_specs,
+        )
 
     return PluginRegistration(
         id=describe_result.id,
         name=describe_result.name,
         category=describe_result.category,
-        tier=PluginTier.SUBPROCESS,
+        tier=launcher.tier,
         capabilities=capabilities,
         description=describe_result.description,
-        inputs=(
-            None if describe_result.inputs is None else list(describe_result.inputs)
-        ),
+        inputs=input_specs,
         outputs=(
             None if describe_result.outputs is None else list(describe_result.outputs)
         ),
         config_model=_PassthroughConfig,
-        module_name=str(plugin_path),
+        module_name=launcher.label,
         invoke=invoke,
         config_schema=describe_result.config_schema,
     )
 
 
-def register_plugin(plugin_cls: type[Tier0Plugin]) -> None:
+def _registration_for_subprocess(
+    plugin_path: Path, describe_result: Any
+) -> PluginRegistration:
+    return _registration(UvLauncher(plugin_path), describe_result)
+
+
+def register_plugin(plugin_cls: type[Plugin]) -> None:
+    """Register a built-in: run in this process through the protocol like
+    any plugin (`InProcessLauncher`), described from its own declarations
+    without starting it."""
     if not hasattr(plugin_cls, "id") or not plugin_cls.id:
         raise ValueError(f"Plugin {plugin_cls.__name__} must define an id")
     if plugin_cls.id in REGISTRY:
         return
-    REGISTRY[plugin_cls.id] = _registration_for_tier0(plugin_cls)
+    REGISTRY[plugin_cls.id] = _registration(
+        InProcessLauncher(plugin_cls), describe_result(plugin_cls)
+    )
 
 
 def discover_plugins(package) -> None:

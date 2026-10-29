@@ -247,6 +247,14 @@ from the next tag forward.
   on purpose still keeps what it got through. Plugins no longer commit:
   `ctx.commit()` does nothing (and warns) and the host answers a `commit`
   call from an older plugin with nothing.
+- **Every plugin runs the same way.** A tier is now only how a plugin is
+  started (`civex.plugins.launchers`: uv, Docker, or a thread in civex), and
+  `civex.plugins.runtime` drives all of them over the wire protocol. The
+  built-in plugins are SDK `Plugin`s run in civex's process through that
+  protocol, so they reach the project only through the host functions their
+  capabilities grant, like any plugin (they are not stopped by a step's
+  timeout, as before). A built-in's error keeps its kind (`validation_error`,
+  ...) but now arrives as a `PluginExecutionError`.
 - **Plugin capabilities are permission actions.** A plugin lists what it
   needs, `read`, `write_records`, `manage_files` or `delete`, and each grants
   every `ctx` method needing it; naming single methods (the older form) still

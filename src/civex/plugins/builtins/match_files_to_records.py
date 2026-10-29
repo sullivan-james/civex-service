@@ -7,12 +7,10 @@ from typing import Any
 from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel, ConfigDict, Field
 
-from civex.domain.exceptions import (
-    DuplicateRecordError,
-    NotFoundError,
-    ValidationError,
-)
-from civex.plugins.base import Tier0Plugin, WorkflowContext
+from civex_plugin_sdk import Ctx, RpcError
+from civex_plugin_sdk import Plugin as PluginBase
+
+from civex.plugins.builtins._refusals import GONE, refused
 
 log = logging.getLogger(__name__)
 
@@ -26,7 +24,7 @@ def _normalise(key: str) -> str:
         return key
 
 
-class Plugin(Tier0Plugin):
+class Plugin(PluginBase):
     id = "civex.match_files_to_records"
     name = "Match Files to Records"
     description = (
@@ -34,7 +32,7 @@ class Plugin(Tier0Plugin):
         "extracted from its filename, creating the record when none matches."
     )
     category = "outputs"
-    capabilities: list[str] = ["create_record", "update_record", "find_records"]
+    capabilities: list[str] = ["read", "write_records"]
     inputs = [IOSpec(name="files", type="files", description="FileRef dicts to match.")]
     outputs = [
         IOSpec(
@@ -91,11 +89,11 @@ class Plugin(Tier0Plugin):
         )
 
     def invoke(
-        self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
+        self, inputs: dict[str, Any], config: Config, ctx: Ctx
     ) -> dict[str, Any]:
         files: list[dict[str, Any]] = inputs["files"]  # list of FileRef dicts
-        dataset_name = config.dataset or ctx.dataset.name
-        parent_id = config.parent_record_id or str(ctx.record.id)
+        dataset_name = config.dataset or ctx.get_context_dataset()["name"]
+        parent_id = config.parent_record_id or ctx.get_context_record()["id"]
 
         try:
             pat = re.compile(config.pattern)
@@ -166,33 +164,36 @@ class Plugin(Tier0Plugin):
             if existing:
                 child = existing[0]
                 try:
-                    ctx.update_record(
-                        str(child.id), {**child.data, config.file_field: ref}
-                    )
+                    # Only the file field: the record's other values stay as
+                    # they are now.
+                    ctx.patch_record(child["id"], {config.file_field: ref})
                     log.info(
                         "  ✓ updated  '%s' → %s %s (key=%s)",
                         filename,
                         config.schema_name,
-                        str(child.id)[:8],
+                        child["id"][:8],
                         key_value,
                     )
                     updated += 1
-                except DuplicateRecordError as e:
-                    log.warning("  ✗ cannot update %s: %s", filename, e)
-                    unmatched.append(f"{filename} (not saved: {e})")
-                except (ValidationError, NotFoundError) as e:
-                    # Symmetric with the create branch below: a schema
-                    # restriction violation, or the matched record being
-                    # deleted concurrently, should report this one file as
-                    # unmatched rather than abort the whole job.
-                    log.warning(
-                        "  ✗ cannot update %s %s (key=%s): %s",
-                        config.schema_name,
-                        str(child.id)[:8],
-                        key_value,
-                        e,
-                    )
-                    unmatched.append(f"{filename} (could not update record: {e})")
+                except RpcError as e:
+                    if e.kind == "duplicate_record":
+                        log.warning("  ✗ cannot update %s: %s", filename, e)
+                        unmatched.append(f"{filename} (not saved: {e})")
+                    elif refused(e, GONE):
+                        # Symmetric with the create branch below: a schema
+                        # restriction violation, or the matched record being
+                        # deleted concurrently, reports this one file as
+                        # unmatched rather than abort the whole job.
+                        log.warning(
+                            "  ✗ cannot update %s %s (key=%s): %s",
+                            config.schema_name,
+                            child["id"][:8],
+                            key_value,
+                            e,
+                        )
+                        unmatched.append(f"{filename} (could not update record: {e})")
+                    else:
+                        raise
             else:
                 try:
                     typed_key: Any = int(key_value)
@@ -209,21 +210,24 @@ class Plugin(Tier0Plugin):
                         "  ✓ created  '%s' → %s %s (key=%s)",
                         filename,
                         config.schema_name,
-                        str(child.id)[:8],
+                        child["id"][:8],
                         key_value,
                     )
                     created += 1
-                except DuplicateRecordError as e:
-                    log.warning("  ✗ cannot create %s: %s", filename, e)
-                    unmatched.append(f"{filename} (not saved: {e})")
-                except ValidationError as e:
-                    log.warning(
-                        "  ✗ cannot create %s (key=%s): %s",
-                        config.schema_name,
-                        key_value,
-                        e,
-                    )
-                    unmatched.append(f"{filename} (missing required fields: {e})")
+                except RpcError as e:
+                    if e.kind == "duplicate_record":
+                        log.warning("  ✗ cannot create %s: %s", filename, e)
+                        unmatched.append(f"{filename} (not saved: {e})")
+                    elif refused(e):
+                        log.warning(
+                            "  ✗ cannot create %s (key=%s): %s",
+                            config.schema_name,
+                            key_value,
+                            e,
+                        )
+                        unmatched.append(f"{filename} (missing required fields: {e})")
+                    else:
+                        raise
 
         log.info(
             "Done: %d created, %d updated, %d unmatched, %d ambiguous",

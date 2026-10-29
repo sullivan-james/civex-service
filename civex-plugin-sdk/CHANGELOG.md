@@ -14,6 +14,12 @@ fixes that change neither. A change to the wire protocol itself also bumps
 
 ## Unreleased
 
+- `serve_loop` takes `scratch_dir` (default the working folder; None inlines
+  everything), and new `serve.describe_result(plugin_cls)` builds a plugin
+  class's `describe_result` (what `describe` answers).
+- An exception from `invoke()` that carries a string `kind` (and
+  `retryable`) keeps them in the error frame instead of becoming
+  `plugin_error`.
 - `Ctx.commit()` does nothing and warns (`DeprecationWarning`): the host
   keeps a run's writes when it ends, or none of them if a step fails.
 - New `Ctx.patch_record(record_id, fields)`: change only these fields.

@@ -1,28 +1,15 @@
-"""Host side of the subprocess (Tier 1) plugin runtime: spawns
-`uv run --no-project <plugin>.py`, drives the civex-plugin-sdk wire protocol
-over its stdin/stdout, and dispatches rpc_call frames against the real
-(trusted) WorkflowContext.
-
-Capability enforcement: the allowlist checked against an incoming rpc_call
-must be the one captured at *discovery* time (this plugin's `describe`
-response, cached on its PluginRegistration when it was first found), never
-anything the run's own live subprocess claims about itself -- a plugin that
-lied in `describe` but tried to use an undeclared capability at run time is
-exactly the thing this is meant to catch, so `run_plugin()` takes
-`capabilities` as a parameter rather than re-describing.
-
-Any failure (a top-level error frame, a malformed frame, a dead process, a
-timeout) raises PluginExecutionError/PluginTimeoutError -- the same shape as
-an exception raised from a tier-BUILTIN plugin's invoke() -- so
-workflows/executor.py needs no tier-specific branch to abort a workflow on a
-failed step.
+"""The process side of the subprocess (Tier 1) launcher: finding uv and
+building `uv run --no-project <plugin>.py`, the sandbox a plugin process
+starts in (a throwaway working folder, a minimal environment, its own
+process group, no console window), reading its stderr as it comes, and
+stopping it. Driving the protocol is `runtime`'s, the same for every tier;
+`launchers.UvLauncher` puts the two together, and `describe_plugin`/
+`run_plugin` here are the short way to use it for one script.
 """
 
 from __future__ import annotations
 
 import contextlib
-import hashlib
-import logging
 import os
 import shutil
 import subprocess
@@ -34,37 +21,15 @@ from collections import deque
 from functools import lru_cache
 from importlib.metadata import PackageNotFoundError, version as _dist_version
 from pathlib import Path
-from typing import Any, Callable, Iterator, TextIO, cast
+from typing import Any, Callable, Iterator, TextIO
 
-from civex_plugin_sdk.io import FrameReader, FrameWriter
-from civex_plugin_sdk.protocol import (
-    PROTOCOL_VERSION,
-    DescribeRequest,
-    DescribeResult,
-    ErrorFrame,
-    ErrorPayload,
-    LogFrame,
-    ProgressFrame,
-    RpcCall,
-    RpcResult,
-    RunRequest,
-    RunResult,
-    parse_frame,
-)
+from civex_plugin_sdk.protocol import DescribeResult
 
-from civex.domain.dtos import ErrorEnvelope
-from civex.domain.exceptions import (
-    ConfigError,
-    PluginExecutionError,
-    PluginTimeoutError,
-)
-from civex.plugins import host_api, workers
+from civex.domain.exceptions import ConfigError
+from civex.plugins import runtime
 from civex.plugins.base import StepResult, WorkflowContext
+from civex.plugins.runtime import plugin_output
 from civex.processes import new_group_kwargs, terminate_tree
-
-#: Where a plugin's own output goes: its print()s and its stderr, one log
-#: line each, into whatever log the run is captured in.
-plugin_output = logging.getLogger("civex.plugins.output")
 
 # -- uv / SDK resolution ------------------------------------------------------
 
@@ -291,7 +256,7 @@ def _relaying(proc: subprocess.Popen) -> Iterator[None]:
     if tail is None:
         yield
         return
-    tail.listener = lambda line: plugin_output.info("│ %s", line)
+    tail.listener = lambda line: plugin_output.warning("│ %s", line)
     try:
         yield
     finally:
@@ -307,10 +272,14 @@ def _kill_process_group(proc: subprocess.Popen, grace_seconds: float = 2.0) -> N
     terminate_tree(proc, grace_seconds)
 
 
-def _ensure_terminated(proc: subprocess.Popen, grace_seconds: float = 2.0) -> None:
+def _ensure_terminated(
+    proc: subprocess.Popen,
+    grace_seconds: float = 2.0,
+    kill: Callable[[], None] | None = None,
+) -> None:
     """Best-effort cleanup after a run that already finished normally: close
     stdin so the plugin's serve_loop sees EOF and exits on its own, falling
-    back to a process-group kill if it doesn't."""
+    back to `kill` (default: the process group) if it doesn't."""
     if proc.poll() is not None:
         return
     try:
@@ -323,7 +292,10 @@ def _ensure_terminated(proc: subprocess.Popen, grace_seconds: float = 2.0) -> No
         return
     except subprocess.TimeoutExpired:
         pass
-    _kill_process_group(proc, grace_seconds=grace_seconds)
+    if kill is not None:
+        kill()
+    else:
+        _kill_process_group(proc, grace_seconds=grace_seconds)
 
 
 def _dead_process_message(proc: subprocess.Popen) -> str:
@@ -351,296 +323,16 @@ def _dead_process_message(proc: subprocess.Popen) -> str:
     return message
 
 
-# -- wall-clock timeout (CIVEX-138) -------------------------------------------
-
-
-def _run_with_timeout(
-    proc: subprocess.Popen,
-    driver_fn: Callable[[], Any],
-    timeout: float,
-    *,
-    label: str,
-    kill_fn: Callable[[], None] | None = None,
-) -> Any:
-    """Runs driver_fn() (the blocking frame-exchange loop) on a daemon thread
-    so the calling thread can enforce a real wall-clock deadline with
-    Event.wait() -- a blocking `next(reader)` read has no timeout parameter
-    of its own. On timeout, calls kill_fn() (default: kill proc's whole
-    process group -- right for a Tier 1 subprocess; container_runtime.py
-    passes a `docker kill` closure instead, since killing the local `docker
-    run` client doesn't reliably stop the container itself). The daemon
-    thread then unblocks on EOF and exits on its own (never joined past a
-    short grace period, so a stuck kill can't hang the caller)."""
-    box: dict[str, Any] = {}
-    done = threading.Event()
-
-    def worker() -> None:
-        try:
-            box["result"] = driver_fn()
-        except BaseException as e:  # noqa: BLE001 -- re-raised on the caller's thread
-            box["exc"] = e
-        finally:
-            done.set()
-
-    thread = threading.Thread(target=worker, daemon=True)
-    thread.start()
-    if not done.wait(timeout):
-        (kill_fn or (lambda: _kill_process_group(proc)))()
-        thread.join(timeout=5.0)
-        raise PluginTimeoutError(f"plugin '{label}' exceeded {timeout}s timeout")
-    if "exc" in box:
-        raise box["exc"]
-    return box["result"]
-
-
-# -- host-side RPC dispatch ----------------------------------------------------
-
-
-class _HostRpcDispatcher:
-    """Answers a run's rpc_call frames from the one table of host functions
-    (`host_api`), allowing what the capabilities captured at discovery grant
-    (see module docstring). A direct method (`get_file`, `update_record`,
-    ...) and a `call_tool` tool are the same thing: a name and its args."""
-
-    def __init__(
-        self, ctx: WorkflowContext, capabilities: list[str], scratch_dir: Path
-    ) -> None:
-        self._ctx = ctx
-        self._allowed = host_api.granted(capabilities)
-        self._scratch_dir = scratch_dir
-
-    def dispatch(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
-        if method == "call_tool":
-            tool = params.get("tool")
-            if not tool:
-                raise PluginExecutionError("call_tool rpc_call missing 'tool' param")
-            return host_api.dispatch(
-                self._ctx,
-                self._allowed,
-                tool,
-                params.get("args") or {},
-                self._scratch_dir,
-            )
-        return host_api.dispatch(
-            self._ctx, self._allowed, method, params, self._scratch_dir
-        )
-
-    def progress(self, done: float, total: float | None, message: str) -> None:
-        """A plugin's `progress` frame: no capability needed (it reads and
-        changes nothing), and a context that can't show it ignores it."""
-        report = getattr(self._ctx, "progress", None)
-        if callable(report):
-            report(done, total, message)
-
-
-# -- frame-exchange drivers ----------------------------------------------------
-
-
-def _drive_describe(proc: subprocess.Popen) -> DescribeResult:
-    # _spawn always pipes stdin/stdout with text=True, so these are always
-    # open text streams at runtime -- Popen's own type can't express that.
-    writer = FrameWriter.for_stream(cast(TextIO, proc.stdin))
-    reader = FrameReader.for_stream(cast(TextIO, proc.stdout))
-    writer.send(DescribeRequest().model_dump())
-    while True:
-        try:
-            raw = next(reader)
-        except StopIteration:
-            raise PluginExecutionError(
-                _dead_process_message(proc), kind="process_exit"
-            ) from None
-        frame = parse_frame(raw)
-        if isinstance(frame, LogFrame):
-            _log_line(frame)
-            continue
-        break
-    if isinstance(frame, DescribeResult):
-        return check_protocol_version(frame)
-    if isinstance(frame, ErrorFrame):
-        raise _error_from_frame(frame)
-    raise PluginExecutionError(
-        f"unexpected frame in response to describe: {raw!r}", kind="protocol_error"
-    )
-
-
-#: The wire protocol versions this host speaks: everything up to the SDK's
-#: own. A newer one only adds what a plugin *may* send (2: `progress`), so a
-#: plugin built on an older SDK still runs.
-PROTOCOL_MIN = 1
-
-
-def check_protocol_version(described: DescribeResult) -> DescribeResult:
-    """Refuse a plugin whose SDK speaks a wire protocol this host doesn't,
-    naming the side that needs upgrading -- instead of letting the two
-    disagree mid-run with an opaque parse error. Shared by the subprocess and
-    container tiers, which both learn a plugin's version from `describe`."""
-    theirs = described.protocol_version
-    if PROTOCOL_MIN <= theirs <= PROTOCOL_VERSION:
-        return described
-    if theirs > PROTOCOL_VERSION:
-        fix = "update civex (`civex update`)"
-    else:
-        fix = "upgrade the plugin's civex-plugin-sdk (or rebuild its image)"
-    raise PluginExecutionError(
-        f"plugin '{described.id}' speaks civex-plugin-sdk wire protocol v{theirs}, "
-        f"but this civex speaks v{PROTOCOL_MIN} to v{PROTOCOL_VERSION}: {fix}",
-        kind="protocol_mismatch",
-    )
-
-
-def _log_line(frame: LogFrame) -> None:
-    """A line the plugin wrote, into the run's log (stderr as a warning)."""
-    if frame.stream == "stderr":
-        plugin_output.warning("│ %s", frame.text)
-    else:
-        plugin_output.info("│ %s", frame.text)
-
-
-def _error_from_frame(frame: ErrorFrame) -> PluginExecutionError:
-    """Rebuild a plugin's own error envelope host-side, preserving the kind
-    and retryable flag it declared rather than re-deriving them. The plugin
-    is the only thing that knows whether its failure was transient, so a
-    plugin that says `retryable=True` is believed."""
-    return PluginExecutionError(
-        frame.error.message,
-        kind=frame.error.kind,
-        retryable=frame.error.retryable,
-    )
-
-
-def _handle_rpc_call(
-    writer: FrameWriter, frame: RpcCall, dispatcher: _HostRpcDispatcher
-) -> None:
-    try:
-        result = dispatcher.dispatch(frame.method, frame.params)
-    except Exception as e:
-        # The host's own classification of a failed capability call, sent
-        # back in the same envelope shape the plugin uses for its own
-        # failures. A CivexError raised by the service layer (NotFoundError
-        # from get_record, ValidationError from create_record, ...) keeps its
-        # own kind rather than being flattened to "rpc_error" -- that
-        # distinction is exactly what makes a job error readable later.
-        envelope = ErrorEnvelope.from_exception(e)
-        writer.send(
-            ErrorFrame(
-                call_id=frame.call_id,
-                error=ErrorPayload(
-                    kind=envelope.kind,
-                    message=envelope.message,
-                    retryable=envelope.retryable,
-                ),
-            ).model_dump()
-        )
-        return
-    writer.send(RpcResult(call_id=frame.call_id, result=result).model_dump())
-
-
-def _drive_run(
-    proc: subprocess.Popen,
-    inputs: dict[str, Any],
-    config: dict[str, Any],
-    dispatcher: _HostRpcDispatcher,
-) -> dict[str, Any]:
-    # _spawn always pipes stdin/stdout with text=True, so these are always
-    # open text streams at runtime -- Popen's own type can't express that.
-    writer = FrameWriter.for_stream(cast(TextIO, proc.stdin))
-    reader = FrameReader.for_stream(cast(TextIO, proc.stdout))
-    writer.send(RunRequest(inputs=inputs, config=config).model_dump())
-    while True:
-        try:
-            raw = next(reader)
-        except StopIteration:
-            raise PluginExecutionError(
-                _dead_process_message(proc), kind="process_exit"
-            ) from None
-        frame = parse_frame(raw)
-        if isinstance(frame, RunResult):
-            return frame.outputs
-        if isinstance(frame, ErrorFrame) and frame.call_id is None:
-            raise _error_from_frame(frame)
-        if isinstance(frame, RpcCall):
-            _handle_rpc_call(writer, frame, dispatcher)
-            continue
-        if isinstance(frame, LogFrame):
-            _log_line(frame)
-            continue
-        if isinstance(frame, ProgressFrame):
-            dispatcher.progress(frame.done, frame.total, frame.message)
-            continue
-        raise PluginExecutionError(
-            f"unexpected frame during run: {raw!r}", kind="protocol_error"
-        )
-
-
-# -- public entrypoints ---------------------------------------------------------
-
-
-def _start_worker(argv: list[str], key: tuple[str, ...]) -> workers.Worker:
-    scratch_dir = Path(tempfile.mkdtemp(prefix="civex-plugin-"))
-    try:
-        proc = _spawn(argv, scratch_dir)
-    except BaseException:
-        shutil.rmtree(scratch_dir, ignore_errors=True)
-        raise
-    return workers.Worker(
-        key=key,
-        proc=proc,
-        scratch_dir=scratch_dir,
-        stop=lambda w: _ensure_terminated(w.proc),
-    )
-
-
-def _worker_key(argv: list[str], plugin_path: Path) -> tuple[str, ...]:
-    """What a worker was started from: the command line and the plugin's
-    contents, so an edited plugin never reaches an old process."""
-    digest = hashlib.sha256(plugin_path.read_bytes()).hexdigest()
-    return (digest, *argv)
-
-
-#: Failures that leave the process in an unknown state: it is stopped rather
-#: than handed the next request. Anything else came back as the plugin's own
-#: error frame, after which `serve_loop` is waiting for the next request.
-_BROKEN_KINDS = frozenset({"process_exit", "protocol_error", "timeout"})
-
-
-def _use_worker(plugin_path: Path, exchange: Callable[[workers.Worker], Any]) -> Any:
-    """Run `exchange` against a warm worker for `plugin_path` (starting one
-    if none is idle), then give the worker back, or stop it if the exchange
-    broke it. A kept worker that has gone away since (the pipe is closed when
-    the request is written) is replaced once by a new one: nothing was asked
-    of it, so nothing is repeated."""
-    argv = _build_command(find_uv_binary(), plugin_path)
-    key = _worker_key(argv, plugin_path)
-    for attempt in (1, 2):
-        worker = workers.POOL.checkout(key, lambda: _start_worker(argv, key))
-        healthy = False
-        try:
-            result = exchange(worker)
-            healthy = True
-            return result
-        except PluginExecutionError as e:
-            healthy = e.kind not in _BROKEN_KINDS
-            raise
-        except OSError:
-            if attempt == 1 and worker.runs > 0:
-                continue
-            raise
-        finally:
-            workers.POOL.checkin(worker, healthy)
-    raise AssertionError("unreachable")
+# -- entry points ----------------------------------------------------------------
 
 
 def describe_plugin(plugin_path: Path, timeout: float = 20.0) -> DescribeResult:
-    """Ask the plugin to describe itself -- used by discovery to learn a
-    plugin's id/name/category/capabilities/config_schema without running it.
-    The process is kept (`workers`), so the first run after discovery finds
-    it started."""
-    return _use_worker(
-        plugin_path,
-        lambda w: _run_with_timeout(
-            w.proc, lambda: _drive_describe(w.proc), timeout, label=str(plugin_path)
-        ),
-    )
+    """Ask a plugin script to describe itself (`runtime.describe` with a
+    `UvLauncher`). The process is kept, so the first run after discovery
+    finds it started."""
+    from civex.plugins.launchers import UvLauncher
+
+    return runtime.describe(UvLauncher(plugin_path), timeout)
 
 
 def run_plugin(
@@ -651,23 +343,9 @@ def run_plugin(
     capabilities: list[str],
     timeout: float,
 ) -> StepResult:
-    """Send `run` to a warm process for this plugin (`workers`), starting one
-    if none is idle -- no redundant `describe` round-trip; `capabilities` is
-    what discovery already learned and cached on this plugin's
-    PluginRegistration. Raises PluginExecutionError/PluginTimeoutError on any
-    failure, exactly like a tier-BUILTIN plugin raising from invoke() --
-    executor.py needs no tier-specific branch to abort the workflow on a
-    failed step."""
+    """Run one step of a plugin script (`runtime.run` with a `UvLauncher`)."""
+    from civex.plugins.launchers import UvLauncher
 
-    def exchange(worker: workers.Worker) -> StepResult:
-        dispatcher = _HostRpcDispatcher(ctx, capabilities, worker.scratch_dir)
-        with _relaying(worker.proc):
-            outputs = _run_with_timeout(
-                worker.proc,
-                lambda: _drive_run(worker.proc, inputs, config, dispatcher),
-                timeout,
-                label=str(plugin_path),
-            )
-        return StepResult(outputs=outputs)
-
-    return _use_worker(plugin_path, exchange)
+    return runtime.run(
+        UvLauncher(plugin_path), inputs, config, ctx, capabilities, timeout
+    )

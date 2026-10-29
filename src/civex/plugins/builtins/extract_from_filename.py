@@ -7,10 +7,11 @@ from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel, Field
 
 from civex.domain import filename_extract
-from civex.plugins.base import Tier0Plugin, WorkflowContext
+from civex_plugin_sdk import Ctx
+from civex_plugin_sdk import Plugin as PluginBase
 
 
-class Plugin(Tier0Plugin):
+class Plugin(PluginBase):
     id = "civex.extract_from_filename"
     name = "Extract from Filename"
     description = (
@@ -18,7 +19,7 @@ class Plugin(Tier0Plugin):
         "captured text to a date/datetime/number."
     )
     category = "data-access"
-    capabilities: list[str] = []
+    capabilities: list[str] = ["read"]
     inputs: list[IOSpec] = []
     outputs = [
         IOSpec(
@@ -63,9 +64,9 @@ class Plugin(Tier0Plugin):
         )
 
     def invoke(
-        self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
+        self, inputs: dict[str, Any], config: Config, ctx: Ctx
     ) -> dict[str, Any]:
-        raw_value = ctx.record.data.get(config.field)
+        raw_value = ctx.get_context_record()["data"].get(config.field)
         if raw_value is None:
             raise ValueError(f"Field '{config.field}' not found on record")
 
