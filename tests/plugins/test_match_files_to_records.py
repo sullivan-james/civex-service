@@ -118,3 +118,63 @@ def test_what_the_run_reports_adds_up(ctx, setup) -> None:
     assert out["created"] + out["updated"] + len(out["unmatched"]) + len(
         out["ambiguous"]
     ) == len(files)
+
+
+@pytest.fixture()
+def list_setup(ctx, make_collection, make_schema, make_record):
+    dataset = make_collection("study")
+    make_schema("recording", fields=[])
+    parent = make_record("study", "recording", {})
+    ctx.schema_svc.create("unit", parent="recording")
+    ctx.schema_svc.add_field("unit", "unit_number", "integer")
+    ctx.schema_svc.add_field("unit", "wavs", "file_list")
+    ctx.commit()
+    return WorkflowContext(record=parent, dataset=dataset, _app_ctx=ctx), parent
+
+
+def _match_list(wf_ctx, files):
+    registration = get_plugin("civex.match_files_to_records")
+    config = registration.config_model(
+        schema="unit", key_field="unit_number", file_field="wavs", pattern=r"sel_(\d+)"
+    )
+    return registration.invoke({"files": files}, config, wf_ctx, 60.0).outputs
+
+
+def _units(ctx, parent) -> dict[int, list[str]]:
+    found = ctx.record_svc.find(
+        "study", schema_name="unit", parent_record_id=str(parent.id), limit=500
+    )
+    return {
+        r.data["unit_number"]: [f["filename"] for f in r.data["wavs"]] for r in found
+    }
+
+
+def test_a_file_list_field_is_given_a_list(ctx, list_setup) -> None:
+    # It was given the lone file, which the record page couldn't show.
+    wf_ctx, parent = list_setup
+    out = _match_list(wf_ctx, _files(ctx, "sel_01_a.wav", "sel_02_a.wav"))
+    assert out["created"] == 2 and not out["unmatched"]
+    assert _units(ctx, parent) == {1: ["sel_01_a.wav"], 2: ["sel_02_a.wav"]}
+
+
+def test_a_file_list_gains_a_file_once(ctx, list_setup) -> None:
+    wf_ctx, parent = list_setup
+    _match_list(wf_ctx, _files(ctx, "sel_01_a.wav"))
+    _match_list(wf_ctx, _files(ctx, "sel_01_b.wav"))
+    _match_list(wf_ctx, _files(ctx, "sel_01_b.wav"))  # the same file again
+    assert _units(ctx, parent) == {1: ["sel_01_a.wav", "sel_01_b.wav"]}
+
+
+def test_a_field_that_holds_no_files_is_refused(ctx, list_setup) -> None:
+    wf_ctx, _ = list_setup
+    registration = get_plugin("civex.match_files_to_records")
+    config = registration.config_model(
+        schema="unit",
+        key_field="unit_number",
+        file_field="unit_number",
+        pattern=r"sel_(\d+)",
+    )
+    with pytest.raises(Exception, match="not a file field"):
+        registration.invoke(
+            {"files": _files(ctx, "sel_01_a.wav")}, config, wf_ctx, 60.0
+        )

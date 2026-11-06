@@ -173,6 +173,37 @@ def test_file_list_checks_every_ref() -> None:
         _check_restrictions([good, bad], "file_list", {"accept": ".csv"}, "f")
 
 
+_REF = {"sha256": "a" * 64, "filename": "a.wav", "size": 10}
+
+
+def test_a_file_list_refuses_a_lone_file_whatever_its_restrictions() -> None:
+    # A lone file in a file_list field broke the record page ("c.filter is not
+    # a function"): civex.match_files_to_records wrote one.
+    for restrictions in ({}, {"accept": "audio/*"}):
+        with pytest.raises(ValidationError, match="list of files"):
+            _check_restrictions(_REF, "file_list", restrictions, "f")
+
+
+def test_a_file_refuses_a_list() -> None:
+    with pytest.raises(ValidationError, match="holds one file"):
+        _check_restrictions([_REF], "file", {}, "f")
+
+
+@pytest.mark.parametrize(
+    "value, dtype",
+    [("a" * 64, "file"), ({"filename": "a.wav"}, "file"), (["a.wav"], "file_list")],
+)
+def test_a_file_value_must_name_stored_content(value, dtype) -> None:
+    with pytest.raises(ValidationError, match="not a stored file"):
+        _check_restrictions(value, dtype, {}, "f")
+
+
+def test_the_shapes_a_file_field_holds_pass() -> None:
+    _check_restrictions(_REF, "file", {}, "f")
+    _check_restrictions([_REF], "file_list", {}, "f")
+    _check_restrictions([], "file_list", {}, "f")
+
+
 # ---------------------------------------------------------------------------
 # naive datetimes are assumed UTC on ingest
 # ---------------------------------------------------------------------------
