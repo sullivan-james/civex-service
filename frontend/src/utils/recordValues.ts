@@ -13,6 +13,15 @@ export function isEmptyValue(value: unknown): boolean {
   )
 }
 
+/** A `file_list` value as the list it is meant to be. A lone file (written
+ * before the server refused that shape) is a list of one, and anything that
+ * isn't a list is none, so a page showing the field never fails on it. */
+export function fileListOf<T = unknown>(value: unknown): T[] {
+  if (Array.isArray(value)) return value as T[]
+  if (value && typeof value === 'object') return [value as T]
+  return []
+}
+
 /** Form-control value -> API value. Number inputs hand back strings; empty
  * values become `undefined` so callers can omit the key. */
 export function coerceFieldValue(value: unknown, type: string): unknown {

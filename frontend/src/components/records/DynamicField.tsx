@@ -49,6 +49,7 @@ import type { FileRef } from '../../api/files'
 import { FileLink, FileLocationChip } from './FileLocation'
 import { acceptProblem } from '../../utils/fileChecks'
 import { UploadProgress, UploadStopped } from './UploadProgress'
+import { fileListOf } from '../../utils/recordValues'
 
 export type { FileRef }
 
@@ -181,7 +182,7 @@ function FileListField({
   const collectionId = useUploadCollection()
   const { current, uploading, run, cancel, stopped, dismiss } =
     useFileUploads(collectionId)
-  const existing = (value as FileRef[] | null | undefined) ?? []
+  const existing = fileListOf<FileRef>(value)
   const { accept, maxSize } = toInputProps(field)
 
   async function handleFiles(files: File[]) {

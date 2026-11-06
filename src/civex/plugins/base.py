@@ -260,6 +260,13 @@ class WorkflowContext:
     def get_schema(self, name: str) -> SchemaDTO:
         return self._app_ctx.schema_svc.get(name)
 
+    def field_type(self, schema_name: str, field_name: str) -> str | None:
+        """The type of `field_name` on records of `schema_name`, inherited
+        fields included; None when the schema has no live field of that name."""
+        svc = self._app_ctx.schema_svc
+        field_dto = svc.resolve(svc.get(schema_name)).by_name.get(field_name)
+        return field_dto.dtype if field_dto is not None else None
+
     def list_schemas(self) -> list[SchemaDTO]:
         return self._app_ctx.schema_svc.list_all()
 

@@ -1,6 +1,6 @@
 # `civex.match_files_to_records`
 
-Match each file to an existing child record by extracting a key value from the filename. If a matching record is found, its file field is updated; if not, a new record is created with the key and file field set. Reach for this when files arrive that may correspond to records created by an earlier step (e.g. `civex.rows_to_records` from a sample sheet), rather than always creating new records.
+Match each file to an existing child record by extracting a key value from the filename. If a matching record is found, its file field is updated (a `file` field's file is replaced; a `file_list` field gains the file, once); if not, a new record is created with the key and file field set. The field must be a `file` or `file_list` field of the schema. Reach for this when files arrive that may correspond to records created by an earlier step (e.g. `civex.rows_to_records` from a sample sheet), rather than always creating new records.
 
 <!-- civex:tables -->
 
