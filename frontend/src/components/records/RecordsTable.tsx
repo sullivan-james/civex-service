@@ -4,6 +4,8 @@ import { DataTable, Badge, type DataTableColumn } from '../ui'
 import { displayLabel } from '../../utils/naming'
 import { formatDate } from '../../lib/utils'
 import { ReferenceLink } from './ReferenceLink'
+import { FileCell } from './FileCell'
+import { fileRefsIn } from '../../utils/fileRefs'
 import type { Schema } from '../../api/schemas'
 
 export interface RecordsTableColumn {
@@ -98,6 +100,13 @@ function CellValue({
         ))}
       </span>
     )
+  if (
+    col.type === 'file' ||
+    col.type === 'file_list' ||
+    // A projected column carries no type: a file reads as one by its shape.
+    (col.type === undefined && fileRefsIn(value).length > 0)
+  )
+    return <FileCell value={value} />
   if (col.type === 'longtext' && typeof value === 'string')
     // One line in a table cell; the whole text is on hover.
     return (
