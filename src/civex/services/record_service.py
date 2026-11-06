@@ -112,6 +112,41 @@ _COERCE: dict[str, Any] = {
 }
 
 
+def _file_refs_of(value: Any, dtype: str, field_name: str) -> list[dict[str, Any]]:
+    """The file references in a `file` or `file_list` value, refusing any other
+    shape: a `file` holds one reference, a `file_list` a list of them, and a
+    reference is an object naming its content by `sha256`. A single reference
+    in a `file_list` field (or a list in a `file` field) would be stored as it
+    came and break everything that reads the field."""
+    if dtype == "file_list":
+        if not isinstance(value, list):
+            raise ValidationError(
+                f"Field '{field_name}' holds a list of files, but was given "
+                f"{_shape_word(value)}"
+            )
+        refs = value
+    else:
+        if isinstance(value, list):
+            raise ValidationError(
+                f"Field '{field_name}' holds one file, but was given a list"
+            )
+        refs = [value]
+    for ref in refs:
+        if not isinstance(ref, dict) or not isinstance(ref.get("sha256"), str):
+            raise ValidationError(
+                f"Field '{field_name}': {_shape_word(ref)} is not a stored file"
+            )
+    return refs
+
+
+def _shape_word(value: Any) -> str:
+    if isinstance(value, dict):
+        return "a single file" if "sha256" in value else "an object"
+    if isinstance(value, list):
+        return "a list"
+    return f"the value {value!r}"
+
+
 def _check_restrictions(
     value: Any, dtype: str, restrictions: dict[str, Any], field_name: str
 ) -> None:
@@ -148,6 +183,10 @@ def _check_restrictions(
                 )
             except ValidationError as e:
                 raise ValidationError(f"Field '{field_name}': {e}") from None
+
+    if dtype in ("file", "file_list"):
+        # The shape is checked whatever the restrictions, like a geometry's.
+        _file_refs_of(value, dtype, field_name)
 
     if not restrictions:
         return
@@ -227,7 +266,7 @@ def _check_restrictions(
             pass  # malformed restriction — let it through; the value was already normalised
 
     elif dtype in ("file", "file_list"):
-        refs = value if isinstance(value, list) else [value]
+        refs = value if isinstance(value, list) else [value]  # checked above
         accept = restrictions.get("accept")
         max_size = restrictions.get("max_size")
         allowed_exts = (
@@ -240,8 +279,6 @@ def _check_restrictions(
             else set()
         )
         for ref in refs:
-            if not isinstance(ref, dict):
-                continue
             if allowed_exts:
                 ext = Path(ref.get("filename", "")).suffix.lstrip(".").lower()
                 if ext not in allowed_exts:

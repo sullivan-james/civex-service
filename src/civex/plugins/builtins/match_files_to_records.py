@@ -26,6 +26,16 @@ def _normalise(key: str) -> str:
         return key
 
 
+def _with_file(current: Any, ref: dict[str, Any]) -> list[Any]:
+    """A `file_list` value with `ref` added, unless the same content is there
+    already (a run over the same files again changes nothing). A lone file
+    stored before lists were enforced is read as a list of one."""
+    files = current if isinstance(current, list) else [current] if current else []
+    if any(isinstance(f, dict) and f.get("sha256") == ref.get("sha256") for f in files):
+        return files
+    return [*files, ref]
+
+
 class Plugin(Tier0Plugin):
     id = "civex.match_files_to_records"
     name = "Match Files to Records"
@@ -116,6 +126,18 @@ class Plugin(Tier0Plugin):
             config.pattern,
         )
 
+        # A `file_list` field holds a list: the file is added to it (once) on a
+        # record that has one, and is the whole list of a new record. A `file`
+        # field holds the file itself, replacing any there.
+        field_type = ctx.field_type(config.schema_name, config.file_field)
+        if field_type not in ("file", "file_list"):
+            raise ValueError(
+                f"'{config.file_field}' is not a file field of "
+                f"'{config.schema_name}'"
+                + (f" (it is {field_type})" if field_type else "")
+            )
+        as_list = field_type == "file_list"
+
         created = updated = 0
         unmatched: list[str] = []
         ambiguous: list[str] = []
@@ -166,8 +188,11 @@ class Plugin(Tier0Plugin):
             if existing:
                 child = existing[0]
                 try:
+                    value: Any = ref
+                    if as_list:
+                        value = _with_file(child.data.get(config.file_field), ref)
                     ctx.update_record(
-                        str(child.id), {**child.data, config.file_field: ref}
+                        str(child.id), {**child.data, config.file_field: value}
                     )
                     log.info(
                         "  ✓ updated  '%s' → %s %s (key=%s)",
@@ -202,7 +227,10 @@ class Plugin(Tier0Plugin):
                     child = ctx.create_record(
                         dataset_name,
                         config.schema_name,
-                        {config.key_field: typed_key, config.file_field: ref},
+                        {
+                            config.key_field: typed_key,
+                            config.file_field: [ref] if as_list else ref,
+                        },
                         context_record_id=parent_id,
                     )
                     log.info(
