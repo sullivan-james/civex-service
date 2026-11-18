@@ -1,18 +1,31 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { schemasApi, type FromFilenameResult } from '../../api/schemas'
+import {
+  schemasApi,
+  type FromFilenamePreview,
+  type FromFilenameResult,
+} from '../../api/schemas'
 import { useDebouncedValue } from '../../hooks/useDebouncedValue'
 import {
   captureForDateFormat,
+  choiceSpan,
   dateFormats,
   describeDateFormat,
+  hasNumberInside,
   keyClashes,
-  keyPattern,
+  looksLike,
+  nameParts,
+  placePattern,
+  textBefore,
+  textPattern,
+  type PartChoice,
 } from '../../utils/patternFromExample'
 import { normalizeNumericKey } from '../../utils/filenamePattern'
 import { DATE_KINDS } from '../../utils/filenameExtract'
 import {
   Button,
+  CheckRow,
+  Chip,
   DataTable,
   Disclosure,
   Field,
@@ -22,6 +35,7 @@ import {
   ModalBody,
   ModalFooter,
   ModalHeader,
+  SegmentedControl,
   Select,
   Textarea,
   type DataTableColumn,
@@ -36,6 +50,44 @@ export interface PatternChoice {
 
 /** The most names the server is asked about at once. */
 const MAX_NAMES = 500
+
+/** What a pattern makes of each of the names, the server's answer (asked
+ * once the pattern stops changing). */
+function useNamesPreview(pattern: string, names: string[], kind: string) {
+  const asked = useDebouncedValue(
+    { pattern, names: names.slice(0, MAX_NAMES) },
+    300,
+  )
+  return useQuery({
+    queryKey: ['from-filename-preview', 'many', kind, asked],
+    queryFn: () =>
+      schemasApi.previewFromFilename({
+        filename: '',
+        patterns: [asked.pattern],
+        kind,
+        filenames: asked.names,
+      }),
+    enabled: !!asked.pattern && asked.names.length > 0,
+    placeholderData: keepPreviousData,
+    staleTime: Infinity,
+  })
+}
+
+/** How many names a pattern gives a value for that looks like the one
+ * picked in `example`. */
+function fitOf(data: FromFilenamePreview | undefined, example: string): number {
+  if (!data || data.problems.some(Boolean)) return -1
+  const results = data.results ?? []
+  const picked = results.find((r) => r.filename === example)?.value
+  if (picked === null || picked === undefined) return -1
+  return results.filter(
+    (r) =>
+      r.value !== null &&
+      r.value !== undefined &&
+      !r.error &&
+      looksLike(String(r.value), String(picked)),
+  ).length
+}
 
 interface Row {
   filename: string
@@ -74,9 +126,8 @@ export function PatternFromExampleDialog({
   const isDate = DATE_KINDS.has(kind)
   const [names, setNames] = useState<string[]>(() => [...new Set(examples)])
   const [example, setExample] = useState(names[0] ?? '')
-  const [marked, setMarked] = useState<{ start: number; end: number } | null>(
-    null,
-  )
+  const [choice, setChoice] = useState<PartChoice | null>(null)
+  const [byChosen, setBy] = useState<'place' | 'text' | null>(null)
   const [format, setFormat] = useState('')
   // What the person typed in "Write the pattern yourself", if anything.
   const [written, setWritten] = useState<string | null>(initialPattern || null)
@@ -92,48 +143,67 @@ export function PatternFromExampleDialog({
 
   function chooseExample(name: string) {
     setExample(name)
-    setMarked(null)
+    setChoice(null)
     setFormat('')
   }
 
-  const markedText = marked ? example.slice(marked.start, marked.end) : ''
+  const parts = useMemo(() => nameParts(example), [example])
+  // A chip's click carries no event, so Shift is read as it goes down.
+  const shift = useRef(false)
+  // Click a part; Shift+click another to take everything between.
+  function pick(index: number, extend: boolean) {
+    setWritten(null)
+    setFormat('')
+    if (extend && choice) {
+      setChoice({
+        from: Math.min(choice.from, index),
+        to: Math.max(choice.to, index),
+        digitsOnly: false,
+      })
+      return
+    }
+    const one = { from: index, to: index, digitsOnly: false }
+    // A part that is mostly a label and a number ("dive07") usually means the number.
+    setChoice({ ...one, digitsOnly: !isDate && hasNumberInside(parts, one) })
+  }
+
+  const span = choice ? choiceSpan(parts, choice) : null
+  const markedText = span ? example.slice(span.start, span.end) : ''
   const formats = useMemo(
     () =>
-      marked && isDate
+      span && isDate
         ? dateFormats(
             example,
-            marked.start,
-            marked.end,
+            span.start,
+            span.end,
             kind === 'date' ? 'date' : 'datetime',
           )
         : [],
-    [marked, isDate, example, kind],
+    [span?.start, span?.end, isDate, example, kind], // eslint-disable-line react-hooks/exhaustive-deps
   )
   const chosenFormat = formats.includes(format) ? format : (formats[0] ?? '')
-  const generated = marked
+  const byPlace = choice && !isDate ? placePattern(choice, parts) : ''
+  const byText = choice && !isDate ? textPattern(example, parts, choice) : null
+  const before = choice ? textBefore(example, parts, choice) : null
+  const placeTry = useNamesPreview(byPlace, names, kind)
+  const textTry = useNamesPreview(byText ?? '', names, kind)
+  // Whichever gives more names a value like the one picked, unless the
+  // person said.
+  const by: 'place' | 'text' =
+    byChosen ??
+    (byText && fitOf(textTry.data, example) > fitOf(placeTry.data, example)
+      ? 'text'
+      : 'place')
+  const generated = choice
     ? isDate
       ? chosenFormat
-      : keyPattern(example, marked.start, marked.end)
+      : by === 'text' && byText
+        ? byText
+        : byPlace
     : ''
   const pattern = written ?? generated
 
-  const asked = useDebouncedValue(
-    { pattern, names: names.slice(0, MAX_NAMES) },
-    300,
-  )
-  const preview = useQuery({
-    queryKey: ['from-filename-preview', 'many', kind, asked],
-    queryFn: () =>
-      schemasApi.previewFromFilename({
-        filename: '',
-        patterns: [asked.pattern],
-        kind,
-        filenames: asked.names,
-      }),
-    enabled: !!asked.pattern && asked.names.length > 0,
-    placeholderData: keepPreviousData,
-    staleTime: Infinity,
-  })
+  const preview = useNamesPreview(pattern, names, kind)
   const problem = pattern ? (preview.data?.problems[0] ?? null) : null
   const results = useMemo(
     () => (problem ? [] : (preview.data?.results ?? [])),
@@ -217,38 +287,67 @@ export function PatternFromExampleDialog({
               <Field
                 label={
                   isDate
-                    ? 'Select the date in the name'
-                    : 'Select the part of the name you want'
+                    ? 'Click the date in the name'
+                    : 'Click the part of the name you want'
                 }
-                info="Drag across it with the mouse, or hold Shift and use the arrow keys. Other names written the same way are read alike."
+                info="Shift+click another part to take everything between. The other names are read the same way."
               >
-                {/* Not readOnly: browsers don't move the caret in a read-only
-                    box, so Shift+arrows couldn't select. Typing changes
-                    nothing, since the value is the example's. */}
-                <Input
-                  value={example}
-                  onChange={() => undefined}
-                  aria-readonly
-                  spellCheck={false}
-                  aria-label="Example file name"
-                  className="font-mono"
-                  onSelect={(e) => {
-                    const el = e.currentTarget
-                    const start = el.selectionStart ?? 0
-                    const end = el.selectionEnd ?? 0
-                    if (end > start) {
-                      setMarked({ start, end })
-                      setWritten(null)
-                    }
-                  }}
-                />
+                <div className="flex flex-wrap items-center gap-1 font-mono text-sm">
+                  {parts.map((part, i) => {
+                    const on = !!choice && i >= choice.from && i <= choice.to
+                    const sep = example.slice(
+                      part.end,
+                      parts[i + 1]?.start ?? part.end,
+                    )
+                    return (
+                      <span
+                        key={i}
+                        className="flex items-center gap-1"
+                        onClickCapture={(e) => {
+                          shift.current = e.shiftKey
+                        }}
+                      >
+                        <Chip
+                          selected={on}
+                          onClick={() => pick(i, shift.current)}
+                          aria-pressed={on}
+                        >
+                          {part.text}
+                        </Chip>
+                        {sep && <span className="text-fg-muted">{sep}</span>}
+                      </span>
+                    )
+                  })}
+                </div>
               </Field>
-              {marked && (
-                <p className="text-sm" data-testid="marked">
-                  Marked: <span className="font-mono">{markedText}</span>
-                </p>
+              {choice && hasNumberInside(parts, choice) && !isDate && (
+                <CheckRow
+                  compact
+                  title={`Just the number in it (${parts[choice.from].text.match(/[0-9]+/)?.[0]})`}
+                  checked={choice.digitsOnly}
+                  onChange={(on) => setChoice({ ...choice, digitsOnly: on })}
+                />
               )}
-              {marked && isDate && formats.length === 0 && (
+              {choice && !isDate && byText && (
+                <Field label="Find it by">
+                  <SegmentedControl
+                    label="Find it by"
+                    value={by}
+                    onChange={(v) => setBy(v)}
+                    options={[
+                      {
+                        value: 'place',
+                        label: `Its place: part ${choice.from + 1}`,
+                      },
+                      {
+                        value: 'text',
+                        label: `What comes before it: “${before}”`,
+                      },
+                    ]}
+                  />
+                </Field>
+              )}
+              {choice && isDate && formats.length === 0 && (
                 <p role="alert" className="text-sm text-danger">
                   That doesn't read as a date. Select the whole date, for
                   example 20240611 or 2024-06-11_142233.
