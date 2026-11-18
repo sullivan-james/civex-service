@@ -8,9 +8,11 @@ parsing Rich console output.
 
 from __future__ import annotations
 
+import sqlite3
+import uuid
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -20,6 +22,9 @@ from civex.config import load_config
 from civex.context import AppContext, build_local_context
 from civex.domain.dtos import DatasetDTO, RecordDTO, SchemaDTO
 from civex.main import app as cli_app
+
+if TYPE_CHECKING:
+    from sqlalchemy.engine import Connection
 
 runner = CliRunner()
 
@@ -156,6 +161,57 @@ def _stop_the_transfer_worker() -> Iterator[None]:
     from civex.services.transfer_jobs import jobs
 
     jobs.shutdown()
+
+
+_template: dict[str, sqlite3.Connection] = {}
+
+
+@pytest.fixture(autouse=True)
+def _migrate_from_a_template(
+    request: pytest.FixtureRequest,
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Migrating a new SQLite database takes ~0.3 s and nearly every test makes
+    one, which was half the suite's time. Migrate one database per process,
+    then copy it (SQLite's backup API) into each new empty database, with a
+    project id of its own. A database
+    that isn't empty migrates as usual, and tests/db, which tests migrating
+    itself, never uses the copy."""
+    if request.node.nodeid.startswith("tests/db/"):
+        return
+    from sqlalchemy import create_engine, inspect
+
+    import civex.db.migrate as migrate
+
+    migrate_for_real = migrate._migrate_connection
+
+    def template() -> sqlite3.Connection:
+        if "db" not in _template:
+            path = tmp_path_factory.mktemp("migrated") / "template.db"
+            engine = create_engine(f"sqlite:///{path}")
+            with engine.connect() as connection:
+                migrate_for_real(connection)
+            engine.dispose()
+            _template["db"] = sqlite3.connect(path, check_same_thread=False)
+        return _template["db"]
+
+    def from_template(connection: Connection) -> None:
+        if connection.dialect.name != "sqlite":
+            return migrate_for_real(connection)
+        empty = not inspect(connection).get_table_names()
+        connection.rollback()
+        if not empty:
+            return migrate_for_real(connection)
+        template().backup(connection.connection.dbapi_connection)
+        # The one thing a migration makes at random: every project its own id.
+        connection.exec_driver_sql(
+            f"UPDATE sync_meta SET project_id = '{uuid.uuid4().hex}'"
+        )
+        connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+        connection.commit()
+
+    monkeypatch.setattr(migrate, "_migrate_connection", from_template)
 
 
 @pytest.fixture(autouse=True)

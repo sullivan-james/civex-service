@@ -66,7 +66,15 @@ jobs:
       - name: Install with dev extras
         run: uv sync --extra server --extra workflows --extra dev
 
+      # Coverage nearly triples the suite's time, so a pull request runs the
+      # tests alone and coverage (with its fail_under floor) is measured on
+      # every push to main.
       - name: Run tests
+        if: github.event_name == 'pull_request'
+        run: uv run pytest tests/ -q -n auto
+
+      - name: Run tests with coverage
+        if: github.event_name != 'pull_request'
         run: uv run pytest tests/ -q -n auto --cov=civex --cov-report=term-missing
 
       - name: Run SDK tests
