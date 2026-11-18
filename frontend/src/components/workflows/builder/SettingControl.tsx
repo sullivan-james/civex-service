@@ -26,9 +26,9 @@ interface Props {
   value: unknown
   onChange: (value: unknown) => void
   ctx: SettingContext
-  /** Set the value of another setting of the same step (a pattern built from
-   * an example also fills its date format). */
-  onChangeOther: (key: string, value: unknown) => void
+  /** Set several settings of the step at once (a pattern built from an
+   * example also fills its date format). */
+  onChangeSome: (values: Record<string, unknown>) => void
   missing?: boolean
 }
 
@@ -116,7 +116,7 @@ function exampleSource(
 }
 
 function PatternControl(props: Props & { id?: string }) {
-  const { setting, value, onChange, ctx, onChangeOther, id } = props
+  const { setting, value, onChange, ctx, onChangeSome, id } = props
   const [open, setOpen] = useState(false)
   const source = exampleSource(setting, ctx)
   const examples = useExampleFilenames(source.schema, source.field)
@@ -149,8 +149,10 @@ function PatternControl(props: Props & { id?: string }) {
           checkClashes={!!setting.hint.keys}
           initialPattern={initial}
           onApply={(choice) => {
-            onChange(choice.pattern)
-            if (dateKey) onChangeOther(dateKey, choice.dateFormat ?? null)
+            onChangeSome({
+              [setting.key]: choice.pattern,
+              ...(dateKey ? { [dateKey]: choice.dateFormat ?? null } : {}),
+            })
             setOpen(false)
           }}
           onClose={() => setOpen(false)}

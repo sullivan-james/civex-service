@@ -222,9 +222,14 @@ export function PatternFromExampleDialog({
                 }
                 info="Drag across it with the mouse, or hold Shift and use the arrow keys. Other names written the same way are read alike."
               >
+                {/* Not readOnly: browsers don't move the caret in a read-only
+                    box, so Shift+arrows couldn't select. Typing changes
+                    nothing, since the value is the example's. */}
                 <Input
-                  readOnly
                   value={example}
+                  onChange={() => undefined}
+                  aria-readonly
+                  spellCheck={false}
                   aria-label="Example file name"
                   className="font-mono"
                   onSelect={(e) => {

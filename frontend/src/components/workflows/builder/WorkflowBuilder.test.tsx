@@ -245,6 +245,61 @@ describe('WorkflowBuilder', () => {
     )
   })
 
+  it('fills a date pattern and its format together from the dialog', async () => {
+    const user = userEvent.setup()
+    const taking = plugin({
+      id: 'civex.extract_from_filename',
+      name: 'Take a value from a file name',
+      config_schema: {
+        properties: {
+          pattern: {
+            type: 'string',
+            title: 'The part of the name to take',
+            'x-civex': {
+              kind: 'pattern',
+              on: 'field',
+              date_format: 'date_format',
+              read_as: 'output_type',
+            },
+          } as never,
+          output_type: { type: 'string', title: 'Read it as' } as never,
+          date_format: { type: 'string', title: 'Date format' } as never,
+        },
+      },
+    })
+    PLUGINS.push(taking)
+    try {
+      renderIt({
+        ...emptyDraft(),
+        name: 'x',
+        schema: 'recording',
+        steps: [
+          {
+            id: 'take',
+            plugin: 'civex.extract_from_filename',
+            config: { output_type: 'date' },
+            inputs: {},
+            condition: '',
+          },
+        ],
+      })
+      await user.click(
+        screen.getByRole('button', { name: 'Build from an example…' }),
+      )
+      await user.click(screen.getByText('Write the pattern yourself'))
+      await user.type(screen.getByLabelText('Pattern'), 'YYYYMMDD')
+      await user.click(screen.getByRole('button', { name: 'Use this pattern' }))
+      // Both settings change in one update: neither undoes the other.
+      expect(latest.steps[0].config).toEqual({
+        output_type: 'date',
+        pattern: '([0-9]{8})',
+        date_format: 'YYYYMMDD',
+      })
+    } finally {
+      PLUGINS.pop()
+    }
+  })
+
   it('warns that watching every field can start it again when it saves', async () => {
     const user = userEvent.setup()
     const saving = plugin({
