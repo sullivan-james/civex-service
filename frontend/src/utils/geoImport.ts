@@ -115,7 +115,10 @@ export async function readLocations(
       featureProjection: 'EPSG:4326',
     })
     const { default: GeoJSON } = await import('ol/format/GeoJSON')
-    found = geometriesOf(new GeoJSON().writeFeatureObject(feature))
+    // Text that isn't WKT reads as no feature at all.
+    found = feature
+      ? geometriesOf(new GeoJSON().writeFeatureObject(feature))
+      : []
   }
 
   return (
