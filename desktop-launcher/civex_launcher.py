@@ -193,8 +193,18 @@ def upgrade_command(uv: Path, pre: bool) -> list[str]:
 def to_command(uv: Path, version: str) -> list[str]:
     """Install exactly the civex the app found (or newer): a requirement that
     names a pre-release allows a pre-release for civex and for nothing else
-    (`civex.updates.upgrade_command` builds the same)."""
-    return [str(uv), "tool", "install", "--force", f"{REQUIREMENT}>={version}"]
+    (`civex.updates.upgrade_command` builds the same). `--refresh-package`
+    makes uv read civex's index again rather than its cached copy, which can
+    be minutes behind the check that found the version."""
+    return [
+        str(uv),
+        "tool",
+        "install",
+        "--force",
+        "--refresh-package",
+        "civex",
+        f"{REQUIREMENT}>={version}",
+    ]
 
 
 def command_busy(home: Path) -> bool:

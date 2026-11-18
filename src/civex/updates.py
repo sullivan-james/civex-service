@@ -273,6 +273,11 @@ def upgrade_command(
     pydantic and an alpha sentry-sdk), while a requirement that names a
     pre-release (`civex>=2.0.0rc6`) allows one for civex alone.
 
+    uv is told to read civex's index again (`--refresh-package`): the check
+    asks PyPI's JSON API, which knows a release at once, while uv keeps its
+    copy of the index for up to ten minutes, so an update started just after
+    a release once found nothing newer than the version before it.
+
     Falls back to pip inside this environment when the installer's own CLI
     isn't on PATH (pip is always present in a pipx venv; uv tool venvs may
     not have it, so that case is reported by `why_not` instead).
@@ -286,6 +291,8 @@ def upgrade_command(
                 "tool",
                 "install",
                 "--force",
+                "--refresh-package",
+                "civex",
                 f"{_tool_requirement(default)}>={target}",
             ]
         return [uv, "tool", "upgrade", "civex"]

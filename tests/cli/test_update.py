@@ -186,6 +186,10 @@ def test_pre_upgrade_commands(monkeypatch: pytest.MonkeyPatch) -> None:
         "tool",
         "install",
         "--force",
+        # The check found the version on PyPI just now; uv's cached index
+        # may not have it yet.
+        "--refresh-package",
+        "civex",
         "civex>=1.3.0rc1",
     ]
     assert update_mod.upgrade_command("uv", pre=True) == [
@@ -264,7 +268,15 @@ def test_the_app_copy_updates_with_its_uv_and_its_folders(
     result = runner.invoke(app, ["update", "--pre"])
     assert result.exit_code == 0, result.output
     [(cmd, env)] = ran
-    assert cmd == [str(uv), "tool", "install", "--force", "civex[desktop]>=2.0.0rc5"]
+    assert cmd == [
+        str(uv),
+        "tool",
+        "install",
+        "--force",
+        "--refresh-package",
+        "civex",
+        "civex[desktop]>=2.0.0rc5",
+    ]
     assert env["UV_TOOL_DIR"] == str(home / "tools")
     assert env["UV_TOOL_BIN_DIR"] == str(home / "bin")
     assert env["UV_PYTHON_PREFERENCE"] == "only-managed"

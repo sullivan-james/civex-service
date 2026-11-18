@@ -322,7 +322,15 @@ def test_an_update_naming_its_version_installs_that_and_nothing_else_pre(
     monkeypatch.setattr(launcher, "civex_version", lambda h, env: "2.0.0rc6")
     assert launcher.main([]) == 0
     assert ran == [
-        ["/bundled/uv", "tool", "install", "--force", "civex[desktop]>=2.0.0rc6"]
+        [
+            "/bundled/uv",
+            "tool",
+            "install",
+            "--force",
+            "--refresh-package",
+            "civex",
+            "civex[desktop]>=2.0.0rc6",
+        ]
     ]
 
 
