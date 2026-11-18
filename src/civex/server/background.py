@@ -1,51 +1,15 @@
 from __future__ import annotations
 
-import contextlib
 import io
 import logging
 from typing import TYPE_CHECKING
+
+from civex.workflows.logs import capture_output as _capture_output
 
 if TYPE_CHECKING:
     from civex.context import ContextFactory
 
 log = logging.getLogger(__name__)
-
-
-_NOISY_PREFIXES = (
-    "sqlalchemy",
-    "uvicorn",
-    "fastapi",
-    "httpx",
-    "asyncio",
-    "urllib3",
-    "watchfiles",
-    "h11",
-)
-
-
-class _WorkflowLogFilter(logging.Filter):
-    def filter(self, record: logging.LogRecord) -> bool:
-        return not any(record.name.startswith(p) for p in _NOISY_PREFIXES)
-
-
-@contextlib.contextmanager
-def _capture_output():
-    """Capture stdout, stderr, and non-noisy log records into a single buffer."""
-    buf = io.StringIO()
-    handler = logging.StreamHandler(buf)
-    handler.setLevel(logging.DEBUG)
-    handler.setFormatter(logging.Formatter("%(levelname)-8s %(name)s: %(message)s"))
-    handler.addFilter(_WorkflowLogFilter())
-    root = logging.getLogger()
-    prev_level = root.level
-    root.addHandler(handler)
-    root.setLevel(min(prev_level, logging.DEBUG))
-    try:
-        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
-            yield buf
-    finally:
-        root.removeHandler(handler)
-        root.setLevel(prev_level)
 
 
 def _with_nothing_kept(log_text: str, wf_ctx) -> str | None:

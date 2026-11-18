@@ -15,6 +15,7 @@ from civex.server.models import (
     FieldTypesResponse,
     FromFilenamePreviewRequest,
     FromFilenamePreviewResponse,
+    FromFilenameResult,
     NameIssueResponse,
     PreviewNameRequest,
     PreviewNameResponse,
@@ -62,11 +63,23 @@ def field_types():
 def preview_from_filename(body: FromFilenamePreviewRequest):
     """Try a `from_filename` rule's patterns on a file name without saving
     anything: what is wrong with each pattern, and what the name gives. The
-    field editor and the new-record form show this as the person types."""
+    field editor and the new-record form show this as the person types. With
+    `filenames`, each is tried too (`results`), so a pattern built from one
+    example shows what it makes of all of them."""
     problems, value, error = filename_extract.try_patterns(
         body.filename, body.patterns, body.kind
     )
-    return FromFilenamePreviewResponse(problems=problems, value=value, error=error)
+    results = []
+    if not any(problems):
+        for name in body.filenames:
+            try:
+                got = filename_extract.extract(name, body.patterns, body.kind)
+                results.append(FromFilenameResult(filename=name, value=got))
+            except ValueError as e:
+                results.append(FromFilenameResult(filename=name, error=str(e)))
+    return FromFilenamePreviewResponse(
+        problems=problems, value=value, error=error, results=results
+    )
 
 
 @router.post("/{name}/preview-name", response_model=PreviewNameResponse)

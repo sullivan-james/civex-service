@@ -88,6 +88,15 @@ export interface FromFilenamePreview {
   value: unknown
   /** A pattern matched but what it captured isn't a value of the kind. */
   error: string | null
+  /** For each of the `filenames` asked about, in order: what it gives. */
+  results?: FromFilenameResult[]
+}
+
+export interface FromFilenameResult {
+  filename: string
+  /** Null when no pattern matches the name. */
+  value: unknown
+  error: string | null
 }
 
 export interface NamePreview {
@@ -112,6 +121,8 @@ export const schemasApi = {
     filename: string
     patterns: string[]
     kind: string
+    /** More names to try the patterns on, answered in `results`. */
+    filenames?: string[]
   }) => api.post<FromFilenamePreview>('/schemas/from-filename/preview', body),
   previewName: (
     name: string,

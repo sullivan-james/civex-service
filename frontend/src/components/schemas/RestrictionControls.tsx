@@ -36,6 +36,8 @@ import { displayLabel } from '../../utils/naming'
 import { FILENAME_FORMAT_TOKENS_HELP } from '../../utils/filenamePattern'
 import { DATE_KINDS, fromFilenameRule } from '../../utils/filenameExtract'
 import { useFromFilenamePreview } from '../../hooks/useFromFilenamePreview'
+import { useExampleFilenames } from '../../hooks/useExampleFilenames'
+import { PatternFromExampleDialog } from '../files/PatternFromExample'
 import {
   TemplateBuilder,
   type TemplateField,
@@ -332,6 +334,9 @@ export function FromFilenameControl({
     (f) => f.dtype === 'file' || f.dtype === 'file_list',
   )
   const [sample, setSample] = useState('')
+  // Which pattern row "Build from an example…" is filling, if any.
+  const [building, setBuilding] = useState<number | null>(null)
+  const examples = useExampleFilenames(ctx.schemaName, field || null)
   const incomplete = !!field && patterns.some((p) => !p.trim())
   // The server tries the patterns, as the one implementation of them: each
   // row's problem, and what the sample name gives.
@@ -414,6 +419,13 @@ export function FromFilenameControl({
                     }
                     className="max-w-md font-mono"
                   />
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setBuilding(i)}
+                  >
+                    Build from an example…
+                  </Button>
                   {patterns.length > 1 && (
                     <IconButton
                       icon={X}
@@ -479,6 +491,22 @@ export function FromFilenameControl({
             </p>
           )}
         </>
+      )}
+      {building !== null && (
+        <PatternFromExampleDialog
+          kind={kind}
+          examples={[...(sample ? [sample] : []), ...examples]}
+          dateStyle="token"
+          initialPattern={patterns[building] || undefined}
+          onApply={({ pattern }) => {
+            update(
+              field,
+              patterns.map((p, j) => (j === building ? pattern : p)),
+            )
+            setBuilding(null)
+          }}
+          onClose={() => setBuilding(null)}
+        />
       )}
     </Shell>
   )

@@ -4,16 +4,17 @@ import re
 from typing import Any
 
 from civex_plugin_sdk.plugin_base import IOSpec
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from civex.domain import filename_extract
 from civex_plugin_sdk import Ctx
 from civex_plugin_sdk import Plugin as PluginBase
+from civex.plugins.hints import choices, hint, says
 
 
 class Plugin(PluginBase):
     id = "civex.extract_from_filename"
-    name = "Extract from Filename"
+    name = "Take a value from a file name"
     description = (
         "Apply a regex to a file field's filename and optionally convert the "
         "captured text to a date/datetime/number."
@@ -25,42 +26,62 @@ class Plugin(PluginBase):
         IOSpec(
             name="value",
             type="any",
-            description="The captured text converted to `output_type`.",
+            description="The value it took from the name: text, a number or a date.",
         ),
         IOSpec(
             name="filename",
             type="string",
-            description="The filename the pattern was applied to.",
+            description="The file name it read.",
         ),
         IOSpec(
             name="extracted",
             type="string",
-            description="The raw captured text, before conversion.",
+            description="The text it took, before it was read as a date or number.",
         ),
     ]
 
     class Config(BaseModel):
+        model_config = ConfigDict(
+            json_schema_extra=says(
+                "Takes {pattern} from the name of the file in {field}, read as {output_type}."
+            )
+        )
         field: str = Field(
-            description="Field on the trigger record holding the filename to match "
-            "(a `file`/`file_list` field, or a plain string field)."
+            title="File field",
+            json_schema_extra=hint("field", dtypes=["file", "file_list", "string"]),
+            description="The file field whose file name it reads.",
         )
         pattern: str = Field(
+            title="The part of the name to take",
+            json_schema_extra=hint(
+                "pattern", on="field", date_format="date_format", read_as="output_type"
+            ),
             default=r"(.+)",
             description="Regex applied to the filename. The first capture group "
             "(or the whole match if there is none) is extracted.",
         )
         output_type: str = Field(
+            title="Read it as",
+            json_schema_extra=choices(
+                ("string", "Text"),
+                ("integer", "Whole number"),
+                ("float", "Number"),
+                ("date", "Date"),
+                ("datetime", "Date and time"),
+            ),
             default="string",
             description="Type to convert the captured text to: "
             "string | integer | float | date | datetime.",
         )
         date_format: str | None = Field(
+            title="Date format",
+            json_schema_extra=hint("date_format", pattern="pattern"),
             default=None,
-            description="Token format for parsing the captured text when "
-            "`output_type` is date/datetime, e.g. 'YYYYMMDD-HHmmSS'. Tokens are "
-            "YYYY MM DD HH mm SS; non-token characters are treated as raw regex, "
-            "so e.g. 'YYYYMMDD[-_]HHmmSS' matches both dashes and underscores. "
-            "Required when output_type is date or datetime.",
+            description="How the date is written in the name, when it is read "
+            "as a date, e.g. 'YYYYMMDD-HHmmSS'. Tokens are YYYY MM DD HH mm SS; "
+            "anything else is a regular expression, so 'YYYYMMDD[-_]HHmmSS' "
+            "takes a dash or an underscore. Needed for a date or a date and "
+            "time (output_type date or datetime).",
         )
 
     def invoke(

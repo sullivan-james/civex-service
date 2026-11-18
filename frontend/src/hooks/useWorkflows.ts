@@ -50,6 +50,47 @@ export function useSaveWorkflow() {
   })
 }
 
+export function useSetWorkflowEnabled() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  return useMutation({
+    mutationFn: ({ stem, enabled }: { stem: string; enabled: boolean }) =>
+      workflowsApi.setEnabled(stem, enabled),
+    onSuccess: (saved) => {
+      qc.invalidateQueries({ queryKey: ['workflows'] })
+      toast.success(
+        saved.enabled
+          ? `“${saved.name}” is on: it starts by itself.`
+          : `“${saved.name}” is off: it runs only when started by hand.`,
+      )
+    },
+  })
+}
+
+/** Try a workflow on a record; nothing it does is kept. */
+/** What the workflow on screen would do, tried on records and undone; asked
+ * again whenever the YAML, the records or the files change. */
+export function useWorkflowPreview(
+  content: string,
+  recordIds: string[],
+  files: Record<string, File[]>,
+  enabled: boolean,
+) {
+  const fileKey = Object.entries(files).map(([k, list]) => [
+    k,
+    list.map((f) => `${f.name}:${f.size}:${f.lastModified}`),
+  ])
+  return useQuery({
+    queryKey: ['workflow-preview', content, recordIds, fileKey],
+    queryFn: () => workflowsApi.tryMany(content, recordIds, files),
+    enabled,
+    placeholderData: keepPreviousData,
+    retry: false,
+    staleTime: Infinity,
+    gcTime: 0,
+  })
+}
+
 export function useDeleteWorkflow() {
   const qc = useQueryClient()
   const toast = useToast()

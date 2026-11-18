@@ -4,17 +4,18 @@ import logging
 from typing import Any
 
 from civex_plugin_sdk.plugin_base import IOSpec
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from civex_plugin_sdk import Ctx
 from civex_plugin_sdk import Plugin as PluginBase
+from civex.plugins.hints import says
 
 log = logging.getLogger(__name__)
 
 
 class Plugin(PluginBase):
     id = "civex.save_fields"
-    name = "Save Fields"
+    name = "Set several fields"
     description = (
         "Write several fields to the trigger record at once. Updates with a "
         "null value are skipped rather than clearing the field."
@@ -25,12 +26,15 @@ class Plugin(PluginBase):
         IOSpec(
             name="updates",
             type="mapping",
-            description="field name → value. Null values are ignored.",
+            description="The values to set, by field (field: value). Empty values are left alone.",
         )
     ]
     outputs: list[IOSpec] = []
 
     class Config(BaseModel):
+        model_config = ConfigDict(
+            json_schema_extra=says("Sets this record's fields to {updates}.")
+        )
         pass
 
     def invoke(

@@ -45,14 +45,14 @@ def test_list_plugins_returns_the_full_declared_contract(client: TestClient) -> 
     resp = client.get("/api/plugins")
     plugins = {p["id"]: p for p in resp.json()}
     get_field = plugins["civex.get_field"]
-    assert get_field["name"] == "Get Field"
+    assert get_field["name"] == "Read a field"
     assert get_field["category"] == "data-access"
     assert get_field["outputs"] == [
         {
             "name": "value",
             "type": "any",
             "required": True,
-            "description": "The field's current value, or null if unset.",
+            "description": "The field's value; empty when it isn't set.",
         }
     ]
     assert get_field["config_schema"]["properties"]["field"]["type"] == "string"

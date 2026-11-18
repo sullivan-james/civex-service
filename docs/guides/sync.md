@@ -45,6 +45,12 @@ civex sync connect https://… --invite civex_inv_…   # an existing project
   `/api/sync/v1/`. Never put the full app on a network: it has no sign-in. On a
   machine you can SSH into, an `ssh://` address needs no server running at all
   ([Over SSH instead](../how-to/set-up-sync.md#over-ssh-instead)).
+- **A server or a device, not both.** A project that serves devices can't
+  connect to another server, and one that follows a server can't serve devices:
+  civex refuses either. To make the old server follow a new one (moving
+  servers), stop it serving first (Settings → Sync, or `civex sync authority
+  disable`) and connect its devices to the new one. A project set up both ways
+  by hand doesn't sync until one is turned off, and says so.
 - **Big projects** show progress while copying, and an interrupted copy finishes
   when you connect again. Records arrive first. History and files follow in
   the background.
@@ -73,7 +79,9 @@ seconds however large the files are, and a missing file never holds up a change.
 Files move in the background, on their own, beside syncing.
 
 - **Sending:** a device uploads files its records use that the authority lacks,
-  with their own progress in the status bar. A file on an unplugged drive is
+  with their own progress in the status bar: how many files and how much in
+  all (`120 MB of 2.1 GB`), how fast, and how long is left, on one bar from
+  the first file to the last. A file on an unplugged drive is
   sent once it can be read. Until the server has a file, its chip says **not on
   the server yet** (other computers can't open it), and the status bar counts
   such files and says why they haven't gone: going up in the background, on a
@@ -242,7 +250,8 @@ first**, then the devices. A device that can't sync says which side to update.
 ## Moving
 
 - **A new authority:** run `civex sync connect <new address> --invite …` on each
-  device. If the new one is empty, the first device fills it. Review items about
+  device. If the old authority is to follow the new one, stop it serving
+  first. If the new one is empty, the first device fills it. Review items about
   the old server are closed.
 - **A device to a new computer:** its id and key live in `~/.civex/sync.toml`,
   not in the project, so a copied folder isn't the same device. Connect the copy

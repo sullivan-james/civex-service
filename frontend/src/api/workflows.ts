@@ -18,6 +18,8 @@ export interface Workflow {
   inputs: Record<string, WorkflowInput> | null
   /** What starts it by itself, one line each; empty if only run by hand. */
   runs_on: string[]
+  /** Off: its triggers start nothing; it runs only when someone starts it. */
+  enabled: boolean
 }
 
 export interface WorkflowTrigger {
@@ -127,6 +129,34 @@ export const workflowsApi = {
       record_id,
     }),
 
+  setEnabled: (stem: string, enabled: boolean) =>
+    api.patch<WorkflowDetail>(`/workflows/${encodeURIComponent(stem)}`, {
+      enabled,
+    }),
+  /** Run `content` (saved or not) on a record and undo it, saying what it did. */
+  /** Try it on these records, or with none named on the `sample` records
+   * of its kind changed most recently; nothing is kept. */
+  tryMany: (
+    content: string,
+    recordIds: string[],
+    fileInputs: Record<string, File[]> = {},
+    sample = 5,
+  ) => {
+    const files = Object.entries(fileInputs).filter(([, f]) => f.length > 0)
+    if (files.length === 0)
+      return api.post<TrialMany>('/workflows/try-many', {
+        content,
+        record_ids: recordIds,
+        sample,
+      })
+    const form = new FormData()
+    form.append('content', content)
+    form.append('sample', String(sample))
+    for (const id of recordIds) form.append('record_ids', id)
+    for (const [name, list] of files) for (const f of list) form.append(name, f)
+    return api.upload<TrialMany>('/workflows/try-many', form)
+  },
+
   runWithFiles: async (
     name: string,
     recordId: string,
@@ -152,6 +182,50 @@ export const workflowsApi = {
     }
     return res.json()
   },
+}
+
+/** One value a trial run would change. */
+export interface TrialFieldChange {
+  field: string
+  label: string
+  dtype: string | null
+  before: unknown
+  after: unknown
+}
+
+/** One record a trial run would create, change or delete. */
+export interface TrialRecordChange {
+  record_id: string
+  schema_name: string | null
+  name: string | null
+  action: 'created' | 'updated' | 'deleted'
+  fields: TrialFieldChange[]
+}
+
+/** What trying a workflow on a record would have done; nothing was kept. */
+/** A trial on one record of several. */
+export interface TrialOnRecord {
+  record_id: string
+  name: string | null
+  /** Null when it can't run there; `problem` says why. */
+  result: TrialResult | null
+  problem: string | null
+}
+
+export interface TrialMany {
+  trials: TrialOnRecord[]
+  /** The records were picked by the server: the latest changed. */
+  sampled: boolean
+}
+
+export interface TrialResult {
+  ok: boolean
+  steps: StepExecution[]
+  changes: TrialRecordChange[]
+  /** Runs its saves would start, by workflow name. */
+  would_start: Record<string, number>
+  error: ErrorDetails | null
+  log: string | null
 }
 
 /** The narrowing a run list can ask for beyond status and record. */

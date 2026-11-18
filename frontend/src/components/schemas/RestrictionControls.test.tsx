@@ -4,6 +4,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { schemasApi } from '../../api/schemas'
+import { recordsApi, type CivexRecord } from '../../api/records'
 import { CONTROLS } from './controlRegistry'
 import type { ControlContext, Rules } from './RestrictionControls'
 import type { RestrictionDescriptor } from '../../api/schemas'
@@ -450,5 +451,35 @@ describe('fill from a file name', () => {
     render(<Harness d={d} />)
     expect(screen.getByText(/Add a file field/)).toBeTruthy()
     expect(screen.queryByLabelText('File field')).toBeNull()
+  })
+
+  it('builds a pattern from a file already in the field', async () => {
+    const search = vi.spyOn(recordsApi, 'searchBySchema').mockResolvedValue([
+      {
+        data: { audio: { sha256: 'a', filename: 'rec_take_07.wav', size: 1 } },
+      } as unknown as CivexRecord,
+    ])
+    render(
+      <Harness
+        d={d}
+        context={{ ...withFiles, type: 'integer' }}
+        initial={{ from_filename: { field: 'audio', pattern: '' } }}
+      />,
+    )
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Build from an example…' }),
+    )
+    // The example's parts are offered to click: the third is the number.
+    await userEvent.click(await screen.findByRole('button', { name: '07' }))
+    expect(search).toHaveBeenCalledWith(ctx.schemaName, undefined, 100)
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Use this pattern' }),
+    )
+    expect(rules()).toEqual({
+      from_filename: {
+        field: 'audio',
+        pattern: '^(?:[^ ._-]+[ ._-]+){2}([0-9]+)',
+      },
+    })
   })
 })

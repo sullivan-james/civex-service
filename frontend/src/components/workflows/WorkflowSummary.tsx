@@ -1,141 +1,54 @@
-import { Badge } from '../ui'
 import { useWorkflow } from '../../hooks/useWorkflows'
+import { useSchemas } from '../../hooks/useSchemas'
 import type { PluginInfo } from '../../api/plugins'
-import type { WorkflowStep } from '../../api/workflows'
+import type { WorkflowDetail } from '../../api/workflows'
+import type { Schema } from '../../api/schemas'
+import { displayLabel } from '../../utils/naming'
+import { fieldsWithInherited } from '../../utils/schemaFields'
+import type { DraftInput, DraftStep } from '../../utils/workflowModel'
+import { Badge, Card } from '../ui'
+import { StepSays } from './builder/StepSays'
 
-function TriggerSummary({
-  triggers,
-}: {
-  triggers: Record<
-    string,
-    { schema_name: string; fields: string[] | null }
-  > | null
-}) {
-  if (!triggers || Object.keys(triggers).length === 0) {
-    return <p className="text-sm text-fg-muted">Manual only</p>
+function kindLabel(schemas: Schema[], name: string): string {
+  const s = schemas.find((x) => x.name === name)
+  return s ? displayLabel(s.name, s.label) : name
+}
+
+/** When it runs, in words: what starts it, or that only a person does. */
+function whenItRuns(detail: WorkflowDetail, schemas: Schema[]): string[] {
+  const t = detail.triggers ?? {}
+  const out: string[] = []
+  if (t.record_created)
+    out.push(
+      `When a ${kindLabel(schemas, t.record_created.schema_name)} is added`,
+    )
+  const updated = t.record_updated
+  if (updated) {
+    const kind = kindLabel(schemas, updated.schema_name)
+    const schema = schemas.find((s) => s.name === updated.schema_name)
+    const fields = (updated.fields ?? []).map((name) => {
+      const f = schema
+        ? fieldsWithInherited(schema, schemas, false).find(
+            (x) => x.name === name,
+          )
+        : undefined
+      return f?.label ?? name
+    })
+    out.push(
+      fields.length
+        ? `When the ${fields.join(' or ')} of a ${kind} changes`
+        : `When a ${kind} changes`,
+    )
   }
-  return (
-    <ul className="text-sm text-fg space-y-1">
-      {triggers.record_created && (
-        <li>
-          Runs automatically when a{' '}
-          <span className="font-mono text-fg">
-            {triggers.record_created.schema_name}
-          </span>{' '}
-          record is created.
-        </li>
-      )}
-      {triggers.record_updated && (
-        <li>
-          Runs automatically when a{' '}
-          <span className="font-mono text-fg">
-            {triggers.record_updated.schema_name}
-          </span>{' '}
-          record is updated
-          {triggers.record_updated.fields
-            ? ` and one of these fields changes: ${triggers.record_updated.fields.join(', ')}.`
-            : '.'}
-        </li>
-      )}
-    </ul>
-  )
+  const by = detail.record_schema
+    ? `when someone starts it on a ${kindLabel(schemas, detail.record_schema)}`
+    : 'when someone starts it'
+  out.push(out.length ? `Or ${by}` : by.charAt(0).toUpperCase() + by.slice(1))
+  return out
 }
 
-function StepCard({
-  step,
-  index,
-  plugin,
-}: {
-  step: WorkflowStep
-  index: number
-  plugin: PluginInfo | undefined
-}) {
-  const configEntries = Object.entries(step.config)
-  const inputEntries = Object.entries(step.inputs)
-
-  return (
-    <li className="border border-border rounded-md p-3">
-      <div className="flex items-center gap-2 flex-wrap">
-        <Badge variant="accent">{index + 1}</Badge>
-        <span className="font-medium text-fg font-mono text-sm">{step.id}</span>
-        <span className="text-fg-muted text-xs">·</span>
-        <span className="font-mono text-xs text-fg-muted">{step.plugin}</span>
-        {plugin?.name && (
-          <span className="text-xs text-fg-muted">({plugin.name})</span>
-        )}
-      </div>
-
-      {plugin?.description && (
-        <p className="text-xs text-fg-muted mt-1">{plugin.description}</p>
-      )}
-
-      {step.condition && (
-        <p className="text-xs text-fg-muted mt-2">
-          Only runs if:{' '}
-          <span className="font-mono text-fg">{step.condition}</span>
-        </p>
-      )}
-
-      <div className="grid sm:grid-cols-3 gap-3 mt-3">
-        <div>
-          <h4 className="text-xs font-semibold text-fg mb-1">Config</h4>
-          {configEntries.length === 0 ? (
-            <p className="text-xs text-fg-muted">none</p>
-          ) : (
-            <ul className="text-xs space-y-0.5">
-              {configEntries.map(([key, value]) => (
-                <li key={key} className="font-mono">
-                  <span className="text-fg">{key}</span>
-                  <span className="text-fg-muted">
-                    : {JSON.stringify(value)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-        <div>
-          <h4 className="text-xs font-semibold text-fg mb-1">Inputs</h4>
-          {inputEntries.length === 0 ? (
-            <p className="text-xs text-fg-muted">none</p>
-          ) : (
-            <ul className="text-xs space-y-0.5">
-              {inputEntries.map(([name, source]) => (
-                <li key={name} className="font-mono">
-                  <span className="text-fg">{name}</span>
-                  <span className="text-fg-muted"> ← {source}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-        <div>
-          <h4 className="text-xs font-semibold text-fg mb-1">Outputs</h4>
-          {plugin?.outputs === null || plugin?.outputs === undefined ? (
-            <p className="text-xs text-fg-muted italic">not declared</p>
-          ) : plugin.outputs.length === 0 ? (
-            <p className="text-xs text-fg-muted">none</p>
-          ) : (
-            <ul className="text-xs space-y-0.5">
-              {plugin.outputs.map((o) => (
-                <li key={o.name} className="font-mono">
-                  <span className="text-fg">
-                    {step.id}.{o.name}
-                  </span>
-                  <span className="text-fg-muted"> : {o.type}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
-    </li>
-  )
-}
-
-/** Readable view of a workflow (trigger, inputs, steps and what each takes
- * and gives) so an automation can be understood without reading its YAML. The
- * Overview of a workflow's page. */
+/** A workflow in words: when it runs, what it asks for and what each step
+ * does, the way the builder says it. The details are in the editor. */
 export function WorkflowSummary({
   stem,
   plugins,
@@ -144,62 +57,83 @@ export function WorkflowSummary({
   plugins: PluginInfo[]
 }) {
   const { data: detail, isLoading } = useWorkflow(stem)
-  const pluginsById = new Map(plugins.map((p) => [p.id, p]))
+  const { data: schemas = [] } = useSchemas()
+  if (isLoading || !detail)
+    return <p className="text-sm text-fg-muted">Loading…</p>
+
+  const inputs: DraftInput[] = Object.entries(detail.inputs ?? {}).map(
+    ([key, i]) => ({
+      key,
+      type: i.type === 'files' ? 'files' : 'value',
+      label: i.label ?? '',
+    }),
+  )
+  const steps: DraftStep[] = (detail.step_list ?? []).map((s) => ({
+    ...s,
+    condition: s.condition ?? '',
+  }))
+  const ctx = {
+    schema: detail.record_schema ?? '',
+    config: {},
+    settings: [],
+    schemas,
+    collections: [],
+    takesFiles: inputs.some((i) => i.type === 'files'),
+  }
 
   return (
-    <div className="flex flex-col gap-5">
-      {isLoading || !detail ? (
-        <div className="flex-1 flex items-center justify-center text-sm text-fg-muted">
-          Loading…
-        </div>
-      ) : (
-        <>
-          {detail.description && (
-            <p className="text-sm text-fg-muted">{detail.description}</p>
-          )}
-
-          <div>
-            <h3 className="text-sm font-semibold text-fg mb-2">Trigger</h3>
-            <TriggerSummary triggers={detail.triggers} />
-          </div>
-
-          {detail.inputs && Object.keys(detail.inputs).length > 0 && (
-            <div>
-              <h3 className="text-sm font-semibold text-fg mb-2">
-                Manual run inputs
-              </h3>
-              <ul className="text-sm space-y-1">
-                {Object.entries(detail.inputs).map(([name, input]) => (
-                  <li key={name} className="font-mono text-fg">
-                    {input.label ?? name}
-                    <span className="text-fg-muted font-sans">
-                      {' '}
-                      — {input.type}
-                      {input.description ? `, ${input.description}` : ''}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          <div>
-            <h3 className="text-sm font-semibold text-fg mb-2">
-              Steps ({(detail.step_list ?? []).length})
-            </h3>
-            <ul className="space-y-3">
-              {(detail.step_list ?? []).map((step, i) => (
-                <StepCard
-                  key={step.id}
-                  step={step}
-                  index={i}
-                  plugin={pluginsById.get(step.plugin)}
-                />
-              ))}
-            </ul>
-          </div>
-        </>
+    <div className="flex max-w-3xl flex-col gap-4">
+      {detail.description && (
+        <p className="text-sm text-fg">{detail.description}</p>
       )}
+      <Card title="When it runs">
+        <ul className="space-y-1 text-sm">
+          {whenItRuns(detail, schemas).map((line) => (
+            <li key={line}>{line}.</li>
+          ))}
+          {inputs.length > 0 && (
+            <li className="text-fg-muted">
+              It asks for{' '}
+              {inputs
+                .map((i) => i.label || (i.type === 'files' ? 'files' : i.key))
+                .join(', ')}{' '}
+              each time.
+            </li>
+          )}
+        </ul>
+      </Card>
+      <Card title="What it does">
+        <ol className="space-y-3">
+          {steps.map((step, i) => {
+            const plugin = plugins.find((p) => p.id === step.plugin)
+            return (
+              <li key={step.id} className="flex gap-3">
+                <span className="self-start">
+                  <Badge variant="accent">{i + 1}</Badge>
+                </span>
+                <div className="min-w-0 flex-1 space-y-1">
+                  <p className="text-sm font-medium">
+                    {plugin?.name ?? step.plugin}
+                    {step.condition && (
+                      <span className="ml-2 text-xs font-normal text-fg-muted">
+                        only in some cases
+                      </span>
+                    )}
+                  </p>
+                  <StepSays
+                    step={step}
+                    index={i}
+                    steps={steps}
+                    inputs={inputs}
+                    plugins={plugins}
+                    ctx={ctx}
+                  />
+                </div>
+              </li>
+            )
+          })}
+        </ol>
+      </Card>
     </div>
   )
 }

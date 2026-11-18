@@ -481,7 +481,12 @@ def test_the_preview_tries_the_patterns_without_saving_anything(client):
             "kind": "date",
         },
     ).json()
-    assert body == {"problems": [None], "value": "2024-03-15", "error": None}
+    assert body == {
+        "problems": [None],
+        "value": "2024-03-15",
+        "error": None,
+        "results": [],
+    }
     body = client.post(
         url,
         json={
@@ -491,3 +496,20 @@ def test_the_preview_tries_the_patterns_without_saving_anything(client):
         },
     ).json()
     assert body["value"] is None and "not a whole number" in body["error"]
+
+
+def test_the_preview_tries_a_pattern_on_many_names(client):
+    """A pattern built from one example is shown on every name the person has."""
+    body = client.post(
+        "/api/schemas/from-filename/preview",
+        json={
+            "patterns": [r"sel_([0-9]+)"],
+            "kind": "integer",
+            "filenames": ["sel_07.csv", "other.csv", "sel_x.csv"],
+        },
+    ).json()
+    assert body["results"] == [
+        {"filename": "sel_07.csv", "value": 7, "error": None},
+        {"filename": "other.csv", "value": None, "error": None},
+        {"filename": "sel_x.csv", "value": None, "error": None},
+    ]

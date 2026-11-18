@@ -62,4 +62,33 @@ describe('describeSyncProgress', () => {
     expect(text.title).toBe('Sending files to the server')
     expect(text.detail).toBe('files · 1 of 4')
   })
+
+  it('says how much is being sent in all, and goes by bytes', () => {
+    const text = describeSyncProgress({
+      phase: 'sending',
+      done: 1,
+      total: 4,
+      kind: null,
+      bytes_done: 250 * 1024 * 1024,
+      bytes_total: 1024 * 1024 * 1024,
+      rate: 10 * 1024 * 1024,
+    })
+    expect(text.count).toBe(
+      '1 of 4 files · 250 MB of 1.0 GB · 10.0 MB/s · about 77 seconds left',
+    )
+    expect(text.fraction).toBeCloseTo(250 / 1024)
+  })
+
+  it('shows the size from the start, before anything has gone', () => {
+    const text = describeSyncProgress({
+      phase: 'sending',
+      done: 0,
+      total: 2,
+      kind: null,
+      bytes_done: 0,
+      bytes_total: 2048,
+    })
+    expect(text.count).toContain('of 2.0 KB')
+    expect(text.fraction).toBe(0)
+  })
 })

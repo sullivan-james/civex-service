@@ -4,18 +4,19 @@ import logging
 from typing import Any
 
 from civex_plugin_sdk.plugin_base import IOSpec
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from civex.domain.dtos import FileRef
 from civex_plugin_sdk import Ctx
 from civex_plugin_sdk import Plugin as PluginBase
+from civex.plugins.hints import hint, says
 
 log = logging.getLogger(__name__)
 
 
 class Plugin(PluginBase):
     id = "civex.load_file"
-    name = "Load File"
+    name = "Read a file"
     description = (
         "Load the bytes of a file stored in a `file` field on the trigger record."
     )
@@ -23,14 +24,17 @@ class Plugin(PluginBase):
     capabilities: list[str] = ["read"]
     inputs: list[IOSpec] = []
     outputs = [
-        IOSpec(name="bytes", type="bytes", description="The file's raw contents."),
-        IOSpec(name="filename", type="string", description="Original filename."),
-        IOSpec(name="sha256", type="string", description="Content hash of the file."),
+        IOSpec(name="bytes", type="bytes", description="The file's contents."),
+        IOSpec(name="filename", type="string", description="The file's name."),
+        IOSpec(name="sha256", type="string", description="The file's content hash."),
     ]
 
     class Config(BaseModel):
+        model_config = ConfigDict(json_schema_extra=says("Reads the file in {field}."))
         field: str = Field(
-            description="Name of the `file` field on the trigger record to load."
+            title="File field",
+            json_schema_extra=hint("field", dtypes=["file"]),
+            description="The file field of the record it runs on.",
         )
 
     def invoke(

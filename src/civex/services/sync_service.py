@@ -467,6 +467,7 @@ class SyncService:
         invite. The answer's `user_code` is for a person to approve there;
         `connect(url, None, login=...)` then waits for that and joins."""
         url = url.strip().rstrip("/")
+        self._refuse_following_while_serving()
         _check_address(url)
         return self._make_transport(url, self._credentials(url)).request_login()
 
@@ -498,6 +499,7 @@ class SyncService:
         on_code: Callable[[LoginStarted], None] | None = None,
     ) -> tuple[str, Hello, str]:
         url = url.strip().rstrip("/")
+        self._refuse_following_while_serving()
         _check_address(url)
         probe = self._make_transport(url, self._credentials(url))
         if invite and invite.strip():
@@ -636,7 +638,15 @@ class SyncService:
 
     def set_serving(self, on: bool) -> None:
         """Whether this project accepts devices (is an authority for them). The
-        devices it knows stay on record either way."""
+        devices it knows stay on record either way. A project following an
+        authority can't be one (`_one_role`)."""
+        remote = self._config.sync.remote
+        if on and remote and not self._config.sync.serve:
+            raise ValidationError(
+                f"This project follows {remote}, so it can't be a server for other "
+                f"devices too: they can follow {remote} instead. To make this "
+                "project the server, disconnect it first."
+            )
         self._config.sync.serve = on
         self._config_store.save(self._config)
 
@@ -665,6 +675,34 @@ class SyncService:
             )
         self._config.sync.interval_seconds = seconds
         self._config_store.save(self._config)
+
+    def _one_role(self) -> str | None:
+        """Why this project can't sync as it is set up, when it both serves
+        devices and follows an authority: the star has one authority, so such a
+        project's records would go up while its files (which only a follower
+        sends) never did, and what its own devices change would reach nobody
+        else. None when it is one or the other. The one rule; connecting,
+        serving and every sync ask it."""
+        remote = self._config.sync.remote
+        if not (remote and self._config.sync.serve):
+            return None
+        return (
+            f"This project follows {remote} and is also a server for other "
+            "devices: it can be one or the other. To keep following "
+            f"{remote}, stop it serving (Settings → Sync, or `civex sync "
+            "authority disable`) and connect its devices to "
+            f"{remote} instead; to keep it a server, disconnect it."
+        )
+
+    def _refuse_following_while_serving(self) -> None:
+        if self._config.sync.serve:
+            raise SyncError(
+                "This project is a server other devices follow, so it can't "
+                "follow another server too. Stop it serving first (Settings → "
+                "Sync, or `civex sync authority disable`); its devices can then "
+                "connect to the new server.",
+                retryable=False,
+            )
 
     def _check_protocol(self, hello: Hello) -> None:
         theirs = (hello.protocol_min, hello.protocol_max)
@@ -747,6 +785,8 @@ class SyncService:
             pass
 
     def _sync(self) -> SyncReport:
+        if problem := self._one_role():
+            raise SyncError(problem, retryable=False)
         transport = self._transport()
         hello = transport.hello()
         self._check_protocol(hello)
@@ -1145,6 +1185,12 @@ class SyncService:
             lacking.extend(sha for sha in page if sha in missing)
         if not lacking:
             return
+        # How much is to go, from the inventory (one lookup); a file it doesn't
+        # know the size of is counted when it is read.
+        sizes = {
+            sha: rows[0][1] for sha, rows in self._files.copies(lacking).items() if rows
+        }
+        total_bytes = sum(sizes.get(sha, 0) for sha in lacking)
         rate = RateWindow()
         done = sent_bytes = 0
         said = 0.0
@@ -1160,6 +1206,7 @@ class SyncService:
                         done,
                         len(lacking),
                         bytes_done=sent_bytes,
+                        bytes_total=total_bytes,
                         rate=rate.add(now, sent_bytes),
                     )
                 )

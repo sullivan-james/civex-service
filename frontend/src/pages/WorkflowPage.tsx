@@ -2,7 +2,12 @@ import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { usePlugins } from '../hooks/usePlugins'
 import { useLibrary, useLibraryItem, useRemoteStatus } from '../hooks/useRemote'
-import { useDeleteWorkflow, useWorkflows } from '../hooks/useWorkflows'
+import {
+  useDeleteWorkflow,
+  useSetWorkflowEnabled,
+  useWorkflow,
+  useWorkflows,
+} from '../hooks/useWorkflows'
 import { errorMessage } from '../lib/errors'
 import {
   sharingLabel,
@@ -25,10 +30,12 @@ import { PublishDialog } from '../components/workflows/PublishDialog'
 import { WorkflowRunModal } from '../components/workflows/WorkflowRunModal'
 import { WorkflowSharing } from '../components/workflows/WorkflowSharing'
 import { WorkflowSummary } from '../components/workflows/WorkflowSummary'
+import { TrialPanel } from '../components/workflows/TrialPanel'
 import { Slot } from '../components/host/Slot'
 
 const TABS = [
   { id: 'overview', label: 'Overview' },
+  { id: 'try', label: 'Preview' },
   { id: 'sharing', label: 'Sharing' },
 ] as const
 type TabId = (typeof TABS)[number]['id']
@@ -46,6 +53,8 @@ export default function WorkflowPage() {
   const { data: library = [] } = useLibrary()
   const { data: plugins = [] } = usePlugins()
   const deleteWf = useDeleteWorkflow()
+  const setEnabled = useSetWorkflowEnabled()
+  const { data: detail } = useWorkflow(tab === 'try' ? stem : '')
   const [running, setRunning] = useState(false)
   const [installing, setInstalling] = useState(false)
   const [publishing, setPublishing] = useState(false)
@@ -79,7 +88,15 @@ export default function WorkflowPage() {
   const state = sharingState(row)
   const badge = sharingLabel(row)
   const secondary: PageMenuAction[] = []
+  const off = !!row.local && !row.local.enabled && row.triggers.length > 0
+  const toggle = (enabled: boolean) => setEnabled.mutate({ stem, enabled })
   if (row.local) {
+    if (row.triggers.length > 0 && !off) {
+      secondary.push({
+        label: 'Turn off',
+        onClick: () => toggle(false),
+      })
+    }
     secondary.push({
       label: 'Edit',
       onClick: () => navigate(`/workflows/${encodeURIComponent(stem)}/edit`),
@@ -110,23 +127,25 @@ export default function WorkflowPage() {
       breadcrumbs={[...breadcrumbs, { label: row.name }]}
       title={row.name}
       meta={
-        <span className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="font-mono text-fg-muted">{stem}.yaml</span>
-          {row.triggers.length === 0 ? (
-            <span className="text-fg-muted">Runs by hand</span>
-          ) : (
-            row.triggers.map((t) => (
-              <span key={t} className="text-fg-muted">
-                Runs on {t}
-              </span>
-            ))
-          )}
-          {sharing && <Badge variant={badge.variant}>{badge.label}</Badge>}
-        </span>
+        (off || sharing) && (
+          <span className="flex flex-wrap items-center gap-2 text-sm">
+            {off && <Badge variant="attention">Off</Badge>}
+            {sharing && <Badge variant={badge.variant}>{badge.label}</Badge>}
+          </span>
+        )
       }
       action={
         <>
           <Slot name="workflow.actions" props={{ workflow: stem }} />
+          {off && (
+            <Button
+              onClick={() => toggle(true)}
+              disabled={setEnabled.isPending}
+              title="Its triggers start runs once it is on"
+            >
+              Turn on
+            </Button>
+          )}
           {row.local ? (
             <Button variant="primary" onClick={() => setRunning(true)}>
               Run
@@ -146,6 +165,29 @@ export default function WorkflowPage() {
           <WorkflowSummary stem={stem} plugins={plugins} />
         ) : (
           <LibraryOverview stem={stem} />
+        )}
+      </TabPanel>
+      <TabPanel id="try" value={tab}>
+        {row.local && detail ? (
+          <div className="max-w-3xl">
+            <TrialPanel
+              content={detail.content}
+              schema={detail.record_schema ?? ''}
+              inputs={detail.inputs ?? {}}
+              plugins={plugins}
+              after={(allOk) =>
+                allOk && off ? (
+                  <Button onClick={() => toggle(true)}>Turn it on</Button>
+                ) : null
+              }
+            />
+          </div>
+        ) : row.local ? (
+          <p className="text-sm text-fg-muted">Loading…</p>
+        ) : (
+          <p className="text-sm text-fg-muted">
+            Install it first to try it on a record here.
+          </p>
         )}
       </TabPanel>
       <TabPanel id="sharing" value={tab}>

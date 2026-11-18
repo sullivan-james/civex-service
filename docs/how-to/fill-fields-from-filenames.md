@@ -165,7 +165,7 @@ steps:
 
 The plugin reads names with the same tokens as the field rule, in two steps:
 `pattern` captures the part of the name, `date_format` reads it. See
-[Extract from Filename](../reference/plugins/extract_from_filename.md) for every
+[Take a value from a file name](../reference/plugins/extract_from_filename.md) for every
 option. A workflow runs *after* the record is saved, so it can't fill a required
 or unique field in time; the rule above can.
 

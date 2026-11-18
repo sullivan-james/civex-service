@@ -2627,6 +2627,12 @@ class RecordService:
                 on_level(len(found))
         return found
 
+    def recently_changed(self, schema_name: str, limit: int = 5) -> list[RecordDTO]:
+        """The live records of this schema changed most recently, newest
+        first, at most `limit`: samples to try a workflow on."""
+        schema = self._schema_svc.get(schema_name)
+        return self.get_many(self._records.recently_changed(schema.id, limit))
+
     def get_many(self, record_ids: list[str]) -> list[RecordDTO]:
         """These live records in the order asked, in the full response form
         (names, reference labels, where each file is stored), in a fixed number

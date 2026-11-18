@@ -226,3 +226,38 @@ def test_a_failed_upload_waits_a_while_and_does_not_hold_up_syncing():
     assert len(r.sends) == 1  # backing off
     r.pending = 1
     assert r.tick() == "report"  # syncing carries on regardless
+
+
+def test_sending_over_several_passes_is_one_bar():
+    """Each pass counts from what is left; the bar adds what earlier passes
+    sent, so it never starts again while the run carries on."""
+    from civex.domain.sync import SENDING, SyncProgress
+
+    r = Rig()
+    passes = [  # (files left, bytes left, files this pass sends, stopped)
+        (3, 300, 2, True),
+        (1, 100, 1, False),
+    ]
+
+    def send_files(**kw):
+        left, size, goes, stopped = passes.pop(0)
+        tell = kw["progress"]
+        tell(SyncProgress(SENDING, 0, left, bytes_total=size))
+        tell(SyncProgress(SENDING, goes, left, bytes_done=goes * 100, bytes_total=size))
+        return SimpleNamespace(sent=goes, owed=[], stopped=stopped)
+
+    seen: list = []
+    r.worker._on_files = seen.append
+    make = r._ctx
+
+    def ctx(config):
+        c = make(config)
+        c.sync_svc.send_files = send_files
+        return c
+
+    r.worker._open = ctx
+    r.files_tick()
+    r.files_tick(1)
+    bars = [(p.done, p.total, p.bytes_done, p.bytes_total) for p in seen if p]
+    assert bars == [(0, 3, 0, 300), (2, 3, 200, 300), (2, 3, 200, 300), (3, 3, 300, 300)]
+    assert seen[-1] is None  # all sent: the bar goes

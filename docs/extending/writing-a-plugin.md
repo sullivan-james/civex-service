@@ -81,6 +81,54 @@ class Config(BaseModel):
     mode: str = "linear"
 ```
 
+#### How the workflow builder shows a setting
+
+The workflow builder makes a form from your `Config`: each setting's `title` is its label and its `description` goes in a tooltip. By default a setting gets a plain text, number, checkbox or list box. To get a better control, say what the setting is with an `x-civex` entry in its JSON schema:
+
+```python
+from pydantic import Field
+
+class Config(BaseModel):
+    field: str = Field(
+        title="Field with the recording",
+        json_schema_extra={"x-civex": {"kind": "field", "dtypes": ["file"]}},
+    )
+    method: str = Field(
+        "fast",
+        title="Method",
+        json_schema_extra={"x-civex": {"kind": "choice", "choices": [
+            {"value": "fast", "label": "Fast"},
+            {"value": "exact", "label": "Exact"},
+        ]}},
+    )
+```
+
+| `kind` | Control | Other keys |
+|---|---|---|
+| `field` | A list of the fields of the record the workflow runs on | `of`: the setting that holds a schema, to list that schema's fields instead; `dtypes`: the field types to list |
+| `schema` | A list of schemas | |
+| `collection` | A list of collections (blank: the record's own) | |
+| `record` | A record id (blank: the record the workflow runs on) | |
+| `choice` | A list of `choices` (`{value, label}`) | |
+| `pattern` | A regular expression with one capture group, with **Build from an example…**, which writes it from a file name the person marks | `on`: `field` (the names of the files in the setting called `field`) or `files` (files given when it is run); `date_format`: the setting a date in the name fills; `read_as`: the setting saying what the value is read as (`string`, `integer`, `date`, …); `keys: true` when the value is matched against records, so names giving the same key are shown |
+| `date_format` | A token format such as `YYYYMMDD-HHmmSS` | `pattern`: the pattern setting it goes with |
+
+Add `"advanced": true` to put a setting under **More settings**. Nothing is checked from these hints: they only choose the control, and a setting without one still works.
+
+The builder and a workflow's **Overview** also say what each step does in one sentence. Give it on the `Config` model with `says()`, naming settings and inputs in braces; each is filled in with what the person chose, by its name in the app ("Recorded on", not `recorded_on`), and shows as "…" until chosen:
+
+```python
+from pydantic import BaseModel, ConfigDict
+from civex.plugins.hints import says
+
+class Config(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra=says("Measures the pitch of the recording in {field}.")
+    )
+```
+
+The sentence is stored as `x-civex-says` in the JSON schema. Write it the way a person would describe the step to a colleague, and write each input's and output's `description` the same way: the builder labels an input by the first clause of its description ("The files to put on records." becomes **Files to put on records**) and an earlier step's output by its description ("Step 1: the file's contents").
+
 ### `invoke()`
 
 ```python
