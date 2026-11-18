@@ -188,7 +188,8 @@ export default function GeoMap(props: GeoMapProps) {
         multiWorld: true,
       }),
     })
-    map.getTargetElement().style.background = sea
+    const target = map.getTargetElement()
+    if (target) target.style.background = sea
     parts.current = {
       map,
       draftSource,
