@@ -27,7 +27,7 @@ export function describeAmounts({
       ? `${done.toLocaleString()} of ${total.toLocaleString()}`
       : done.toLocaleString()
   const shown = [unit ? `${of} ${unit}` : of]
-  if (bytesDone)
+  if (bytesDone || bytesTotal)
     shown.push(
       bytesTotal
         ? `${formatSize(bytesDone)} of ${formatSize(bytesTotal)}`

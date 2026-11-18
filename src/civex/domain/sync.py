@@ -557,9 +557,11 @@ class SyncProgress:
     done: int
     total: int | None
     kind: str | None = None
-    # For downloading files: bytes so far, how fast (`domain/rates`).
+    # For moving files: bytes so far, how many in all (None when unknown),
+    # how fast (`domain/rates`).
     bytes_done: int = 0
     rate: float = 0.0
+    bytes_total: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -568,6 +570,7 @@ class SyncProgress:
             "total": self.total,
             "kind": self.kind,
             "bytes_done": self.bytes_done,
+            "bytes_total": self.bytes_total,
             "rate": self.rate,
         }
 

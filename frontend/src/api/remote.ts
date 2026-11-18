@@ -171,8 +171,10 @@ export interface SyncProgress {
   done: number
   total: number | null
   kind: string | null
-  /** Moving files: bytes so far, and how fast (bytes a second). */
+  /** Moving files: bytes so far, how many in all (null when not known), and
+   * how fast (bytes a second). */
   bytes_done?: number
+  bytes_total?: number | null
   rate?: number
 }
 
