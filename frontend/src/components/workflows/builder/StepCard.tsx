@@ -1,4 +1,4 @@
-import type { PluginInfo } from '../../../api/plugins'
+import type { PluginInfo, PluginIOSpec } from '../../../api/plugins'
 import {
   Badge,
   Card,
@@ -12,6 +12,7 @@ import {
 import { ArrowDown, ArrowUp, Trash2 } from '../../ui/icons'
 import {
   brokenInputs,
+  inputLabel,
   missingSettings,
   settingsOf,
   sourcesFor,
@@ -22,8 +23,13 @@ import {
   writeCondition,
   type ConditionOp,
 } from '../../../utils/stepCondition'
-import type { DraftInput, DraftStep } from '../../../utils/workflowModel'
+import {
+  INPUT_SOURCE,
+  type DraftInput,
+  type DraftStep,
+} from '../../../utils/workflowModel'
 import { SettingControl, type SettingContext } from './SettingControl'
+import { StepSays } from './StepSays'
 
 const CATEGORY_LABELS: Record<string, string> = {
   'data-sources': 'Read',
@@ -187,6 +193,102 @@ function ConditionEditor({
   )
 }
 
+const lowerFirst = (t: string) => t.charAt(0).toLowerCase() + t.slice(1)
+
+/** Where an input of the step comes from. With one thing that can give it,
+ * already chosen, that is said in words; a list only when there is a choice. */
+function InputSource({
+  spec,
+  step,
+  index,
+  steps,
+  inputs,
+  plugins,
+  broken,
+  showMissing,
+  onChange,
+}: {
+  spec: PluginIOSpec
+  step: DraftStep
+  index: number
+  steps: DraftStep[]
+  inputs: DraftInput[]
+  plugins: PluginInfo[]
+  broken: boolean
+  showMissing: boolean
+  onChange: (ref: string) => void
+}) {
+  const { fitting, others } = sourcesFor(spec, index, steps, inputs, plugins)
+  const current = step.inputs[spec.name] ?? ''
+  const all = [...fitting, ...others]
+  const chosen = all.find((s) => s.ref === current)
+  const label = inputLabel(spec)
+  const error = broken
+    ? 'This came from a step that is now later or gone: choose again.'
+    : showMissing && spec.required && !current
+      ? 'Choose where this comes from.'
+      : undefined
+  if (all.length === 0) {
+    return (
+      <Field label={label} info={spec.description || undefined} error={error}>
+        <p className="text-sm text-fg-muted">
+          Nothing before this step gives this. Add a step above it that does, or
+          have it ask for files when it is started.
+        </p>
+      </Field>
+    )
+  }
+  if (chosen && fitting.length === 1 && fitting[0] === chosen) {
+    return (
+      <Field label={label} info={spec.description || undefined}>
+        <p className="text-sm">
+          {chosen.ref.startsWith(`${INPUT_SOURCE}.`) ? (
+            chosen.label
+          ) : (
+            <>
+              <span className="text-fg-muted">
+                From {lowerFirst(chosen.origin)}:
+              </span>{' '}
+              {chosen.words}
+            </>
+          )}
+        </p>
+      </Field>
+    )
+  }
+  return (
+    <Field
+      label={label}
+      info={spec.description || undefined}
+      required={spec.required}
+      error={error}
+    >
+      <Select
+        size="sm"
+        value={current}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value="">— where does it come from? —</option>
+        {current && !chosen && <option value={current}>{current}</option>}
+        {fitting.map((s) => (
+          <option key={s.ref} value={s.ref}>
+            {s.label}
+          </option>
+        ))}
+        {others.length > 0 && (
+          <optgroup label="Other values (may not fit)">
+            {others.map((s) => (
+              <option key={s.ref} value={s.ref}>
+                {s.label}
+              </option>
+            ))}
+          </optgroup>
+        )}
+      </Select>
+    </Field>
+  )
+}
+
 export function StepCard(props: Props) {
   const {
     step,
@@ -257,6 +359,14 @@ export function StepCard(props: Props) {
       }
     >
       <div className="space-y-3" data-step={step.id}>
+        <StepSays
+          step={step}
+          index={index}
+          steps={steps}
+          inputs={inputs}
+          plugins={plugins}
+          ctx={settingCtx}
+        />
         <Field
           label="What it does"
           info={plugin?.description || undefined}
@@ -273,62 +383,25 @@ export function StepCard(props: Props) {
           />
         </Field>
 
-        {(plugin?.inputs ?? []).map((spec) => {
-          const { fitting, others } = sourcesFor(
-            spec,
-            index,
-            steps,
-            inputs,
-            plugins,
-          )
-          const current = step.inputs[spec.name] ?? ''
-          const known = [...fitting, ...others].some((s) => s.ref === current)
-          return (
-            <Field
-              key={spec.name}
-              label={`Uses: ${spec.description?.split(/[.;]/)[0] || spec.name}`}
-              info={spec.description || undefined}
-              required={spec.required}
-              error={
-                broken.has(spec.name)
-                  ? 'This came from a step that is now later or gone: choose again.'
-                  : showMissing && spec.required && !current
-                    ? 'Choose where this comes from.'
-                    : undefined
-              }
-            >
-              <Select
-                size="sm"
-                value={current}
-                onChange={(e) =>
-                  onChange({
-                    ...step,
-                    inputs: { ...step.inputs, [spec.name]: e.target.value },
-                  })
-                }
-              >
-                <option value="">— choose —</option>
-                {current && !known && (
-                  <option value={current}>{current}</option>
-                )}
-                {fitting.map((s) => (
-                  <option key={s.ref} value={s.ref}>
-                    {s.label}
-                  </option>
-                ))}
-                {others.length > 0 && (
-                  <optgroup label="Other values (may not fit)">
-                    {others.map((s) => (
-                      <option key={s.ref} value={s.ref}>
-                        {s.label}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-              </Select>
-            </Field>
-          )
-        })}
+        {(plugin?.inputs ?? []).map((spec) => (
+          <InputSource
+            key={spec.name}
+            spec={spec}
+            step={step}
+            index={index}
+            steps={steps}
+            inputs={inputs}
+            plugins={plugins}
+            broken={broken.has(spec.name)}
+            showMissing={showMissing}
+            onChange={(ref) =>
+              onChange({
+                ...step,
+                inputs: { ...step.inputs, [spec.name]: ref },
+              })
+            }
+          />
+        ))}
 
         {basic.map(control)}
         {advanced.length > 0 && (
