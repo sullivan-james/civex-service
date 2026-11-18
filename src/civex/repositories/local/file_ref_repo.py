@@ -404,6 +404,7 @@ class LocalFileReferenceRepository:
                     FileReference.volume,
                 ).where(FileReference.volume.is_not(None))
             )
+            if volume is not None
         }
         newest: dict[str, str] = {
             sha: volume

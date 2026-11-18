@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import nulls_last, select
+from sqlalchemy import select
 from civex.repositories.local.record_repo import parent_allows_restore
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -67,7 +67,7 @@ class LocalSchemaRepository:
             self._s.query(Field)
             .filter_by(schema_id=schema_id)
             .filter(Field.deleted_at.is_(None))
-            .order_by(nulls_last(Field.position), Field.created_at)
+            .order_by(Field.position.asc().nulls_last(), Field.created_at)
             .all()
         )
         return [_field_to_dto(r) for r in rows]

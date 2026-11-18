@@ -6,6 +6,7 @@ router this replaces -- these tests cover the behavior for the first time.
 from __future__ import annotations
 
 import pytest
+from civex_plugin_sdk.protocol import PROTOCOL_VERSION
 
 from civex.context import AppContext
 from civex.domain.exceptions import NotFoundError, ValidationError
@@ -101,15 +102,15 @@ def _as_saved(code: str) -> str:
     return manifest.write(code, described)
 
 
-_SAVED_HEADER_SOURCE = """\
+_SAVED_HEADER_SOURCE = f"""\
 # /// script
 # [tool.civex]
 # id = "project.my_plugin"
 # name = "My Plugin"
 # category = "general"
 # capabilities = []
-# protocol_version = 2
-# config_schema = "{\\"properties\\":{},\\"title\\":\\"Config\\",\\"type\\":\\"object\\"}"
+# protocol_version = {PROTOCOL_VERSION}
+# config_schema = "{{\\"properties\\":{{}},\\"title\\":\\"Config\\",\\"type\\":\\"object\\"}}"
 # ///
 """
 
