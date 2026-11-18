@@ -85,7 +85,9 @@ export function Modal({
         if (dismissible && e.target === dialogRef.current)
           dialogRef.current?.close()
       }}
-      className="fixed inset-0 m-0 h-full max-h-none w-full max-w-none border-0 bg-transparent p-4 flex items-center justify-center backdrop:bg-overlay-scrim"
+      // A <dialog> takes the browser's own text colour (CanvasText), not the
+      // page's, so it is set here or every popup is dark text in dark mode.
+      className="fixed inset-0 m-0 h-full max-h-none w-full max-w-none border-0 bg-transparent p-4 flex items-center justify-center text-fg backdrop:bg-overlay-scrim"
     >
       <div
         className={`bg-canvas rounded-lg border border-border shadow-lg w-full max-h-full flex flex-col ${sizeClasses[size]} ${className}`}
