@@ -7,11 +7,12 @@ from pydantic import BaseModel, Field
 
 from civex_plugin_sdk import Ctx
 from civex_plugin_sdk import Plugin as PluginBase
+from civex.plugins.hints import hint
 
 
 class Plugin(PluginBase):
     id = "civex.save_field"
-    name = "Save Field"
+    name = "Set a field"
     description = "Write a value to a single field on the trigger record."
     category = "outputs"
     capabilities: list[str] = ["read", "write_records"]
@@ -20,7 +21,9 @@ class Plugin(PluginBase):
 
     class Config(BaseModel):
         field: str = Field(
-            description="Name of the field on the trigger record to write to."
+            title="Field to set",
+            json_schema_extra=hint("field"),
+            description="Name of the field on the trigger record to write to.",
         )
 
     def invoke(

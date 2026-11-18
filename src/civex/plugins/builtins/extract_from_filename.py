@@ -9,11 +9,12 @@ from pydantic import BaseModel, Field
 from civex.domain import filename_extract
 from civex_plugin_sdk import Ctx
 from civex_plugin_sdk import Plugin as PluginBase
+from civex.plugins.hints import choices, hint
 
 
 class Plugin(PluginBase):
     id = "civex.extract_from_filename"
-    name = "Extract from Filename"
+    name = "Take a value from a file name"
     description = (
         "Apply a regex to a file field's filename and optionally convert the "
         "captured text to a date/datetime/number."
@@ -41,20 +42,34 @@ class Plugin(PluginBase):
 
     class Config(BaseModel):
         field: str = Field(
+            title="Field with the file name",
+            json_schema_extra=hint("field", dtypes=["file", "file_list", "string"]),
             description="Field on the trigger record holding the filename to match "
-            "(a `file`/`file_list` field, or a plain string field)."
+            "(a `file`/`file_list` field, or a plain string field).",
         )
         pattern: str = Field(
+            title="The part of the name to take",
+            json_schema_extra=hint("pattern", on="field", date_format="date_format"),
             default=r"(.+)",
             description="Regex applied to the filename. The first capture group "
             "(or the whole match if there is none) is extracted.",
         )
         output_type: str = Field(
+            title="Read it as",
+            json_schema_extra=choices(
+                ("string", "Text"),
+                ("integer", "Whole number"),
+                ("float", "Number"),
+                ("date", "Date"),
+                ("datetime", "Date and time"),
+            ),
             default="string",
             description="Type to convert the captured text to: "
             "string | integer | float | date | datetime.",
         )
         date_format: str | None = Field(
+            title="Date format",
+            json_schema_extra=hint("date_format", pattern="pattern"),
             default=None,
             description="Token format for parsing the captured text when "
             "`output_type` is date/datetime, e.g. 'YYYYMMDD-HHmmSS'. Tokens are "

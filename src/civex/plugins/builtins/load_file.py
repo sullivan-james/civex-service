@@ -9,13 +9,14 @@ from pydantic import BaseModel, Field
 from civex.domain.dtos import FileRef
 from civex_plugin_sdk import Ctx
 from civex_plugin_sdk import Plugin as PluginBase
+from civex.plugins.hints import hint
 
 log = logging.getLogger(__name__)
 
 
 class Plugin(PluginBase):
     id = "civex.load_file"
-    name = "Load File"
+    name = "Read a file"
     description = (
         "Load the bytes of a file stored in a `file` field on the trigger record."
     )
@@ -30,7 +31,9 @@ class Plugin(PluginBase):
 
     class Config(BaseModel):
         field: str = Field(
-            description="Name of the `file` field on the trigger record to load."
+            title="File field",
+            json_schema_extra=hint("field", dtypes=["file"]),
+            description="Name of the `file` field on the trigger record to load.",
         )
 
     def invoke(

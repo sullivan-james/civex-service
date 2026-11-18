@@ -7,11 +7,12 @@ from pydantic import BaseModel, Field
 
 from civex_plugin_sdk import Ctx
 from civex_plugin_sdk import Plugin as PluginBase
+from civex.plugins.hints import hint
 
 
 class Plugin(PluginBase):
     id = "civex.get_field"
-    name = "Get Field"
+    name = "Read a field"
     description = "Read a single field from the record that triggered the workflow."
     category = "data-access"
     capabilities: list[str] = ["read"]
@@ -26,7 +27,9 @@ class Plugin(PluginBase):
 
     class Config(BaseModel):
         field: str = Field(
-            description="Name of the field to read from the trigger record."
+            title="Field",
+            json_schema_extra=hint("field"),
+            description="Name of the field to read from the trigger record.",
         )
 
     def invoke(

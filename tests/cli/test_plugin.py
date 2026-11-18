@@ -27,7 +27,7 @@ def test_plugin_info_shows_description_inputs_outputs_and_config(
 ) -> None:
     result = runner.invoke(app, ["plugin", "info", "civex.get_field"])
     assert result.exit_code == 0
-    assert "Get Field" in result.output
+    assert "Read a field" in result.output
     assert "civex.get_field" in result.output
     assert "value" in result.output  # declared output name
     assert "field" in result.output  # declared config key

@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 from civex.domain.exceptions import ValidationError
 from civex_plugin_sdk import Ctx
 from civex_plugin_sdk import Plugin as PluginBase
+from civex.plugins.hints import advanced, choices
 
 log = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ def detect_delimiter(text: str, candidates: list[str]) -> str:
 
 class Plugin(PluginBase):
     id = "civex.parse_table"
-    name = "Parse Table"
+    name = "Read a table from a file"
     description = (
         "Parse delimited text (CSV, TSV, ...) into a table for a downstream "
         "records step."
@@ -104,6 +105,14 @@ class Plugin(PluginBase):
 
     class Config(BaseModel):
         delimiter: str = Field(
+            title="Columns separated by",
+            json_schema_extra=choices(
+                ("comma", "Commas"),
+                ("tab", "Tabs"),
+                ("semicolon", "Semicolons"),
+                ("pipe", "Pipes |"),
+                ("space", "Spaces"),
+            ),
             default=",",
             description=(
                 "Column separator: one character, or a name (comma, tab, "
@@ -111,6 +120,8 @@ class Plugin(PluginBase):
             ),
         )
         delimiters: list[str] | None = Field(
+            title="Or any of these separators",
+            json_schema_extra=advanced(),
             default=None,
             description=(
                 "Several separators the file may use, such as [comma, tab] to "
@@ -120,7 +131,10 @@ class Plugin(PluginBase):
             ),
         )
         encoding: str = Field(
-            default="utf-8", description="Text encoding to decode the file with."
+            title="Text encoding",
+            json_schema_extra=advanced(),
+            default="utf-8",
+            description="Text encoding to decode the file with.",
         )
 
         @field_validator("delimiters")
