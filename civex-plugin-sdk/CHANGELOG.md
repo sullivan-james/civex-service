@@ -14,6 +14,8 @@ fixes that change neither. A change to the wire protocol itself also bumps
 
 ## Unreleased
 
+## v0.3.0 (2026-11-18)
+
 - `PROTOCOL_VERSION` is 3: `RunRequest.run_dir` names the run's folder,
   which `serve_loop` and `Ctx` use for values too large to inline (it lives
   for the whole workflow run). New `Ctx.file_path(sha256)` (a read-only copy
