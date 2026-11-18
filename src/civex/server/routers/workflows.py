@@ -33,6 +33,9 @@ from civex.server.models import (
     WorkflowResponse,
     WorkflowEnabledRequest,
     WorkflowSaveRequest,
+    TrialOnRecord,
+    WorkflowTrialManyRequest,
+    WorkflowTrialManyResponse,
     WorkflowTrialRequest,
     WorkflowTrialResponse,
     WorkflowStepResponse,
@@ -239,6 +242,88 @@ async def try_workflow_on_record(request: Request, ctx: AppContext = Depends(get
         # Nothing of a trial stays, not even the files it was given.
         ctx.rollback()
     return WorkflowTrialResponse.model_validate(result.to_dict())
+
+
+@router.post("/try-many", response_model=WorkflowTrialManyResponse)
+async def try_workflow_on_records(request: Request, ctx: AppContext = Depends(get_ctx)):
+    """Try a workflow on several records at once, keeping nothing: each is
+    tried as `POST /workflows/try` would, one after the other, and all of it is
+    rolled back. Names no records and it takes the most recently changed
+    records of the kind the workflow runs on (`sample`, 5 by default), so an
+    editor can show what a change would do without anyone choosing. JSON
+    `{content, record_ids, sample}`, or a form with those (`record_ids`
+    repeated) plus the files for each `files` input, given to every trial. A
+    record it can't run on is answered with `problem`, not an error."""
+    content_type = request.headers.get("content-type", "")
+    form = None
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        raw = {
+            "content": str(form.get("content", "")),
+            "record_ids": [str(v) for v in form.getlist("record_ids") if v],
+            "sample": int(str(form.get("sample") or 5)),
+        }
+    else:
+        try:
+            raw = await request.json()
+        except json.JSONDecodeError as e:
+            raise HTTPException(422, detail=f"Invalid request: {e}")
+    try:
+        body = WorkflowTrialManyRequest.model_validate(raw)
+    except PydanticValidationError as e:
+        raise HTTPException(422, detail=f"Invalid request: {e}")
+    try:
+        wf_def = ctx.workflow_svc.check(body.content)
+    except WorkflowValidationError as e:
+        raise HTTPException(422, detail=e.errors)
+    sampled = not body.record_ids
+    if sampled:
+        if not wf_def.record_schema:
+            raise HTTPException(
+                422, detail="Choose the kind of record it runs on to try it."
+            )
+        ids: list[str] = [
+            str(r.id)
+            for r in ctx.record_svc.recently_changed(wf_def.record_schema, body.sample)
+        ]
+    else:
+        ids = body.record_ids
+    trials: list[TrialOnRecord] = []
+    try:
+        input_data = (
+            await _form_inputs(form, wf_def, ids[0] if ids else "", ctx)
+            if form is not None
+            else None
+        )
+        for record_id in ids:
+            try:
+                record = ctx.record_svc.get(record_id)
+            except NotFoundError:
+                trials.append(
+                    TrialOnRecord(record_id=record_id, problem="No such record.")
+                )
+                continue
+            try:
+                result = try_workflow(ctx, wf_def, str(record.id), input_data)
+            except (ValidationError, NotFoundError) as e:
+                trials.append(
+                    TrialOnRecord(
+                        record_id=str(record.id),
+                        name=record.natural_name,
+                        problem=str(e),
+                    )
+                )
+                continue
+            trials.append(
+                TrialOnRecord(
+                    record_id=str(record.id),
+                    name=record.natural_name,
+                    result=WorkflowTrialResponse.model_validate(result.to_dict()),
+                )
+            )
+    finally:
+        ctx.rollback()
+    return WorkflowTrialManyResponse(trials=trials, sampled=sampled)
 
 
 @router.post("/{name}/run-many", response_model=RunManyResponse, status_code=202)

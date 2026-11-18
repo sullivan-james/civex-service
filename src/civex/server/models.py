@@ -1314,6 +1314,21 @@ class WorkflowTrialRequest(BaseModel):
     record_id: str = Field(description="The record to try it on (an id or prefix).")
 
 
+class WorkflowTrialManyRequest(BaseModel):
+    content: str = Field(
+        description="The workflow's YAML: what is on screen, saved or not."
+    )
+    record_ids: list[str] = Field(
+        default_factory=list,
+        max_length=10,
+        description="The records to try it on (ids or prefixes). Empty: the "
+        "records of the kind it runs on that changed most recently.",
+    )
+    sample: int = Field(
+        5, ge=1, le=10, description="How many records to take when none are named."
+    )
+
+
 class TrialFieldChange(BaseModel):
     field: str = Field(description="The field's key.")
     label: str = Field(description="The field's name as people see it.")
@@ -2865,4 +2880,29 @@ class UpdateExportDefinitionRequest(BaseModel):
     volume: str | None = Field(
         default=None,
         description="For 'copy': the drive to copy onto; send null for the project folder.",
+    )
+
+
+class TrialOnRecord(BaseModel):
+    record_id: str = Field(description="The record it was tried on.")
+    name: str | None = Field(
+        default=None, description="That record's name, as people see it."
+    )
+    result: WorkflowTrialResponse | None = Field(
+        default=None,
+        description="What it would have done; null when it can't run there.",
+    )
+    problem: str | None = Field(
+        default=None,
+        description="Why it can't run on this record (deleted, another kind).",
+    )
+
+
+class WorkflowTrialManyResponse(BaseModel):
+    trials: list[TrialOnRecord] = Field(
+        default_factory=list, description="One per record, in the order tried."
+    )
+    sampled: bool = Field(
+        description="True when the records were picked here: the most recently "
+        "changed of the kind it runs on."
     )
