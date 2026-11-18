@@ -68,17 +68,26 @@ export function useSetWorkflowEnabled() {
 }
 
 /** Try a workflow on a record; nothing it does is kept. */
-export function useTryWorkflow() {
-  return useMutation({
-    mutationFn: ({
-      content,
-      recordId,
-      files,
-    }: {
-      content: string
-      recordId: string
-      files?: Record<string, File[]>
-    }) => workflowsApi.try(content, recordId, files),
+/** What the workflow on screen would do, tried on records and undone; asked
+ * again whenever the YAML, the records or the files change. */
+export function useWorkflowPreview(
+  content: string,
+  recordIds: string[],
+  files: Record<string, File[]>,
+  enabled: boolean,
+) {
+  const fileKey = Object.entries(files).map(([k, list]) => [
+    k,
+    list.map((f) => `${f.name}:${f.size}:${f.lastModified}`),
+  ])
+  return useQuery({
+    queryKey: ['workflow-preview', content, recordIds, fileKey],
+    queryFn: () => workflowsApi.tryMany(content, recordIds, files),
+    enabled,
+    placeholderData: keepPreviousData,
+    retry: false,
+    staleTime: Infinity,
+    gcTime: 0,
   })
 }
 

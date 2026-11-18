@@ -134,22 +134,27 @@ export const workflowsApi = {
       enabled,
     }),
   /** Run `content` (saved or not) on a record and undo it, saying what it did. */
-  try: (
+  /** Try it on these records, or with none named on the `sample` records
+   * of its kind changed most recently; nothing is kept. */
+  tryMany: (
     content: string,
-    recordId: string,
+    recordIds: string[],
     fileInputs: Record<string, File[]> = {},
+    sample = 5,
   ) => {
     const files = Object.entries(fileInputs).filter(([, f]) => f.length > 0)
     if (files.length === 0)
-      return api.post<TrialResult>('/workflows/try', {
+      return api.post<TrialMany>('/workflows/try-many', {
         content,
-        record_id: recordId,
+        record_ids: recordIds,
+        sample,
       })
     const form = new FormData()
     form.append('content', content)
-    form.append('record_id', recordId)
+    form.append('sample', String(sample))
+    for (const id of recordIds) form.append('record_ids', id)
     for (const [name, list] of files) for (const f of list) form.append(name, f)
-    return api.upload<TrialResult>('/workflows/try', form)
+    return api.upload<TrialMany>('/workflows/try-many', form)
   },
 
   runWithFiles: async (
@@ -198,6 +203,21 @@ export interface TrialRecordChange {
 }
 
 /** What trying a workflow on a record would have done; nothing was kept. */
+/** A trial on one record of several. */
+export interface TrialOnRecord {
+  record_id: string
+  name: string | null
+  /** Null when it can't run there; `problem` says why. */
+  result: TrialResult | null
+  problem: string | null
+}
+
+export interface TrialMany {
+  trials: TrialOnRecord[]
+  /** The records were picked by the server: the latest changed. */
+  sampled: boolean
+}
+
 export interface TrialResult {
   ok: boolean
   steps: StepExecution[]
