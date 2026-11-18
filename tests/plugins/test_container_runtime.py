@@ -242,14 +242,14 @@ from civex_plugin_sdk import Ctx, Plugin, serve
 class TestPlugin(Plugin):
     id = "test.container_plugin"
     name = "Test Container Plugin"
-    capabilities = ["commit"]
+    capabilities = ["write_records"]
 
     class Config(BaseModel):
         pass
 
     def invoke(self, inputs, config, ctx: Ctx) -> dict:
-        if inputs.get("call_commit"):
-            ctx.commit()
+        if inputs.get("call_host"):
+            ctx.patch_record("r1", {"x": 1})
         return {"saw": inputs.get("value")}
 
 if __name__ == "__main__":
@@ -278,12 +278,21 @@ if __name__ == "__main__":
 """
 
 
+class _Patched:
+    def __init__(self, record_id: str, fields: dict) -> None:
+        self.record_id, self.fields = record_id, fields
+
+    def to_dict(self) -> dict:
+        return {"id": self.record_id, "data": self.fields}
+
+
 class _FakeWorkflowContext:
     def __init__(self) -> None:
-        self.committed = False
+        self.patched: list[tuple[str, dict]] = []
 
-    def commit(self) -> None:
-        self.committed = True
+    def patch_record(self, record_id: str, fields: dict) -> _Patched:
+        self.patched.append((record_id, fields))
+        return _Patched(record_id, fields)
 
 
 def _patch_spawn_to_plain_python(
@@ -317,7 +326,7 @@ def test_describe_container_returns_metadata(
     result = rt.describe_container("fake-image:latest")
 
     assert result.id == "test.container_plugin"
-    assert result.capabilities == ["commit"]
+    assert result.capabilities == ["write_records"]
 
 
 def test_run_container_dispatches_and_respects_memory_cpus_args(
@@ -340,17 +349,17 @@ def test_run_container_dispatches_and_respects_memory_cpus_args(
     ctx = _FakeWorkflowContext()
     result = rt.run_container(
         "fake-image:latest",
-        {"call_commit": True, "value": "x"},
+        {"call_host": True, "value": "x"},
         {},
         ctx,
-        ["commit"],
+        ["write_records"],
         timeout=20.0,
         memory="256m",
         cpus=0.5,
     )
 
     assert result.outputs == {"saw": "x"}
-    assert ctx.committed is True
+    assert ctx.patched == [("r1", {"x": 1})]
     assert "--memory" in seen_argv[0]
     assert seen_argv[0][seen_argv[0].index("--memory") + 1] == "256m"
     assert "--cpus" in seen_argv[0]

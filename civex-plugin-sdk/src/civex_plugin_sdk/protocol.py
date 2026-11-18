@@ -29,7 +29,13 @@ from civex_plugin_sdk.plugin_base import IOSpec
 # The host reads `DescribeResult.protocol_version` and refuses a plugin whose
 # version it doesn't speak, naming the side to upgrade. Older SDKs predate the
 # field and omit it; that is read as 1.
-PROTOCOL_VERSION = 1
+#
+# 2: plugins may send `progress` frames during a run (a host speaking only 1
+# would refuse them as unknown). A host speaking 2 still runs a plugin on 1.
+# 3: a `run` names the run's folder (`run_dir`), where large values and the
+# files a plugin asks for are kept for the whole run; the host functions
+# `file_path` and `store_path` pass files by path.
+PROTOCOL_VERSION = 3
 
 RpcMethod = Literal["get_file", "update_record", "create_record", "commit", "call_tool"]
 
@@ -48,13 +54,12 @@ CAPABILITIES: tuple[RpcMethod, ...] = (
 # host-side without another protocol change. Its `params` always have the
 # shape {"tool": <tool name>, "args": {...}}.
 #
-# Even so, a plugin's declared `capabilities` list (both here and on
-# civex-service's Tier0Plugin) names the *tool*, not the literal string
-# "call_tool" -- e.g. a plugin using Ctx.find_records() declares
-# capabilities = ["find_records"], not ["call_tool"]. Enforcement (not
-# wired yet -- there's no out-of-process executor to enforce it against;
-# see CIVEX-127) checks `params["tool"]` against the declared list for a
-# `call_tool` rpc_call, and the bare method name for the original four.
+# A plugin's declared `capabilities` don't name these methods: they name the
+# permission actions it needs ("read", "write_records", "manage_files",
+# "delete"), or, in the older form, single tools ("find_records"). The host
+# checks each rpc_call's tool (for `call_tool`) or method name against what
+# those grant (civex.plugins.host_api). `commit` is still accepted and does
+# nothing: the host keeps or drops a run's writes whole.
 
 
 class DescribeRequest(BaseModel):
@@ -98,6 +103,12 @@ class RunRequest(BaseModel):
     type: Literal["run"] = "run"
     inputs: dict[str, Any] = Field(default_factory=dict)
     config: dict[str, Any] = Field(default_factory=dict)
+    # The run's folder (protocol 3): values too large to inline, and files the
+    # plugin asks for, are written here and live until the whole run ends, so
+    # a later step can read what an earlier one wrote. Paths the plugin sends
+    # back must be inside it. None from an older host: the plugin's own
+    # working folder is used.
+    run_dir: str | None = None
 
 
 class RunResult(BaseModel):
@@ -139,6 +150,19 @@ class LogFrame(BaseModel):
     text: str
 
 
+class ProgressFrame(BaseModel):
+    """Plugin -> host: how far the current `run` has got, for whoever is watching it (protocol 2).
+
+    No answer is sent. `total` is None when the plugin can't say how much
+    there is; `message` says what it is doing now ("Reading sel_03.txt").
+    """
+
+    type: Literal["progress"] = "progress"
+    done: float = 0
+    total: float | None = None
+    message: str = ""
+
+
 class RpcCall(BaseModel):
     """Plugin -> host: invoke one `RpcMethod`, blocking for the matching `RpcResult`/`ErrorFrame`."""
 
@@ -163,6 +187,7 @@ FRAME_TYPES: dict[str, type[BaseModel]] = {
     "result": RunResult,
     "error": ErrorFrame,
     "log": LogFrame,
+    "progress": ProgressFrame,
     "rpc_call": RpcCall,
     "rpc_result": RpcResult,
 }
@@ -174,6 +199,10 @@ def parse_frame(raw: dict[str, Any]) -> BaseModel:
     model = FRAME_TYPES.get(frame_type)  # type: ignore[arg-type]
     if model is None:
         raise ValueError(f"Unknown frame type: {frame_type!r}")
+    if model is DescribeResult and "protocol_version" not in raw:
+        # An SDK older than the field omits it: that one spoke version 1, not
+        # whatever this SDK's default is now.
+        raw = {**raw, "protocol_version": 1}
     return model.model_validate(raw)
 
 

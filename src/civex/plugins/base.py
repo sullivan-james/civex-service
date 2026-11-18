@@ -1,24 +1,24 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 import dataclasses
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from civex.domain.dtos import DatasetDTO, FileRef, RecordDTO, SchemaDTO
 from civex.domain.exceptions import DuplicateRecordError
 from civex.domain.file_refs import without_file_locations
-from civex_plugin_sdk.plugin_base import PluginBase
+from civex.workflows.progress import RUNS
 
 if TYPE_CHECKING:
     from civex.context import AppContext
 
 
 class PluginTier(str, Enum):
-    """Which runtime executes a plugin. BUILTIN (in-process) and SUBPROCESS
-    (uv-managed, CIVEX-127) are populated; CONTAINER is structurally
-    reserved for a later story."""
+    """Which launcher runs a plugin (`civex.plugins.launchers`): BUILTIN in
+    this process, SUBPROCESS by uv, CONTAINER by Docker. Shown to people;
+    nothing branches on it."""
 
     BUILTIN = "builtin"
     SUBPROCESS = "subprocess"
@@ -37,32 +37,6 @@ class StepResult:
     outputs: dict[str, Any] = field(default_factory=dict)
     logs: list[str] = field(default_factory=list)
     error: Any | None = None
-
-
-class Tier0Plugin(PluginBase, ABC):
-    """New-style in-process plugin contract that all built-in plugins
-    implement. Shares its id/name/category/capabilities/Config declarations
-    with civex-plugin-sdk's out-of-process `Plugin` (via the common
-    `PluginBase`) so that shape can't drift between tiers -- only `invoke()`
-    itself is declared separately per tier, since the in-process
-    WorkflowContext and out-of-process Ctx deliberately expose different
-    surfaces (WorkflowContext gives ambient `.record`/`.dataset` access that
-    Ctx intentionally withholds from untrusted out-of-process code; several
-    built-ins rely on that ambient access, e.g. get_field/save_field/
-    extract_from_filename).
-
-    Capability declarations are metadata only here — not enforced for tier
-    BUILTIN, since capability allowlisting is an RPC-boundary control for
-    untrusted out-of-process tiers, and there's no RPC call to intercept for
-    in-process execution."""
-
-    @abstractmethod
-    def invoke(
-        self,
-        inputs: dict[str, Any],
-        config: Any,
-        ctx: "WorkflowContext",
-    ) -> dict[str, Any]: ...
 
 
 @dataclass
@@ -121,6 +95,10 @@ class WorkflowContext:
     # carries on would otherwise leave no trace of *which* record it collided
     # with; the executor adds these to that step's outputs.
     duplicates: list[dict[str, Any]] = field(default_factory=list)
+    # The run's folder (`executor.run` makes it and removes it when the run
+    # ends): files a plugin asks for, and values too large to send inline, are
+    # kept here for every step of the run.
+    run_dir: Path | None = None
 
     def __post_init__(self) -> None:
         # However the record was built, a workflow sees a file's identity, not
@@ -158,6 +136,19 @@ class WorkflowContext:
     def store_file(self, data: bytes, filename: str) -> FileRef:
         return self._app_ctx.file_svc.store_bytes(data, filename, str(self.dataset.id))
 
+    def store_path(self, path: Path, filename: str) -> FileRef:
+        """Store the file at `path` (read in chunks, never whole) in the run's
+        collection, named `filename`."""
+        return self._app_ctx.file_svc.store(
+            path, str(self.dataset.id), filename=filename
+        )
+
+    def copy_file(self, sha256: str, dest: Path) -> None:
+        """Write a stored file's bytes to `dest`, a chunk at a time."""
+        with open(dest, "wb") as out:
+            for chunk in self._app_ctx.file_svc.stream(sha256):
+                out.write(chunk)
+
     @property
     def _cause(self) -> dict[str, Any] | None:
         if self.job_id is None:
@@ -173,6 +164,15 @@ class WorkflowContext:
                 "existing_record": e.existing_name,
             }
         )
+
+    def progress(
+        self, done: float, total: float | None = None, message: str = ""
+    ) -> None:
+        """Say how far the step running now has got (the status bar shows it
+        while the run lasts; `civex.workflows.progress`). A context with no
+        run (`job_id` None) shows it nowhere."""
+        if self.job_id is not None:
+            RUNS.report(self.job_id, done, total, message)
 
     def take_duplicates(self) -> list[dict[str, Any]]:
         """The refused writes noted since the last call, clearing the list."""
@@ -268,6 +268,3 @@ class WorkflowContext:
 
     def list_collections(self) -> list[DatasetDTO]:
         return self._app_ctx.dataset_svc.list_all()
-
-    def commit(self) -> None:
-        self._app_ctx.commit()

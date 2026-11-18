@@ -15,12 +15,14 @@ must answer an rpc_call before sending anything else.
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import Any
 
 from civex_plugin_sdk.errors import RpcError
 from civex_plugin_sdk.io import FrameReader, FrameWriter
 from civex_plugin_sdk.protocol import (
+    ProgressFrame,
     RpcCall,
     RpcMethod,
     RpcResult,
@@ -87,6 +89,24 @@ class Ctx:
         """
         return self._call("call_tool", {"tool": tool, "args": args})
 
+    def progress(
+        self, done: float, total: float | None = None, message: str = ""
+    ) -> None:
+        """Say how far this run has got, for whoever is watching it.
+
+        The civex app shows it in the status bar while the run lasts. Cheap
+        (one line to the host, no answer), but there is no point in calling
+        it more than a few times a second.
+
+        Args:
+            done: How much is done (items, bytes, ...).
+            total: How much there is in all, or None if unknown.
+            message: What it is doing now, e.g. "Reading sel_03.txt".
+        """
+        self._writer.send(
+            ProgressFrame(done=done, total=total, message=message).model_dump()
+        )
+
     def get_context_record(self) -> dict[str, Any]:
         """Return the record that triggered this workflow step.
 
@@ -107,6 +127,32 @@ class Ctx:
         result = self._call("get_file", {"sha256": sha256})
         return decode_binary(result)
 
+    def file_path(self, sha256: str) -> Path:
+        """Return a path to a read-only copy of a stored file, in the run's folder.
+
+        Prefer this to `get_file` for anything large: nothing is read into
+        memory or sent over the protocol. The copy is removed when the run
+        ends. Needs `read` (protocol 3).
+        """
+        result = self._call_tool("file_path", {"sha256": sha256})
+        return Path(result["path"])
+
+    def store_path(self, path: str | Path, filename: str) -> dict[str, Any]:
+        """Store the file at `path` (which must be in the run's folder: `run_dir`) and return its `FileRef` dict.
+
+        Prefer this to `store_file` for anything large: the host reads the
+        file itself. Needs `manage_files` (protocol 3).
+        """
+        result = self._call_tool(
+            "store_path", {"path": str(Path(path).resolve()), "filename": filename}
+        )
+        return result["file"]
+
+    @property
+    def run_dir(self) -> Path | None:
+        """The run's folder, where a plugin may write files to `store_path` (None from an older host)."""
+        return self._scratch_dir
+
     def store_file(self, data: bytes, filename: str) -> dict[str, Any]:
         """Write `data` to the object store and return its `FileRef` dict (`{sha256, filename, size}`)."""
         result = self._call_tool(
@@ -116,7 +162,11 @@ class Ctx:
         return result["file"]
 
     def update_record(self, record_id: str, data: dict[str, Any]) -> dict[str, Any]:
-        """Merge `data` into the record identified by `record_id` and return the updated record."""
+        """Replace the values of the record identified by `record_id` with `data` and return it.
+
+        Fields not in `data` are cleared; to change only some fields use
+        `patch_record`. Needs `write_records`.
+        """
         return self._call("update_record", {"record_id": record_id, "data": data})
 
     def create_record(
@@ -141,6 +191,19 @@ class Ctx:
                 "context_record_id": context_record_id,
             },
         )
+
+    def patch_record(self, record_id: str, fields: dict[str, Any]) -> dict[str, Any]:
+        """Change only `fields` of a record and return it; every other field stays as it is now.
+
+        Prefer this to `update_record`, which replaces the record's whole
+        data with what it is given (so fields left out are cleared). Nothing
+        is written, and nothing is triggered, when the fields already hold
+        these values. Needs `write_records`.
+        """
+        result = self._call_tool(
+            "patch_record", {"record_id": record_id, "fields": fields}
+        )
+        return result["record"]
 
     def get_record(self, record_id: str) -> dict[str, Any]:
         """Return the record identified by `record_id`."""
@@ -211,12 +274,16 @@ class Ctx:
         return result["collections"]
 
     def commit(self) -> None:
-        """Persist every write this `Ctx` made so far.
+        """Do nothing (deprecated).
 
-        Mirrors `AppContext.commit()`'s in-process contract: nothing a
-        plugin writes via `update_record`/`create_record`/`store_file`/the
-        `call_tool` mutators is guaranteed durable until this is called (or
-        the workflow step ends and the executor commits on the plugin's
-        behalf).
+        A run's writes are kept or dropped whole when it ends: civex keeps
+        them if every step succeeds and undoes them all if one fails, so a
+        plugin no longer commits part of a run. Kept so plugins that call it
+        still run; it sends nothing.
         """
-        self._call("commit", {})
+        warnings.warn(
+            "Ctx.commit() does nothing: civex keeps a run's writes when the run "
+            "ends, or none of them if it fails.",
+            DeprecationWarning,
+            stacklevel=2,
+        )

@@ -251,6 +251,22 @@ export interface AutomationStatus {
   cancelled: number
   /** The current stretch of work, counted by the server; null when idle. */
   batch: AutomationBatch | null
+  /** For each run going on in this server, the step it is on and how far
+   * that step has got (as its plugin reports it). */
+  steps: RunStep[]
+}
+
+export interface RunStep {
+  job_id: string
+  workflow: string
+  step: string
+  plugin: string
+  /** How much of the step is done, as the plugin counts it; null until it says. */
+  done: number | null
+  /** How much there is in all; null if the plugin can't say. */
+  total: number | null
+  /** What the step is doing now, in the plugin's words. */
+  message: string
 }
 
 export interface AutomationBatch {

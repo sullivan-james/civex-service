@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import time
 from collections import deque
+from pathlib import Path
 from typing import Any, Callable
 
 from civex.domain.dtos import ErrorEnvelope, StepExecution
 from civex.domain.exceptions import JobCancelled, PluginContractError
 from civex.plugins.base import WorkflowContext
 from civex.plugins.registry import PluginRegistration
+from civex.plugins.runtime import new_run_dir
 from civex.workflows.conditions import (
     SKIPPED_OUTPUTS,
     condition_refs,
@@ -17,6 +20,7 @@ from civex.workflows.conditions import (
 )
 from civex.workflows.contract_validation import validate_workflow_contracts
 from civex.workflows.definition import StepDef, WorkflowDef
+from civex.workflows.progress import RUNS
 
 log = logging.getLogger(__name__)
 
@@ -145,7 +149,7 @@ def _assert_json_safe_outputs(
 
     A subprocess/container-tier step's outputs came off a JSON wire and so are
     serializable by construction. A BUILTIN step's didn't: only its declared
-    `table`/`bytes` values are converted (registry._registration_for_tier0),
+    `table`/`bytes` values are converted (the SDK's serve_loop),
     and anything else it returns would otherwise fail somewhere else entirely
     -- when the next step happens to be out-of-process, or when the job record
     is written -- rather than at the step that produced it.
@@ -211,6 +215,40 @@ def run(
     `JobCancelled` (carrying the steps that already ran). A step that is already
     running is not interrupted: it finishes, or hits its own timeout.
     """
+    job_id = getattr(ctx, "job_id", None)
+    # One folder for the whole run: files plugins ask for and values too
+    # large to send inline are kept here, so a later step can read what an
+    # earlier one wrote; removed when the run ends, however it ends.
+    made: Path | None = None
+    if getattr(ctx, "run_dir", None) is None:
+        made = ctx.run_dir = new_run_dir()
+    try:
+        return _run(
+            wf,
+            ctx,
+            plugins,
+            initial_outputs,
+            default_timeout_seconds,
+            should_stop,
+            job_id,
+        )
+    finally:
+        if job_id is not None:
+            RUNS.finished(job_id)
+        if made is not None:
+            shutil.rmtree(made, ignore_errors=True)
+            ctx.run_dir = None
+
+
+def _run(
+    wf: WorkflowDef,
+    ctx: WorkflowContext,
+    plugins: dict[str, PluginRegistration],
+    initial_outputs: dict[str, dict[str, Any]] | None,
+    default_timeout_seconds: float,
+    should_stop: Callable[[], bool] | None,
+    job_id: str | None,
+) -> list[dict[str, Any]]:
     log.info(wf)
     _validate_contracts(wf, plugins)
     virtual_ids = set(initial_outputs.keys()) if initial_outputs else None
@@ -255,6 +293,8 @@ def run(
             continue
 
         log.info("  [%s] → %s", step.id, step.plugin)
+        if job_id is not None:
+            RUNS.step_started(job_id, wf.name, step.id, step.plugin)
         t = time.perf_counter()
         config = registration.config_model(**step.config)
         inputs = _resolve_inputs(step.inputs, step_outputs)
@@ -311,6 +351,8 @@ def run(
             ).to_dict()
         )
 
-    ctx.commit()
+    # Nothing is committed here: whoever ran the workflow keeps its writes
+    # with the run's outcome, or drops them all if it failed
+    # (`AppContext.all_or_nothing`).
     log.info("✓ done (%.3fs total)", time.perf_counter() - wf_start)
     return step_executions

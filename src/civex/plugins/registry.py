@@ -12,12 +12,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from civex_plugin_sdk.io_convert import convert_inputs, convert_outputs
+from civex_plugin_sdk.plugin import Plugin
 from civex_plugin_sdk.plugin_base import IOSpec
+from civex_plugin_sdk.serve import describe_result
 from civex_plugin_sdk.protocol import DescribeResult
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from civex.plugins.base import PluginTier, StepResult, Tier0Plugin, WorkflowContext
+from civex.plugins import runtime
+from civex.plugins.base import PluginTier, StepResult, WorkflowContext
+from civex.plugins.launchers import InProcessLauncher, Launcher, UvLauncher
 
 log = logging.getLogger(__name__)
 
@@ -88,94 +91,88 @@ _SUBPROCESS_DESCRIBED: dict[Path, tuple[str, str]] = {}
 _LOAD_FAILURES: dict[Path, str] = {}
 
 
-def _registration_for_tier0(plugin_cls: type[Tier0Plugin]) -> PluginRegistration:
-    def invoke(
-        inputs: dict[str, Any], config: Any, ctx: WorkflowContext, timeout: float
-    ) -> StepResult:
-        # The same declared-`table`/`bytes` conversion the out-of-process
-        # tiers get in civex_plugin_sdk.serve._handle_run, applied here so a
-        # BUILTIN plugin's author code sees the identical invoke-time values
-        # (a real DataFrame, real `bytes`) while its *outputs* still leave in
-        # the always-JSON-safe wire form. Without this, a step like
-        # civex.parse_table would hand a live DataFrame to the next step -- fine
-        # for another in-process step, but a TypeError the moment that step is
-        # a subprocess/container one whose RunRequest has to json.dumps it.
-        #
-        # scratch_dir=None: tier BUILTIN has no per-run scratch dir to write
-        # into (nothing spawns a process here), so values always inline.
-        converted = convert_inputs(plugin_cls.inputs, inputs)
-        outputs = plugin_cls().invoke(converted, config, ctx) or {}
-        return StepResult(outputs=convert_outputs(plugin_cls.outputs, outputs))
-
-    return PluginRegistration(
-        id=plugin_cls.id,
-        name=plugin_cls.name,
-        category=plugin_cls.category,
-        tier=PluginTier.BUILTIN,
-        capabilities=list(plugin_cls.capabilities),
-        description=plugin_cls.description,
-        inputs=None if plugin_cls.inputs is None else list(plugin_cls.inputs),
-        outputs=None if plugin_cls.outputs is None else list(plugin_cls.outputs),
-        config_model=plugin_cls.Config,
-        module_name=plugin_cls.__module__,
-        invoke=invoke,
-    )
-
-
 class _PassthroughConfig(BaseModel):
-    """Placeholder config_model for subprocess/container-tier registrations —
-    real validation happens inside the plugin's own subprocess via its
-    Config.model_validate() (see civex_plugin_sdk.serve._handle_run); the
-    host only needs to pass step.config through untouched."""
+    """config_model for every registration: real validation happens where the
+    plugin runs (its own `Config.model_validate`, in `serve_loop`), so the
+    host only passes `step.config` through. `config_schema` (from
+    `describe`) is the real schema, for whoever shows or checks it."""
 
     model_config = ConfigDict(extra="allow")
 
 
-def _registration_for_subprocess(
-    plugin_path: Path, describe_result: Any
-) -> PluginRegistration:
-    """Wraps a Tier 1 (uv-managed subprocess) plugin. `describe_result` is
-    the DescribeResult obtained once at discovery time; the capabilities it
-    declares are closed over here and used to enforce the RPC allowlist at
-    run time — never re-derived from the run's own (separate) subprocess."""
+def _registration(launcher: Launcher, describe_result: Any) -> PluginRegistration:
+    """One plugin of any tier, behind one `invoke()`: `runtime.run` with its
+    launcher. `describe_result` was obtained once (at discovery, or read off
+    a built-in's class); the capabilities it declares are closed over here
+    and are what the host functions it calls are checked against, never
+    re-derived from the running plugin."""
     capabilities = list(describe_result.capabilities)
+    from civex.plugins.host_api import unknown_capabilities
+
+    unknown = unknown_capabilities(capabilities)
+    if unknown:
+        # Not refused: it may name a function a newer civex has. A call it
+        # makes is checked against what it was granted anyway.
+        log.warning(
+            "Plugin %s lists capabilities this civex doesn't know: %s",
+            describe_result.id,
+            ", ".join(unknown),
+        )
+    input_specs = (
+        None if describe_result.inputs is None else list(describe_result.inputs)
+    )
 
     def invoke(
         inputs: dict[str, Any], config: Any, ctx: WorkflowContext, timeout: float
     ) -> StepResult:
-        from civex.plugins.subprocess_runtime import run_plugin
-
         config_dict = (
             config.model_dump() if isinstance(config, BaseModel) else dict(config)
         )
-        return run_plugin(plugin_path, inputs, config_dict, ctx, capabilities, timeout)
+        return runtime.run(
+            launcher,
+            inputs,
+            config_dict,
+            ctx,
+            capabilities,
+            timeout,
+            input_specs=input_specs,
+        )
 
     return PluginRegistration(
         id=describe_result.id,
         name=describe_result.name,
         category=describe_result.category,
-        tier=PluginTier.SUBPROCESS,
+        tier=launcher.tier,
         capabilities=capabilities,
         description=describe_result.description,
-        inputs=(
-            None if describe_result.inputs is None else list(describe_result.inputs)
-        ),
+        inputs=input_specs,
         outputs=(
             None if describe_result.outputs is None else list(describe_result.outputs)
         ),
         config_model=_PassthroughConfig,
-        module_name=str(plugin_path),
+        module_name=launcher.label,
         invoke=invoke,
         config_schema=describe_result.config_schema,
     )
 
 
-def register_plugin(plugin_cls: type[Tier0Plugin]) -> None:
+def _registration_for_subprocess(
+    plugin_path: Path, describe_result: Any
+) -> PluginRegistration:
+    return _registration(UvLauncher(plugin_path), describe_result)
+
+
+def register_plugin(plugin_cls: type[Plugin]) -> None:
+    """Register a built-in: run in this process through the protocol like
+    any plugin (`InProcessLauncher`), described from its own declarations
+    without starting it."""
     if not hasattr(plugin_cls, "id") or not plugin_cls.id:
         raise ValueError(f"Plugin {plugin_cls.__name__} must define an id")
     if plugin_cls.id in REGISTRY:
         return
-    REGISTRY[plugin_cls.id] = _registration_for_tier0(plugin_cls)
+    REGISTRY[plugin_cls.id] = _registration(
+        InProcessLauncher(plugin_cls), describe_result(plugin_cls)
+    )
 
 
 def discover_plugins(package) -> None:
@@ -222,8 +219,16 @@ def discover_user_plugins(plugins_dir: Path) -> None:
             _LOAD_FAILURES.pop(resolved, None)
             continue
         try:
-            describe_result = _describe_with_disk_cache(path, content_hash)
-            registration = _registration_for_subprocess(path, describe_result)
+            declared = _declared(path)
+            if declared is not None:
+                # Its header says what it is: nothing is run to find out. Its
+                # code is checked against the header when its process starts.
+                registration = _registration(
+                    UvLauncher(path, declared=declared), declared
+                )
+            else:
+                describe_result = _describe_with_disk_cache(path, content_hash)
+                registration = _registration_for_subprocess(path, describe_result)
         except Exception as exc:
             # A single broken plugin file (bad PEP 723 deps, a describe()
             # that raises, a timeout, ...) must not stop discovery of every
@@ -239,6 +244,16 @@ def discover_user_plugins(plugins_dir: Path) -> None:
         p for p in _LOAD_FAILURES if p.parent == resolved_dir and p not in seen
     ]:
         _LOAD_FAILURES.pop(stale, None)
+
+
+def _declared(path: Path) -> DescribeResult | None:
+    """The contract `path`'s header declares (`manifest`), checked against
+    the protocol versions this civex speaks; None if it declares none."""
+    from civex.plugins.manifest import read
+    from civex.plugins.runtime import check_protocol_version
+
+    declared = read(path.read_text(encoding="utf-8"))
+    return None if declared is None else check_protocol_version(declared)
 
 
 def _content_hash(path: Path) -> str:
@@ -303,10 +318,32 @@ def _write_describe_cache(cache_path: Path, cache: dict[str, Any]) -> None:
 
 
 def describe_file(plugin_path: Path) -> DescribeResult:
-    """Describe one plugin file (which runs it), reusing the on-disk cache when
-    its contents were described before. Registers nothing: the library uses it
-    to check a version before installing it."""
+    """What one plugin file is: the contract its header declares, read
+    without running it; else its `describe` answer (which runs it), reusing
+    the on-disk cache when its contents were described before. Registers
+    nothing: the library uses it to check a version before installing it."""
+    declared = _declared(plugin_path)
+    if declared is not None:
+        return declared
     return _describe_with_disk_cache(plugin_path, _content_hash(plugin_path))
+
+
+def describe_code(plugin_path: Path) -> DescribeResult:
+    """What one plugin file's *code* says it is (its `describe` answer,
+    which runs it; cached by contents), for whoever must not take its header
+    on trust (the library installing someone else's plugin). When the
+    header declares a contract too, the two must agree."""
+    from civex.plugins.manifest import differences
+
+    described = _describe_with_disk_cache(plugin_path, _content_hash(plugin_path))
+    declared = _declared(plugin_path)
+    if declared is not None:
+        problems = differences(declared, described)
+        if problems:
+            raise ValueError(
+                "its code doesn't do what its header says: " + "; ".join(problems)
+            )
+    return described
 
 
 def registration_from_contract(

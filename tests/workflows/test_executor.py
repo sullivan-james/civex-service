@@ -229,3 +229,46 @@ def test_a_steps_refused_writes_are_added_to_its_outputs() -> None:
     ctx = Ctx()
     executions = executor.run(wf, ctx, {"test.plugin": _recording_registration([])})
     assert executions[0]["outputs"]["duplicates"][0]["existing_record_id"] == "abc"
+
+
+# -- how far a run has got (civex.workflows.progress) ------------------------
+
+
+def test_a_run_says_which_step_it_is_on_and_forgets_it_when_done() -> None:
+    from civex.workflows.progress import RUNS
+
+    ctx = _FakeCtx()
+    ctx.job_id = "job-1"  # type: ignore[attr-defined]
+    seen: list = []
+
+    def invoke(inputs, config, c, timeout) -> StepResult:
+        RUNS.report("job-1", 2, 5, "halfway")
+        seen.extend(RUNS.of(["job-1"]))
+        return StepResult(outputs={})
+
+    registration = _recording_registration([])
+    registration.invoke = invoke
+    wf = WorkflowDef(name="wf", steps=[StepDef(id="s1", plugin="test.plugin")])
+    executor.run(wf, ctx, {"test.plugin": registration})
+
+    assert [(p.workflow, p.step, p.done, p.total, p.message) for p in seen] == [
+        ("wf", "s1", 2, 5, "halfway")
+    ]
+    assert RUNS.of(["job-1"]) == []
+
+
+def test_a_failed_run_is_forgotten_too() -> None:
+    from civex.workflows.progress import RUNS
+
+    ctx = _FakeCtx()
+    ctx.job_id = "job-2"  # type: ignore[attr-defined]
+
+    def invoke(inputs, config, c, timeout) -> StepResult:
+        raise RuntimeError("boom")
+
+    registration = _recording_registration([])
+    registration.invoke = invoke
+    wf = WorkflowDef(name="wf", steps=[StepDef(id="s1", plugin="test.plugin")])
+    with pytest.raises(RuntimeError):
+        executor.run(wf, ctx, {"test.plugin": registration})
+    assert RUNS.of(["job-2"]) == []

@@ -22,7 +22,7 @@ from pydantic import ValidationError
 
 from civex_plugin_sdk.ctx import Ctx
 from civex_plugin_sdk.errors import ConfigValidationError, PluginError
-from civex_plugin_sdk.io import FrameReader, FrameWriter, isolate_stdout
+from civex_plugin_sdk.io import FrameReader, FrameWriter, LogStream, isolate_stdout
 from civex_plugin_sdk.io_convert import convert_inputs, convert_outputs
 from civex_plugin_sdk.protocol import (
     DescribeRequest,
@@ -36,6 +36,7 @@ from civex_plugin_sdk.protocol import (
 
 if TYPE_CHECKING:
     from civex_plugin_sdk.plugin import Plugin
+    from civex_plugin_sdk.plugin_base import PluginBase
 
 
 def serve(plugin_cls: "type[Plugin]") -> None:
@@ -45,6 +46,7 @@ def serve(plugin_cls: "type[Plugin]") -> None:
     """
     out = isolate_stdout()
     writer = FrameWriter.for_stream(out)
+    _relay_output(writer)
     reader = FrameReader.for_stream(sys.stdin)
     serve_loop(plugin_cls, reader, writer)
 
@@ -57,6 +59,7 @@ def serve_container(plugin_cls: "type[Plugin]") -> None:
     """
     out = isolate_stdout()
     writer = FrameWriter.for_stream(out)
+    _relay_output(writer)
     reader = FrameReader.for_stream(sys.stdin)
     mode = sys.argv[1] if len(sys.argv) > 1 else None
     serve_container_once(plugin_cls, mode, reader, writer)
@@ -107,9 +110,17 @@ def serve_container_once(
 
 
 def serve_loop(
-    plugin_cls: "type[Plugin]", reader: FrameReader, writer: FrameWriter
+    plugin_cls: "type[Plugin]",
+    reader: FrameReader,
+    writer: FrameWriter,
+    scratch_dir: Path | None = Path("."),
 ) -> None:
-    """The dispatch loop itself, decoupled from real stdio so it's unit-testable against injected reader/writer."""
+    """The dispatch loop itself, over any reader/writer pair (real stdio, or civex's in-process streams for its built-ins).
+
+    `scratch_dir` is where values too large to inline are written: the
+    process's own working folder by default (the host made it for this
+    plugin), or None to inline everything.
+    """
     for raw in reader:
         try:
             frame = parse_frame(raw)
@@ -120,7 +131,7 @@ def serve_loop(
         if isinstance(frame, DescribeRequest):
             _handle_describe(plugin_cls, writer)
         elif isinstance(frame, RunRequest):
-            _handle_run(plugin_cls, frame, reader, writer)
+            _handle_run(plugin_cls, frame, reader, writer, scratch_dir)
         else:
             _send_error(
                 writer,
@@ -131,19 +142,22 @@ def serve_loop(
             )
 
 
-def _handle_describe(plugin_cls: "type[Plugin]", writer: FrameWriter) -> None:
-    writer.send(
-        DescribeResult(
-            id=plugin_cls.id,
-            name=plugin_cls.name,
-            description=plugin_cls.description,
-            category=plugin_cls.category,
-            capabilities=list(plugin_cls.capabilities),
-            inputs=None if plugin_cls.inputs is None else list(plugin_cls.inputs),
-            outputs=None if plugin_cls.outputs is None else list(plugin_cls.outputs),
-            config_schema=plugin_cls.Config.model_json_schema(),
-        ).model_dump()
+def describe_result(plugin_cls: "type[PluginBase]") -> DescribeResult:
+    """A plugin class's `describe_result`: what `describe` answers, read off its declarations (and what civex registers its built-ins from, without starting them)."""
+    return DescribeResult(
+        id=plugin_cls.id,
+        name=plugin_cls.name,
+        description=plugin_cls.description,
+        category=plugin_cls.category,
+        capabilities=list(plugin_cls.capabilities),
+        inputs=None if plugin_cls.inputs is None else list(plugin_cls.inputs),
+        outputs=None if plugin_cls.outputs is None else list(plugin_cls.outputs),
+        config_schema=plugin_cls.Config.model_json_schema(),
     )
+
+
+def _handle_describe(plugin_cls: "type[Plugin]", writer: FrameWriter) -> None:
+    writer.send(describe_result(plugin_cls).model_dump())
 
 
 def _handle_run(
@@ -151,6 +165,7 @@ def _handle_run(
     frame: RunRequest,
     reader: FrameReader,
     writer: FrameWriter,
+    scratch_dir: Path | None = Path("."),
 ) -> None:
     try:
         config = plugin_cls.Config.model_validate(frame.config)
@@ -158,13 +173,15 @@ def _handle_run(
         _send_error(writer, ConfigValidationError(str(e)))
         return
 
-    # A plugin's cwd already *is* the host-managed, per-run scratch dir (see
-    # civex-service's subprocess_runtime._spawn), so it needs no scratch path
-    # of its own -- anything too large to inline is written here and crosses
-    # back as an absolute path.
-    scratch_dir = Path(".")
+    # The run's folder when the host names one (protocol 3): what is too large
+    # to inline is written there and crosses as an absolute path, and lives
+    # for the whole run. Else the default: the plugin's own working folder.
+    if frame.run_dir:
+        scratch_dir = Path(frame.run_dir)
     try:
-        inputs = convert_inputs(plugin_cls.inputs, frame.inputs, scratch_dir=scratch_dir)
+        inputs = convert_inputs(
+            plugin_cls.inputs, frame.inputs, scratch_dir=scratch_dir
+        )
     except Exception as e:
         # A malformed/unreadable `table`/`bytes` envelope is the host's or an
         # upstream step's fault, not this plugin author's -- classified as a
@@ -175,7 +192,7 @@ def _handle_run(
         )
         return
 
-    ctx = Ctx(writer, reader)
+    ctx = Ctx(writer, reader, Path(frame.run_dir) if frame.run_dir else None)
     try:
         outputs = plugin_cls().invoke(inputs, config, ctx) or {}
         # Declared `table`/`bytes` outputs become the always-JSON-safe wire
@@ -186,17 +203,43 @@ def _handle_run(
         _send_error(writer, e)
         return
     except Exception as e:
-        # An exception the plugin didn't classify. Reported as the generic
-        # kind and never as retryable -- the SDK has no basis to guess, and
-        # guessing wrong in that direction means re-running a permanently
-        # broken step.
-        _send_error(writer, PluginError(str(e)))
+        # An exception that isn't the SDK's own. One carrying a `kind` (an
+        # error type with its own classification) keeps it; otherwise it is
+        # the generic kind. Never retryable unless it says so -- the SDK has
+        # no basis to guess, and guessing wrong in that direction means
+        # re-running a permanently broken step.
+        kind = getattr(e, "kind", None)
+        _send_error(
+            writer,
+            PluginError(
+                str(e) or type(e).__name__,
+                kind=kind if isinstance(kind, str) else None,
+                retryable=getattr(e, "retryable", False) is True,
+            ),
+        )
         return
 
+    _flush_stdout()
     writer.send(RunResult(outputs=outputs).model_dump())
 
 
+def _relay_output(writer: FrameWriter) -> None:
+    """Send what the plugin prints, and what it writes to `sys.stderr` (warnings, `logging`), as `log` frames: in order with the run's answer, so it lands in that run's log. Output written straight to the file descriptors (C code, a crash before `serve()`) still goes to fd 2, which the host also reads."""
+    sys.stdout = LogStream(writer, "stdout")
+    sys.stderr = LogStream(writer, "stderr")
+
+
+def _flush_stdout() -> None:
+    """Send a half-written line before the run's answer, so it lands in this run's log."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except Exception:
+            pass
+
+
 def _send_error(writer: FrameWriter, error: PluginError) -> None:
+    _flush_stdout()
     writer.send(
         ErrorFrame(
             error=ErrorPayload(

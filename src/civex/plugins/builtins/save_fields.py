@@ -6,12 +6,13 @@ from typing import Any
 from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel
 
-from civex.plugins.base import Tier0Plugin, WorkflowContext
+from civex_plugin_sdk import Ctx
+from civex_plugin_sdk import Plugin as PluginBase
 
 log = logging.getLogger(__name__)
 
 
-class Plugin(Tier0Plugin):
+class Plugin(PluginBase):
     id = "civex.save_fields"
     name = "Save Fields"
     description = (
@@ -19,7 +20,7 @@ class Plugin(Tier0Plugin):
         "null value are skipped rather than clearing the field."
     )
     category = "outputs"
-    capabilities: list[str] = ["update_record"]
+    capabilities: list[str] = ["read", "write_records"]
     inputs = [
         IOSpec(
             name="updates",
@@ -33,17 +34,18 @@ class Plugin(Tier0Plugin):
         pass
 
     def invoke(
-        self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
+        self, inputs: dict[str, Any], config: Config, ctx: Ctx
     ) -> dict[str, Any]:
         updates: dict[str, Any] = inputs["updates"]
         # Null values are skipped, and the record's other fields are read as they
         # are now, not as they were when the workflow started.
         changes = {k: v for k, v in updates.items() if v is not None}
+        record_id = ctx.get_context_record()["id"]
         log.info(
             "Saving %d field(s) to record %s: %s",
             len(updates),
-            str(ctx.record.id)[:8],
+            record_id[:8],
             list(updates.keys()),
         )
-        ctx.patch_record(str(ctx.record.id), changes)
+        ctx.patch_record(record_id, changes)
         return {}

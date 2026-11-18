@@ -17,9 +17,11 @@ as a public name.
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import sys
+import threading
 from collections.abc import Callable, Iterable, Iterator
 from typing import Any, TextIO
 
@@ -36,10 +38,15 @@ class FrameWriter:
                 directly so tests can pass a list-appending callable.
         """
         self._write = write
+        # A plugin may print from a thread of its own; two frames must never
+        # interleave on the one line-based stream.
+        self._lock = threading.Lock()
 
     def send(self, frame: dict[str, Any]) -> None:
         """Encode `frame` as one compact JSON line and write it."""
-        self._write(json.dumps(frame, separators=(",", ":")) + "\n")
+        line = json.dumps(frame, separators=(",", ":")) + "\n"
+        with self._lock:
+            self._write(line)
 
     @classmethod
     def for_stream(cls, stream: TextIO) -> "FrameWriter":
@@ -105,6 +112,47 @@ def isolate_stdout() -> TextIO:
     os.dup2(devnull_fd, 1)
     os.close(devnull_fd)
     return os.fdopen(real_stdout_fd, "w", buffering=1)
+
+
+class LogStream(io.TextIOBase):
+    """A text stream that sends each line written to it as a `log` frame.
+
+    `serve()` puts one in place of `sys.stdout`, so a plugin's `print()`
+    reaches the host (and the run's log) in order with its other frames,
+    instead of being thrown away. Output written straight to file
+    descriptor 1 (by C code) still goes to devnull (`isolate_stdout`).
+    """
+
+    def __init__(self, writer: FrameWriter, stream: str = "stdout") -> None:
+        """Send lines through `writer`, labelled with `stream`."""
+        super().__init__()
+        self._writer = writer
+        self._stream = stream
+        self._buffer = ""
+        self._lock = threading.Lock()
+
+    def writable(self) -> bool:
+        """Always: this is an output stream."""
+        return True
+
+    def write(self, text: str) -> int:
+        """Buffer `text`, sending every complete line as a `log` frame."""
+        with self._lock:
+            self._buffer += text
+            *lines, self._buffer = self._buffer.split("\n")
+        for line in lines:
+            self._send(line)
+        return len(text)
+
+    def flush(self) -> None:
+        """Send whatever is left of an unfinished line."""
+        with self._lock:
+            rest, self._buffer = self._buffer, ""
+        if rest:
+            self._send(rest)
+
+    def _send(self, text: str) -> None:
+        self._writer.send({"type": "log", "stream": self._stream, "text": text})
 
 
 def stdin_lines() -> Iterator[str]:

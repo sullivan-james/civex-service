@@ -238,6 +238,68 @@ from the next tag forward.
 - Dependencies: certifi 2026.10.19, virtualenv 21.14.12 and vite 8.3.4, for
   advisories pip-audit and npm audit raised.
 
+### Changed
+
+- **A workflow run that fails keeps none of its writes.** Both drains run a
+  workflow inside a savepoint and commit once with its outcome: if a step
+  fails, every record change the run made is undone (its log says so), where
+  it used to keep whatever the steps before the failure wrote. A run stopped
+  on purpose still keeps what it got through. Plugins no longer commit:
+  `ctx.commit()` does nothing (and warns) and the host answers a `commit`
+  call from an older plugin with nothing.
+- **Files go to plugins by path, in one folder per run.** Each workflow run
+  gets a folder (in the user's cache, `CIVEX_RUNS_DIR` to move it; removed
+  when the run ends). A file a plugin asks for is copied there and handed
+  over by path instead of base64 in the protocol, new `ctx.file_path` and
+  `ctx.store_path` pass large files without reading them into memory, and a
+  large `table`/`bytes` value a step produces stays there until a later
+  step reads it (it used to be deleted when the step that wrote it ended).
+  A container gets the folder mounted. A path a plugin hands back outside
+  the run's folder is refused (`path_refused`).
+- **A plugin says what it is in its header, and is locked.** Saving a plugin
+  (or `civex plugin check --write`) writes its contract, from the code's own
+  answer, into the script block under `[tool.civex]`, so discovery, workflow
+  checks and the library read it without running the plugin; when its
+  process starts the code is asked again and a plugin whose code no longer
+  matches its header is refused (`contract_mismatch`). A plugin with no
+  header is described by running it, as before. The first time a plugin is
+  started its dependencies are locked (`<plugin>.py.lock`, `uv lock
+  --script`), and a locked plugin runs from its lock without the exact SDK
+  pin, so updating civex no longer rebuilds every plugin's environment.
+  Installing from the library still runs the code (and checks it against
+  its header).
+- **Every plugin runs the same way.** A tier is now only how a plugin is
+  started (`civex.plugins.launchers`: uv, Docker, or a thread in civex), and
+  `civex.plugins.runtime` drives all of them over the wire protocol. The
+  built-in plugins are SDK `Plugin`s run in civex's process through that
+  protocol, so they reach the project only through the host functions their
+  capabilities grant, like any plugin (they are not stopped by a step's
+  timeout, as before). A built-in's error keeps its kind (`validation_error`,
+  ...) but now arrives as a `PluginExecutionError`.
+- **Plugin capabilities are permission actions.** A plugin lists what it
+  needs, `read`, `write_records`, `manage_files` or `delete`, and each grants
+  every `ctx` method needing it; naming single methods (the older form) still
+  works. Every function a plugin may call is one entry in
+  `civex.plugins.host_api`, with the action it needs. New `ctx.patch_record`
+  for plugins (change only some fields, as built-ins do). A refusal says what
+  to add; a capability civex doesn't know is warned about at discovery.
+- **Custom plugins start once, not for every step.** A plugin's process is
+  kept after it answers (its `describe` at discovery included) and handed the
+  next run of that plugin, until it has been idle for five minutes or civex
+  stops; editing the file starts a new one, and one that timed out or died is
+  not reused (`civex.plugins.workers`). A plugin's module-level state now
+  lives from one run to the next; its working folder is emptied before each.
+- On Windows, plugin processes (and Docker for container plugins) no longer
+  open a console window for every step when civex runs from the desktop app.
+- A plugin's stderr is read while it runs, so one that writes a lot of it no
+  longer stops, waiting for a reader.
+- **A plugin's output reaches the run's log.** Its `print()`s and whatever it
+  writes to stderr are written to the run's log as they come (they were thrown
+  away). A plugin can say how far it has got with `ctx.progress(done, total,
+  message)`, and the status bar shows the step a run is on and that progress
+  (`GET /automation`'s new `steps`). Plugins speak wire protocol 2 (SDK
+  unreleased); civex still runs plugins on 1.
+
 ## v2.0.0 — syncing between machines, updates from the app (2026-10-07)
 
 ### Breaking

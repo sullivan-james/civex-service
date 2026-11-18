@@ -226,9 +226,11 @@ class CapabilityDeniedError(PluginExecutionError):
 
     kind = "capability_denied"
 
-    def __init__(self, method: str) -> None:
+    def __init__(self, method: str, action: str | None = None) -> None:
         self.method = method
-        super().__init__(f"plugin is not declared to use capability '{method}'")
+        self.action = action
+        fix = f": add '{action}' (or '{method}') to its capabilities" if action else ""
+        super().__init__(f"plugin is not declared to use capability '{method}'{fix}")
 
 
 class PluginContractError(CivexError):
@@ -238,7 +240,7 @@ class PluginContractError(CivexError):
 
     Declared `table`/`bytes` IOSpec values are converted for the author
     automatically (civex_plugin_sdk.io_convert, wired into both
-    registry._registration_for_tier0 and civex_plugin_sdk.serve._handle_run),
+    civex_plugin_sdk.serve._handle_run, which runs every tier's plugins),
     so this only fires for a BUILTIN plugin returning some *other*
     non-serializable value -- caught at the step that produced it rather than
     later and further away, when a downstream subprocess step tried to send it

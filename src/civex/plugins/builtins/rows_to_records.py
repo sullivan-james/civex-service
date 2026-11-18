@@ -6,13 +6,16 @@ from typing import Any
 from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel, ConfigDict, Field
 
-from civex.domain.exceptions import ValidationError
-from civex.plugins.base import Tier0Plugin, WorkflowContext
+from civex_plugin_sdk import RpcError
+
+from civex.plugins.builtins._refusals import refused
+from civex_plugin_sdk import Ctx
+from civex_plugin_sdk import Plugin as PluginBase
 
 log = logging.getLogger(__name__)
 
 
-class Plugin(Tier0Plugin):
+class Plugin(PluginBase):
     id = "civex.rows_to_records"
     name = "Rows to Records"
     description = (
@@ -20,7 +23,7 @@ class Plugin(Tier0Plugin):
         "Records to match existing records instead."
     )
     category = "outputs"
-    capabilities: list[str] = ["create_record"]
+    capabilities: list[str] = ["read", "write_records"]
     inputs = [
         IOSpec(
             name="table",
@@ -62,7 +65,7 @@ class Plugin(Tier0Plugin):
         )
 
     def invoke(
-        self, inputs: dict[str, Any], config: Config, ctx: WorkflowContext
+        self, inputs: dict[str, Any], config: Config, ctx: Ctx
     ) -> dict[str, Any]:
         try:
             import pandas as pd
@@ -72,7 +75,7 @@ class Plugin(Tier0Plugin):
             )
 
         df = inputs["table"]
-        dataset_name = config.dataset or ctx.dataset.name
+        dataset_name = config.dataset or ctx.get_context_dataset()["name"]
         log.info(
             "Creating %d records → dataset '%s', schema '%s'",
             len(df),
@@ -102,7 +105,9 @@ class Plugin(Tier0Plugin):
                     context_record_id=config.context_record_id or None,
                 )
                 created += 1
-            except ValidationError as e:
+            except RpcError as e:
+                if not refused(e):
+                    raise
                 log.warning("  ✗ skipped row %s: %s", data, e)
                 skipped += 1
 

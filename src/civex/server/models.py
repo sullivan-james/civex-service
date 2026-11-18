@@ -1417,6 +1417,24 @@ class RunManyResponse(BaseModel):
     )
 
 
+class RunStepResponse(BaseModel):
+    job_id: str = Field(description="The run.")
+    workflow: str = Field(description="The workflow it is a run of.")
+    step: str = Field(description="The step it is on.")
+    plugin: str = Field(description="The plugin that step runs.")
+    done: float | None = Field(
+        default=None,
+        description="How much of the step is done, as the plugin counts it; null "
+        "until the plugin says.",
+    )
+    total: float | None = Field(
+        default=None, description="How much there is in all; null if not known."
+    )
+    message: str = Field(
+        default="", description="What the step is doing now, in the plugin's words."
+    )
+
+
 class BatchResponse(BaseModel):
     total: int = Field(
         description="Every run in the current stretch of work: those finished "
@@ -1468,6 +1486,11 @@ class AutomationStatusResponse(BaseModel):
         default=None,
         description="The current stretch of work with how many have succeeded and "
         "failed so far; null when nothing is waiting or running.",
+    )
+    steps: list[RunStepResponse] = Field(
+        default_factory=list,
+        description="For each run going on in this server, the step it is on and "
+        "how far that step has got.",
     )
 
 

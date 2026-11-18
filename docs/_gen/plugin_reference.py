@@ -12,7 +12,6 @@ from typing import Any
 
 import mkdocs_gen_files
 from civex_plugin_sdk.plugin_base import IOSpec
-from pydantic import BaseModel
 
 from civex.plugins import builtins, registry
 from civex.plugins.registry import PluginRegistration
@@ -73,8 +72,9 @@ def _prop_default(prop: dict[str, Any]) -> str:
     return str(default)
 
 
-def config_table(config_model: type[BaseModel]) -> str:
-    schema = config_model.model_json_schema(by_alias=True)
+def config_table(schema: dict) -> str:
+    """The plugin's own Config schema, as `describe` gives it (the
+    registration's `config_model` is a pass-through for every tier)."""
     properties = schema.get("properties", {})
     if not properties:
         return ""
@@ -97,7 +97,7 @@ for pid, reg in sorted(registry.all_plugins().items()):
     prose = (PROSE_DIR / f"{slug}.md").read_text()
     tables = (
         header(reg)
-        + config_table(reg.config_model)
+        + config_table(reg.config_schema or {})
         + io_table(reg.inputs, "Inputs")
         + io_table(reg.outputs, "Outputs")
     )

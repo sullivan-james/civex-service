@@ -351,6 +351,9 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
         jobs.shutdown()
         sync_jobs.shutdown()
         history_jobs.shutdown()
+        from civex.plugins.workers import POOL
+
+        POOL.close()  # the plugin processes kept warm between runs
 
 
 def _base_app(**kwargs) -> FastAPI:

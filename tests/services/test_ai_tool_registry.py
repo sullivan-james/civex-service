@@ -220,7 +220,11 @@ def test_list_plugins_tool_reads_via_plugin_service(ctx: AppContext) -> None:
     ctx.plugin_svc.save("demo", code)
     result = json.loads(dispatch("list_plugins", {}, _tool_ctx(ctx)))
 
-    assert result["custom_source"] == [{"filename": "demo.py", "code": code}]
+    (source,) = result["custom_source"]
+    assert source["filename"] == "demo.py"
+    # Saved with the header the code describes, the code itself kept.
+    assert "# [tool.civex]" in source["code"]
+    assert source["code"].endswith(code.split("# ///\n", 1)[1])
 
     registered = {p["id"]: p for p in result["registered"]}
     assert registered["project.demo"]["builtin"] is False

@@ -33,14 +33,14 @@ from civex_plugin_sdk import Ctx, Plugin as PluginBase, serve
 class Plugin(PluginBase):
     id = "project.uv_e2e_plugin"
     name = "UV E2E Plugin"
-    capabilities = ["commit"]
+    capabilities = ["write_records"]
 
     class Config(BaseModel):
         greeting: str = "hi"
 
     def invoke(self, inputs, config, ctx: Ctx) -> dict:
-        if inputs.get("call_commit"):
-            ctx.commit()
+        if inputs.get("call_host"):
+            ctx.patch_record("r1", {"x": 1})
         return {"greeting": config.greeting}
 
 if __name__ == "__main__":
@@ -58,24 +58,29 @@ def test_real_uv_run_discovers_and_executes_a_plugin(tmp_path: Path) -> None:
     registration = get_plugin("project.uv_e2e_plugin")
     assert registration is not None
     assert registration.tier == PluginTier.SUBPROCESS
-    assert registration.capabilities == ["commit"]
+    assert registration.capabilities == ["write_records"]
+
+    class _Patched(dict):
+        def to_dict(self) -> dict:
+            return dict(self)
 
     class _FakeCtx:
         def __init__(self) -> None:
-            self.committed = False
+            self.patched: list[tuple[str, dict]] = []
 
-        def commit(self) -> None:
-            self.committed = True
+        def patch_record(self, record_id: str, fields: dict) -> _Patched:
+            self.patched.append((record_id, fields))
+            return _Patched(id=record_id, data=fields)
 
     ctx = _FakeCtx()
     result = registration.invoke(
-        {"call_commit": True},
+        {"call_host": True},
         registration.config_model(greeting="hello"),
         ctx,
         30.0,
     )
     assert result.outputs == {"greeting": "hello"}
-    assert ctx.committed is True
+    assert ctx.patched == [("r1", {"x": 1})]
 
 
 _FAILING_PLUGIN_CODE = """\

@@ -12,6 +12,39 @@ civex host could observe (wire format, IO conversion, public API), patch for
 fixes that change neither. A change to the wire protocol itself also bumps
 `PROTOCOL_VERSION` (see `civex_plugin_sdk.protocol`).
 
+## Unreleased
+
+- `PROTOCOL_VERSION` is 3: `RunRequest.run_dir` names the run's folder,
+  which `serve_loop` and `Ctx` use for values too large to inline (it lives
+  for the whole workflow run). New `Ctx.file_path(sha256)` (a read-only copy
+  of a stored file, by path), `Ctx.store_path(path, filename)` and
+  `Ctx.run_dir`.
+- `serve_loop` takes `scratch_dir` (default the working folder; None inlines
+  everything), and new `serve.describe_result(plugin_cls)` builds a plugin
+  class's `describe_result` (what `describe` answers).
+- An exception from `invoke()` that carries a string `kind` (and
+  `retryable`) keeps them in the error frame instead of becoming
+  `plugin_error`.
+- `Ctx.commit()` does nothing and warns (`DeprecationWarning`): the host
+  keeps a run's writes when it ends, or none of them if a step fails.
+- New `Ctx.patch_record(record_id, fields)`: change only these fields.
+  `update_record`'s docstring now says it replaces the record's data.
+- `capabilities` are permission actions (`read`, `write_records`,
+  `manage_files`, `delete`), each granting every `Ctx` method needing it;
+  single method names still work.
+- `PROTOCOL_VERSION` is 2: a plugin may send `progress` frames.
+  `Ctx.progress(done, total=None, message="")` says how far a run has got;
+  the civex app shows it in the status bar. A host speaking 2 still runs
+  plugins on 1.
+- `print()` from a plugin is no longer thrown away: `serve()` and
+  `serve_container()` replace `sys.stdout` and `sys.stderr` with
+  `io.LogStream`, which sends each line as a `log` frame (`stream` says
+  which; a half-written line before the run's answer).
+- `FrameWriter.send` holds a lock, so frames sent from two threads never
+  interleave.
+- `parse_frame` reads a `describe_result` with no `protocol_version` as 1
+  (it read the SDK's own version).
+
 ## v0.2.0 (2026-09-30)
 
 First release published to PyPI (planned tag `sdk-v0.2.0`), under the MIT

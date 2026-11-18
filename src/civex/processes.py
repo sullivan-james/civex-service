@@ -41,11 +41,25 @@ def pid_alive(pid: int) -> bool:
     return True
 
 
+def no_window_kwargs() -> dict[str, Any]:
+    """`Popen` arguments that keep a console program from opening a window of
+    its own on Windows. A program started from one with no console (the
+    desktop app runs under `pythonw`) otherwise gets a new console window,
+    which shows for as long as it runs and takes time to open."""
+    if sys.platform == "win32":
+        return {"creationflags": subprocess.CREATE_NO_WINDOW}
+    return {}
+
+
 def new_group_kwargs() -> dict[str, Any]:
     """`Popen` arguments that put the child (and anything it starts) in its own
-    process group, so `terminate_tree` can stop them as one."""
+    process group, so `terminate_tree` can stop them as one, without a window
+    of its own on Windows (`no_window_kwargs`)."""
     if sys.platform == "win32":
-        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+        return {
+            "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP
+            | subprocess.CREATE_NO_WINDOW
+        }
     return {"start_new_session": True}
 
 
@@ -58,6 +72,7 @@ def terminate_tree(proc: subprocess.Popen, grace_seconds: float = 2.0) -> None:
             ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
             capture_output=True,
             check=False,
+            **no_window_kwargs(),
         )
         try:
             proc.wait(timeout=grace_seconds)

@@ -7,7 +7,7 @@ import pytest
 from civex_plugin_sdk.io_convert import to_invoke_form
 from pydantic import ValidationError as PydanticValidationError
 
-from civex.domain.exceptions import ValidationError
+from civex.domain.exceptions import PluginExecutionError
 from civex.plugins.builtins.parse_table import (
     Plugin,
     detect_delimiter,
@@ -122,10 +122,13 @@ def test_a_separator_in_the_list_must_be_one_character() -> None:
 
 
 def test_empty_and_undecodable_input_are_reported_plainly(wf_ctx) -> None:
-    with pytest.raises(ValidationError, match="no data"):
+    """The plugin's own ValidationError keeps its kind through the protocol."""
+    with pytest.raises(PluginExecutionError, match="no data") as e:
         _read(wf_ctx, b"", delimiters=[",", "tab"])
-    with pytest.raises(ValidationError, match="decode"):
+    assert e.value.kind == "validation_error"
+    with pytest.raises(PluginExecutionError, match="decode") as e:
         _read(wf_ctx, b"\xff\xfe\x00bad", delimiters=[",", "tab"], encoding="ascii")
+    assert e.value.kind == "validation_error"
 
 
 def test_resolving_names_and_characters() -> None:

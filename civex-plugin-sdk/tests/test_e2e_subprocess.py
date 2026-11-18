@@ -39,7 +39,7 @@ def test_describe_and_run_over_real_stdio_pipes():
         describe = _recv(proc)
         assert describe["type"] == "describe_result"
         assert describe["id"] == "example.echo"
-        assert describe["capabilities"] == ["commit"]
+        assert describe["capabilities"] == ["write_records"]
         assert describe["config_schema"]["required"] == ["text"]
 
         _send(
@@ -49,15 +49,15 @@ def test_describe_and_run_over_real_stdio_pipes():
         result = _recv(proc)
         assert result == {"type": "result", "outputs": {"echo": "hello", "inputs": {}}}
 
-        # A run that triggers a real nested rpc_call (commit) -- we act as
+        # A run that triggers a real nested rpc_call (update_record) -- we act as
         # the host and answer it before the plugin can produce its result.
         _send(
             proc,
-            {"type": "run", "inputs": {"call_commit": True}, "config": {"text": "hi"}},
+            {"type": "run", "inputs": {"call_host": True}, "config": {"text": "hi"}},
         )
         call = _recv(proc)
         assert call["type"] == "rpc_call"
-        assert call["method"] == "commit"
+        assert call["method"] == "update_record"
         _send(
             proc,
             {"type": "rpc_result", "call_id": call["call_id"], "result": {}},
@@ -65,7 +65,7 @@ def test_describe_and_run_over_real_stdio_pipes():
         result = _recv(proc)
         assert result == {
             "type": "result",
-            "outputs": {"echo": "hi", "inputs": {"call_commit": True}},
+            "outputs": {"echo": "hi", "inputs": {"call_host": True}},
         }
     finally:
         assert proc.stdin is not None
