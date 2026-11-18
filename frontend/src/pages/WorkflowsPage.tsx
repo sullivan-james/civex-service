@@ -12,12 +12,7 @@ export default function WorkflowsPage() {
       title="Workflows"
       info="Automations that run when records are created or updated, or by hand. While this project shares with a server, the workflows in its library are listed too: publish yours, install others'."
       action={
-        <Button
-          to="/workflows/new"
-          target="_blank"
-          rel="opener"
-          variant="primary"
-        >
+        <Button to="/workflows/new" variant="primary">
           + New workflow
         </Button>
       }

@@ -50,6 +50,38 @@ export function useSaveWorkflow() {
   })
 }
 
+export function useSetWorkflowEnabled() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  return useMutation({
+    mutationFn: ({ stem, enabled }: { stem: string; enabled: boolean }) =>
+      workflowsApi.setEnabled(stem, enabled),
+    onSuccess: (saved) => {
+      qc.invalidateQueries({ queryKey: ['workflows'] })
+      toast.success(
+        saved.enabled
+          ? `“${saved.name}” is on: it starts by itself.`
+          : `“${saved.name}” is off: it runs only when started by hand.`,
+      )
+    },
+  })
+}
+
+/** Try a workflow on a record; nothing it does is kept. */
+export function useTryWorkflow() {
+  return useMutation({
+    mutationFn: ({
+      content,
+      recordId,
+      files,
+    }: {
+      content: string
+      recordId: string
+      files?: Record<string, File[]>
+    }) => workflowsApi.try(content, recordId, files),
+  })
+}
+
 export function useDeleteWorkflow() {
   const qc = useQueryClient()
   const toast = useToast()
