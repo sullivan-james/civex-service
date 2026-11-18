@@ -127,7 +127,14 @@ class Plugin(PluginBase):
         # A `file_list` field holds a list: the file is added to it (once) on a
         # record that has one, and is the whole list of a new record. A `file`
         # field holds the file itself, replacing any there.
-        field_type = ctx.field_type(config.schema_name, config.file_field)
+        field_type = next(
+            (
+                f["dtype"]
+                for f in ctx.get_schema(config.schema_name)["fields"]
+                if f["name"] == config.file_field
+            ),
+            None,
+        )
         if field_type not in ("file", "file_list"):
             raise ValueError(
                 f"'{config.file_field}' is not a file field of "

@@ -55,6 +55,13 @@ def _record(dto: Any) -> dict[str, Any]:
     return dto.to_dict()
 
 
+def _schema(ctx: WorkflowContext, dto: Any) -> dict[str, Any]:
+    """A schema as a plugin sees it: with its live fields, inherited ones
+    included, so a plugin can tell a field's type."""
+    fields = [f.to_dict() for f in ctx.schema_fields(dto.name)]
+    return {**dto.to_dict(), "fields": fields}
+
+
 def _folder(scratch: Path | None) -> Path:
     if scratch is None:
         raise PluginExecutionError(
@@ -168,13 +175,13 @@ _FNS = [
     HostFn(
         "get_schema",
         READ,
-        lambda ctx, a, s: {"schema": ctx.get_schema(a["name"]).to_dict()},
+        lambda ctx, a, s: {"schema": _schema(ctx, ctx.get_schema(a["name"]))},
         "A kind of record, with its fields.",
     ),
     HostFn(
         "list_schemas",
         READ,
-        lambda ctx, a, s: {"schemas": [x.to_dict() for x in ctx.list_schemas()]},
+        lambda ctx, a, s: {"schemas": [_schema(ctx, x) for x in ctx.list_schemas()]},
         "Every kind of record.",
     ),
     HostFn(
