@@ -10,6 +10,7 @@ import {
 
 const wf = (stem: string): Workflow => ({
   name: stem,
+  enabled: true,
   description: null,
   steps: 2,
   filename: `${stem}.yaml`,

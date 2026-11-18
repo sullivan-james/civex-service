@@ -17,6 +17,7 @@ const RID = '3f2b8c1e-0000-4000-8000-123456789abc'
 
 const wf = (name: string, over: Partial<Workflow> = {}): Workflow => ({
   name,
+  enabled: true,
   description: null,
   steps: 1,
   filename: `${name}.yaml`,

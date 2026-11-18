@@ -42,6 +42,7 @@ walks through it.
 |---|---|---|
 | `name` | yes | How the workflow is referred to (`civex workflow run <name>`) |
 | `description` | | Shown in lists |
+| `enabled` | | `false` switches its triggers off: it runs only when someone starts or tries it. Missing means on |
 | `triggers` | | When it runs by itself (below) |
 | `record_schema` | | Manual runs only on records of this schema |
 | `inputs` | | What a manual run asks for (below) |
@@ -112,8 +113,61 @@ run on many records, tick them in a list and choose **Run workflow on N**.
 
 ## Editing
 
-Edit the YAML in any editor, or in the app under **Workflows → New workflow** (or
-open one). Both write the same file, and changes take effect on the next run with
-nothing to register. To share workflows with other computers, see
+In the app, **Workflows → New workflow** offers a few starting points (fill a
+field from a file's name, copy a field, put files on matching records, make a
+record for each file, run your own plugin on a file, records from a table, or
+nothing) and opens the **builder**. The builder is a form:
+
+- **When it runs**: the kind of record it runs on, and whether adding or
+  changing one starts it (and which fields to watch).
+- **Then, in order**: each step's action, chosen by name ("Read a file",
+  "Take a value from a file name"), with its settings as lists of your fields
+  and schemas. A step's inputs are filled in when only one earlier step can
+  give them, and **Only run this step when…** makes it depend on an earlier
+  step's result.
+- A setting that is a file-name pattern has **Build from an example…**: pick
+  one of the names already in that field, select the part you want (a number,
+  a code, a date), and see what it makes of every name before using it. For
+  files matched to records, names that would give the same key are marked.
+
+**YAML** at the top switches to the file itself, and back: the builder changes
+only what it shows, so comments and anything else in the file are kept. A
+schema's **Automations** tab has **New workflow for these**, which starts with
+that schema chosen.
+
+### Try it before it runs
+
+**Try it** (beside the builder, and a tab on each workflow's page) runs the
+workflow on a record you choose, then undoes everything it did, and shows what
+it would have done: each record it would add, change or delete, with the
+values before and after, files that matched no record, and other workflows its
+saves would start. It tries what is on screen, saved or not.
+
+```bash
+civex workflow try read-sample-time --record 3f2b8c1e
+civex workflow try ./draft.yaml --record 3f2b8c1e --input files='*.csv'
+```
+
+A plugin of yours that reaches outside civex (a web request, a file of its
+own) still does that during a try.
+
+### On and off
+
+A workflow made in the app starts **off**: nothing starts it by itself until
+you turn it on, after trying it (**Turn it on** after a good try, or on its
+page). An existing file without `enabled:` is on. Off, it still runs when
+someone starts it.
+
+```bash
+civex workflow disable read-sample-time
+civex workflow enable read-sample-time
+```
+
+Both change only the file's `enabled:` line. To stop every workflow at once,
+see [Stopping automation](automation.md#stopping-automation).
+
+Any text editor works too: the app and the builder write the same file, and
+changes take effect on the next run with nothing to register. To share
+workflows with other computers, see
 [the library](sync.md#sharing-workflows-and-plugins). For your own steps, see
 [Writing a plugin](../extending/writing-a-plugin.md).

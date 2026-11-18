@@ -174,6 +174,10 @@ export function WorkflowsPanel({
       render: (r) =>
         r.triggers.length === 0 ? (
           <span className="text-fg-muted">By hand</span>
+        ) : r.local && !r.local.enabled ? (
+          <span className="text-xs text-fg-muted">
+            <Badge variant="attention">Off</Badge> {r.triggers.join('; ')}
+          </span>
         ) : (
           <span className="text-xs">
             {r.triggers.map((t) => (
@@ -209,27 +213,37 @@ export function WorkflowsPanel({
 
   return (
     <div className="space-y-3">
-      <ListToolbar
-        search={{
-          value: list.q,
-          label: 'Search workflows',
-          onChange: (q) => list.set({ q }),
-        }}
-        picks={
-          sharing
-            ? [
-                {
-                  label: 'Show…',
-                  value: list.picks.show,
-                  options: schemaName
-                    ? SHOW_OPTIONS.filter((o) => o.value !== 'library')
-                    : SHOW_OPTIONS,
-                  onChange: (show) => list.set({ show }),
-                },
-              ]
-            : []
-        }
-      />
+      <div className="flex flex-wrap items-center gap-2">
+        <ListToolbar
+          search={{
+            value: list.q,
+            label: 'Search workflows',
+            onChange: (q) => list.set({ q }),
+          }}
+          picks={
+            sharing
+              ? [
+                  {
+                    label: 'Show…',
+                    value: list.picks.show,
+                    options: schemaName
+                      ? SHOW_OPTIONS.filter((o) => o.value !== 'library')
+                      : SHOW_OPTIONS,
+                    onChange: (show) => list.set({ show }),
+                  },
+                ]
+              : []
+          }
+        />
+        {schemaName && (
+          <Button
+            size="sm"
+            to={`/workflows/new?schema=${encodeURIComponent(schemaName)}`}
+          >
+            New workflow for these
+          </Button>
+        )}
+      </div>
       {libraryError && sharing && (
         <p role="alert" className="text-xs text-danger">
           The library can't be read: {errorMessage(libraryError)}
