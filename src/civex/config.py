@@ -276,10 +276,11 @@ class Config:
         return self.store
 
 
-def find_project_root() -> Path | None:
-    """Walk up from cwd looking for a _civex directory."""
-    cwd = Path.cwd()
-    for directory in [cwd, *cwd.parents]:
+def find_project_root(start: Path | None = None) -> Path | None:
+    """Walk up from `start` (the cwd by default) looking for a _civex
+    directory."""
+    here = (start or Path.cwd()).resolve()
+    for directory in [here, *here.parents]:
         if (directory / "_civex").is_dir():
             return directory
     return None
