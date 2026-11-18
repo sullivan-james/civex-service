@@ -52,7 +52,7 @@ def test_list_plugins_returns_the_full_declared_contract(client: TestClient) -> 
             "name": "value",
             "type": "any",
             "required": True,
-            "description": "The field's current value, or null if unset.",
+            "description": "The field's value; empty when it isn't set.",
         }
     ]
     assert get_field["config_schema"]["properties"]["field"]["type"] == "string"

@@ -11,7 +11,7 @@ from civex_plugin_sdk import RpcError
 from civex.plugins.builtins._refusals import refused
 from civex_plugin_sdk import Ctx
 from civex_plugin_sdk import Plugin as PluginBase
-from civex.plugins.hints import advanced, hint
+from civex.plugins.hints import advanced, hint, says
 
 log = logging.getLogger(__name__)
 
@@ -29,20 +29,25 @@ class Plugin(PluginBase):
         IOSpec(
             name="table",
             type="table",
-            description="Rows to insert; columns map to schema fields by name unless `field_mapping` is set.",
+            description="The table to make records from. Its columns go into the fields of the same name, unless Columns to fields says otherwise.",
         )
     ]
     outputs = [
-        IOSpec(name="created", type="number", description="Records created."),
+        IOSpec(name="created", type="number", description="How many records it made."),
         IOSpec(
             name="skipped",
             type="number",
-            description="Rows whose record failed validation.",
+            description="The rows whose record could not be made.",
         ),
     ]
 
     class Config(BaseModel):
-        model_config = ConfigDict(populate_by_name=True)
+        model_config = ConfigDict(
+            json_schema_extra=says(
+                "Makes a {schema} inside this record for each row of {table}."
+            ),
+            populate_by_name=True,
+        )
         schema_name: str = Field(
             title="Kind of record to make",
             json_schema_extra=hint("schema"),

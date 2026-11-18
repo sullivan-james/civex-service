@@ -115,6 +115,20 @@ class Config(BaseModel):
 
 Add `"advanced": true` to put a setting under **More settings**. Nothing is checked from these hints: they only choose the control, and a setting without one still works.
 
+The builder and a workflow's **Overview** also say what each step does in one sentence. Give it on the `Config` model with `says()`, naming settings and inputs in braces; each is filled in with what the person chose, by its name in the app ("Recorded on", not `recorded_on`), and shows as "…" until chosen:
+
+```python
+from pydantic import BaseModel, ConfigDict
+from civex.plugins.hints import says
+
+class Config(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra=says("Measures the pitch of the recording in {field}.")
+    )
+```
+
+The sentence is stored as `x-civex-says` in the JSON schema. Write it the way a person would describe the step to a colleague, and write each input's and output's `description` the same way: the builder labels an input by the first clause of its description ("The files to put on records." becomes **Files to put on records**) and an earlier step's output by its description ("Step 1: the file's contents").
+
 ### `invoke()`
 
 ```python

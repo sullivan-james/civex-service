@@ -11,7 +11,7 @@ from civex_plugin_sdk import Ctx, RpcError
 from civex_plugin_sdk import Plugin as PluginBase
 
 from civex.plugins.builtins._refusals import GONE, refused
-from civex.plugins.hints import advanced, hint
+from civex.plugins.hints import advanced, hint, says
 
 log = logging.getLogger(__name__)
 
@@ -44,20 +44,28 @@ class Plugin(PluginBase):
     )
     category = "outputs"
     capabilities: list[str] = ["read", "write_records"]
-    inputs = [IOSpec(name="files", type="files", description="FileRef dicts to match.")]
+    inputs = [
+        IOSpec(
+            name="files",
+            type="files",
+            description="The files to put on records. Each goes on the record its name says.",
+        )
+    ]
     outputs = [
         IOSpec(
             name="created",
             type="number",
-            description="Records created because no match was found.",
+            description="How many records it made, because none matched.",
         ),
         IOSpec(
-            name="updated", type="number", description="Existing records given a file."
+            name="updated",
+            type="number",
+            description="How many records it gave a file.",
         ),
         IOSpec(
             name="unmatched",
             type="list",
-            description="Filenames the pattern missed, or whose record could not be created.",
+            description="The file names it found no key in, or whose record could not be made.",
         ),
         IOSpec(
             name="ambiguous",
@@ -69,32 +77,32 @@ class Plugin(PluginBase):
     ]
 
     class Config(BaseModel):
-        model_config = ConfigDict(populate_by_name=True)
+        model_config = ConfigDict(
+            json_schema_extra=says(
+                "Puts each of {files} on the {schema} inside this record whose {key_field} is {pattern} in the file's name, in its {file_field}. A file with no such {schema} gets a new one."
+            ),
+            populate_by_name=True,
+        )
         schema_name: str = Field(
-            title="Kind of record to match",
+            title="Put them on which kind of record",
             json_schema_extra=hint("schema"),
             alias="schema",
-            description="Name of the child schema to match/create records "
-            "under. Workflow YAML sets this via the `schema:` key (the Python "
-            "field is `schema_name`).",
-        )
-        key_field: str = Field(
-            title="Match on field",
-            json_schema_extra=hint("field", of="schema"),
-            description="Field on child records to match the extracted key "
-            "against, e.g. 'selection_number'.",
-        )
-        file_field: str = Field(
-            title="Put each file in",
-            json_schema_extra=hint("field", of="schema", dtypes=["file", "file_list"]),
-            description="Field on child records to set with the matched file "
-            "reference, e.g. 'contour_file'.",
+            description="The kind of record each file goes on: one inside the record the workflow runs on. In the YAML, `schema:`.",
         )
         pattern: str = Field(
-            title="The key in each file name",
+            title="The key in each file's name",
             json_schema_extra=hint("pattern", on="files", keys=True),
-            description="Regex with one capture group that extracts the key "
-            "value from each filename.",
+            description="Which part of a file's name says which record it belongs to. Build it from an example.",
+        )
+        key_field: str = Field(
+            title="Matched against field",
+            json_schema_extra=hint("field", of="schema"),
+            description="The field of those records the key is compared with, e.g. a selection number.",
+        )
+        file_field: str = Field(
+            title="Put the file in field",
+            json_schema_extra=hint("field", of="schema", dtypes=["file", "file_list"]),
+            description="The file field of the matching record.",
         )
         dataset: str = Field(
             title="Collection",

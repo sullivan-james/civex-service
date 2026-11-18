@@ -5,12 +5,12 @@ import logging
 from typing import Any
 
 from civex_plugin_sdk.plugin_base import IOSpec
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from civex.domain.exceptions import ValidationError
 from civex_plugin_sdk import Ctx
 from civex_plugin_sdk import Plugin as PluginBase
-from civex.plugins.hints import advanced, choices
+from civex.plugins.hints import advanced, choices, says
 
 log = logging.getLogger(__name__)
 
@@ -96,14 +96,17 @@ class Plugin(PluginBase):
         IOSpec(
             name="bytes",
             type="bytes",
-            description="Raw file contents: CSV, TSV or other delimited text.",
+            description="The file to read as a table: CSV, TSV or other delimited text.",
         )
     ]
-    outputs = [
-        IOSpec(name="table", type="table", description="The parsed rows and columns.")
-    ]
+    outputs = [IOSpec(name="table", type="table", description="The table it read.")]
 
     class Config(BaseModel):
+        model_config = ConfigDict(
+            json_schema_extra=says(
+                "Reads {bytes} as a table, its columns separated by {delimiter}."
+            )
+        )
         delimiter: str = Field(
             title="Columns separated by",
             json_schema_extra=choices(

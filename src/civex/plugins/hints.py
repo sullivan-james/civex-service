@@ -19,7 +19,14 @@ hint(...)` on its pydantic `Field`). Kinds:
 - `date_format`: a token format (`YYYYMMDD-HHmmSS`) for a date in a name.
 - `choice`: one of `choices` (a list of `{value, label}`).
 
-`advanced: true` puts a setting under "More settings". A form that doesn't
+`advanced: true` puts a setting under "More settings".
+
+The settings model as a whole may carry `{"x-civex-says": "..."}`
+(`model_config = ConfigDict(json_schema_extra=says(...))`): one sentence of
+what the step does, with `{setting}` and `{input}` placeholders the form fills
+with what has been chosen ("Sets this record's {field} to {value}.").
+
+A form that doesn't
 know a kind shows a plain input, so a plugin may use them or not; nothing is
 checked from them.
 """
@@ -41,3 +48,8 @@ def advanced(extra: dict[str, Any] | None = None, **more: Any) -> dict[str, Any]
     out = dict(extra or {"x-civex": {}})
     out["x-civex"] = {**out["x-civex"], "advanced": True, **more}
     return out
+
+
+def says(sentence: str) -> dict[str, Any]:
+    """What the step does, as a sentence with `{setting}`/`{input}` blanks."""
+    return {"x-civex-says": sentence}
