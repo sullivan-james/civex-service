@@ -6,7 +6,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from civex.domain.dtos import DatasetDTO, FileRef, RecordDTO, SchemaDTO
+from civex.domain.dtos import DatasetDTO, FieldDTO, FileRef, RecordDTO, SchemaDTO
 from civex.domain.exceptions import DuplicateRecordError
 from civex.domain.file_refs import without_file_locations
 from civex.workflows.progress import RUNS
@@ -259,6 +259,11 @@ class WorkflowContext:
 
     def get_schema(self, name: str) -> SchemaDTO:
         return self._app_ctx.schema_svc.get(name)
+
+    def schema_fields(self, name: str) -> list[FieldDTO]:
+        """The live fields of records of `name`: its own, then inherited."""
+        svc = self._app_ctx.schema_svc
+        return [rf.field for rf in svc.collect_fields(svc.get(name))]
 
     def list_schemas(self) -> list[SchemaDTO]:
         return self._app_ctx.schema_svc.list_all()

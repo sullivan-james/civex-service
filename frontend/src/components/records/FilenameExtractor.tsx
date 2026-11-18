@@ -5,6 +5,7 @@ import { Button, Field, Input, Select } from '../ui'
 import { ArrowRight } from '../ui/icons'
 import { datetimeLocalToUTC } from '../../utils/dates'
 import { displayLabel } from '../../utils/naming'
+import { fileListOf } from '../../utils/recordValues'
 import {
   FILENAME_FORMAT_TOKENS_HELP,
   parseFilenameByTokenFormat,
@@ -34,8 +35,7 @@ export function collectFileSources(
           label: `${ref.filename} (${displayLabel(f.name, f.label)})`,
         })
     } else if (f.type === 'file_list') {
-      const refs = values[f.name] as FileRef[] | undefined
-      for (const ref of refs ?? []) {
+      for (const ref of fileListOf<FileRef>(values[f.name])) {
         if (ref?.filename)
           out.push({
             filename: ref.filename,

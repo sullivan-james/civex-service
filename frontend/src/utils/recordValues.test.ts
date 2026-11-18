@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildRecordData,
+  fileListOf,
   coerceFieldValue,
   isEmptyValue,
   sameValue,
@@ -51,5 +52,19 @@ describe('sameValue / isEmptyValue', () => {
   it('compares structures', () => {
     expect(sameValue({ sha256: 'a' }, { sha256: 'a' })).toBe(true)
     expect(sameValue(['a'], ['b'])).toBe(false)
+  })
+})
+
+const ref = { sha256: 'a'.repeat(64), filename: 'a.wav', size: 1 }
+
+describe('fileListOf', () => {
+  it('reads a lone file stored in a file_list as a list of one', () => {
+    // Such a value made the record page fail with "c.filter is not a function".
+    expect(fileListOf(ref)).toEqual([ref])
+  })
+  it('keeps a list and reads nothing as none', () => {
+    expect(fileListOf([ref])).toEqual([ref])
+    expect(fileListOf(null)).toEqual([])
+    expect(fileListOf(undefined)).toEqual([])
   })
 })

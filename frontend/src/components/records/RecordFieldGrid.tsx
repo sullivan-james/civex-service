@@ -28,6 +28,7 @@ import type { FieldSaveError } from './saveErrors'
 import { FieldValue } from './FieldValue'
 import { FileLink, FileLocationChip } from './FileLocation'
 import { UploadProgress, UploadStopped } from './UploadProgress'
+import { fileListOf } from '../../utils/recordValues'
 
 const isEmpty = (v: unknown) =>
   v === null ||
@@ -109,7 +110,7 @@ function FileControl({
 }) {
   const multiple = field.type === 'file_list'
   const items: (FileRef | PendingFile)[] = multiple
-    ? ((value as (FileRef | PendingFile)[] | null | undefined) ?? [])
+    ? fileListOf<FileRef | PendingFile>(value)
     : value
       ? [value as FileRef | PendingFile]
       : []

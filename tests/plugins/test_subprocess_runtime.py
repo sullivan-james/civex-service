@@ -183,6 +183,9 @@ class _FakeWorkflowContext:
             created_at=_dto_now(),
         )
 
+    def schema_fields(self, name: str) -> list:
+        return []
+
     def list_schemas(self) -> list[SchemaDTO]:
         return [self.get_schema("Subject")]
 
