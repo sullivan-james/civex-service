@@ -12,7 +12,10 @@ hint(...)` on its pydantic `Field`). Kinds:
 - `pattern`: a regular expression with one capture group, matched against
   file names. `on` names the setting holding the field whose files' names it
   reads (`field`), or `files` for files given when the workflow is run;
-  `date_format` names a setting it fills for a date in the name.
+  `date_format` names a setting it fills for a date in the name, `read_as` the
+  setting saying what the value is read as (`string`, `date`, ...), and
+  `keys: true` that the value is matched against records, so two names giving
+  the same key is a problem.
 - `date_format`: a token format (`YYYYMMDD-HHmmSS`) for a date in a name.
 - `choice`: one of `choices` (a list of `{value, label}`).
 

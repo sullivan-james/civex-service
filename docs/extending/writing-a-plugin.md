@@ -110,7 +110,7 @@ class Config(BaseModel):
 | `collection` | A list of collections (blank: the record's own) | |
 | `record` | A record id (blank: the record the workflow runs on) | |
 | `choice` | A list of `choices` (`{value, label}`) | |
-| `pattern` | A regular expression with one capture group, with **Build from an example…**, which writes it from a file name the person marks | `on`: `field` (the names of the files in the setting called `field`) or `files` (files given when it is run); `date_format`: the setting a date in the name fills |
+| `pattern` | A regular expression with one capture group, with **Build from an example…**, which writes it from a file name the person marks | `on`: `field` (the names of the files in the setting called `field`) or `files` (files given when it is run); `date_format`: the setting a date in the name fills; `read_as`: the setting saying what the value is read as (`string`, `integer`, `date`, …); `keys: true` when the value is matched against records, so names giving the same key are shown |
 | `date_format` | A token format such as `YYYYMMDD-HHmmSS` | `pattern`: the pattern setting it goes with |
 
 Add `"advanced": true` to put a setting under **More settings**. Nothing is checked from these hints: they only choose the control, and a setting without one still works.
