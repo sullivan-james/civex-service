@@ -223,7 +223,7 @@ class WorkflowJobService:
             return []
         jobs: list[WorkflowJobDTO] = []
         for wf in self._load_workflows():
-            if wf.triggers is None:
+            if wf.triggers is None or not wf.enabled:
                 continue
             trigger_def = getattr(wf.triggers, event, None)
             if trigger_def is None or trigger_def.schema_name != record.schema_name:

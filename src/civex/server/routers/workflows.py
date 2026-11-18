@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from pydantic import ValidationError as PydanticValidationError
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -30,11 +31,15 @@ from civex.server.models import (
     WorkflowInputResponse,
     WorkflowJobResponse,
     WorkflowResponse,
+    WorkflowEnabledRequest,
     WorkflowSaveRequest,
+    WorkflowTrialRequest,
+    WorkflowTrialResponse,
     WorkflowStepResponse,
     WorkflowTriggerResponse,
 )
 from civex.workflows.definition import WorkflowDef, trigger_summaries
+from civex.workflows.trial import try_workflow
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
 
@@ -69,6 +74,29 @@ def _triggers(wf: WorkflowDef) -> dict[str, WorkflowTriggerResponse] | None:
     return triggers or None
 
 
+def _inputs(wf: WorkflowDef) -> dict[str, WorkflowInputResponse] | None:
+    return {
+        k: WorkflowInputResponse(type=v.type, label=v.label, description=v.description)
+        for k, v in (wf.inputs or {}).items()
+    } or None
+
+
+def _detail(stem: str, filename: str, wf: WorkflowDef, content: str):
+    return WorkflowDetailResponse(
+        name=wf.name,
+        description=wf.description,
+        steps=len(wf.steps),
+        filename=filename,
+        stem=stem,
+        record_schema=wf.record_schema,
+        inputs=_inputs(wf),
+        enabled=wf.enabled,
+        content=content,
+        step_list=_step_list(wf),
+        triggers=_triggers(wf),
+    )
+
+
 @router.get("", response_model=list[WorkflowResponse])
 def list_workflows(ctx: AppContext = Depends(get_ctx)):
     return [
@@ -79,13 +107,8 @@ def list_workflows(ctx: AppContext = Depends(get_ctx)):
             filename=path.name,
             stem=path.stem,
             record_schema=wf.record_schema,
-            inputs={
-                k: WorkflowInputResponse(
-                    type=v.type, label=v.label, description=v.description
-                )
-                for k, v in (wf.inputs or {}).items()
-            }
-            or None,
+            inputs=_inputs(wf),
+            enabled=wf.enabled,
             runs_on=trigger_summaries(wf),
         )
         for path, wf in ctx.workflow_svc.list_defs()
@@ -100,17 +123,7 @@ def get_workflow(stem: str, ctx: AppContext = Depends(get_ctx)):
         raise HTTPException(404, detail=str(e))
     except ValidationError as e:
         raise HTTPException(422, detail=str(e))
-    return WorkflowDetailResponse(
-        name=wf.name,
-        description=wf.description,
-        steps=len(wf.steps),
-        filename=path.name,
-        stem=path.stem,
-        record_schema=wf.record_schema,
-        content=content,
-        step_list=_step_list(wf),
-        triggers=_triggers(wf),
-    )
+    return _detail(path.stem, path.name, wf, content)
 
 
 @router.put("/{stem}", response_model=WorkflowDetailResponse)
@@ -123,17 +136,25 @@ def save_workflow(
         raise HTTPException(422, detail=e.errors)
     except ValidationError as e:
         raise HTTPException(422, detail=str(e))
-    return WorkflowDetailResponse(
-        name=wf.name,
-        description=wf.description,
-        steps=len(wf.steps),
-        filename=path.name,
-        stem=stem,
-        record_schema=wf.record_schema,
-        content=body.content,
-        step_list=_step_list(wf),
-        triggers=_triggers(wf),
-    )
+    return _detail(stem, path.name, wf, body.content)
+
+
+@router.patch("/{stem}", response_model=WorkflowDetailResponse)
+def set_workflow_enabled(
+    stem: str, body: WorkflowEnabledRequest, ctx: AppContext = Depends(get_ctx)
+):
+    """Switch a workflow on (its triggers start runs) or off (it runs only when
+    someone starts or tries it). Only the file's `enabled:` line changes. 422
+    when the workflow no longer passes its checks."""
+    try:
+        path, wf, content = ctx.workflow_svc.set_enabled(stem, body.enabled)
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except WorkflowValidationError as e:
+        raise HTTPException(422, detail=e.errors)
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    return _detail(stem, path.name, wf, content)
 
 
 @router.delete("/{stem}", status_code=204)
@@ -145,6 +166,79 @@ def delete_workflow(stem: str, force: bool = False, ctx: AppContext = Depends(ge
         ctx.workflow_svc.delete(stem, force=force)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
+
+
+async def _form_inputs(
+    form: Any, wf_def: WorkflowDef, record_id: str, ctx: AppContext
+) -> dict[str, Any] | None:
+    """The files a form carries for each declared `files` input, stored, as
+    the `__input__` outputs a run starts with (None when there are none)."""
+    # Files uploaded as run inputs belong to the triggering record's
+    # collection, whose home volume (if any) receives new content.
+    input_collection: str | None = None
+    if record_id:
+        try:
+            input_collection = str(ctx.record_svc.get(record_id).dataset_id)
+        except NotFoundError:
+            input_collection = None
+    resolved: dict[str, Any] = {}
+    for input_name, input_decl in (wf_def.inputs or {}).items():
+        if input_decl.type != "files":
+            continue
+        refs = []
+        for upload in form.getlist(input_name):
+            if isinstance(upload, UploadFile):
+                data = await upload.read()
+                try:
+                    ref = ctx.file_svc.store_bytes(
+                        data, upload.filename or "upload", input_collection
+                    )
+                except (AllVolumesFull, VolumeUnavailableError) as e:
+                    raise HTTPException(507, detail=str(e))
+                refs.append(ref.to_dict())
+        if refs:
+            resolved[input_name] = refs
+    return {"__input__": resolved} if resolved else None
+
+
+@router.post("/try", response_model=WorkflowTrialResponse)
+async def try_workflow_on_record(request: Request, ctx: AppContext = Depends(get_ctx)):
+    """Try a workflow (saved or not: the YAML is sent) on one record without
+    keeping anything: it runs as a real run would, inside a transaction that is
+    always rolled back, and the answer says what it would have done (each
+    record created, changed or deleted, with the values before and after, and
+    the runs its saves would start). JSON `{content, record_id}`, or a form
+    with those plus the files for each `files` input. Works whether the
+    workflow is on or off, and while automation is paused. 422 when the YAML
+    doesn't pass its checks or the record isn't the kind it runs on; a step
+    that fails is not an error but `ok: false` with `error`."""
+    content_type = request.headers.get("content-type", "")
+    form = None
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        content = str(form.get("content", ""))
+        record_id = str(form.get("record_id", ""))
+    else:
+        try:
+            body = WorkflowTrialRequest.model_validate(await request.json())
+        except (json.JSONDecodeError, PydanticValidationError) as e:
+            raise HTTPException(422, detail=f"Invalid request: {e}")
+        content, record_id = body.content, body.record_id
+    if not record_id:
+        raise HTTPException(422, detail="Choose a record to try it on.")
+    try:
+        wf_def = ctx.workflow_svc.check(content)
+    except WorkflowValidationError as e:
+        raise HTTPException(422, detail=e.errors)
+    input_data = (
+        await _form_inputs(form, wf_def, record_id, ctx) if form is not None else None
+    )
+    try:
+        result = try_workflow(ctx, wf_def, record_id, input_data)
+    finally:
+        # Nothing of a trial stays, not even the files it was given.
+        ctx.rollback()
+    return WorkflowTrialResponse.model_validate(result.to_dict())
 
 
 @router.post("/{name}/run-many", response_model=RunManyResponse, status_code=202)
@@ -216,34 +310,7 @@ async def run_workflow(
     ):
         form = await request.form()
         record_id = str(form.get("record_id", ""))
-        # Files uploaded as run inputs belong to the triggering record's
-        # collection, whose home volume (if any) receives new content.
-        input_collection: str | None = None
-        if record_id:
-            try:
-                input_collection = str(ctx.record_svc.get(record_id).dataset_id)
-            except NotFoundError:
-                input_collection = None
-        declared_inputs = wf_def.inputs or {}
-        resolved: dict[str, Any] = {}
-        for input_name, input_decl in declared_inputs.items():
-            if input_decl.type == "files":
-                uploads = form.getlist(input_name)
-                refs = []
-                for upload in uploads:
-                    if isinstance(upload, UploadFile):
-                        data = await upload.read()
-                        try:
-                            ref = ctx.file_svc.store_bytes(
-                                data, upload.filename or "upload", input_collection
-                            )
-                        except (AllVolumesFull, VolumeUnavailableError) as e:
-                            raise HTTPException(507, detail=str(e))
-                        refs.append(ref.to_dict())
-                if refs:
-                    resolved[input_name] = refs
-        if resolved:
-            input_data = {"__input__": resolved}
+        input_data = await _form_inputs(form, wf_def, record_id, ctx)
     else:
         try:
             body = await request.json()

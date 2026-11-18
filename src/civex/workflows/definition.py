@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -51,6 +52,11 @@ class WorkflowInput(BaseModel):
 class WorkflowDef(BaseModel):
     name: str
     description: str | None = None
+    # Whether its triggers start runs. Off, it runs only when someone starts
+    # it (or tries it): a new workflow is made off, so its first run on real
+    # data is one someone chose, after trying it. A file without the key is
+    # on, as every workflow was before the key existed.
+    enabled: bool = True
     triggers: Triggers | None = None
     record_schema: str | None = (
         None  # schema the anchor record must have; enforced on manual runs
@@ -72,6 +78,26 @@ def trigger_summaries(wf: WorkflowDef) -> list[str]:
             text += f" ({', '.join(trigger.fields)})"
         out.append(text)
     return out
+
+
+def set_enabled_text(content: str, enabled: bool) -> str:
+    """`content` with its top-level `enabled:` set, every other line (and so
+    every comment) as it was: the one way a workflow is switched on or off, so
+    a hand-written file keeps its layout. The key goes just before `name:` when
+    the file has none."""
+    value = "true" if enabled else "false"
+    lines = content.splitlines(keepends=True)
+    key = re.compile(r"^enabled\s*:")
+    for i, line in enumerate(lines):
+        if key.match(line):
+            lines[i] = f"enabled: {value}\n"
+            return "".join(lines)
+    # Just before `name:`, which every workflow has at the top level: a key
+    # put before another top-level key is valid whatever follows `name:`
+    # (a folded block, a comment).
+    at = next((i for i, line in enumerate(lines) if re.match(r"^name\s*:", line)), 0)
+    lines.insert(at, f"enabled: {value}\n")
+    return "".join(lines)
 
 
 def load_workflow(path: Path) -> WorkflowDef:

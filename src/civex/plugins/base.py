@@ -255,7 +255,9 @@ class WorkflowContext:
         )
 
     def delete_record(self, record_id: str) -> None:
+        dto = self._app_ctx.record_svc.get(record_id)
         self._app_ctx.record_svc.delete(record_id)
+        self._note_affected(dto, "deleted")
 
     def get_schema(self, name: str) -> SchemaDTO:
         return self._app_ctx.schema_svc.get(name)
