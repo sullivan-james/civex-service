@@ -18,6 +18,8 @@ export interface Workflow {
   inputs: Record<string, WorkflowInput> | null
   /** What starts it by itself, one line each; empty if only run by hand. */
   runs_on: string[]
+  /** Off: its triggers start nothing; it runs only when someone starts it. */
+  enabled: boolean
 }
 
 export interface WorkflowTrigger {
@@ -127,6 +129,29 @@ export const workflowsApi = {
       record_id,
     }),
 
+  setEnabled: (stem: string, enabled: boolean) =>
+    api.patch<WorkflowDetail>(`/workflows/${encodeURIComponent(stem)}`, {
+      enabled,
+    }),
+  /** Run `content` (saved or not) on a record and undo it, saying what it did. */
+  try: (
+    content: string,
+    recordId: string,
+    fileInputs: Record<string, File[]> = {},
+  ) => {
+    const files = Object.entries(fileInputs).filter(([, f]) => f.length > 0)
+    if (files.length === 0)
+      return api.post<TrialResult>('/workflows/try', {
+        content,
+        record_id: recordId,
+      })
+    const form = new FormData()
+    form.append('content', content)
+    form.append('record_id', recordId)
+    for (const [name, list] of files) for (const f of list) form.append(name, f)
+    return api.upload<TrialResult>('/workflows/try', form)
+  },
+
   runWithFiles: async (
     name: string,
     recordId: string,
@@ -152,6 +177,35 @@ export const workflowsApi = {
     }
     return res.json()
   },
+}
+
+/** One value a trial run would change. */
+export interface TrialFieldChange {
+  field: string
+  label: string
+  dtype: string | null
+  before: unknown
+  after: unknown
+}
+
+/** One record a trial run would create, change or delete. */
+export interface TrialRecordChange {
+  record_id: string
+  schema_name: string | null
+  name: string | null
+  action: 'created' | 'updated' | 'deleted'
+  fields: TrialFieldChange[]
+}
+
+/** What trying a workflow on a record would have done; nothing was kept. */
+export interface TrialResult {
+  ok: boolean
+  steps: StepExecution[]
+  changes: TrialRecordChange[]
+  /** Runs its saves would start, by workflow name. */
+  would_start: Record<string, number>
+  error: ErrorDetails | null
+  log: string | null
 }
 
 /** The narrowing a run list can ask for beyond status and record. */
