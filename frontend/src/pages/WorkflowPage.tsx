@@ -35,7 +35,7 @@ import { Slot } from '../components/host/Slot'
 
 const TABS = [
   { id: 'overview', label: 'Overview' },
-  { id: 'try', label: 'Try it' },
+  { id: 'try', label: 'Preview' },
   { id: 'sharing', label: 'Sharing' },
 ] as const
 type TabId = (typeof TABS)[number]['id']
@@ -127,20 +127,12 @@ export default function WorkflowPage() {
       breadcrumbs={[...breadcrumbs, { label: row.name }]}
       title={row.name}
       meta={
-        <span className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="font-mono text-fg-muted">{stem}.yaml</span>
-          {row.triggers.length === 0 ? (
-            <span className="text-fg-muted">Runs by hand</span>
-          ) : (
-            row.triggers.map((t) => (
-              <span key={t} className="text-fg-muted">
-                Runs on {t}
-              </span>
-            ))
-          )}
-          {off && <Badge variant="attention">Off</Badge>}
-          {sharing && <Badge variant={badge.variant}>{badge.label}</Badge>}
-        </span>
+        (off || sharing) && (
+          <span className="flex flex-wrap items-center gap-2 text-sm">
+            {off && <Badge variant="attention">Off</Badge>}
+            {sharing && <Badge variant={badge.variant}>{badge.label}</Badge>}
+          </span>
+        )
       }
       action={
         <>
@@ -183,8 +175,8 @@ export default function WorkflowPage() {
               schema={detail.record_schema ?? ''}
               inputs={detail.inputs ?? {}}
               plugins={plugins}
-              after={(result) =>
-                result.ok && off ? (
+              after={(allOk) =>
+                allOk && off ? (
                   <Button onClick={() => toggle(true)}>Turn it on</Button>
                 ) : null
               }

@@ -276,6 +276,7 @@ export default function WorkflowEditorPage({
   }, [isNew, initialStem, stemEdited, draft?.name, existing])
 
   function setDraft(next: WorkflowDraft) {
+    setIssues(null)
     setContent((prev) => writeDraft(prev ?? '', next))
   }
 
@@ -461,7 +462,10 @@ export default function WorkflowEditorPage({
                 )}
                 <YamlEditor
                   content={content ?? ''}
-                  onChange={setContent}
+                  onChange={(text) => {
+                    setIssues(null)
+                    setContent(text)
+                  }}
                   plugins={plugins}
                   viewRef={viewRef}
                 />
@@ -505,12 +509,15 @@ export default function WorkflowEditorPage({
               schema={draft?.schema ?? ''}
               inputs={inputs}
               plugins={plugins}
-              onInvalid={(found) => {
-                setIssues(found)
-                setShowMissing(true)
-              }}
-              after={(result) =>
-                result.ok && draft && triggered && !draft.enabled ? (
+              ready={!!draft && toFinish === 0}
+              waiting={
+                draft
+                  ? `Choose ${toFinish} more thing${toFinish === 1 ? '' : 's'} on the left and the preview starts.`
+                  : 'Fix the YAML and the preview starts.'
+              }
+              onInvalid={setIssues}
+              after={(allOk) =>
+                allOk && draft && triggered && !draft.enabled ? (
                   <Button onClick={() => setDraft({ ...draft, enabled: true })}>
                     Turn it on
                   </Button>

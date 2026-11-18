@@ -1,45 +1,78 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router'
-import type { TrialResult } from '../../api/workflows'
+import type { TrialOnRecord, TrialResult } from '../../api/workflows'
 import { TrialPanel } from './TrialPanel'
 
-const RID = '3f2b8c1e-0000-4000-8000-123456789abc'
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json' },
   })
 
-let trialAnswer: { body: unknown; status: number }
-let sent: unknown
+const ok = (after: string): TrialResult => ({
+  ok: true,
+  steps: [],
+  changes: [
+    {
+      record_id: 'r1',
+      schema_name: 'rec',
+      name: 'Dive 7',
+      action: 'updated',
+      fields: [
+        {
+          field: 'title',
+          label: 'Title',
+          dtype: 'string',
+          before: 'old',
+          after,
+        },
+      ],
+    },
+  ],
+  would_start: {},
+  error: null,
+  log: null,
+})
+
+let answer: (body: { content: string }) => {
+  body: unknown
+  status?: number
+}
+let sent: { content: string; record_ids: string[] }[]
 
 beforeEach(() => {
-  sent = undefined
+  sent = []
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input), 'http://x')
-      if (url.pathname.endsWith('/workflows/try')) {
-        sent = JSON.parse(String(init?.body))
-        return json(trialAnswer.body, trialAnswer.status)
+      if (url.pathname.endsWith('/workflows/try-many')) {
+        const body = JSON.parse(String(init?.body))
+        sent.push(body)
+        const a = answer(body)
+        return json(a.body, a.status ?? 200)
       }
-      if (url.pathname.endsWith('/records'))
-        return json([
-          { id: RID, natural_name: 'Dive 7', schema_name: 'rec', data: {} },
-        ])
-      if (url.pathname.includes('/records/')) return json(null, 404)
+      if (url.pathname.endsWith('/schemas'))
+        return json([{ id: 's', name: 'rec', label: 'Recording', fields: [] }])
       return json([])
     }),
   )
 })
 afterEach(() => vi.unstubAllGlobals())
 
-function renderIt(after = vi.fn(() => null)) {
+const trials = (...ts: TrialOnRecord[]) => ({ trials: ts, sampled: true })
+const on = (record_id: string, result: TrialResult | null, problem = null) => ({
+  record_id,
+  name: record_id === 'r1' ? 'Dive 7' : 'Dive 8',
+  result,
+  problem,
+})
+
+function renderIt(props: Partial<Parameters<typeof TrialPanel>[0]> = {}) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(
+  const view = (p: Partial<Parameters<typeof TrialPanel>[0]>) => (
     <QueryClientProvider client={qc}>
       <MemoryRouter>
         <TrialPanel
@@ -47,111 +80,108 @@ function renderIt(after = vi.fn(() => null)) {
           schema="rec"
           inputs={{}}
           plugins={[]}
-          after={after}
+          {...props}
+          {...p}
         />
       </MemoryRouter>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   )
+  const r = render(view({}))
+  return {
+    rerender: (p: Partial<Parameters<typeof TrialPanel>[0]>) =>
+      r.rerender(view(p)),
+  }
 }
 
-async function pickAndTry() {
-  const user = userEvent.setup()
-  const search = screen.getByPlaceholderText('Search rec records')
-  await user.click(search)
-  const option = await screen.findByText('Dive 7')
-  fireEvent.mouseDown(option)
-  await user.click(screen.getByRole('button', { name: 'Try it' }))
-}
-
-describe('TrialPanel', () => {
-  it('shows what would change, field by field, and that nothing was kept', async () => {
-    const result: TrialResult = {
-      ok: true,
-      steps: [],
-      changes: [
-        {
-          record_id: RID,
-          schema_name: 'rec',
-          name: 'Dive 7',
-          action: 'updated',
-          fields: [
-            {
-              field: 'title',
-              label: 'Title',
-              dtype: 'string',
-              before: 'old',
-              after: 'new',
-            },
-          ],
-        },
-      ],
-      would_start: { 'Calculate stats': 2 },
-      error: null,
-      log: null,
-    }
-    trialAnswer = { body: result, status: 200 }
-    const after = vi.fn(() => null)
-    renderIt(after)
-    await pickAndTry()
-
+describe('TrialPanel (the live preview)', () => {
+  it('runs by itself on the latest records and says what each would get', async () => {
+    answer = () => ({
+      body: trials(on('r1', ok('new')), on('r2', ok('other'))),
+    })
+    renderIt()
     expect(
-      await screen.findByText(/It would change 1 record\./),
+      await screen.findByText(/Would change every one\./),
     ).toBeInTheDocument()
-    expect(screen.getByText(/Nothing was kept/)).toBeInTheDocument()
-    expect(screen.getByText('Would change')).toBeInTheDocument()
-    expect(screen.getByText('old')).toBeInTheDocument()
+    expect(sent[0]).toEqual({ content: 'name: x', record_ids: [], sample: 5 })
+    expect(screen.getByText('Dive 7')).toBeInTheDocument()
     expect(screen.getByText('new')).toBeInTheDocument()
     expect(
-      screen.getByText(/also start “Calculate stats” on 2 records/),
+      screen.getByText(/On the 2 Recording records changed last/),
     ).toBeInTheDocument()
-    expect(sent).toEqual({ content: 'name: x', record_id: RID })
-    expect(after).toHaveBeenCalledWith(result)
   })
 
-  it('says which step failed and what to do', async () => {
-    trialAnswer = {
-      status: 200,
-      body: {
-        ok: false,
-        steps: [
-          {
-            step_id: 'read',
-            plugin: 'p',
-            status: 'failed',
-            inputs: {},
-            outputs: null,
-            duration_seconds: 0,
-            error: 'boom',
-            depends_on: [],
-          },
-        ],
-        changes: [],
-        would_start: {},
-        error: {
-          kind: 'not_found',
-          message: "Field 'x' not found",
-          retryable: false,
-          step: 'read',
-        },
-        log: null,
-      },
-    }
-    renderIt()
-    await pickAndTry()
+  it('runs again when the workflow changes and marks what changed', async () => {
+    answer = ({ content }) => ({
+      body: trials(
+        on('r1', ok(content === 'name: x' ? 'new' : 'newer')),
+        on('r2', ok('same')),
+      ),
+    })
+    const { rerender } = renderIt()
+    await screen.findByText('new')
+    rerender({ content: 'name: y' })
     expect(
-      await screen.findByText(/Step 1 failed: Field 'x' not found/),
+      await screen.findByText('newer', {}, { timeout: 3000 }),
     ).toBeInTheDocument()
+    const badges = screen.getAllByText('Changed')
+    expect(badges).toHaveLength(1)
+    expect(sent.map((b) => b.content)).toEqual(['name: x', 'name: y'])
+  })
+
+  it('says where it fails', async () => {
+    answer = () => ({
+      body: trials(
+        on('r1', {
+          ok: false,
+          steps: [
+            {
+              step_id: 'read',
+              plugin: 'p',
+              status: 'failed',
+              inputs: {},
+              outputs: null,
+              duration_seconds: 0,
+              error: 'boom',
+              depends_on: [],
+            },
+          ],
+          changes: [],
+          would_start: {},
+          error: {
+            kind: 'not_found',
+            message: "Field 'x' not found",
+            retryable: false,
+            step: 'read',
+          },
+          log: null,
+        }),
+      ),
+    })
+    renderIt()
+    expect(
+      await screen.findByText(/Step 1 fails: Field 'x' not found/),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Fails on 1 of 1/)).toBeInTheDocument()
   })
 
   it('lists what the server says is wrong with the workflow', async () => {
-    trialAnswer = {
+    answer = () => ({
       status: 422,
       body: { detail: [{ step: 'read', message: "Unknown plugin 'nope'" }] },
-    }
-    renderIt()
-    await pickAndTry()
+    })
+    const onInvalid = vi.fn()
+    renderIt({ onInvalid })
     await waitFor(() =>
       expect(screen.getByText(/Unknown plugin 'nope'/)).toBeInTheDocument(),
     )
+    expect(onInvalid).toHaveBeenCalledTimes(1)
+  })
+
+  it('waits while there is something left to choose', async () => {
+    answer = () => ({ body: trials() })
+    renderIt({ ready: false, waiting: 'Choose 2 more things.' })
+    expect(screen.getByText('Choose 2 more things.')).toBeInTheDocument()
+    await new Promise((r) => setTimeout(r, 800))
+    expect(sent).toEqual([])
   })
 })
