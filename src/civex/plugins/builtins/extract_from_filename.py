@@ -26,7 +26,7 @@ class Plugin(PluginBase):
         IOSpec(
             name="value",
             type="any",
-            description="The captured text converted to `output_type`.",
+            description="The part of the name, read as text, a number or a date.",
         ),
         IOSpec(
             name="filename",
@@ -73,11 +73,11 @@ class Plugin(PluginBase):
             title="Date format",
             json_schema_extra=hint("date_format", pattern="pattern"),
             default=None,
-            description="Token format for parsing the captured text when "
-            "`output_type` is date/datetime, e.g. 'YYYYMMDD-HHmmSS'. Tokens are "
-            "YYYY MM DD HH mm SS; non-token characters are treated as raw regex, "
-            "so e.g. 'YYYYMMDD[-_]HHmmSS' matches both dashes and underscores. "
-            "Required when output_type is date or datetime.",
+            description="How the date is written in the name, when it is read "
+            "as a date, e.g. 'YYYYMMDD-HHmmSS'. Tokens are YYYY MM DD HH mm SS; "
+            "anything else is a regular expression, so 'YYYYMMDD[-_]HHmmSS' "
+            "takes a dash or an underscore. Needed for a date or a date and "
+            "time (output_type date or datetime).",
         )
 
     def invoke(

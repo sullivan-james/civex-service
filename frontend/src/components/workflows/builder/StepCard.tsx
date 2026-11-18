@@ -207,8 +207,10 @@ export function StepCard(props: Props) {
   const missing = new Set(missingSettings(step, plugin).map((s) => s.key))
   const broken = new Set(brokenInputs(step, index, steps).map(([k]) => k))
   const settingCtx: SettingContext = { ...ctx, config: step.config, settings }
-  const setConfig = (key: string, value: unknown) =>
-    onChange({ ...step, config: { ...step.config, [key]: value } })
+  // Several settings change in one update, or the last would undo the others.
+  const setSome = (values: Record<string, unknown>) =>
+    onChange({ ...step, config: { ...step.config, ...values } })
+  const setConfig = (key: string, value: unknown) => setSome({ [key]: value })
   const basic = settings.filter((s) => !s.hint.advanced)
   const advanced = settings.filter((s) => s.hint.advanced)
   const control = (s: (typeof settings)[number]) => (
@@ -217,7 +219,7 @@ export function StepCard(props: Props) {
       setting={s}
       value={step.config[s.key]}
       onChange={(v) => setConfig(s.key, v)}
-      onChangeOther={setConfig}
+      onChangeSome={setSome}
       ctx={settingCtx}
       missing={showMissing && missing.has(s.key)}
     />
