@@ -177,6 +177,10 @@ class StoreService:
         del sc.volumes[name]
         self._config_store.save(self._config)
 
+    def queue(self) -> list[str]:
+        """The volumes new files are written to, in order."""
+        return list(self._config.store_config.volume_queue)
+
     def set_queue(self, names: list[str]) -> None:
         sc = self._config.store_config
         for n in names:

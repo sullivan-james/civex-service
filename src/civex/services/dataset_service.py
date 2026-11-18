@@ -92,6 +92,14 @@ class DatasetService:
             raise NotFoundError(f"Dataset '{dataset_id}' not found")
         return dto
 
+    def lookup(self, ref: str) -> DatasetDTO:
+        """A live collection by its id or its name. Raises NotFoundError."""
+        try:
+            dto = self._datasets.get_by_id(uuid.UUID(ref))
+        except ValueError:
+            dto = None
+        return dto or self.get(ref)
+
     def id_of(self, ref: str) -> uuid.UUID:
         """A collection's id from its name or id, deleted or not (its history
         outlives it). Raises NotFoundError."""

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -53,14 +52,7 @@ def create_dataset(body: CreateDatasetRequest, ctx: AppContext = Depends(get_ctx
 @router.get("/{name_or_id}", response_model=DatasetResponse)
 def get_dataset(name_or_id: str, ctx: AppContext = Depends(get_ctx)):
     try:
-        uid = uuid.UUID(name_or_id)
-        dto = ctx.dataset_svc._datasets.get_by_id(uid)
-        if dto:
-            return DatasetResponse.from_dto(dto)
-    except ValueError:
-        pass
-    try:
-        return DatasetResponse.from_dto(ctx.dataset_svc.get(name_or_id))
+        return DatasetResponse.from_dto(ctx.dataset_svc.lookup(name_or_id))
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
 
@@ -74,17 +66,10 @@ def record_counts(
     """Record counts grouped by schema name — single SQL GROUP BY, no record
     loading. Takes the list endpoint's filters (except 'schema', which is the
     grouping), so e.g. 'within' counts what sits under one record."""
-    dataset = None
     try:
-        uid = uuid.UUID(name_or_id)
-        dataset = ctx.dataset_svc._datasets.get_by_id(uid)
-    except ValueError:
-        pass
-    if dataset is None:
-        try:
-            dataset = ctx.dataset_svc.get(name_or_id)
-        except NotFoundError as e:
-            raise HTTPException(404, detail=str(e))
+        dataset = ctx.dataset_svc.lookup(name_or_id)
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
     query.dataset = dataset.name
     query.schema = None
     query.sort = None
@@ -115,17 +100,10 @@ def update_dataset(
     name_or_id: str, body: UpdateDatasetRequest, ctx: AppContext = Depends(get_ctx)
 ):
     # Resolve by UUID or name
-    dataset = None
     try:
-        uid = uuid.UUID(name_or_id)
-        dataset = ctx.dataset_svc._datasets.get_by_id(uid)
-    except ValueError:
-        pass
-    if dataset is None:
-        try:
-            dataset = ctx.dataset_svc.get(name_or_id)
-        except NotFoundError as e:
-            raise HTTPException(404, detail=str(e))
+        dataset = ctx.dataset_svc.lookup(name_or_id)
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
     try:
         updated = ctx.dataset_svc.update(
             dataset.name,

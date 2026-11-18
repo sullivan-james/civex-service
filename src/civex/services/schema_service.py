@@ -366,6 +366,14 @@ class SchemaService:
             raise NotFoundError(f"Schema '{name}' not found")
         return dto
 
+    def lookup(self, ref: str) -> SchemaDTO:
+        """A live schema by its id or its name. Raises NotFoundError."""
+        try:
+            dto = self._repo.get_by_id(uuid.UUID(ref))
+        except ValueError:
+            dto = None
+        return dto or self.get(ref)
+
     def list_all(self) -> list[SchemaDTO]:
         return self._repo.list_all()
 

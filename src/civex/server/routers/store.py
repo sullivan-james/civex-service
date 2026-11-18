@@ -121,7 +121,7 @@ def set_queue(body: SetQueueRequest, ctx: AppContext = Depends(get_ctx)):
         ctx.store_svc.set_queue(body.queue)
     except (NotFoundError, ValidationError) as e:
         raise HTTPException(422, detail=str(e))
-    return ctx.store_svc._config.store_config.volume_queue
+    return ctx.store_svc.queue()
 
 
 @router.post("/gc", response_model=GCReportResponse)

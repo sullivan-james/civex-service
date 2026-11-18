@@ -26,8 +26,8 @@ def resolve(
 
     try:
         record = ctx.record_svc.get(id)
-        dataset = ctx.dataset_svc._datasets.get_by_id(record.dataset_id)
-        dataset_name = dataset.name if dataset else str(record.dataset_id)
+        found = ctx.dataset_svc.find({record.dataset_id}).get(record.dataset_id)
+        dataset_name = found.name if found else str(record.dataset_id)
         console.print(f"record   [bold]{record.id}[/bold]   dataset: {dataset_name}")
         return
     except NotFoundError:

@@ -33,7 +33,7 @@ def record_add(
     # Prompt for parent record ID if this is a child schema.
     parent_record_id: str | None = None
     if schema.parent_id:
-        parent_schema = ctx.schema_svc._repo.get_by_id(schema.parent_id)
+        parent_schema = ctx.schema_svc.get_by_id(schema.parent_id)
         parent_schema_name = parent_schema.name if parent_schema else "unknown"
         while True:
             raw_id = typer.prompt(f"  Parent record ID ({parent_schema_name})")

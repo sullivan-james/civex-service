@@ -100,9 +100,10 @@ def run_pending_jobs(make_context: ContextFactory | None = None) -> None:
                             f"The record this run was for ({str(job.record_id)[:8]}…) "
                             "is deleted or no longer exists, so the run can't start."
                         ) from None
-                    dataset = ctx.dataset_svc._datasets.get_by_id(record.dataset_id)
-                    if dataset is None:
-                        raise ValueError("Dataset for record not found")
+                    try:
+                        dataset = ctx.dataset_svc.get_by_id(record.dataset_id)
+                    except NotFoundError:
+                        raise ValueError("Dataset for record not found") from None
                     wf_ctx = WorkflowContext(
                         record=record,
                         dataset=dataset,
