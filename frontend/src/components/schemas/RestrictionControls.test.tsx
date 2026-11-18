@@ -469,17 +469,17 @@ describe('fill from a file name', () => {
     await userEvent.click(
       screen.getByRole('button', { name: 'Build from an example…' }),
     )
-    const example = (await screen.findByDisplayValue(
-      'rec_take_07.wav',
-    )) as HTMLInputElement
+    // The example's parts are offered to click: the third is the number.
+    await userEvent.click(await screen.findByRole('button', { name: '07' }))
     expect(search).toHaveBeenCalledWith(ctx.schemaName, undefined, 100)
-    example.setSelectionRange(9, 11)
-    fireEvent.select(example)
     await userEvent.click(
       screen.getByRole('button', { name: 'Use this pattern' }),
     )
     expect(rules()).toEqual({
-      from_filename: { field: 'audio', pattern: 'rec_take_([0-9]+)' },
+      from_filename: {
+        field: 'audio',
+        pattern: '^(?:[^ ._-]+[ ._-]+){2}([0-9]+)',
+      },
     })
   })
 })

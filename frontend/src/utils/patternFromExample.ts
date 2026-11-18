@@ -12,13 +12,7 @@ import {
   parseFilenameByTokenFormat,
 } from './filenamePattern'
 
-type CharClass = 'digit' | 'letter' | 'alnum' | 'other'
-
-const PREFIX_MAX = 20
-
 const isDigit = (c: string) => c >= '0' && c <= '9'
-const isLetter = (c: string) => /^[A-Za-z]$/.test(c)
-const isAlnum = (c: string) => isDigit(c) || isLetter(c)
 
 /** `text` with every character that means something in a regex escaped, the
  * same way for JavaScript and Python. A dash is left alone: outside a set it
@@ -27,65 +21,150 @@ export function escapeRegex(text: string): string {
   return text.replace(/[\\^$.|?*+()[\]{}]/g, '\\$&')
 }
 
-function classOf(text: string): CharClass {
-  const chars = [...text]
-  if (chars.every(isDigit)) return 'digit'
-  if (chars.every(isLetter)) return 'letter'
-  if (chars.every(isAlnum)) return 'alnum'
-  return 'other'
+/** What separates the parts of a name, and what a part is made of, as regex
+ * sets (valid in JavaScript and Python). */
+const SEP = '[ ._-]'
+const PART = '[^ ._-]'
+
+/** One part of a file name: a run between separators (` `, `.`, `_`, `-`). */
+export interface NamePart {
+  text: string
+  start: number
+  end: number
 }
 
-function inClass(c: string, cls: CharClass): boolean {
-  if (cls === 'digit') return isDigit(c)
-  if (cls === 'letter') return isLetter(c)
-  if (cls === 'alnum') return isAlnum(c)
-  return false
+export function nameParts(name: string): NamePart[] {
+  return [...name.matchAll(/[^ ._-]+/g)].map((m) => ({
+    text: m[0],
+    start: m.index,
+    end: m.index + m[0].length,
+  }))
 }
 
-const CLASS_RE: Record<Exclude<CharClass, 'other'>, string> = {
-  digit: '[0-9]',
-  letter: '[A-Za-z]',
-  alnum: '[A-Za-z0-9]',
+/** The parts a person picked: `from` to `to` (inclusive), and for one part
+ * with letters and digits, perhaps only the number in it (`dive07` -> 07). */
+export interface PartChoice {
+  from: number
+  to: number
+  digitsOnly: boolean
 }
 
-/** The text just before the marked part that pins it down: the run of
- * characters right before it that can't belong to it (`sel_` before `07`),
- * at most `PREFIX_MAX` long. With no such run, the whole start of the name,
- * anchored at its beginning. */
-function anchorBefore(before: string, cls: CharClass): string {
-  let i = before.length
-  const outside =
-    cls === 'other'
-      ? (c: string) => !isAlnum(c)
-      : (c: string) => !inClass(c, cls)
-  while (i > 0 && outside(before[i - 1]) && before.length - i < PREFIX_MAX) i--
-  const run = before.slice(i)
-  if (run) return escapeRegex(run)
-  return `^${escapeRegex(before)}`
+/** Whether "just the number in it" means something for this choice. */
+export function hasNumberInside(parts: NamePart[], c: PartChoice): boolean {
+  if (c.from !== c.to) return false
+  const text = parts[c.from]?.text ?? ''
+  return /[0-9]/.test(text) && /[^0-9]/.test(text)
 }
 
-/**
- * A regex with one capture group that takes, from names like `name`, the part
- * `name.slice(start, end)`: digits as digits (`sel_([0-9]+)`), letters as
- * letters, a mix as either, anything else up to the text that follows it.
- */
-export function keyPattern(name: string, start: number, end: number): string {
-  const marked = name.slice(start, end)
-  if (!marked) return ''
-  const before = name.slice(0, start)
-  const after = name.slice(end)
-  const cls = classOf(marked)
-  const prefix = anchorBefore(before, cls)
-  if (cls === 'other') {
-    // Lazy, so it needs the text after it to know where to stop.
-    let i = 0
-    while (i < after.length && !isAlnum(after[i])) i++
-    const next = after ? escapeRegex(i > 0 ? after.slice(0, i) : after[0]) : '$'
-    return `${prefix}(.+?)${next}`
+function capture(c: PartChoice, parts: NamePart[]): string {
+  if (c.digitsOnly) return '[^ ._0-9-]*([0-9]+)'
+  const span = c.to - c.from
+  // A number picked is taken as a number, so a letter after it isn't.
+  if (!span && /^[0-9]+$/.test(parts[c.from]?.text ?? '')) return '([0-9]+)'
+  return `(${PART}+${span ? `(?:${SEP}+${PART}+){${span}}` : ''})`
+}
+
+/** The choice found by its place: "the second part of the name", whatever
+ * the parts say. */
+export function placePattern(c: PartChoice, parts: NamePart[] = []): string {
+  const skip = c.from === 0 ? '^' : `^(?:${PART}+${SEP}+){${c.from}}`
+  return skip + capture(c, parts)
+}
+
+/** The text that comes just before the choice: the letters in front of the
+ * number inside a part (`dive` of `dive07`), else the part before it and the
+ * separator. Null when nothing comes before it. */
+export function textBefore(
+  name: string,
+  parts: NamePart[],
+  c: PartChoice,
+): string | null {
+  const part = parts[c.from]
+  if (!part) return null
+  if (c.digitsOnly) {
+    const lead = part.text.slice(0, part.text.search(/[0-9]/))
+    if (lead) return lead
   }
-  const runsOn = after.length > 0 && inClass(after[0], cls)
-  const count = runsOn ? `{${marked.length}}` : '+'
-  return `${prefix}(${CLASS_RE[cls]}${count})`
+  const prev = parts[c.from - 1]
+  if (!prev) return null
+  return name.slice(prev.start, part.start)
+}
+
+/** The choice found by the text before it: names where it moves about but
+ * always follows the same word. Null when nothing comes before it. */
+export function textPattern(
+  name: string,
+  parts: NamePart[],
+  c: PartChoice,
+): string | null {
+  const before = textBefore(name, parts, c)
+  if (before === null) return null
+  const part = parts[c.from]
+  const inside = c.digitsOnly && part.text.startsWith(before)
+  return escapeRegex(before) + (inside ? '([0-9]+)' : capture(c, parts))
+}
+
+const shape = (v: string) =>
+  /^[0-9]+$/.test(v) ? 'digits' : /^[A-Za-z]+$/.test(v) ? 'letters' : 'mixed'
+
+/** Whether a value taken from another name is the same sort of thing as the
+ * one picked in the example: the same kind of characters and about as long
+ * (`163` like `07`; not `20240612`). How two ways of finding a part are told
+ * apart when both give every name a value. */
+export function looksLike(value: string, picked: string): boolean {
+  return (
+    shape(value) === shape(picked) &&
+    Math.abs(value.length - picked.length) <= Math.max(2, picked.length)
+  )
+}
+
+const ORDINALS = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth']
+const nth = (i: number) => ORDINALS[i] ?? `${i + 1}th`
+
+/** A pattern said in words, for the patterns this file writes ("the number
+ * after “dive”", "the second part of the name"); null for anything else. */
+export function describePattern(pattern: string): string | null {
+  const SKIP = '^(?:[^ ._-]+[ ._-]+){'
+  let from = 0
+  let rest: string
+  if (pattern.startsWith(SKIP)) {
+    const m = /^\^\(\?:\[\^ \._-\]\+\[ \._-\]\+\)\{(\d+)\}/.exec(pattern)
+    if (!m) return null
+    from = Number(m[1])
+    rest = pattern.slice(m[0].length)
+  } else if (pattern.startsWith('^')) {
+    rest = pattern.slice(1)
+  } else {
+    const at = pattern.search(
+      /(\(\[0-9\]\+\)|\(\[\^ \._-\]\+\)|\[\^ \._0-9-\]\*\(\[0-9\]\+\))$/,
+    )
+    if (at <= 0) return null
+    const before = pattern.slice(0, at).replace(/\\(.)/g, '$1')
+    const taken = pattern.slice(at)
+    const what = taken.includes('[0-9]+') ? 'the number' : 'the part'
+    return `${what} after “${before}”`
+  }
+  if (rest === '[^ ._0-9-]*([0-9]+)')
+    return `the number in the ${nth(from)} part of the name`
+  if (rest === '([0-9]+)')
+    return `the number that is the ${nth(from)} part of the name`
+  const span =
+    /^\(\[\^ \._-\]\+(?:\(\?:\[ \._-\]\+\[\^ \._-\]\+\)\{(\d+)\})?\)$/.exec(
+      rest,
+    )
+  if (!span) return null
+  const more = Number(span[1] ?? 0)
+  return more
+    ? `parts ${from + 1} to ${from + more + 1} of the name`
+    : `the ${nth(from)} part of the name`
+}
+
+/** Where the choice is in the name, as offsets: for reading a date. */
+export function choiceSpan(
+  parts: NamePart[],
+  c: PartChoice,
+): { start: number; end: number } {
+  return { start: parts[c.from].start, end: parts[c.to].end }
 }
 
 // ── Dates ────────────────────────────────────────────────────────────────

@@ -3,8 +3,13 @@ import {
   captureForDateFormat,
   dateFormats,
   describeDateFormat,
+  describePattern,
   keyClashes,
-  keyPattern,
+  nameParts,
+  placePattern,
+  textBefore,
+  textPattern,
+  type PartChoice,
 } from './patternFromExample'
 import { parseFilenameByTokenFormat } from './filenamePattern'
 
@@ -17,36 +22,80 @@ function captured(pattern: string, name: string): string | undefined {
   return new RegExp(pattern).exec(name)?.[1]
 }
 
-describe('keyPattern', () => {
-  it.each([
-    ['sel_07_contour.csv', '07', 'sel_([0-9]+)'],
-    ['rec2024_site-A_07.csv', '07', '_site-A_([0-9]+)'],
-  ])('%s marking %s', (name, part, expected) => {
-    const pattern = keyPattern(...mark(name, part))
-    expect(pattern).toBe(expected)
-    expect(captured(pattern, name)).toBe(part)
+const one = (i: number, digitsOnly = false): PartChoice => ({
+  from: i,
+  to: i,
+  digitsOnly,
+})
+
+describe('nameParts', () => {
+  it('splits a name at spaces, dots, underscores and dashes', () => {
+    expect(
+      nameParts('20240611_dive07-hydro phone.wav').map((p) => p.text),
+    ).toEqual(['20240611', 'dive07', 'hydro', 'phone', 'wav'])
+  })
+})
+
+describe('placePattern', () => {
+  it('takes the same part of names whose words differ', () => {
+    const pattern = placePattern(one(1))
+    expect(captured(pattern, 'Recording_A12_part3.wav')).toBe('A12')
+    expect(captured(pattern, 'Take_B07_part1.wav')).toBe('B07')
   })
 
-  it.each([
-    ['site-ABC_2024.wav', 'ABC'],
-    ['take12b.wav', '12b'],
-    ['42_notes.txt', '42'],
-    ['x107_y.csv', '07'],
-    ['a.b (copy).txt', 'b (copy)'],
-    ['tag+v2.txt', 'v2'],
-    ['report[3].pdf', '3'],
-  ])('captures exactly the marked part of %s', (name, part) => {
-    const pattern = keyPattern(...mark(name, part))
-    expect(captured(pattern, name)).toBe(part)
+  it('takes the number inside a part, whatever the letters', () => {
+    const pattern = placePattern(one(1, true))
+    expect(captured(pattern, 'Recording_A12_part3.wav')).toBe('12')
+    expect(captured(pattern, 'Take_B7_part1.wav')).toBe('7')
   })
 
-  it('reads other names written the same way', () => {
-    const pattern = keyPattern(...mark('sel_07_contour.csv', '07'))
-    expect(captured(pattern, 'sel_163_contour.csv')).toBe('163')
+  it('takes a run of parts with what separates them', () => {
+    const pattern = placePattern({ from: 1, to: 2, digitsOnly: false })
+    expect(captured(pattern, 'x_2024-06_y.csv')).toBe('2024-06')
   })
 
-  it('is blank when nothing is marked', () => {
-    expect(keyPattern('abc', 1, 1)).toBe('')
+  it('takes the first part from the start', () => {
+    expect(captured(placePattern(one(0)), '42_notes.txt')).toBe('42')
+  })
+
+  it.each(['a.b (copy).txt', 'report[3].pdf', 'tag+v2.txt'])(
+    'is a valid pattern for %s',
+    (name) => {
+      for (let i = 0; i < nameParts(name).length; i++)
+        expect(captured(placePattern(one(i)), name)).toBe(
+          nameParts(name)[i].text,
+        )
+    },
+  )
+})
+
+describe('textPattern', () => {
+  it('finds the number after the same word, wherever it is', () => {
+    const name = '20240611_dive07_hydrophone.wav'
+    const parts = nameParts(name)
+    expect(textBefore(name, parts, one(1, true))).toBe('dive')
+    const pattern = textPattern(name, parts, one(1, true))!
+    expect(captured(pattern, 'extra_20240612_dive163_x.wav')).toBe('163')
+  })
+
+  it('uses the part before when nothing in the part leads it', () => {
+    const name = 'site_A_2024.csv'
+    const parts = nameParts(name)
+    expect(textBefore(name, parts, one(1))).toBe('site_')
+    expect(captured(textPattern(name, parts, one(1))!, 'x_site_B_1.csv')).toBe(
+      'B',
+    )
+  })
+
+  it('is null when nothing comes before', () => {
+    const parts = nameParts('42_notes.txt')
+    expect(textPattern('42_notes.txt', parts, one(0))).toBeNull()
+  })
+
+  it('escapes what it copies', () => {
+    const name = 'a+b_7.txt'
+    const parts = nameParts(name)
+    expect(captured(textPattern(name, parts, one(1))!, 'a+b_9.txt')).toBe('9')
   })
 })
 
@@ -121,5 +170,26 @@ describe('keyClashes', () => {
       { filename: 'other.csv', value: null },
     ])
     expect([...clashes]).toEqual([['7', ['sel_07.csv', 'sel_7.csv']]])
+  })
+})
+
+describe('describePattern', () => {
+  it.each([
+    [placePattern(one(1)), 'the second part of the name'],
+    [placePattern(one(0)), 'the first part of the name'],
+    [placePattern(one(2, true)), 'the number in the third part of the name'],
+    [
+      placePattern({ from: 1, to: 2, digitsOnly: false }),
+      'parts 2 to 3 of the name',
+    ],
+    ['dive([0-9]+)', 'the number after “dive”'],
+    ['site_([^ ._-]+)', 'the part after “site_”'],
+    ['a\\+b_([^ ._-]+)', 'the part after “a+b_”'],
+  ])('%s', (pattern, words) => {
+    expect(describePattern(pattern)).toBe(words)
+  })
+
+  it('says nothing of a pattern written by hand', () => {
+    expect(describePattern('sel_(\\d{2})')).toBeNull()
   })
 })

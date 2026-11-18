@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { schemasApi } from '../../api/schemas'
@@ -33,11 +33,17 @@ function renderDialog(
   return onApply
 }
 
-function select(part: string) {
-  const input = screen.getByLabelText('Example file name') as HTMLInputElement
-  const start = input.value.indexOf(part)
-  input.setSelectionRange(start, start + part.length)
-  fireEvent.select(input)
+const PLACE_2 = '^(?:[^ ._-]+[ ._-]+){1}([0-9]+)'
+
+/** Click a part of the example name; with `through`, Shift+click another. */
+async function pick(part: string, through?: string) {
+  const user = userEvent.setup()
+  await user.click(screen.getByRole('button', { name: part }))
+  if (through) {
+    await user.keyboard('{Shift>}')
+    await user.click(screen.getByRole('button', { name: through }))
+    await user.keyboard('{/Shift}')
+  }
 }
 
 let preview: ReturnType<typeof vi.spyOn>
@@ -62,18 +68,17 @@ beforeEach(() => {
 })
 
 describe('PatternFromExampleDialog', () => {
-  it('writes the pattern from the marked part and shows every name', async () => {
+  it('takes the part clicked by its place and shows every name', async () => {
     const onApply = renderDialog({ checkClashes: true })
-    select('07')
-    expect(screen.getByTestId('marked')).toHaveTextContent('07')
+    await pick('07')
     await waitFor(() =>
       expect(screen.getByTestId('summary')).toHaveTextContent(
         '3 of 3 names give a value; 2 give the same key as another',
       ),
     )
-    expect(preview).toHaveBeenLastCalledWith(
+    expect(preview).toHaveBeenCalledWith(
       expect.objectContaining({
-        patterns: ['sel_([0-9]+)'],
+        patterns: [PLACE_2],
         filenames: [
           'sel_07_contour.csv',
           'sel_7_contour.csv',
@@ -85,7 +90,29 @@ describe('PatternFromExampleDialog', () => {
     await userEvent.click(
       screen.getByRole('button', { name: 'Use this pattern' }),
     )
-    expect(onApply).toHaveBeenCalledWith({ pattern: 'sel_([0-9]+)' })
+    expect(onApply).toHaveBeenCalledWith({ pattern: PLACE_2 })
+  })
+
+  it('finds it by the word before it when that reads more names', async () => {
+    const onApply = renderDialog({
+      examples: ['20240611_dive07_a.wav', 'extra_20240612_dive163_b.wav'],
+    })
+    await pick('dive07')
+    // The number inside is what is meant; by its place, the second name
+    // would give 20240612.
+    await waitFor(() =>
+      expect(
+        screen.getByRole('radio', { name: /What comes before it: “dive”/ }),
+      ).toBeChecked(),
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId('summary')).toHaveTextContent('2 of 2'),
+    )
+    expect(await screen.findByText('163')).toBeTruthy()
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Use this pattern' }),
+    )
+    expect(onApply).toHaveBeenCalledWith({ pattern: 'dive([0-9]+)' })
   })
 
   it('gives a date as a capture and a format for the workflow action', async () => {
@@ -94,7 +121,7 @@ describe('PatternFromExampleDialog', () => {
       dateStyle: 'separate',
       examples: ['rec_20240611-142233.wav'],
     })
-    select('20240611-142233')
+    await pick('20240611', '142233')
     expect(
       screen.getByText(/Reads as 11 June 2024 14:22:33 \(year first\)/),
     ).toBeTruthy()
@@ -125,9 +152,8 @@ describe('PatternFromExampleDialog', () => {
     await userEvent.click(
       screen.getByRole('button', { name: 'Add these names' }),
     )
-    expect(
-      (screen.getByLabelText('Example file name') as HTMLInputElement).value,
-    ).toBe('a_1.csv')
+    expect(screen.getByRole('button', { name: 'a' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'csv' })).toBeTruthy()
   })
 
   it('lets the pattern be written by hand', async () => {
