@@ -3,11 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from civex_plugin_sdk.plugin_base import IOSpec
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from civex_plugin_sdk import Ctx
 from civex_plugin_sdk import Plugin as PluginBase
-from civex.plugins.hints import hint
+from civex.plugins.hints import hint, says
 
 
 class Plugin(PluginBase):
@@ -20,10 +20,13 @@ class Plugin(PluginBase):
     outputs: list[IOSpec] = []
 
     class Config(BaseModel):
+        model_config = ConfigDict(
+            json_schema_extra=says("Sets this record's {field} to {value}.")
+        )
         field: str = Field(
             title="Field to set",
             json_schema_extra=hint("field"),
-            description="Name of the field on the trigger record to write to.",
+            description="The field of the record it runs on to set.",
         )
 
     def invoke(

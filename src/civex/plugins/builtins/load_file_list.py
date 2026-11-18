@@ -4,11 +4,11 @@ import logging
 from typing import Any
 
 from civex_plugin_sdk.plugin_base import IOSpec
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from civex_plugin_sdk import Ctx
 from civex_plugin_sdk import Plugin as PluginBase
-from civex.plugins.hints import hint
+from civex.plugins.hints import hint, says
 
 log = logging.getLogger(__name__)
 
@@ -27,15 +27,16 @@ class Plugin(PluginBase):
         IOSpec(
             name="files",
             type="files",
-            description="FileRef dicts ({sha256, filename, size}).",
+            description="The files in the field.",
         )
     ]
 
     class Config(BaseModel):
+        model_config = ConfigDict(json_schema_extra=says("Reads the files in {field}."))
         field: str = Field(
             title="Files field",
             json_schema_extra=hint("field", dtypes=["file_list"]),
-            description="Name of the `file_list` field on the trigger record to read.",
+            description="The file list field of the record it runs on.",
         )
 
     def invoke(

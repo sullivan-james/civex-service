@@ -11,7 +11,7 @@ from civex_plugin_sdk import RpcError
 from civex.plugins.builtins._refusals import refused
 from civex_plugin_sdk import Ctx
 from civex_plugin_sdk import Plugin as PluginBase
-from civex.plugins.hints import advanced, hint
+from civex.plugins.hints import advanced, hint, says
 
 log = logging.getLogger(__name__)
 
@@ -29,20 +29,25 @@ class Plugin(PluginBase):
         IOSpec(
             name="files",
             type="files",
-            description="FileRef dicts to create one record from each.",
+            description="The files to make records from, one record each.",
         )
     ]
     outputs = [
-        IOSpec(name="created", type="number", description="Records created."),
+        IOSpec(name="created", type="number", description="How many records it made."),
         IOSpec(
             name="skipped",
             type="number",
-            description="Files whose record failed validation.",
+            description="The files whose record could not be made.",
         ),
     ]
 
     class Config(BaseModel):
-        model_config = ConfigDict(populate_by_name=True)
+        model_config = ConfigDict(
+            json_schema_extra=says(
+                "Makes a {schema} inside this record for each of {files}, with the file in its {file_field}."
+            ),
+            populate_by_name=True,
+        )
         schema_name: str = Field(
             title="Kind of record to make",
             json_schema_extra=hint("schema"),
@@ -52,9 +57,9 @@ class Plugin(PluginBase):
             "`schema_name`).",
         )
         file_field: str = Field(
-            title="Put each file in",
+            title="Put the file in field",
             json_schema_extra=hint("field", of="schema", dtypes=["file", "file_list"]),
-            description="Field on the created records to store each file reference in.",
+            description="The file field of each new record.",
         )
         dataset: str = Field(
             title="Collection",

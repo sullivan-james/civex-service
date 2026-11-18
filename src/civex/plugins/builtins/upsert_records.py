@@ -11,7 +11,7 @@ from civex_plugin_sdk import RpcError
 from civex.plugins.builtins._refusals import GONE, refused
 from civex_plugin_sdk import Ctx
 from civex_plugin_sdk import Plugin as PluginBase
-from civex.plugins.hints import advanced, hint
+from civex.plugins.hints import advanced, hint, says
 
 log = logging.getLogger(__name__)
 
@@ -30,21 +30,32 @@ class Plugin(PluginBase):
         IOSpec(
             name="table",
             type="table",
-            description="Rows to upsert; columns map to schema fields by name.",
+            description="The table to save. Its columns go into the fields of the same name.",
         )
     ]
     outputs = [
-        IOSpec(name="created", type="number", description="Rows that inserted."),
-        IOSpec(name="updated", type="number", description="Rows that matched."),
+        IOSpec(
+            name="created",
+            type="number",
+            description="How many rows it added as new records.",
+        ),
+        IOSpec(
+            name="updated", type="number", description="How many rows matched a record."
+        ),
         IOSpec(
             name="skipped",
             type="number",
-            description="Rows whose record failed validation.",
+            description="The rows whose record could not be saved.",
         ),
     ]
 
     class Config(BaseModel):
-        model_config = ConfigDict(populate_by_name=True)
+        model_config = ConfigDict(
+            json_schema_extra=says(
+                "For each row of {table}, updates the {schema} inside this record whose {key_field} matches it, or makes a new one."
+            ),
+            populate_by_name=True,
+        )
         schema_name: str = Field(
             title="Kind of record",
             json_schema_extra=hint("schema"),
@@ -54,9 +65,9 @@ class Plugin(PluginBase):
             "`schema_name`).",
         )
         key_field: str = Field(
-            title="Match rows on field",
+            title="Match rows by field",
             json_schema_extra=hint("field", of="schema"),
-            description="Field used to match table rows against existing records.",
+            description="The field a row and a record must agree on to be the same.",
         )
         dataset: str = Field(
             title="Collection",

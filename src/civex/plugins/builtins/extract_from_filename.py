@@ -4,12 +4,12 @@ import re
 from typing import Any
 
 from civex_plugin_sdk.plugin_base import IOSpec
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from civex.domain import filename_extract
 from civex_plugin_sdk import Ctx
 from civex_plugin_sdk import Plugin as PluginBase
-from civex.plugins.hints import choices, hint
+from civex.plugins.hints import choices, hint, says
 
 
 class Plugin(PluginBase):
@@ -26,26 +26,30 @@ class Plugin(PluginBase):
         IOSpec(
             name="value",
             type="any",
-            description="The part of the name, read as text, a number or a date.",
+            description="The value it took from the name: text, a number or a date.",
         ),
         IOSpec(
             name="filename",
             type="string",
-            description="The filename the pattern was applied to.",
+            description="The file name it read.",
         ),
         IOSpec(
             name="extracted",
             type="string",
-            description="The raw captured text, before conversion.",
+            description="The text it took, before it was read as a date or number.",
         ),
     ]
 
     class Config(BaseModel):
+        model_config = ConfigDict(
+            json_schema_extra=says(
+                "Takes {pattern} from the name of the file in {field}, read as {output_type}."
+            )
+        )
         field: str = Field(
-            title="Field with the file name",
+            title="File field",
             json_schema_extra=hint("field", dtypes=["file", "file_list", "string"]),
-            description="Field on the trigger record holding the filename to match "
-            "(a `file`/`file_list` field, or a plain string field).",
+            description="The file field whose file name it reads.",
         )
         pattern: str = Field(
             title="The part of the name to take",
