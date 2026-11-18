@@ -11,13 +11,14 @@ from civex_plugin_sdk import RpcError
 from civex.plugins.builtins._refusals import refused
 from civex_plugin_sdk import Ctx
 from civex_plugin_sdk import Plugin as PluginBase
+from civex.plugins.hints import advanced, hint
 
 log = logging.getLogger(__name__)
 
 
 class Plugin(PluginBase):
     id = "civex.create_records_from_files"
-    name = "Create Records from Files"
+    name = "Make a record for each file"
     description = (
         "Create one record per file in a list. Pure insert -- no key matching "
         "against existing records; use Match Files to Records for that."
@@ -43,20 +44,28 @@ class Plugin(PluginBase):
     class Config(BaseModel):
         model_config = ConfigDict(populate_by_name=True)
         schema_name: str = Field(
+            title="Kind of record to make",
+            json_schema_extra=hint("schema"),
             alias="schema",
             description="Name of the schema to create records under. Workflow "
             "YAML sets this via the `schema:` key (the Python field is "
             "`schema_name`).",
         )
         file_field: str = Field(
-            description="Field on the created records to store each file reference in."
+            title="Put each file in",
+            json_schema_extra=hint("field", of="schema", dtypes=["file", "file_list"]),
+            description="Field on the created records to store each file reference in.",
         )
         dataset: str = Field(
+            title="Collection",
+            json_schema_extra=advanced(hint("collection")),
             default="",
             description="Dataset to create records in. Empty string falls back "
             "to the trigger record's own dataset.",
         )
         context_record_id: str = Field(
+            title="Inside record",
+            json_schema_extra=advanced(hint("record")),
             default="",
             description="Parent record ID to attach created records to. Empty "
             "string falls back to the workflow's context record.",

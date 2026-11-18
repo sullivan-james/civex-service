@@ -11,13 +11,14 @@ from civex_plugin_sdk import RpcError
 from civex.plugins.builtins._refusals import GONE, refused
 from civex_plugin_sdk import Ctx
 from civex_plugin_sdk import Plugin as PluginBase
+from civex.plugins.hints import advanced, hint
 
 log = logging.getLogger(__name__)
 
 
 class Plugin(PluginBase):
     id = "civex.upsert_records"
-    name = "Upsert Records"
+    name = "Add or update records from a table"
     description = (
         "Create or update one record per table row, matching existing records "
         "on a key column. An update changes only the columns in the table; the "
@@ -45,20 +46,28 @@ class Plugin(PluginBase):
     class Config(BaseModel):
         model_config = ConfigDict(populate_by_name=True)
         schema_name: str = Field(
+            title="Kind of record",
+            json_schema_extra=hint("schema"),
             alias="schema",
             description="Name of the schema to create/update records under. "
             "Workflow YAML sets this via the `schema:` key (the Python field is "
             "`schema_name`).",
         )
         key_field: str = Field(
-            description="Field used to match table rows against existing records."
+            title="Match rows on field",
+            json_schema_extra=hint("field", of="schema"),
+            description="Field used to match table rows against existing records.",
         )
         dataset: str = Field(
+            title="Collection",
+            json_schema_extra=advanced(hint("collection")),
             default="",
             description="Dataset to search and create records in. Empty string "
             "falls back to the trigger record's own dataset.",
         )
         parent_record_id: str = Field(
+            title="Inside record",
+            json_schema_extra=advanced(hint("record")),
             default="",
             description="Parent record ID to scope matching and creation to. "
             "Empty string falls back to the trigger record's ID.",

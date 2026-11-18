@@ -11,6 +11,7 @@ from civex_plugin_sdk import Ctx, RpcError
 from civex_plugin_sdk import Plugin as PluginBase
 
 from civex.plugins.builtins._refusals import GONE, refused
+from civex.plugins.hints import advanced, hint
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ def _with_file(current: Any, ref: dict[str, Any]) -> list[Any]:
 
 class Plugin(PluginBase):
     id = "civex.match_files_to_records"
-    name = "Match Files to Records"
+    name = "Put files on matching records"
     description = (
         "Attach each file to an existing child record matched by a key "
         "extracted from its filename, creating the record when none matches."
@@ -70,29 +71,41 @@ class Plugin(PluginBase):
     class Config(BaseModel):
         model_config = ConfigDict(populate_by_name=True)
         schema_name: str = Field(
+            title="Kind of record to match",
+            json_schema_extra=hint("schema"),
             alias="schema",
             description="Name of the child schema to match/create records "
             "under. Workflow YAML sets this via the `schema:` key (the Python "
             "field is `schema_name`).",
         )
         key_field: str = Field(
+            title="Match on field",
+            json_schema_extra=hint("field", of="schema"),
             description="Field on child records to match the extracted key "
-            "against, e.g. 'selection_number'."
+            "against, e.g. 'selection_number'.",
         )
         file_field: str = Field(
+            title="Put each file in",
+            json_schema_extra=hint("field", of="schema", dtypes=["file", "file_list"]),
             description="Field on child records to set with the matched file "
-            "reference, e.g. 'contour_file'."
+            "reference, e.g. 'contour_file'.",
         )
         pattern: str = Field(
+            title="The key in each file name",
+            json_schema_extra=hint("pattern", on="files"),
             description="Regex with one capture group that extracts the key "
-            "value from each filename."
+            "value from each filename.",
         )
         dataset: str = Field(
+            title="Collection",
+            json_schema_extra=advanced(hint("collection")),
             default="",
             description="Dataset to search and create records in. Empty string "
             "falls back to the trigger record's own dataset.",
         )
         parent_record_id: str = Field(
+            title="Inside record",
+            json_schema_extra=advanced(hint("record")),
             default="",
             description="Parent record ID to scope matching and creation to. "
             "Empty string falls back to the trigger record's ID.",

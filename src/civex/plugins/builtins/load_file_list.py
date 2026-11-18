@@ -8,13 +8,14 @@ from pydantic import BaseModel, Field
 
 from civex_plugin_sdk import Ctx
 from civex_plugin_sdk import Plugin as PluginBase
+from civex.plugins.hints import hint
 
 log = logging.getLogger(__name__)
 
 
 class Plugin(PluginBase):
     id = "civex.load_file_list"
-    name = "Load File List"
+    name = "Read a list of files"
     description = (
         "Read the file references held in a `file_list` field on the trigger "
         "record. Yields an empty list when the field is unset."
@@ -32,7 +33,9 @@ class Plugin(PluginBase):
 
     class Config(BaseModel):
         field: str = Field(
-            description="Name of the `file_list` field on the trigger record to read."
+            title="Files field",
+            json_schema_extra=hint("field", dtypes=["file_list"]),
+            description="Name of the `file_list` field on the trigger record to read.",
         )
 
     def invoke(

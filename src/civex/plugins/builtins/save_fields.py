@@ -14,7 +14,7 @@ log = logging.getLogger(__name__)
 
 class Plugin(PluginBase):
     id = "civex.save_fields"
-    name = "Save Fields"
+    name = "Set several fields"
     description = (
         "Write several fields to the trigger record at once. Updates with a "
         "null value are skipped rather than clearing the field."
