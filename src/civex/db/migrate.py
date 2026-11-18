@@ -26,6 +26,7 @@ states a given project is in.
 from __future__ import annotations
 
 import threading
+import weakref
 from pathlib import Path
 
 from alembic import command
@@ -39,7 +40,9 @@ _MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 # Present in every pre-Alembic install; absence means "brand new project".
 _LEGACY_MARKER_TABLE = "schemas"
 
-_migrated_engines: set[Engine] = set()
+# Weak, so an engine nobody uses any more (a test's, a closed project's) is
+# freed with its compiled-statement cache instead of being kept here forever.
+_migrated_engines: weakref.WeakSet[Engine] = weakref.WeakSet()
 _migrate_lock = threading.Lock()
 
 

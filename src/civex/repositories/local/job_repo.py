@@ -505,7 +505,7 @@ class LocalWorkflowJobRepository:
         while grew:
             grew = False
             for i, (created, ended, _) in enumerate(finished):
-                if i not in included and ended >= start:
+                if i not in included and ended is not None and ended >= start:
                     included.add(i)
                     start = min(start, created)
                     grew = True
@@ -650,7 +650,7 @@ class LocalWorkflowJobRepository:
             q = q.filter(WorkflowJob.created_at >= start)
         if end is not None:
             q = q.filter(WorkflowJob.created_at < end)
-        return [d for (d,) in q.all()]
+        return [d for (d,) in q.all() if d is not None]
 
 
 def _touches_schema(schema_name: str):

@@ -158,6 +158,18 @@ def _stop_the_transfer_worker() -> Iterator[None]:
     jobs.shutdown()
 
 
+@pytest.fixture(autouse=True)
+def _forget_engines() -> Iterator[None]:
+    """`context._get_engine` keeps one engine per database URL for the life of
+    the process, and every test's project has its own URL. Kept, each holds its
+    pool and compiled statements, and a worker grows by megabytes a test until
+    WSL runs out of memory, so drop them after each test."""
+    yield
+    from civex import context
+
+    context._get_engine.cache_clear()
+
+
 @pytest.fixture()
 def project_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Initialise a civex project in a temp dir and cd into it."""

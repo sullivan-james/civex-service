@@ -39,7 +39,6 @@ from sqlalchemy import (
     event,
     inspect,
     insert,
-    nulls_last,
     select,
     text,
 )
@@ -129,7 +128,7 @@ class Schema(Base):
         "Field",
         back_populates="schema",
         cascade="all, delete-orphan",
-        order_by=lambda: [nulls_last(Field.position), Field.created_at],
+        order_by=lambda: [Field.position.asc().nulls_last(), Field.created_at],
     )
     parent: Mapped[Schema | None] = relationship(
         "Schema", remote_side="Schema.id", back_populates="children"

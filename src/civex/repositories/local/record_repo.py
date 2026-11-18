@@ -304,6 +304,8 @@ class LocalRecordRepository:
         )
         counts: dict[uuid.UUID, dict[str, int]] = {}
         for parent_id, schema_name, n in rows:
+            if parent_id is None:  # never: the query asks for these parents
+                continue
             counts.setdefault(parent_id, {})[schema_name] = n
         return counts
 
