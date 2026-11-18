@@ -48,6 +48,7 @@ def test_sending_is_shown_as_it_goes(pair):
 
     sending = [p for p in seen if p.phase == SENDING]
     assert sending[0].done == 0 and sending[0].total == 1
+    assert sending[0].bytes_total == len(content)  # how much, before any goes
     assert sending[-1].done == 1 and sending[-1].bytes_done == len(content)
 
 

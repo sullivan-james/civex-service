@@ -30,6 +30,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from civex.config import Config
@@ -56,6 +57,36 @@ HISTORY_PAGES = 10
 FILES_SECONDS = 20.0
 
 ProgressSink = Callable[[SyncProgress | None], None]
+
+
+@dataclass
+class _SendRun:
+    """Uploads from the first pass that found something to send until one
+    finishes: what the passes before this one did, and the speed over all of
+    them."""
+
+    files: int = 0
+    bytes: int = 0
+    rate: RateWindow = field(default_factory=RateWindow)
+    last: SyncProgress | None = None
+
+    def carried(self, p: SyncProgress, now: float) -> SyncProgress:
+        """A pass's progress as part of the run."""
+        sent = self.bytes + p.bytes_done
+        return replace(
+            p,
+            done=self.files + p.done,
+            total=None if p.total is None else self.files + p.total,
+            bytes_done=sent,
+            bytes_total=None if p.bytes_total is None else self.bytes + p.bytes_total,
+            rate=self.rate.add(now, sent),
+        )
+
+    def close_pass(self) -> None:
+        if self.last is not None:
+            self.files += self.last.done
+            self.bytes += self.last.bytes_done
+            self.last = None
 
 
 class SyncWorker:
@@ -101,6 +132,9 @@ class SyncWorker:
         self._absent_since = 0.0
         self._files_total = 0
         self._files_done = 0
+        # The run of uploads under way, over as many passes as it takes, so
+        # its bar carries on from pass to pass instead of starting again.
+        self._send_run: _SendRun | None = None
         # What the last sync run here did, for the app to report. Kept in memory:
         # it is a notice, not state anyone needs after a restart.
         self.last_report: SyncReport | None = None
@@ -178,15 +212,19 @@ class SyncWorker:
     def _send_files(self, ctx: AppContext, everything: bool) -> None:
         """Upload, for a while, the files the authority hasn't said it holds
         (every file it is asked about again, when `everything` or every
-        `FILE_CHECK_EVERY`)."""
+        `FILE_CHECK_EVERY`). A pass counts from what is left when it starts;
+        the progress published adds what earlier passes of the same run sent,
+        so one bar runs from the first file to the last."""
         now = self._clock()
         everything = everything or now - self._last_file_check >= FILE_CHECK_EVERY
         sending = False
+        run = self._send_run or _SendRun()
 
         def told(p: SyncProgress) -> None:
             nonlocal sending
             sending = True
-            self._on_files(p)
+            run.last = p
+            self._on_files(run.carried(p, self._clock()))
 
         try:
             report = ctx.sync_svc.send_files(
@@ -195,15 +233,20 @@ class SyncWorker:
         except SyncError as e:
             log.info("sending files failed (%s); it carries on later", e)
             self._files_backoff_until = now + MAX_BACKOFF / 5
+            self._send_run = None
             if sending:
                 self._on_files(None)
             return
         if everything:
             self._last_file_check = now
-        if sending and not report.stopped:  # no bar left where uploading ended
+        if report.stopped:  # more to send: carry on at once, on the same bar
+            run.close_pass()
+            self._send_run = run
+            self._files_wake.set()
+            return
+        self._send_run = None
+        if sending:  # no bar left where uploading ended
             self._on_files(None)
-        if report.stopped:
-            self._files_wake.set()  # more to send: carry on at once
 
     def _fetch_history(self, ctx: AppContext) -> None:
         """A few pages of the history from before this project joined, while

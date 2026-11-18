@@ -40,17 +40,32 @@ export function describeSyncProgress(p: SyncProgress): SyncProgressText {
       : p.phase === 'files' || p.phase === 'sending'
         ? 'files'
         : (KINDS[p.kind ?? ''] ?? '')
+  // With the size known, the bar and the time left go by bytes: one big file
+  // among small ones is most of the wait.
+  const bytesTotal = p.bytes_total ?? 0
+  const bytesDone = p.bytes_done ?? 0
+  const byBytes = bytesTotal > 0
+  const eta =
+    byBytes && p.rate && p.rate > 0
+      ? Math.max(0, bytesTotal - bytesDone) / p.rate
+      : null
+  const amounts = describeAmounts({
+    done: p.done,
+    total: p.total,
+    unit: what || undefined,
+    bytesDone,
+    bytesTotal: byBytes ? bytesTotal : undefined,
+    rate: p.rate,
+    eta,
+  })
   return {
     title: PHASES[p.phase] ?? 'Syncing',
     detail: what ? `${what} · ${count}` : count,
-    count: describeAmounts({
-      done: p.done,
-      total: p.total,
-      unit: what || undefined,
-      bytesDone: p.bytes_done,
-      rate: p.rate,
-    }),
-    fraction:
-      p.total != null && p.total > 0 ? Math.min(1, p.done / p.total) : null,
+    count: amounts,
+    fraction: byBytes
+      ? Math.min(1, bytesDone / bytesTotal)
+      : p.total != null && p.total > 0
+        ? Math.min(1, p.done / p.total)
+        : null,
   }
 }
