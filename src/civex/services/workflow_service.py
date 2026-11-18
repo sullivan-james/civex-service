@@ -24,7 +24,7 @@ from civex.workflows.contract_validation import (
     ContractError,
     validate_workflow_contracts,
 )
-from civex.workflows.definition import WorkflowDef, load_workflow
+from civex.workflows.definition import WorkflowDef, load_workflow, set_enabled_text
 from civex.workflows.executor import topological_sort
 
 if TYPE_CHECKING:
@@ -140,6 +140,11 @@ class WorkflowService:
             raise ValidationError(
                 "stem must contain only letters, numbers, hyphens, and underscores"
             )
+        return self.check(content)
+
+    def check(self, content: str) -> WorkflowDef:
+        """Everything `validate` checks but the file name: what a workflow that
+        isn't saved yet must pass before it is tried."""
         try:
             raw = yaml.safe_load(content)
             wf = WorkflowDef.model_validate(raw)
@@ -168,6 +173,16 @@ class WorkflowService:
         path = self._dir / f"{stem}.yaml"
         path.write_text(content, encoding="utf-8")
         return path, wf
+
+    def set_enabled(self, stem: str, enabled: bool) -> tuple[Path, WorkflowDef, str]:
+        """Switch a workflow's triggers on or off, changing only its `enabled:`
+        line (`definition.set_enabled_text`). Checked like any save, so a
+        workflow that no longer matches its plugins can't be switched on."""
+        path, _, content = self.get(stem)
+        changed = set_enabled_text(content, enabled)
+        wf = self.check(changed)
+        path.write_text(changed, encoding="utf-8")
+        return path, wf, changed
 
     def delete(self, stem: str, force: bool = False) -> None:
         path = self.find_path(stem)

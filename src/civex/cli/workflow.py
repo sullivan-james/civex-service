@@ -10,7 +10,7 @@ from rich.table import Table
 
 from civex.cli.utils import cli_load_config, drain_jobs, get_ctx
 from civex.console import console
-from civex.domain.exceptions import NotFoundError
+from civex.domain.exceptions import CivexError, NotFoundError, WorkflowValidationError
 from civex.workflows.definition import WorkflowDef, load_workflow
 
 log = logging.getLogger(__name__)
@@ -109,7 +109,7 @@ def workflow_list() -> None:
         )
         return
 
-    table = Table("Name", "Description", "Steps", "Inputs", "File")
+    table = Table("Name", "On", "Description", "Steps", "Inputs", "File")
     for path in yamls:
         try:
             wf = load_workflow(path)
@@ -119,13 +119,14 @@ def workflow_list() -> None:
             )
             table.add_row(
                 wf.name,
+                "yes" if wf.enabled else "[dim]off[/dim]",
                 wf.description or "",
                 str(len(wf.steps)),
                 inputs_summary,
                 path.name,
             )
         except Exception as e:
-            table.add_row(path.stem, f"[error]{e}[/error]", "-", "-", path.name)
+            table.add_row(path.stem, "-", f"[error]{e}[/error]", "-", "-", path.name)
     console.print(table)
 
 
@@ -181,3 +182,127 @@ def workflow_run(
     console.print(f"Enqueued job {str(job.id)[:8]}… — draining queue")
 
     drain_jobs(app_ctx)
+
+
+def _show_value(value: Any) -> str:
+    if value is None or value == "":
+        return "—"
+    if isinstance(value, dict) and "filename" in value:
+        return str(value["filename"])
+    if isinstance(value, list) and value and isinstance(value[0], dict):
+        return ", ".join(str(v.get("filename", v)) for v in value)
+    text = str(value)
+    return text if len(text) <= 60 else text[:57] + "…"
+
+
+@app.command("try")
+def workflow_try(
+    name: str = typer.Argument(
+        ..., help="Workflow name, filename stem, or a path to a YAML file"
+    ),
+    record_id: str = typer.Option(
+        ..., "--record", "-r", help="Record ID or short prefix"
+    ),
+    input_args: list[str] = typer.Option(
+        [],
+        "--input",
+        "-i",
+        help="Workflow input as name=value. For 'files' inputs, value is a glob pattern.",
+    ),
+) -> None:
+    """Try a workflow on a record without keeping anything it does.
+
+    It runs as a real run would, then everything it wrote is undone, and what
+    it would have done is printed: the records it would create, change or
+    delete, with each value before and after, and the runs its saves would
+    start. Works whether the workflow is on or off. A plugin that reaches
+    outside civex (a web request, a file of its own) still does so.
+    """
+    from civex.workflows.trial import try_workflow
+
+    config = cli_load_config()
+    app_ctx = get_ctx()
+    try:
+        as_path = Path(name)
+        if as_path.suffix in (".yaml", ".yml") and as_path.exists():
+            wf_def = app_ctx.workflow_svc.check(as_path.read_text(encoding="utf-8"))
+        else:
+            found = _find_workflow(name, config.civex_dir / "workflows")
+            if found is None:
+                console.print(f"[error]Workflow '{name}' not found[/error]")
+                raise typer.Exit(1)
+            wf_def = found
+        input_data = _resolve_inputs(wf_def, input_args, app_ctx) or None
+        result = try_workflow(app_ctx, wf_def, record_id, input_data)
+    except CivexError as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        app_ctx.rollback()
+        app_ctx.close()
+
+    for step in result.steps:
+        mark = {"success": "✓", "skipped": "⏭", "failed": "✗"}.get(step["status"], "?")
+        console.print(f"  {mark} {step['step_id']} [dim]({step['plugin']})[/dim]")
+    if result.error:
+        console.print(
+            f"[error]Step '{result.error.get('step')}' failed: "
+            f"{result.error.get('message')}[/error]"
+        )
+    if not result.changes:
+        console.print("[info]It would change no records.[/info]")
+    for change in result.changes:
+        title = change.name or change.record_id[:8]
+        console.print(
+            f"\n[bold]{change.action.capitalize()}[/bold] {change.schema_name} {title}"
+        )
+        if change.fields:
+            table = Table("Field", "Before", "After")
+            for f in change.fields:
+                table.add_row(f.label, _show_value(f.before), _show_value(f.after))
+            console.print(table)
+    for workflow, count in result.would_start.items():
+        console.print(f"[info]Would start '{workflow}' on {count} record(s).[/info]")
+    console.print("[dim]Nothing was kept.[/dim]")
+    if result.error:
+        raise typer.Exit(1)
+
+
+def _switch(stem: str, enabled: bool) -> None:
+    app_ctx = get_ctx()
+    try:
+        app_ctx.workflow_svc.set_enabled(stem, enabled)
+    except WorkflowValidationError as e:
+        for err in e.errors:
+            console.print(
+                f"[error]{err['step'] or 'workflow'}: {err['message']}[/error]"
+            )
+        raise typer.Exit(1)
+    except CivexError as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        app_ctx.close()
+    state = (
+        "on: its triggers start runs"
+        if enabled
+        else ("off: it runs only when started by hand")
+    )
+    console.print(f"[success]'{stem}' is {state}.[/success]")
+
+
+@app.command("enable")
+def workflow_enable(
+    stem: str = typer.Argument(..., help="Workflow filename stem"),
+) -> None:
+    """Switch a workflow on, so its triggers start runs."""
+    _switch(stem, True)
+
+
+@app.command("disable")
+def workflow_disable(
+    stem: str = typer.Argument(..., help="Workflow filename stem"),
+) -> None:
+    """Switch a workflow off: its triggers start nothing, and it runs only when
+    someone starts or tries it."""
+    _switch(stem, False)

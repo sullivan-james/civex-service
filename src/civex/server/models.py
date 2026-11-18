@@ -1233,6 +1233,11 @@ class WorkflowResponse(BaseModel):
     stem: str
     record_schema: str | None = None
     inputs: dict[str, WorkflowInputResponse] | None = None
+    enabled: bool = Field(
+        True,
+        description="Whether its triggers start runs. Off, it runs only when "
+        "someone starts or tries it.",
+    )
     runs_on: list[str] = Field(
         default_factory=list,
         description="What starts it by itself, one line each "
@@ -1266,10 +1271,67 @@ class WorkflowDetailResponse(BaseModel):
     content: str  # raw YAML
     step_list: list[WorkflowStepResponse] = []
     triggers: dict[str, WorkflowTriggerResponse] | None = None
+    enabled: bool = Field(
+        True,
+        description="Whether its triggers start runs. Off, it runs only when "
+        "someone starts or tries it.",
+    )
 
 
 class WorkflowSaveRequest(BaseModel):
     content: str  # raw YAML
+
+
+class WorkflowEnabledRequest(BaseModel):
+    enabled: bool = Field(description="On: its triggers start runs. Off: they don't.")
+
+
+class WorkflowTrialRequest(BaseModel):
+    content: str = Field(
+        description="The workflow's YAML: what is on screen, saved or not."
+    )
+    record_id: str = Field(description="The record to try it on (an id or prefix).")
+
+
+class TrialFieldChange(BaseModel):
+    field: str = Field(description="The field's key.")
+    label: str = Field(description="The field's name as people see it.")
+    dtype: str | None = Field(
+        None, description="The field's type; null for a value no field has."
+    )
+    before: Any = Field(None, description="The value before the run (null: none).")
+    after: Any = Field(None, description="The value the run would leave.")
+
+
+class TrialRecordChange(BaseModel):
+    record_id: str
+    schema_name: str | None = None
+    name: str | None = Field(None, description="The record's name.")
+    action: str = Field(description="created, updated or deleted.")
+    fields: list[TrialFieldChange] = Field(
+        default_factory=list,
+        description="The values that would differ; for a new record, those it sets.",
+    )
+
+
+class WorkflowTrialResponse(BaseModel):
+    ok: bool = Field(description="False when a step failed; `error` says which.")
+    steps: list[dict] = Field(
+        default_factory=list,
+        description="Each step as a run records it (status, inputs, outputs).",
+    )
+    changes: list[TrialRecordChange] = Field(
+        default_factory=list,
+        description="Every record the run would create, change or delete.",
+    )
+    would_start: dict[str, int] = Field(
+        default_factory=dict,
+        description="Runs its saves would start, by workflow.",
+    )
+    error: dict | None = Field(
+        None, description="{kind, message, retryable, step} when a step failed."
+    )
+    log: str | None = None
 
 
 # --- Jobs ---
