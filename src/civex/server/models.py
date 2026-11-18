@@ -144,6 +144,23 @@ class FromFilenamePreviewRequest(BaseModel):
     kind: str = Field(
         description="The field type the value is read as, e.g. 'datetime'."
     )
+    filenames: list[str] = Field(
+        default_factory=list,
+        max_length=500,
+        description="More file names to try the patterns on, each answered in "
+        "`results`: what a pattern built from an example makes of every name.",
+    )
+
+
+class FromFilenameResult(BaseModel):
+    filename: str
+    value: Any = Field(
+        default=None, description="What the name gives; null when no pattern matches."
+    )
+    error: str | None = Field(
+        default=None,
+        description="A pattern matched but what it captured isn't a value of the kind.",
+    )
 
 
 class FromFilenamePreviewResponse(BaseModel):
@@ -157,6 +174,10 @@ class FromFilenamePreviewResponse(BaseModel):
     error: str | None = Field(
         default=None,
         description="A pattern matched but what it captured isn't a value of the kind.",
+    )
+    results: list[FromFilenameResult] = Field(
+        default_factory=list,
+        description="For each of `filenames`, in order: what it gives.",
     )
 
 
