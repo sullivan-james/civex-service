@@ -57,7 +57,7 @@ dependencies = [
     # PyPI and the SDK's source hasn't changed since it. Widen the upper bound (minor bump)
     # deliberately when a compatible SDK ships; narrow the lower bound only
     # if civex starts needing a newer SDK.
-    "civex-plugin-sdk>=0.2.0,<0.3",
+    "civex-plugin-sdk>=0.3.0,<0.4",
     # Everything below used to be an optional extra. The whole set is small
     # enough that a plain `pipx install civex` should just work, so they're
     # base dependencies now (the extras further down remain as empty aliases
