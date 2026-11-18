@@ -198,7 +198,7 @@ def record_find(
         records = ctx.record_svc.find(
             dataset_name, schema_name=schema_name, filters=where or [], limit=limit
         )
-    except (NotFoundError, ValueError) as e:
+    except (NotFoundError, ValidationError, ValueError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
 
