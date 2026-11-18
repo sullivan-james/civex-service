@@ -21,403 +21,392 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
-## Unreleased
+## v2.0.0 — sync between machines, a workflow builder, files on drives or in a bucket (2026-11-18)
+
+civex 2.0 lets a project be kept on several computers through one server.
+Workflows can be built in a form without knowing YAML, files can live in an S3
+bucket, exports and file moves ask fewer questions, and the desktop app installs
+and updates itself. This entry covers everything since v1.2.0, including what
+the release candidates (2.0.0rc1 to rc15) carried. If you are upgrading, read
+**Breaking** first.
 
 ### Breaking
 
-- Migration `c4d8e2f6a9b3`: the key that holds a record to its parent's
-  collection is now checked when a transaction commits rather than at each
-  statement (`DEFERRABLE INITIALLY DEFERRED`), so a tree of records can move
-  one record at a time. On SQLite the `records` table is rebuilt. Nothing
-  to do by hand.
+- **Database migrations.** They all run by themselves when a project is first
+  opened, and existing data is kept. If you upgrade a SQLite project by hand,
+  have about its size free on the disk, because `records` is rebuilt
+  (`c4d8e2f6a9b3`). The migrations, in order of area:
+  - sync: `c9e1f4a7b3d2` (sync tables, `audit_log.apply_state`),
+    `d6c2a8f41b07` (conflict context), `a8c4e2f6b1d9` (device keys),
+    `c1e8f4a2b7d3` (join requests), `b5e1d8f2a647` (which device a change came
+    through), `a7c3e9f1b5d2` and `d2f6a9c4e8b1` (which files the server has
+    and lacks), `b2d6f8a3c517` and `e6a2c8f4d1b7` (the shared library and its
+    versions);
+  - history: `e8b4f2c6a917` (entries that store only what changed, written in
+    order), `f1c3a5e7b902` (one action's entries kept together),
+    `a4d9e2c7f310` (an index for converting old history);
+  - files: `c3f7a9e1d5b8` (a file may have copies on several drives),
+    `f7b3d9e2a6c4` (each record's file points at one copy), `b9d4e7f2a1c6`
+    (when a copy was checked against its hash);
+  - exports: `d9f3b1c7e4a2`, `e1a7c5b8f204`, `f4b8d2a6c139`, `a1e5c9d3f7b2`
+    (saved exports, their tables and how they are handed over),
+    `c8e2a4f6d913` (a view's file layout);
+  - records: `b3c7d1e9f5a2` drops each collection's schema list (see below),
+    `c4d8e2f6a9b3` checks a record's parent and collection at commit, and
+    `bc183bbafef8` turns a lone file stored in a `file_list` field into a list
+    of one.
 
-- **`civex dump`/`civex restore` are replaced by bundles.** `civex bundle
-  export|show|import`, `GET /bundle`, `GET /bundle/plan`, `POST /bundle/import`,
-  and **Export bundle…** / **Import bundle…** on the Collections page. A bundle
-  is a zip (`bundle.json`, `records.jsonl`, `files/<sha256>`, `workflows/`,
-  `plugins/`) that keeps record ids, so records inside others and references
-  survive the move to another project, and carries the stored files the
-  records cite unless `--no-files` (the app's dialog says how many files and
-  bytes that is). Importing matches schemas and collections by name and records
-  by id (what is already there is left alone, so a bundle can be imported
-  again), writes each record through the usual checks and history, defers a
-  record until the record it sits inside and the records it references are
-  there, and is one `import` event in Activity. A file whose bytes don't hash
-  to their name is refused. `civex dump`/`restore` and `GET /dump`, `POST
-  /restore` are gone; a YAML dump from an older release is read by that
-  release.
-- **Records can be moved to another collection**, or inside another record
-  there: `civex record move <ids> --to <collection> [--under <record>]`,
-  `civex record move-all` for everything a query lists, `POST
-  /records/move` (and `/records/move/plan`, the same rule as a preview), and
-  **Move to…** on the explorer's selection bar beside Delete. A record keeps
-  its id, values and history and takes everything beneath it along; files are
-  stored by content and stay where they are; the move is one event in
-  Activity (`move`), reads in a record's history as "Collection: a → b", and
-  is refused whole when a reference would break, a uniqueness key is taken
-  where it would land, or the kind can't sit there. Over sync a move is one
-  action, taken or held whole: a device with an unsent change beneath a moved
-  record waits for its push before taking the move, a child's collection
-  follows its parent on the authority when the parent moved meanwhile, and a
-  refused move is put back on the device that made it.
-- **The guided import is gone.** The spreadsheet and folder wizard
-  (**New ▸ Import data…**, a schema page's **Import data**) read the file in
-  the browser, guessed a schema from it and made a request per row, and led
-  people to shape their records around a file rather than the other way
-  round. Records are added from the **New** menu; a folder of files comes in
-  through a workflow (`civex.create_records_from_files`,
-  `civex.match_files_to_records`), which can be saved and run again.
-- **The desktop app installs civex onto a pinned Python (3.13).** The
-  launcher and the in-app updater used to let uv pick the newest CPython it
-  could download; once that became 3.15, which PyYAML has no wheel for, a
-  fresh install on Windows tried to compile it and failed asking for Visual
-  C++ Build Tools. Both now set `UV_PYTHON` (the launcher's `PYTHON`,
-  `updates.APP_PYTHON`), so a new setup exe is needed for the fix to reach a
-  first install.
-- A server serves the project it is asked for, not the one in its working
-  directory: `deps.current_project` resolves it once per request (a host
-  serving many projects installs `app.state.project_resolver`), a context is
-  built from a `Project` (`build_context`: settings, where they are kept, who
-  changes are recorded as, optionally a shared engine), and every service
-  saves settings through its `ConfigStore` rather than writing `config.toml`.
-  Nothing changes for a project in a folder; this is the seam a hosted civex
-  builds on.
-- What a server does is said once (`domain/features.py`): `GET
-  /api/status/features` lists it, a host that does less leaves those routers
-  out and answers 501 in plain words on what is left, and the app hides the
-  matching nav items and Settings sections. The server's background hosts
-  (history conversion, file moves, sync, run drains) open their contexts
-  through a factory, so a host serving many projects can run them per project.
-  A project in a folder offers everything it did.
-- **Files in an S3 bucket**, in every install: `[store.s3]` in `config.toml`
-  (`bucket`, `prefix`, `region`, `endpoint` for MinIO and the like, `profile`)
-  keeps a project's files in a bucket instead of on drives. Everything else is
-  the same: records, history, sync, clean-up. The bucket is one volume that is
-  always online; Settings → Storage and the drive commands aren't offered for
-  such a project. Credentials come from the environment or an AWS profile,
-  never from config.toml.
-- **Files sync apart from records.** A sync, and filling an empty server, now
-  send records only, so they take seconds whatever the files weigh; files go up
-  and come down in the background on their own, with their own task in the
-  status bar. That task counts only files this computer can send, says why they
-  haven't gone (going up, or on a drive that can't be read) and offers **Send
-  now** only when some can go; files that are on no drive here and that the
-  server said it hasn't got are a separate "missing" task, since nothing here
-  can send them (migration `d2f6a9c4e8b1` keeps what the server said it lacks).
-  `civex sync send` uploads them from the command line.
-- **Which files are on the server, in the files list.** A collection's (or a
-  record's) **Their files** filters by **On the server** / **Not on the server
-  yet**, marks each file not sent yet, and shows files going up live, with
-  **Send now**. A missing file says so, and which computer added it.
-- **Versions are shown, not enforced.** Settings → Sync and `civex sync
-  now|status` show the civex on this computer and on the server. Whether two
-  can sync is still decided by the sync protocol alone, so updating a server
-  doesn't cut devices off; a server that will stop accepting an older civex at
-  its next update says so first, and those devices show *Update civex soon*.
-  A field of a type this civex doesn't know stops a sync before anything is
-  applied.
-- **Sync and connect failures in plain words.** One sentence saying what to do
-  (a database problem points to `civex doctor`), with the technical text in
-  the log, behind *Technical details* in Settings → Sync, and dimmed in the
-  CLI. `civex doctor` now checks that the database has every table and column
-  this civex expects, whatever revision it is stamped at.
-- **Every collection in one view**: `/collections` has an **All records** tab,
-  the records explorer across every collection, with **Their files** listing
-  every file in the project (a filter or a record narrows it as usual).
-- **Choosing a bucket from the app or the CLI**: Settings → Storage → Tasks →
-  **Use a bucket…**, or `civex store bucket check|set|show|clear`. The bucket is
-  tried first (reached, written, read back, nothing else under the prefix), and
-  a project switches between drives and a bucket only while the place it leaves
-  holds none of its files, since files are never moved between the two. A
-  project using a bucket shows it under Settings → Storage; `civex doctor`
-  warns about files left on drives.
-- **Files go straight to storage** where the bucket allows it (`direct_files`,
-  on by default; `direct = false` turns it off): a device syncing with such an
-  authority uploads to and downloads from the bucket by presigned URL, the
-  authority only saying where and recording what arrived, and the app's
-  downloads are a redirect to the bucket. A file that went in in parts is
-  checked against its hash by a read-back during the next clean-up
-  (`stored_objects.verified_at`, migration `b9d4e7f2a1c6`). An older authority
-  or device streams as before.
-- For developers: the store protocol is split into `ObjectStore` (what every
-  service sees) and `VolumeStore` (drives as places), `AppContext.store_svc` and
-  `transfer_svc` exist only where there are drives, and `FileService.local_path`
-  is None where files aren't on disk here.
-- **A device can ask to join** instead of being given an invite: connect
-  without one and it shows a code; `civex sync device approve <code> <name>`
-  (or Settings → Sync → *Asking to join*) lets it in, `deny` turns it away, and
-  a code nobody approves in 15 minutes lapses. Invites still work. Migration
-  `c1e8f4a2b7d3` adds the table of requests.
-- For developers: the sync test harness ships as `civex.testing` (devices
-  against an authority over a loopback, the convergence and invariants
-  scenarios, a test server, a fake bucket), so a host that embeds civex can
-  prove its own authority with civex's tests. CI gains a PostgreSQL job.
-- **What a person may do** is now one concept (`domain/permissions.py`: read,
-  write records, change the structure, add files, delete, manage members, each
-  everywhere or in named collections). A project in a folder allows everything,
-  as before. A host that knows who is signed in gives each request their
-  permissions: the services refuse at the boundary (403, in plain words), the
-  authority holds a person's device to the same rule, `GET /api/me` says who
-  you are and what you may do, and the app shows a control you may not use
-  switched off with the reason.
-- The app can be served under a path of its own (`/p/<owner>/<project>/`):
-  its assets, requests and routes follow the page's `<base href>`, which the
-  server writes (`server/app_page.render_app_page`, also used by a host along
-  with a boot object: where to sign in again after a 401, and extensions to
-  load). Pins, recents and other things kept in the browser are kept per
-  project. A host with accounts gets a Settings → *Members & access* section
-  (who you are, what you may do, a link to where members are managed), Sync
-  becomes *Devices*, and a collection says *View only* / *Who can edit*. A
-  host's extensions draw into five named places (`utils/slots.ts`) and get
-  civex's own controls from `@civex/ui` (`frontend/packages/ui`). Nothing
-  changes for a local civex.
-- **Schemas, explained where people meet them.** The docs open with one page
-  on the three ideas (a schema is a blank form, a record one filled-in copy, a
-  collection the binder), one survey example (Site › Visit › Sample) runs
-  through every page, the three ideas carry one colour each, and the tour is
-  the app first. The word stays "schema" everywhere; the earlier plan to say
-  "record type" was tried and taken back the same day, since the detour, not
-  the word, was what confused people. The AI assistant explains the same way,
-  uses the app's words, and when someone describes one thing rather than a kind
-  of thing it proposes a record instead of a new schema.
+  History written by v1.2.0 and earlier is converted to the new compact form
+  in the background after the server starts. `civex history compact
+  [--vacuum]` converts it straight away.
 - **A collection holds records of every schema.** The schema checklist is gone
-  from the collection forms, the command line (`--schema` on `collection
-  create|update`, `collection add-schema`) and the API, and the list itself is
-  gone from the database (migration `b3c7d1e9f5a2` drops `dataset_schemas`,
-  with every list in it): a schema made after a collection can be used in it
-  at once, and nothing has to keep a list right. Collections made before this
-  release lose the list they were given when they were made. The sync
-  protocol is now 3 (a collection's change no longer carries `schema_ids` and
-  `schemas`); every machine on a project needs this release.
-- **Starting a collection no longer sends you to the Schemas page first.** An
-  empty collection is a short two-step guide with its own **New schema…**
-  button, apart from **New**; the same button sits under the schema rail of a
-  collection that has records. It opens the Schemas page on a new schema, and
-  from inside a record the new schema goes inside that record's kind. Every
-  record form ends with **+ Add field**, which adds a field to the schema in
-  place (the toast says "Added Depth to every sample"). The explorer waits for
-  the collection and its counts before showing a list, so a New menu opened in
-  the first moment is no longer replaced under the pointer.
+  from the collection forms, from the CLI (`--schema` on `collection
+  create|update`, and `collection add-schema`) and from the API. Migration
+  `b3c7d1e9f5a2` drops the `dataset_schemas` table and every list in it. A
+  schema made after a collection can be used in it at once.
+- **`civex dump`/`civex restore` are replaced by bundles** (see *Records and
+  schemas*). `GET /dump` and `POST /restore` are gone. To read a YAML dump
+  from an older release, use that release.
+- **The guided import is gone.** This was the spreadsheet and folder wizard
+  under **New ▸ Import data…** and a schema page's **Import data**. Add
+  records from the **New** menu. To bring in a folder of files, use a workflow
+  (`civex.create_records_from_files`, `civex.match_files_to_records`). The
+  workflow builder has starting points for both.
+- **A workflow run that fails keeps none of its writes.** A run happens
+  inside a savepoint and is committed once with its outcome. If a step fails,
+  every record change the run made is undone. Before, it kept what the steps
+  before the failure had written. A run you stop on purpose still keeps what
+  it got through. `ctx.commit()` now does nothing and warns.
+- **Plugins need `civex-plugin-sdk` 0.3** (`>=0.3.0,<0.4`; wire protocol 3).
+  civex still runs plugins written for protocols 1 and 2. Built-in plugins
+  now run through the same protocol, so an error from one arrives as a
+  `PluginExecutionError`; its kind (`validation_error`, ...) is kept. A
+  plugin's process is now kept between runs, so state at module level lasts
+  from one run to the next. See *Workflows and plugins*.
+- **Values are checked more strictly**, wherever they are written (the app,
+  the CLI, `civex.open()`, workflows and sync):
+  - An `integer` or `float` field refuses anything that isn't a number, even
+    with no restrictions. It used to store `"deep"`. `civex.upsert_records`
+    now reports such a cell as a skipped row.
+  - A `file_list` field refuses a lone file, a `file` field refuses a list,
+    and neither takes a value that isn't a stored file. Migration
+    `bc183bbafef8` repairs values already stored.
+  - On a `file_list` field, `civex.match_files_to_records` now **adds** the
+    file to the list instead of replacing it.
+  - A `field=value` filter without a schema raises `ValidationError`. It used
+    to match nothing.
+  - A file field's name template is the file's stem, and the file always
+    keeps its own extension. `{ext}` is refused, and a trailing `.{ext}` is
+    dropped when the template is saved. Older templates still render.
+- **Exports and file moves:**
+  - The `files_scattered` answer (409) and `FilesScatteredError` are gone,
+    because an export folder is now always made (see *Exports*).
+  - Files in an **Open as a folder** export that are linked to the stored
+    file are read-only.
+  - The *grouped* layout is no longer offered. Exports and views saved with it
+    still run.
+  - `civex files gather --include-shared` is a hidden no-op: every picked
+    file moves.
+- **The desktop app is a launcher** that installs civex the first time it
+  starts (see *Desktop app and updates*). The `civex-desktop` command is gone;
+  `civex desktop` opens the window from a terminal.
+
+### Added: sync between machines
+
+- **A project can follow a server** (an *authority*: any `civex serve` with
+  serving turned on). Changes merge field by field. When two people change
+  the same value, the server's value stays and yours is kept for review. A
+  retry is safe and a dropped connection resumes. The commands are
+  `civex sync …` and `civex clone`, the app has Settings → Sync, and the
+  Syncing guide walks through it.
+- **Sync runs by itself** while the server is up, and with `civex sync
+  watch`: after changes, on an interval, and backing off while the server
+  can't be reached. The status bar shows a sync that is running, failing or
+  waiting for review. Failures are said in plain words; the technical text
+  is in the log and behind *Technical details*.
+- **Running a server for other devices:** `civex sync authority enable`.
+  Other machines reach only `/api/sync/v1/`. `civex serve --sync-only` serves
+  just that, for a server behind an HTTPS proxy. Devices connect over
+  `https://` only (`http://` only to this computer), or over **`ssh://`**:
+  the far machine runs `civex sync ssh-serve` through your own SSH login, and
+  nothing stays running there between syncs.
+- **Devices join by invite or by asking.**
+  - An invite (`civex sync device invite <name>`, starting `civex_inv_`)
+    works once and expires after 24 hours by default.
+  - A device can instead ask to join. It shows a code, which an admin
+    approves with `civex sync device approve`, or under Settings → Sync →
+    *Asking to join*.
+  - Either way, the device makes its own Ed25519 key, which never leaves it,
+    and signs in with it for a session of a few minutes. A different server at
+    the same address is refused before anything is sent.
+  - `civex sync device list|cancel|revoke`. Revoking takes effect at once.
+- **Reviewing what didn't go in.** A clash, a refused change or an edit that
+  met a delete is settled on the record's own **Resolve** tab:
+  - Their value is on one side and yours on the other, the differences are
+    marked, and the middle is the usual input. You can also type a value of
+    your own.
+  - **Start review** steps through every record waiting.
+  - `/sync/review` lists them, with **Keep theirs for all** and **Undo**.
+  - A refused record shows the field to fix, and fixing it sends it. **Send
+    again** waits for the server's answer.
+  - The same is available from `civex sync conflicts|resolve|reopen`.
+- **History says who and through what.** A synced change keeps who made it
+  and which device sent it ("l2 via backup"). The author's name is set per
+  project with `civex sync user` or in Settings → Sync.
+- **Files sync separately from records**, in the background, so a sync takes
+  seconds however much the files weigh.
+  - The status bar shows files going up (bytes, speed, time left), offers
+    **Send now** when some can go, and lists *missing* files (on no drive here
+    and not on the server) separately, naming the computer that added them.
+  - Each collection keeps its files on this computer or fetches them when
+    they are opened. **Free up space** removes this computer's copies of files
+    the server holds. Commands: `civex sync files|keep|free|fetch|send`, or
+    Settings → Storage → Collections.
+  - **Their files** filters by *On the server* and *Not on the server yet*.
+- **Shared workflows and plugins.** A person publishes and others install;
+  they are never synced as they change. Every version is kept, and a workflow
+  pins the plugin versions it was published with. An install is checked
+  against the workflows already here first, and plugin code is shown and must
+  be trusted before it is installed. Devices may publish only once allowed
+  (`civex sync device allow-publish`), and the server accepts plugins only
+  with `[sync] library = all`. Commands: `civex sync library
+  list|show|publish|install|remove`. In the app it is part of the Workflows
+  page.
+- **Versions are shown, not enforced.** Settings → Sync and `civex sync
+  status` show which civex each side runs. Whether two machines can sync is
+  decided by the sync protocol (3) alone, so updating the server doesn't cut
+  devices off. A server that will stop accepting an older civex says so first
+  (*Update civex soon*).
+- A project either serves devices or follows a server, never both.
+- A device that fell behind a server whose history was pruned copies the
+  project again instead of skipping changes. A first copy shows its progress
+  and fetches history afterwards in the background.
+
+### Added: files and storage
+
+- **Files in an S3 bucket** (or MinIO and the like), in every install. Set
+  `[store.s3]` in `config.toml`, or use Settings → Storage → Tasks → **Use a
+  bucket…** or `civex store bucket check|set|show|clear`.
+  - The bucket is tried first.
+  - A project switches only while the place it leaves holds none of its
+    files.
+  - Credentials come from the environment or an AWS profile, never from
+    `config.toml`.
+  - Where the bucket allows it, uploads and downloads go straight to it by
+    presigned URL, for the app and for syncing devices (`direct = false` turns
+    this off).
+- **A file may have copies on several drives, and each record's file points
+  at exactly one.** Where a record's file is, what a drive holds and what a
+  move frees are now facts instead of a pick among copies. A move copies only
+  what isn't on the target already. Clean-up removes only copies nothing
+  points at.
+- **Their files**: the records explorer can show the files of the records it
+  lists, and everything beneath them, using the same filter. You can filter
+  by place and by kind of file, tick files, and **Move to drive…**,
+  **Download** or **Free up** the files. A record page links to it too, and
+  `/collections` gets an **All records** tab covering every collection.
+- **Adding files goes in batches** (`PUT /files/batch`), so 300 files are a
+  few requests. If one file fails, what went in is kept and you are offered
+  the rest. A file and its record save as one request: if the record is
+  refused, the new file is removed.
+- File moves show each stage while they are prepared, count files already on
+  the target as "already there", and are described in one sentence ("Moves 3
+  files (3.0 KB) onto archive, and frees 2.0 KB on other drives").
+
+### Added: exports
+
+- **Saved exports** start from a schema and take its records and everything
+  inside them. Each export is a page of its own on the new **Exports** page
+  (`/exports`). They are managed there, and from `civex schema exports …` and
+  `civex files list|export|gather --export`. An export is saved with how it
+  is handed over (**Open as a folder**, **Put on a drive** or **Download as a
+  zip**), so running one from any Export menu needs no dialog.
+- **Tables beside the files, or instead of them**, in csv, tsv, xlsx, json or
+  jsonl: one of every record, one per folder of a kind, or a record's own
+  details sheet, with your choice of name and columns. The preview shows each
+  table in the folder it will be written to.
+- **Open as a folder always makes one folder.** Files that can be linked are
+  linked, and the others are copied after checking there is room, so files
+  spread over several drives no longer stop an export. The editor has two
+  steps (What, then Finish), and a **Put all the files in one folder** box
+  next to the live preview. Files that can't be reached are listed before you
+  start. An export started from a list begins as just that list's table.
+
+### Added: workflows and plugins
+
+- **A workflow builder.** **New workflow** offers starting points (fill a
+  field from a file's name, put files on matching records, records from a
+  table, and more) and opens a form.
+  - Each step is chosen by name, and its settings are lists of your own
+    fields and schemas.
+  - Each step is said as a sentence filled in with what you chose.
+  - **YAML** switches to the file and back, keeping its comments.
+- **Patterns from an example.** Click the parts of a real file name instead
+  of writing a regular expression. Every name is shown with the value it
+  gives.
+- **Live preview.** What is on screen runs, saved or not, on the five records
+  of its kind changed most recently, about half a second after each edit.
+  Nothing is kept (`POST /workflows/try-many`).
+- **On and off.** A workflow made in the app starts off. **Turn it on** once
+  the preview fails on none of its records, or use `civex workflow
+  enable|disable`.
+- **Each workflow has a page** (`/workflows/<name>`) with Overview, Sharing
+  and Preview tabs. The Workflows page is one list (search, filter by sharing,
+  sort).
 - **Fields filled from a file's name when the record is saved.** A text,
-  number, date or datetime field can carry a `from_filename` rule naming a
-  file field and a pattern (`DDMMYYYY_HHmmSS`, a regex with named groups, or
-  several patterns tried in order); the value is read from the file's name in
-  the same save, before validation and uniqueness, so a recording's start time
-  that is the unique key is filled without typing. The rule follows the file:
-  a blank field is filled, a replaced file re-fills it, a value you type stays
-  until the file changes, and a name that fits no pattern changes nothing.
-  Set it on the field (Rules → **Filled from file name**, with a live
-  preview), or `civex schema add-field … --from-file FIELD
-  --filename-pattern PATTERN`. The pattern logic is `domain/filename_extract`;
-  the `civex.extract_from_filename` plugin now uses it and stays optional.
-- **A file and its record save as one request.** Attaching a file on a record
-  (`PUT /records/{id}/files/{field}`) and adding a record with files
-  (`POST /collections/{c}/records/with-files`) store the bytes and save the
-  record together: if the save is refused (a uniqueness clash, a value the
-  field refuses) the new bytes are removed, nothing of the record changes, and
-  the progress line says "Not added — <file>: <reason>". On a new record the
-  files stay in the browser until **Add**. Content another record already
-  holds is never deleted.
-- **Saved exports say how they are handed over.** An export is saved with its
-  method (a folder of links, copies on a drive, or a zip; migration
-  `a1e5c9d3f7b2`, applied on first open) and runs straight away from any
-  Export menu, no dialog; only a one-time **Export…** still asks. An export
-  saves before there is anything to export (the preview says "Nothing to export
-  yet"), the include step reads as plain choices (*One spreadsheet of all
-  visits*, *Each visit's details, as a sheet in its folder*), and a table's
-  name and columns sit behind **Customise…**. CLI: `--method`, `--to`.
-- **The schema page, simplified.** Fields are one column of wide rows that
-  open in place with Save, Cancel and Remove field; **Add field** is one big
-  button at the end, turning into large kind cards then the form. Only the
-  rule the chosen kind leads with shows inline (a choice's values, a
-  quantity's unit, a link's target); everything else waits behind **More
-  rules**. The app says **Name** (what people see) and **Key** (what workflows,
-  CSV headers and the API use), the key folded under the name with a *change*
-  link. Naming and Uniqueness are one **Records** tab of two cards; old links
-  to either still open it. Sentences became tooltips.
-- Dependencies: certifi 2026.10.19, virtualenv 21.14.12 and vite 8.3.4, for
-  advisories pip-audit and npm audit raised.
+  number, date or datetime field can carry a rule (Rules → **Filled from file
+  name**, or `--from-file FIELD --filename-pattern PATTERN`). A pattern such
+  as `DDMMYYYY_HHmmSS` fills the field before validation, so it can be part of
+  a unique key.
+- **Plugins:**
+  - A plugin's `print()`s and stderr reach the run's log.
+    `ctx.progress(done, total, message)` shows in the status bar.
+  - Files go to plugins by path, in one folder per run (`ctx.file_path`,
+    `ctx.store_path`, `ctx.run_dir`; `CIVEX_RUNS_DIR` moves it) instead of
+    base64.
+  - A plugin's contract is written into its header (`[tool.civex]`, `civex
+    plugin check --write`), so discovery doesn't need to run it.
+  - A plugin's dependencies are locked the first time it starts
+    (`<plugin>.py.lock`), so updating civex no longer rebuilds every plugin.
+  - Capabilities are permission actions (`read`, `write_records`,
+    `manage_files`, `delete`).
+  - The new `ctx.patch_record` changes only the fields given.
+- **Runs:** delete runs, whether waiting, running or finished (`POST
+  /jobs/delete`, `civex automation delete`, **Delete N…**). Ticking a page of
+  runs offers **Select all N matching**. The status bar shows the step a run
+  is on.
 
-### Changed
+### Added: records, schemas and history
 
-- **A workflow run that fails keeps none of its writes.** Both drains run a
-  workflow inside a savepoint and commit once with its outcome: if a step
-  fails, every record change the run made is undone (its log says so), where
-  it used to keep whatever the steps before the failure wrote. A run stopped
-  on purpose still keeps what it got through. Plugins no longer commit:
-  `ctx.commit()` does nothing (and warns) and the host answers a `commit`
-  call from an older plugin with nothing.
-- **Files go to plugins by path, in one folder per run.** Each workflow run
-  gets a folder (in the user's cache, `CIVEX_RUNS_DIR` to move it; removed
-  when the run ends). A file a plugin asks for is copied there and handed
-  over by path instead of base64 in the protocol, new `ctx.file_path` and
-  `ctx.store_path` pass large files without reading them into memory, and a
-  large `table`/`bytes` value a step produces stays there until a later
-  step reads it (it used to be deleted when the step that wrote it ended).
-  A container gets the folder mounted. A path a plugin hands back outside
-  the run's folder is refused (`path_refused`).
-- **A plugin says what it is in its header, and is locked.** Saving a plugin
-  (or `civex plugin check --write`) writes its contract, from the code's own
-  answer, into the script block under `[tool.civex]`, so discovery, workflow
-  checks and the library read it without running the plugin; when its
-  process starts the code is asked again and a plugin whose code no longer
-  matches its header is refused (`contract_mismatch`). A plugin with no
-  header is described by running it, as before. The first time a plugin is
-  started its dependencies are locked (`<plugin>.py.lock`, `uv lock
-  --script`), and a locked plugin runs from its lock without the exact SDK
-  pin, so updating civex no longer rebuilds every plugin's environment.
-  Installing from the library still runs the code (and checks it against
-  its header).
-- **Every plugin runs the same way.** A tier is now only how a plugin is
-  started (`civex.plugins.launchers`: uv, Docker, or a thread in civex), and
-  `civex.plugins.runtime` drives all of them over the wire protocol. The
-  built-in plugins are SDK `Plugin`s run in civex's process through that
-  protocol, so they reach the project only through the host functions their
-  capabilities grant, like any plugin (they are not stopped by a step's
-  timeout, as before). A built-in's error keeps its kind (`validation_error`,
-  ...) but now arrives as a `PluginExecutionError`.
-- **Plugin capabilities are permission actions.** A plugin lists what it
-  needs, `read`, `write_records`, `manage_files` or `delete`, and each grants
-  every `ctx` method needing it; naming single methods (the older form) still
-  works. Every function a plugin may call is one entry in
-  `civex.plugins.host_api`, with the action it needs. New `ctx.patch_record`
-  for plugins (change only some fields, as built-ins do). A refusal says what
-  to add; a capability civex doesn't know is warned about at discovery.
-- **Custom plugins start once, not for every step.** A plugin's process is
-  kept after it answers (its `describe` at discovery included) and handed the
-  next run of that plugin, until it has been idle for five minutes or civex
-  stops; editing the file starts a new one, and one that timed out or died is
-  not reused (`civex.plugins.workers`). A plugin's module-level state now
-  lives from one run to the next; its working folder is emptied before each.
-- On Windows, plugin processes (and Docker for container plugins) no longer
-  open a console window for every step when civex runs from the desktop app.
-- A plugin's stderr is read while it runs, so one that writes a lot of it no
-  longer stops, waiting for a reader.
-- **A plugin's output reaches the run's log.** Its `print()`s and whatever it
-  writes to stderr are written to the run's log as they come (they were thrown
-  away). A plugin can say how far it has got with `ctx.progress(done, total,
-  message)`, and the status bar shows the step a run is on and that progress
-  (`GET /automation`'s new `steps`). Plugins speak wire protocol 2 (SDK
-  unreleased); civex still runs plugins on 1.
+- **Bundles** move a project's data to another project: `civex bundle
+  export|show|import`, `GET /bundle`, `POST /bundle/import`, and **Export
+  bundle…** / **Import bundle…** on the Collections page.
+  - A bundle is a zip of schemas, collections, records (ids kept, so nesting
+    and references survive), and optionally files, workflows and plugins.
+  - Importing matches schemas and collections by name and records by id, so
+    the same bundle can be imported again.
+  - Every record goes through the usual checks and history, and the import is
+    one event in Activity.
+- **Moving records** to another collection, or inside another record there:
+  **Move to…** on the explorer's selection bar, `civex record move|move-all`,
+  `POST /records/move`. A record keeps its id, values and history and takes
+  everything beneath it. The move is refused whole if a reference would break,
+  a uniqueness key is taken, or the kind can't sit there.
+- **History stores only what changed** in an edit. A large history takes a
+  fraction of the space, and Settings → Database → *History storage* can
+  reclaim the space freed (SQLite).
+- **Records under a deleted record** are found and can be put back (`civex
+  record orphans|restore-above`, Settings → Database, a banner on the record
+  page). `civex doctor` counts them.
+- **The Python API:** `civex.open(path)` opens a project in your own process,
+  with the same services the CLI and server use and no server needed.
+  `with civex.open(...) as project:` commits on success and rolls back on an
+  error. See Guides › Running civex › From Python.
+- **Download names from the records above.** A file's name template can use
+  fields of the records above it and reach through a reference
+  (`{species.common}_{site}_{take:02}`). Values are inserted from a searchable
+  list.
+- **The schema page is simpler.**
+  - Fields are wide rows that open in place.
+  - **Add field** shows the kinds as large cards.
+  - Only the kind's main rule shows inline; the rest is behind **More rules**.
+  - The app calls the two names **Name** and **Key**.
+  - Naming and Uniqueness are one **Records** tab.
+  - Every record form ends with **+ Add field**.
+- **Starting a collection** is a short guide with its own **New schema…**
+  button.
+- File columns in the records table show the file's name and size, not JSON.
+- The docs open with one page on schemas, records and collections, use one
+  survey example (Site › Visit › Sample) throughout, and have a new How-to
+  section. The AI assistant explains things the same way, and proposes a
+  record when someone describes one thing rather than a kind of thing.
 
-## v2.0.0 — syncing between machines, updates from the app (2026-10-07)
+### Added: desktop app and updates
 
-### Breaking
+- **Update from the app** (Settings → Updates, and a notice in the status bar):
+  - civex closes, installs the new version and starts again.
+  - This works for the desktop app and for `civex serve` installed with uv,
+    pipx or pip (`GET`/`POST /api/update`).
+  - Other servers running from the same copy are stopped and started again,
+    after asking.
+  - `civex update --pre`, or *Include pre-releases*, installs release
+    candidates.
+- **Settings → Logs and `civex logs`** collect every log civex keeps on this
+  computer in one place.
+- **Size** in Settings → Appearance (80% to 125%). In the desktop app, ⌘/Ctrl
+  with + − 0 changes it too.
+- A database from a newer civex is explained (what it is and what to do)
+  instead of failing every request. `civex serve` refuses to start on one.
 
-- Migration `c9e1f4a7b3d2` adds the sync tables, indexes on `audit_log`, and
-  `audit_log.apply_state`. It runs automatically; existing history is kept.
+### Added: for hosts and developers
 
-### Added
-
-- **Settings → Logs and `civex logs`**: every log civex keeps on this computer
-  (this project's server, the desktop app and its launcher, updates) in one
-  place, with the latest lines, a level filter, search, following, download and
-  opening the folder. A failed update and a failing sync link to the log that
-  says why.
-
-- **Sync with an authority** (`civex sync`, `civex clone`): a project can follow
-  another civex over HTTP. Changes merge field by field; the authority's value
-  wins a clash and yours is kept as a conflict you can take back. Retries are
-  safe, and a dropped connection resumes. See the Syncing guide.
-- **Sync runs by itself** while the server is up (and with `civex sync watch`):
-  after changes, on an interval, backing off when the authority is unreachable.
-  Settings → Sync connects, shows status, syncs now, pauses and settles
-  conflicts; the status bar shows a failing or waiting sync.
-- `civex sync authority enable` + `civex sync device invite` turn a server into an
-  authority; remote hosts reach only `/api/sync/v1/`.
-- **Devices join by invite and sign in with a key.** An invite works once and
-  expires (24 hours by default). The device makes a key of its own, which never
-  leaves it, and signs in for a session of a few minutes; a server that isn't the
-  one it joined is refused before anything is sent. `civex sync connect --invite`,
-  `civex sync device invite|list|cancel|revoke`; Settings → Sync. Adds the
-  `cryptography` dependency and migration `a8c4e2f6b1d9`.
-- `civex serve --sync-only` serves only the sync API, for an authority behind an
-  HTTPS proxy. Devices connect over `https://` only (`http://` for this computer).
-- Sync protocol 2. A device and the authority use the newest version both speak,
-  and one that can't says which side to update.
-- Invites start with `civex_inv_`, recognised by gitleaks and secret scanners.
-- **Update from the app** (Settings → Updates, and a notice in the status bar
-  when a newer version is out): civex closes, installs the new version and
-  starts again, reopening the page. It works for the desktop app and for
-  `civex serve` installed with uv, pipx or pip. `GET`/`POST /api/update`.
-- **Pre-releases**: `civex update --pre`, and *Include pre-releases* on the
-  Updates page, install release candidates; nobody gets one otherwise.
-- **Size** in Settings → Appearance (80% to 125%), remembered by each window;
-  in the desktop app ⌘/Ctrl with + − 0 change it too.
+- **One project per request:** a server serves the project it is asked for
+  (`deps.current_project`, `app.state.project_resolver`). Settings are saved
+  through a `ConfigStore`. Background jobs open contexts through a factory.
+- **Features** (`domain/features.py`, `GET /api/status/features`): a host
+  that offers less leaves those routes out, answers 501 in plain words, and
+  the app hides what isn't there.
+- **Permissions** (`domain/permissions.py`, `GET /api/me`): read, write
+  records, change the structure, add files, delete, and manage members,
+  everywhere or in named collections. The services refuse with a 403, and the
+  app switches off the controls you may not use and says why. A project in a
+  folder allows everything, as before.
+- **Served under a path** (`/p/<owner>/<project>/`): the page's `<base
+  href>`, a boot object, five extension slots and `@civex/ui`.
+- **`civex.testing`** ships the sync harness, including the convergence and
+  invariants scenarios, a test server and a fake bucket. CI gains a PostgreSQL
+  job, and real v1.1.4 and v1.2.0 databases are upgraded in the tests.
+- The store protocol is split into `ObjectStore` and `VolumeStore`.
+- `benchmarks/` has a data generator and a stress test.
 
 ### Changed
 
 - **The desktop app is a small launcher** (about 30 MB) that installs civex
-  with its own `uv` the first time it starts, then keeps it up to date. It no
-  longer contains civex, so it never needs downloading again for a new
-  version. Custom plugins work in it without anything else installed.
-- **The desktop app installs properly**: a Windows installer
-  (`civex-<version>-windows-setup.exe`: Start menu, uninstaller, no administrator
-  needed) and a macOS disk image with one app for Intel and Apple silicon
-  Macs. Neither is signed yet; the install guide says how to open them.
-- **The desktop app's civex can be a terminal command**: the Windows
-  installer's *Add the civex command to PATH* (on by default; uninstalling
-  removes it), or Settings → Updates → *Command line* on any system.
-- The desktop app no longer opens a terminal window, keeps its logs in its own
-  folder (AppData on Windows), and installs the civex it was released with.
-  There is no `civex-desktop` command any more; `civex desktop` opens the
-  window from a terminal.
-- On Intel Macs civex uses `cryptography` 48, the last version with Intel macOS
-  builds: newer ones could only be installed there by compiling Rust.
-- Install with `uv tool install civex`, which needs no Python on the computer.
+  with its own uv onto Python 3.13 the first time it starts, then keeps it up
+  to date.
+  - Windows gets an installer (`civex-<version>-windows-setup.exe`) with a
+    Start menu entry, an uninstaller, and an optional `civex` command on PATH.
+  - macOS gets one disk image for Intel and Apple silicon. Neither is signed
+    yet; the install guide says how to open them.
+  - The window fits the screen and opens as you left it.
+  - Downloads open the system's Save dialog. F5, Ctrl/Cmd+R and back/forward
+    keys work.
+  - No terminal or console windows open, including for plugin processes.
+- **Install with `uv tool install civex`**, which needs no Python on the
+  computer.
+- **The app says "drive", never "volume"** (Settings → Storage → **Drives**).
+  The CLI and the code keep "volume".
+- **HTTPS trusts what the operating system trusts** (`truststore`), for sync
+  and the update check. This includes a company's own certificates.
+- The window never scrolls as a whole, and menus stay inside it.
+- Explanations moved into tooltips across the app.
+- New dependencies: `cryptography` (48 on Intel Macs, the last version with
+  builds for them), `truststore`, `openpyxl` and `boto3`. Notable upgrades:
+  SQLAlchemy 2.1, FastAPI 0.162, pandas 3.1, pydantic 2.14, React 19.3. Other
+  dependencies were updated for security advisories (certifi, virtualenv,
+  mako, msgpack, filelock, minimatch, vite, vitest).
 
 ### Fixes
 
-- **The desktop app's window fits the screen**: on a small one (a 13-inch
-  laptop, up to 1440 × 900) a project opens filling it, on a larger one at a
-  comfortable size, centred, instead of a fixed 1280 × 800 that didn't fit a
-  13-inch MacBook's screen. It opens as you last left it, kept on the screen.
-  Its Size (⌘ + / −) now lasts too.
-
-- **Updating stops, and starts again, the other servers running from the same
-  copy**, after asking (the Updates page lists them; `civex update` asks). An
-  update from the app used to fail half way while a `civex serve` from the same
-  copy ran in a terminal (on Windows a file in use can't be replaced).
-- **Including pre-releases no longer brings in pre-releases of everything civex
-  depends on** (a beta pydantic, an alpha sentry-sdk): the version found is
-  installed by name instead.
-- **An update's outcome is shown only while it is news**, and **Dismiss**
-  forgets it for good. An update that got civex to the new version is no longer
-  called failed because the installer tripped over a file in use.
-- **The desktop app keeps what its pages remember** (pins, recent items,
-  dismissed notices, the pre-releases choice) from one opening to the next: its
-  window no longer starts in private mode.
-
-- **`civex update` in a terminal updates the desktop app's copy** (the `civex`
-  command the app puts on PATH). It used to try pip, which that copy hasn't got.
-  It now upgrades with the app's own uv and folders. On Windows it refuses while
-  the app is open, and finishes the upgrade once the command has exited, in the
-  same window.
-
-- **The page froze after using the navigation drawer** (a narrow window, as
-  the macOS desktop app often is): closing it left the rest of the page
-  unclickable. It is handed back now.
-- **The Windows desktop app had no project menu** (open, create, reveal the
-  data folder) and no native folder picker: the page decided whether it was in
-  the desktop app before the app had said so.
-- **Reordering a schema's fields now appears in history.** It wrote no entry,
-  so the new order was in the database but nowhere in the history (and would
-  never have reached another device once sync exists). Each field that moved is
-  recorded as an edit of that field.
-- **Renaming or deleting a field now records the name templates it rewrites.**
-  A schema's record-name template, or a file field's download-name template,
-  that used the field was updated without an entry; each template changed is
-  now an edit of its schema or field in history.
-- **The desktop downloads couldn't create a project** (`civex init` failed: the
-  database migrations were left out of the bundle). Every release is now
-  installed and run on Linux, macOS and Windows before it is published.
-- After `civex update` reinstalled missing packages for a uv install, later
-  updates did nothing: the repair pinned the version (`==`).
-
-A new test (`tests/services/test_audit_replay.py`) does everything a person can
-do to schemas, fields, collections, views and records and checks that the last
-history entry about each thing matches the database, so the next change that
-forgets to write history fails it.
+- **Reordering a schema's fields, and the name templates a field rename or
+  delete rewrites, now appear in history.** A new test checks that the latest
+  history entry about each schema, field, collection, view and record matches
+  the database.
+- "Their files" and the move preview are up to 5× faster on large projects
+  (17k records: 9.9 s to 1.9 s for a move preview).
+- Dialogs are readable in dark mode, and native controls draw dark.
+- What the desktop app's pages remember (pins, recent items, dismissed
+  notices) lasts from one opening to the next.
+- The Windows desktop app has its project menu and native folder picker.
+- The page no longer freezes after using the navigation drawer in a narrow
+  window.
+- `civex update` in a terminal updates the desktop app's copy, and repairs no
+  longer pin the version.
+- Including pre-releases no longer installs pre-releases of civex's own
+  dependencies.
+- A plugin that writes a lot to stderr no longer hangs.
+- A record page with a lone file in a `file_list` field no longer fails with
+  "c.filter is not a function".
 
 ## v1.2.0 — uniqueness policies, recoverable fields, old sync removed (2026-10-05)
 
