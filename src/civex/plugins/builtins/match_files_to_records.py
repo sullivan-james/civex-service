@@ -82,7 +82,7 @@ class Plugin(PluginBase):
         )
         pattern: str = Field(
             title="The key in each file name",
-            json_schema_extra=hint("pattern", on="files"),
+            json_schema_extra=hint("pattern", on="files", keys=True),
             description="Regex with one capture group that extracts the key "
             "value from each filename.",
         )

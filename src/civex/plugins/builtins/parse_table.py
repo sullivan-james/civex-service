@@ -107,10 +107,10 @@ class Plugin(PluginBase):
         delimiter: str = Field(
             title="Columns separated by",
             json_schema_extra=choices(
-                ("comma", "Commas"),
+                (",", "Commas"),
                 ("tab", "Tabs"),
-                ("semicolon", "Semicolons"),
-                ("pipe", "Pipes |"),
+                (";", "Semicolons"),
+                ("|", "Pipes |"),
                 ("space", "Spaces"),
             ),
             default=",",

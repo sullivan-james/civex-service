@@ -49,7 +49,9 @@ class Plugin(PluginBase):
         )
         pattern: str = Field(
             title="The part of the name to take",
-            json_schema_extra=hint("pattern", on="field", date_format="date_format"),
+            json_schema_extra=hint(
+                "pattern", on="field", date_format="date_format", read_as="output_type"
+            ),
             default=r"(.+)",
             description="Regex applied to the filename. The first capture group "
             "(or the whole match if there is none) is extracted.",
