@@ -817,6 +817,18 @@ class LocalRecordRepository:
         rows = base.order_by(Record.updated_at, Record.id).limit(limit).all()
         return [_to_dto(r) for r in rows], total
 
+    def recently_changed(self, schema_id: uuid.UUID, limit: int) -> list[str]:
+        """Ids of the live records of exactly this schema, the most recently
+        changed first, at most `limit`."""
+        rows = (
+            self._s.query(Record.id)
+            .filter(Record.schema_id == schema_id, Record.deleted_at.is_(None))
+            .order_by(Record.updated_at.desc(), Record.id)
+            .limit(limit)
+            .all()
+        )
+        return [str(r.id) for r in rows]
+
     def restore_many(self, ids: list[uuid.UUID]) -> None:
         for chunk in _chunks(ids):
             self._s.execute(

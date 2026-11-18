@@ -143,3 +143,48 @@ def test_switching_off_stops_triggers_but_not_a_manual_run(client: TestClient) -
     resp = client.patch("/api/workflows/copy-subject", json={"enabled": True})
     assert "enabled: true\n" in resp.json()["content"]
     assert resp.json()["content"].count("enabled:") == 1
+
+
+def test_trying_on_the_latest_records_needs_no_choice_and_keeps_nothing(
+    client: TestClient,
+) -> None:
+    first = _record(client, subject="one", title="x")
+    later = []
+    for subject in ("two", "three"):
+        resp = client.post(
+            "/api/collections/study/records",
+            json={"schema_name": "doc", "data": {"subject": subject, "title": "x"}},
+        )
+        later.append(resp.json()["id"])
+    # The first record changed last, so it is tried first.
+    client.patch(
+        f"/api/records/{first}", json={"data": {"subject": "one!", "title": "x"}}
+    )
+
+    resp = client.post("/api/workflows/try-many", json={"content": _COPY, "sample": 2})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["sampled"] is True
+    assert [t["record_id"] for t in body["trials"]] == [first, later[1]]
+    afters = [t["result"]["changes"][0]["fields"][0]["after"] for t in body["trials"]]
+    assert afters == ["one!", "three"]
+    for rid in [first, *later]:
+        assert client.get(f"/api/records/{rid}").json()["data"]["title"] == "x"
+    assert _jobs(client) == []
+
+
+def test_trying_on_named_records_says_where_it_cannot_run(client: TestClient) -> None:
+    rid = _record(client, subject="a", title="b")
+    client.post("/api/schemas", json={"name": "other", "description": None})
+    other = client.post(
+        "/api/collections/study/records", json={"schema_name": "other", "data": {}}
+    ).json()["id"]
+    resp = client.post(
+        "/api/workflows/try-many",
+        json={"content": _COPY, "record_ids": [rid, other, "ffffffff"]},
+    )
+    assert resp.status_code == 200, resp.text
+    trials = resp.json()["trials"]
+    assert trials[0]["result"]["ok"] is True
+    assert trials[1]["result"] is None and "doc records" in trials[1]["problem"]
+    assert trials[2]["problem"] == "No such record."
