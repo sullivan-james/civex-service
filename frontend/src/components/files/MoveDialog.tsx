@@ -12,7 +12,6 @@ import { placeLabel } from '../../utils/places'
 import { formatSize } from '../../utils/storage'
 import {
   Button,
-  InfoTip,
   Modal,
   ModalBody,
   ModalFooter,
@@ -58,6 +57,21 @@ export function MoveToDriveButton({
 /** Move the picked files onto one drive: the drive and whether they fit
  * (the shared drive-and-free-space rule), what has to be downloaded first and
  * what can't move; the move itself then runs as a job in the status bar. */
+/** What a move will do, in one sentence about the end result: how many files
+ * end up on the drive, how much is written there, and any space it gives back.
+ * How it gets there (copies kept for other records, records switched to a copy
+ * already there) is civex's business. */
+function moveSentence(plan: MovePlan, drive: string): string {
+  if (nothingToDo(plan)) return `They are on ${drive} already.`
+  const moving = plan.files + plan.repointed + plan.from_server
+  const size = plan.bytes > 0 ? ` (${formatSize(plan.bytes)})` : ''
+  const freed =
+    plan.freed_bytes > 0
+      ? `, and frees ${formatSize(plan.freed_bytes)} on other drives`
+      : ''
+  return `Moves ${plural(moving, 'file')}${size} onto ${drive}${freed}.`
+}
+
 /** Whether a move would change nothing: nothing to copy, download or point
  * elsewhere. */
 function nothingToDo(plan: MovePlan): boolean {
@@ -128,36 +142,7 @@ export function MoveDialog({
           tooBig={drive.free != null && (plan?.bytes ?? 0) > drive.free}
           onChange={setChosen}
         />
-        {plan && (
-          <ul className="space-y-1">
-            <li>
-              {nothingToDo(plan)
-                ? 'Nothing to do: they are there already.'
-                : plan.files > 0
-                  ? `Copies ${plural(plan.files, 'file')} there (${formatSize(plan.bytes)}).`
-                  : 'Nothing to copy.'}
-              {plan.copied > 0 && (
-                <>
-                  {` ${plan.copied.toLocaleString()} stay where they are too.`}
-                  <InfoTip>
-                    Other records use those copies, so they keep them; these
-                    records use the new ones.
-                  </InfoTip>
-                </>
-              )}
-            </li>
-            {plan.repointed > 0 && (
-              <li>
-                {`${plural(plan.repointed, 'file')} ${plan.repointed === 1 ? 'is' : 'are'} there already: these records will use ${plan.repointed === 1 ? 'that copy' : 'those copies'}.`}
-              </li>
-            )}
-            {plan.freed_bytes > 0 && (
-              <li>
-                {`Frees ${formatSize(plan.freed_bytes)} on other drives: copies nothing will use any more.`}
-              </li>
-            )}
-          </ul>
-        )}
+        {plan && <p>{moveSentence(plan, drive.target)}</p>}
         {plan && plan.from_server > 0 && (
           <ToDownloadNotice toFetch={{ files: plan.from_server, bytes: 0 }} />
         )}

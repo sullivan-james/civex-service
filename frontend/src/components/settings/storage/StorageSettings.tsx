@@ -12,7 +12,7 @@ import { VolumesTab } from './VolumesTab'
 type TabId = StorageTab
 
 const TABS: TabDef<TabId>[] = [
-  { id: 'volumes', label: 'Volumes' },
+  { id: 'volumes', label: 'Drives' },
   { id: 'collections', label: 'Collections' },
   { id: 'tasks', label: 'Tasks' },
 ]

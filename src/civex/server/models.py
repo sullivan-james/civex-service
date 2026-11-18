@@ -2541,10 +2541,10 @@ class FilePlanRequest(FileSelectionRequest):
 class FileExportRequest(FileSelectionRequest):
     mode: Literal["link", "copy"] = Field(
         default="link",
-        description="'link' makes hard links in a folder on the drive that holds "
-        "the files: no copying, no extra space, and refused (409 "
-        "'files_scattered') when the files are on more than one drive. 'copy' "
-        "makes real copies on one drive ('volume'), wherever the files are.",
+        description="'link' makes a folder on the drive holding most of the "
+        "files: read-only hard links to the files there (no extra space) and "
+        "copies of the rest. 'copy' makes real copies on one drive ('volume'), "
+        "wherever the files are.",
     )
     volume: str | None = Field(
         default=None,

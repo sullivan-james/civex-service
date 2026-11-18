@@ -1,8 +1,9 @@
 import type { FileExportResult } from '../../api/fileAccess'
 
 /** The one place that says what an export did, for any way of starting one:
- * how many files, how they got there (a link is the stored file itself, so it
- * says not to edit it in place), where, and what was left out. */
+ * how many files, where, how to change them when they can't be saved over (a
+ * linked file is the stored file itself, so it is read-only), and what was left
+ * out. */
 export function reportExport(
   toast: {
     success: (m: string, o?: { duration?: number; action?: Action }) => void
@@ -23,26 +24,23 @@ export function reportExport(
     toast.error(
       `${plural(result.missing.length, 'file')} left out; the folder's MISSING.txt lists them.`,
     )
-  const how = [
-    result.linked > 0 && `${result.linked.toLocaleString()} linked`,
-    result.copied > 0 && `${result.copied.toLocaleString()} copied`,
-  ].filter(Boolean)
-  const detail = how.length > 0 ? ` (${how.join(', ')})` : ''
   const where =
     result.location && result.location !== 'project'
       ? ` on ${result.location}`
       : ''
+  // How the folder was made (links, copies) is civex's business; what matters
+  // is that the linked files can be opened but not saved over.
   const warning =
     result.linked > 0
-      ? ' Linked files are the stored files themselves: don’t edit them in place.'
+      ? ' To change these files, edit them in civex or put them on a drive.'
       : ''
   if (result.opened) {
-    toast.success(`Opened a folder of ${made}${detail}${where}.${warning}`, {
+    toast.success(`Opened a folder of ${made}${where}.${warning}`, {
       duration: warning ? 12000 : undefined,
     })
   } else {
     toast.success(
-      `A folder of ${made}${detail} is ready${where} at ${result.dest}.${warning}`,
+      `A folder of ${made} is ready${where} at ${result.dest}.${warning}`,
       {
         duration: 15000,
         action: {

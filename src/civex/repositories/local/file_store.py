@@ -44,7 +44,7 @@ from typing import (
     Iterator,
 )
 
-from civex import fs_locations
+from civex import file_modes, fs_locations
 from civex.repositories.local import inventory
 from civex.processes import pid_alive
 from civex.config import StoreConfig, VolumeConfig
@@ -231,7 +231,7 @@ class VolumeAwareFileObjectStore:
                 # an atomic same-filesystem rename.
                 tmp_path.write_bytes(data)
                 dest.parent.mkdir(exist_ok=True)
-                os.replace(tmp_path, dest)
+                file_modes.replace(tmp_path, dest)
             except OSError as e:
                 tmp_path.unlink(missing_ok=True)
                 if e.errno == errno.ENOSPC:
@@ -554,7 +554,7 @@ class VolumeAwareFileObjectStore:
         dest = self._object_path(sha256, vol_name)
         try:
             dest.parent.mkdir(exist_ok=True)
-            os.replace(tmp_path, dest)
+            file_modes.replace(tmp_path, dest)
         except OSError as e:
             tmp_path.unlink(missing_ok=True)
             raise VolumeUnavailableError(
@@ -848,7 +848,7 @@ class VolumeAwareFileObjectStore:
                 continue
             path = self._object_path(sha256, name)
             try:
-                path.unlink()
+                file_modes.remove(path)
                 removed = True
             except FileNotFoundError:
                 # Already gone -- e.g. a second GC run (or any other deleter)
@@ -1126,7 +1126,7 @@ class VolumeAwareFileObjectStore:
                 os.utime(scratch, ns=(src_stat.st_atime_ns, src_stat.st_mtime_ns))
             except OSError:
                 pass
-            os.replace(scratch, dst)
+            file_modes.replace(scratch, dst)
         except BaseException:
             scratch.unlink(missing_ok=True)
             raise
@@ -1201,9 +1201,9 @@ class VolumeAwareFileObjectStore:
         vc = self._cfg.volumes[volume]
         try:
             if self._inside_project(vc):
-                path.unlink()
+                file_modes.remove(path)
             else:
-                fs_locations.guarded(f"{path}#unlink", path.unlink)
+                fs_locations.guarded(f"{path}#unlink", file_modes.remove, path)
         except FileNotFoundError:
             return False
         except fs_locations.Unresponsive as e:

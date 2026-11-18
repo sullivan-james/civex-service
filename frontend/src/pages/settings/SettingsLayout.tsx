@@ -25,7 +25,7 @@ const settingsSections = [
     // Drives, or the bucket a project keeps its files in instead.
     feature: 'store_admin',
     label: 'Storage',
-    info: 'Where Civex keeps your files, and which collections use which volume.',
+    info: 'Where Civex keeps your files, and which collections use which drive.',
   },
   {
     to: 'retention',
@@ -115,7 +115,7 @@ export default function SettingsLayout() {
   // The tab says which area, and for Storage which of its tabs.
   const storageTab =
     current?.to === 'storage'
-      ? (STORAGE_TABS[params.get('tab') ?? ''] ?? 'Volumes')
+      ? (STORAGE_TABS[params.get('tab') ?? ''] ?? 'Drives')
       : undefined
   return (
     <Page

@@ -14,7 +14,6 @@ export const plan = (over: Record<string, unknown> = {}) => ({
   bytes: 4000,
   available_bytes: 4000,
   complete: true,
-  scattered: false,
   link_volume: 'default',
   by_volume: [{ volume: 'default', files: 4, bytes: 4000 }],
   summary: '',
@@ -127,7 +126,7 @@ export function fakeServer(routes: Record<string, Answer>) {
 
 /** The server's refusal of an export it can explain: nothing was built. */
 export const refusal = (
-  code: 'files_unavailable' | 'files_scattered' | 'links_not_possible',
+  code: 'files_unavailable' | 'links_not_possible',
   body: Record<string, unknown> = {},
   detail = 'It can’t be done as asked.',
 ) => json({ detail, code, ...body }, 409)
@@ -155,10 +154,10 @@ export const transfer = (over: Record<string, unknown> = {}) => ({
   ...over,
 })
 
-/** In the open export dialog: through the steps (what, layout) to the method, then go. */
+/** In the open export dialog: past the first step (what) to the method, then go. */
 export async function finishExport(
   method: 'folder' | 'copy' | 'zip' = 'folder',
-  steps = 2,
+  steps = 1,
 ) {
   const { screen, within } = await import('@testing-library/react')
   const userEvent = (await import('@testing-library/user-event')).default
@@ -170,9 +169,9 @@ export async function finishExport(
   for (let i = 0; i < steps; i++)
     await userEvent.click(await box().findByRole('button', { name: /^next:/i }))
   const [radio, button] = {
-    folder: [/open as folder/i, /^open folder$/i],
-    copy: [/copy to a drive/i, /^copy$/i],
-    zip: [/download zip/i, /^download$/i],
+    folder: [/open as a folder/i, /^open folder$/i],
+    copy: [/put on a drive/i, /^put on drive$/i],
+    zip: [/download as a zip/i, /^download$/i],
   }[method]
   await userEvent.click(await box().findByRole('radio', { name: radio }))
   await userEvent.click(box().getByRole('button', { name: button }))

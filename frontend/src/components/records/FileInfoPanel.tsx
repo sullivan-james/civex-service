@@ -89,7 +89,7 @@ export function FileInfoPanel({ sha256 }: { sha256: string }) {
                 </p>
                 {copy.present === null && (
                   <p className="text-attention">
-                    Recorded here, but the volume can&apos;t be checked right
+                    Recorded here, but the drive can&apos;t be checked right
                     now.
                   </p>
                 )}

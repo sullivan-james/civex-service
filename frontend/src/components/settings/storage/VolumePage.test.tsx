@@ -363,7 +363,7 @@ describe('a volume’s page', () => {
   it('says so when there is no such volume', async () => {
     renderAt('ghost')
     expect(
-      await screen.findByText(/No volume called “ghost”/),
+      await screen.findByText(/No drive called “ghost”/),
     ).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Storage/ })).toHaveAttribute(
       'href',

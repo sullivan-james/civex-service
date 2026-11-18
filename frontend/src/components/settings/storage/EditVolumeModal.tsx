@@ -67,7 +67,7 @@ export function EditVolumeModal({
 
   return (
     <Modal onClose={onClose} size="lg" dismissible={!updateVolume.isPending}>
-      <ModalHeader onClose={onClose}>Edit volume “{vol.name}”</ModalHeader>
+      <ModalHeader onClose={onClose}>Edit drive “{vol.name}”</ModalHeader>
       <ModalBody>
         <div className="space-y-5">
           <p className="text-sm">
@@ -96,7 +96,7 @@ export function EditVolumeModal({
               )}
             </div>
             <InfoTip>
-              This points the volume at a different folder. It does not move any
+              This points the drive at a different folder. It does not move any
               files: Civex looks for them in the new folder.
             </InfoTip>
           </div>

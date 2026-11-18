@@ -17,7 +17,6 @@ from civex.domain.file_access import (
     EXPORT_MODES,
     FilePlan,
     FileSelection,
-    FilesScatteredError,
     FilesUnavailableError,
     LAYOUT_TREE,
     LAYOUTS,
@@ -394,13 +393,6 @@ def files_export(
             result = svc.export_managed(
                 selection, folder_name, mode, to, allow_partial=True, plan=plan
             )
-    except FilesScatteredError as e:
-        console.print(f"[error]{escape(str(e))}[/error]")
-        console.print(
-            "Try: civex files export ... --mode copy --to <drive>  "
-            "(civex store list shows the drives)"
-        )
-        raise typer.Exit(1)
     except (LinksNotPossibleError, FilesUnavailableError, CivexError) as e:
         console.print(f"[error]{escape(str(e))}[/error]")
         raise typer.Exit(1)
@@ -416,8 +408,8 @@ def files_export(
     )
     if result.linked:
         console.print(
-            "[dim]A linked file is the stored file itself: don't edit it in place "
-            "(use --mode copy for files you will change).[/dim]"
+            "[dim]Linked files are the stored files themselves, so they are "
+            "read-only (use --mode copy for files you will change).[/dim]"
         )
     if result.missing:
         console.print(

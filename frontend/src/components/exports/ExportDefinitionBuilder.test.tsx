@@ -73,7 +73,10 @@ async function onlyFiles(...keep: string[]) {
 }
 const chooseKind = (kind: 'recording' | 'selection') =>
   kind === 'selection' ? onlyFiles('contour', 'table') : onlyFiles('audio')
-const layout = (name: RegExp) => screen.getByRole('radio', { name })
+const oneFolder = () =>
+  screen.getByRole('checkbox', {
+    name: /put all the files in one folder/i,
+  }) as HTMLInputElement
 const bodyOf = (
   calls: { path: string; method: string; body: Record<string, unknown> }[],
   method: string,
@@ -86,14 +89,14 @@ describe('the export builder, step by step', () => {
 
     const steps = screen.getByRole('list')
     expect(within(steps).getByText('What')).toBeTruthy()
-    expect(within(steps).getByText('Layout')).toBeTruthy()
+    expect(within(steps).queryByText('Layout')).toBeNull()
     expect(within(steps).getByText('Finish')).toBeTruthy()
     expect(section('Selection')).toBeTruthy()
     expect(
       (screen.getByRole('button', { name: /^back/i }) as HTMLButtonElement)
         .disabled,
     ).toBe(true)
-    expect(screen.getByRole('button', { name: /next: layout/i })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /next: finish/i })).toBeTruthy()
   })
 
   it('is about the schema: there is no collection or record to pick', () => {
@@ -183,7 +186,7 @@ describe('the export builder, step by step', () => {
     await onlyFiles('contour')
 
     await next()
-    expect(screen.getByRole('radiogroup', { name: 'Layout' })).toBeTruthy()
+    expect(screen.getByRole('radiogroup', { name: /method/i })).toBeTruthy()
     await back()
 
     expect(chip('Selection', /contour/i).checked).toBe(true)
@@ -247,7 +250,6 @@ describe('the kind it starts from', () => {
       ).checked,
     ).toBe(false)
     await next()
-    await next()
     await userEvent.type(screen.getByRole('textbox', { name: 'Name' }), 'X')
     await userEvent.click(
       screen.getByRole('button', { name: /^save export$/i }),
@@ -272,49 +274,35 @@ describe('the kind it starts from', () => {
   })
 })
 
-describe('choosing a layout', () => {
-  it('shows each one as the folders it makes, in neutral names', async () => {
+describe('the one layout choice', () => {
+  it('sits beside the preview: a folder for each record to begin with', async () => {
     serve()
     renderIt()
     await next()
 
-    const tree = screen.getByLabelText(/a folder per record example/i)
-    const grouped = screen.getByLabelText(/grouped by kind example/i)
-    const flat = screen.getByLabelText(/all in one folder example/i)
-
-    expect(within(tree).getByText('Child 1')).toBeTruthy()
-    expect(within(tree).getAllByText('file.txt')).toHaveLength(2)
-    expect(within(tree).queryByText('Items')).toBeNull()
-    expect(within(grouped).getByText('Items')).toBeTruthy()
-    expect(within(grouped).getByText('Item 2 - file.txt')).toBeTruthy()
-    expect(within(flat).queryByText('Parent 1')).toBeNull()
-    expect(within(flat).getAllByText(/ - file\.txt$/)).toHaveLength(3)
-    // Nothing tied to anyone’s own schemas.
-    expect(document.body.textContent).not.toMatch(
-      /encounter 1|recording 1|selection 1/i,
-    )
+    expect(screen.queryByRole('radiogroup', { name: /layout/i })).toBeNull()
+    expect(oneFolder().checked).toBe(false)
+    await userEvent.click(oneFolder())
+    expect(oneFolder().checked).toBe(true)
   })
 
-  it('selects one, a folder per record to begin with', async () => {
+  it('cannot be ticked while a table is written in each record’s folder', async () => {
     serve()
     renderIt()
+    await userEvent.click(
+      screen.getByRole('checkbox', {
+        name: /each selection’s details, as a sheet in its folder/i,
+      }),
+    )
     await next()
 
-    expect((layout(/a folder per record/i) as HTMLInputElement).checked).toBe(
-      true,
-    )
-    await userEvent.click(layout(/grouped by kind/i))
-
-    expect((layout(/grouped by kind/i) as HTMLInputElement).checked).toBe(true)
-    expect((layout(/a folder per record/i) as HTMLInputElement).checked).toBe(
-      false,
-    )
+    expect(oneFolder().disabled).toBe(true)
+    expect(oneFolder().checked).toBe(false)
   })
 })
 
 describe('reviewing', () => {
   async function toReview() {
-    await next()
     await next()
   }
 
@@ -323,24 +311,22 @@ describe('reviewing', () => {
     renderIt()
     await onlyFiles('contour')
     await next()
-    await userEvent.click(layout(/all in one folder/i))
-    await next()
 
     const radios = screen.getByRole('radiogroup', { name: /method/i })
     expect(
       (
         within(radios).getByRole('radio', {
-          name: /open as folder/i,
+          name: /open as a folder/i,
         }) as HTMLInputElement
       ).checked,
     ).toBe(true)
     await userEvent.click(
-      within(radios).getByRole('radio', { name: /download zip/i }),
+      within(radios).getByRole('radio', { name: /download as a zip/i }),
     )
     expect(
       (
         within(radios).getByRole('radio', {
-          name: /download zip/i,
+          name: /download as a zip/i,
         }) as HTMLInputElement
       ).checked,
     ).toBe(true)
@@ -444,8 +430,7 @@ describe('saving', () => {
     const onDone = renderIt()
     await onlyFiles('contour')
     await next()
-    await userEvent.click(layout(/grouped by kind/i))
-    await next()
+    await userEvent.click(oneFolder())
     const save = screen.getByRole('button', { name: /^save export$/i })
     expect((save as HTMLButtonElement).disabled).toBe(true)
 
@@ -466,7 +451,7 @@ describe('saving', () => {
       holder: 'selection',
       fields: ['contour'],
       filter_tree: null,
-      files_layout: 'grouped',
+      files_layout: 'flat',
       include_files: true,
       tables: [],
       method: 'link',
@@ -486,7 +471,6 @@ describe('saving', () => {
         ),
     })
     const onDone = renderIt()
-    await next()
     await next()
     await userEvent.type(
       screen.getByRole('textbox', { name: 'Name' }),
@@ -512,11 +496,8 @@ describe('changing an export', () => {
     expect(chip('Selection', /table/i).checked).toBe(false)
     expect(chip('Recording', /audio/i).checked).toBe(false)
     await next()
-    expect((layout(/all in one folder/i) as HTMLInputElement).checked).toBe(
-      true,
-    )
-    await userEvent.click(layout(/grouped by kind/i))
-    await next()
+    expect(oneFolder().checked).toBe(true)
+    await userEvent.click(oneFolder())
     const name = screen.getByRole('textbox', {
       name: 'Name',
     }) as HTMLInputElement
@@ -535,14 +516,13 @@ describe('changing an export', () => {
       rename: 'Contour files',
       holder: 'selection',
       fields: ['contour'],
-      files_layout: 'grouped',
+      files_layout: 'tree',
     })
   })
 
   it('does not rename when the name is the same', async () => {
     const calls = serve()
     renderIt({ editing: definition() })
-    await next()
     await next()
 
     await userEvent.click(

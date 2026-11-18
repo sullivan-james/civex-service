@@ -123,7 +123,7 @@ export default function VolumePage() {
     return (
       <Page breadcrumbs={crumbs(name)}>
         <EmptyState
-          title={`No volume called “${name}”`}
+          title={`No drive called “${name}”`}
           message="It may have been removed."
         />
       </Page>
@@ -248,7 +248,7 @@ export default function VolumePage() {
       tabs={
         tabs.length > 1 ? (
           <TabNav
-            label="Volume"
+            label="Drive"
             tabs={tabs}
             value={shownTab}
             onChange={setTab}
@@ -409,7 +409,7 @@ function ShareBar({
       thin
       muted={muted}
       fraction={pct / 100}
-      label={`${pct}% of this volume`}
+      label={`${pct}% of this drive`}
       className="w-full"
     />
   )

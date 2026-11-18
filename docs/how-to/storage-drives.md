@@ -19,7 +19,7 @@ Added volume 'archive' at /media/archive/civex.
 with civex store place set.
 ```
 
-**In the app:** Settings → Storage → Volumes → **Add volume**. **Browse…** lists
+**In the app:** Settings → Storage → Drives → **Add drive**. **Browse…** lists
 the folders and mounted drives of the computer running civex, and checks the
 folder before you add it.
 

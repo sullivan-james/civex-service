@@ -14,7 +14,6 @@ from civex.domain.file_access import (
     copy_key,
     place_of,
     FileSelection,
-    FilesScatteredError,
     FilesUnavailableError,
     LinksNotPossibleError,
 )
@@ -187,12 +186,13 @@ def export_files(
 ):
     """Build the selection as a folder tree on the server's machine.
 
-    `link` makes hard links in a folder on the drive that holds the files;
-    `copy` makes copies on the drive named by `volume`. Answers 409, building
-    nothing, when files are out of reach (`files_unavailable`, unless
-    `allow_partial`), when they are on several drives and a link was asked for
-    (`files_scattered`), or when the drive can't hold links
-    (`links_not_possible`). Building again into the same folder updates it."""
+    `link` makes a folder on the drive holding most of the files: read-only
+    hard links to the files there, and copies of any it can't link (on another
+    drive, or a drive without links); `copy` makes copies on the drive named by
+    `volume`. Answers 409, building nothing, when files are out of reach
+    (`files_unavailable`, unless `allow_partial`) or the drive can't be written
+    to (`links_not_possible`). Building again into the same folder updates
+    it."""
     svc = ctx.file_access_svc
     selection = _selection(body, ctx)
     try:
@@ -215,15 +215,6 @@ def export_files(
             )
     except FilesUnavailableError as e:
         return _unreachable(e)
-    except FilesScatteredError as e:
-        return JSONResponse(
-            status_code=409,
-            content={
-                "detail": str(e),
-                "code": "files_scattered",
-                "plan": e.plan.to_dict(include_items=False),
-            },
-        )
     except LinksNotPossibleError as e:
         return JSONResponse(
             status_code=409, content={"detail": str(e), "code": "links_not_possible"}

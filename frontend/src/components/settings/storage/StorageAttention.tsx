@@ -12,7 +12,7 @@ const TONE = {
 } as const
 
 const TAB_LABEL: Record<StorageTab, string> = {
-  volumes: 'Volumes',
+  volumes: 'Drives',
   collections: 'Collections',
   tasks: 'Tasks',
 }

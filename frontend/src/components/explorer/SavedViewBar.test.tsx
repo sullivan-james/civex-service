@@ -44,14 +44,14 @@ const openMenu = () =>
   userEvent.click(screen.getByRole('button', { name: /manage view tables/i }))
 
 describe('a saved view’s files layout', () => {
-  it('offers the other two layouts to a view that arranges files by record', async () => {
+  it('offers the other layout to a view that arranges files by record', async () => {
     const choose = vi.fn()
     renderIt('tree', choose)
     await openMenu()
 
     expect(
       screen.queryByRole('menuitem', {
-        name: /export files: a folder per record/i,
+        name: /export files: a folder for each record/i,
       }),
     ).toBeNull()
     await userEvent.click(
@@ -63,16 +63,23 @@ describe('a saved view’s files layout', () => {
     expect(choose).toHaveBeenCalledWith('flat')
   })
 
-  it('offers grouping by kind', async () => {
+  it('no longer offers grouping by kind, but keeps a view that has it', async () => {
     const choose = vi.fn()
-    renderIt('tree', choose)
+    renderIt('grouped', choose)
     await openMenu()
 
+    expect(
+      screen.queryByRole('menuitem', {
+        name: /export files: grouped by kind/i,
+      }),
+    ).toBeNull()
     await userEvent.click(
-      screen.getByRole('menuitem', { name: /export files: grouped by kind/i }),
+      screen.getByRole('menuitem', {
+        name: /export files: a folder for each record/i,
+      }),
     )
 
-    expect(choose).toHaveBeenCalledWith('grouped')
+    expect(choose).toHaveBeenCalledWith('tree')
   })
 
   it('offers the way back for a flat one', async () => {
@@ -82,7 +89,7 @@ describe('a saved view’s files layout', () => {
 
     await userEvent.click(
       screen.getByRole('menuitem', {
-        name: /export files: a folder per record/i,
+        name: /export files: a folder for each record/i,
       }),
     )
 

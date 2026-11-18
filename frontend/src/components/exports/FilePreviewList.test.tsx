@@ -10,7 +10,6 @@ const preview = (over: Partial<FilePreview> = {}): FilePreview =>
     bytes: 2048,
     available_bytes: 2048,
     complete: true,
-    scattered: false,
     link_volume: 'default',
     by_volume: [{ volume: 'default', files: 2, bytes: 2048 }],
     summary: '',
@@ -57,9 +56,7 @@ describe('the preview of what an export makes', () => {
   it('says how many files, how big, and how many tables', () => {
     render(<FilePreviewList data={preview({ tables: [table('T.csv', 1)] })} />)
 
-    expect(
-      screen.getByText(/2 files \(2\.0 KB\) · 1 table on default \(2\)/),
-    ).toBeTruthy()
+    expect(screen.getByText(/2 files \(2\.0 KB\) · 1 table\./)).toBeTruthy()
     expect(screen.getByText('1 row')).toBeTruthy()
   })
 
@@ -109,13 +106,29 @@ describe('the preview of what an export makes', () => {
     expect(screen.getByText(/nothing to export/i)).toBeTruthy()
   })
 
-  it('says what cannot be reached and what is on several drives', () => {
+  it('says what cannot be reached, on which drive and what to do, before anything is made', () => {
     render(
-      <FilePreviewList data={preview({ available: 1, scattered: true })} />,
+      <FilePreviewList
+        data={preview({
+          available: 1,
+          unavailable: [
+            {
+              volume: 'archive',
+              state: 'offline',
+              reason: 'Drive “archive” is not connected.',
+              fix: 'Plug in the drive called archive.',
+              files: 1,
+              bytes: 1024,
+              records: ['Selection 2'],
+            },
+          ],
+        } as Partial<FilePreview>)}
+      />,
     )
 
     expect(screen.getByText(/1 file can’t be reached right now/)).toBeTruthy()
-    expect(screen.getByText(/several drives/)).toBeTruthy()
+    expect(screen.getByText(/on “archive”/)).toBeTruthy()
+    expect(screen.getByText(/plug in the drive called archive/i)).toBeTruthy()
   })
 
   it('never breaks on an answer missing parts', () => {

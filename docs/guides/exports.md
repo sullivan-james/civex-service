@@ -37,17 +37,18 @@ same name are told apart by their record (`Sample 02 - photo.jpg`).
 
 | Method | How | Space | Where |
 |---|---|---|---|
-| **Link** (`--mode link`, default) | Hard links to the stored files | None | `_exports/<name>` on the drive holding the files (`_civex/exports/<name>` for the default volume) |
+| **Link** (`--mode link`, default) | Read-only hard links to the stored files; copies of any it can't link | None, except the copies | `_exports/<name>` on the drive holding most of the files (`_civex/exports/<name>` for the default volume) |
 | **Copy** (`--mode copy --to <drive>`) | Real copies | The files' size, checked first | On the drive you pick |
 | **Zip** (`civex files download x.zip`) | One file | The files' size | Where you say |
 
 Linked files are ordinary files to Windows, WSL and every program, but they *are*
-the stored files, so don't edit them in place. Links can't cross drives: a
-selection spread over several drives is refused with `files_scattered`, and you
-either copy, or gather the files onto one drive first
-(`civex files gather … --to <drive>`, or **Move these files…** in the app).
-exFAT and FAT32 drives can't link. Symlinks are never used, because they break
-when a drive is unplugged.
+the stored files, so civex makes them read-only: a program can open them but
+not save over them. Links can't cross drives, and exFAT and FAT32 drives can't
+link at all, so a file that can't be linked is copied into the folder instead
+(the room for those copies is checked first). How the files are spread over
+drives never stops a folder being made; to avoid the copies, gather the files
+onto one drive first (`civex files gather … --to <drive>`). Symlinks are never
+used, because they break when a drive is unplugged.
 
 An export folder holds a `.civex-export.json` listing what civex put there.
 Running the export again updates only the difference, and removing it

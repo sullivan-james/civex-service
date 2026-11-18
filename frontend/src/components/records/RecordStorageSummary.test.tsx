@@ -98,12 +98,13 @@ describe('RecordStorageSummary', () => {
     await userEvent.click(
       await screen.findByRole('button', { name: 'Move to drive…' }),
     )
+    // One sentence about where they end up, not how (copies kept for others).
     expect(
       await screen.findByText(
-        /Copies 3 files there .* 1 stay where they are too/,
+        'Moves 3 files (3.0 KB) onto archive, and frees 2.0 KB on other drives.',
       ),
     ).toBeInTheDocument()
-    expect(screen.getByText(/Frees 2.0 KB on other drives/)).toBeInTheDocument()
+    expect(screen.queryByText(/stay where they are/)).toBeNull()
     const preview = calls.find((c) => c.path === '/api/file-access/gather')
     expect(preview?.body).toMatchObject({ within: 'enc7', volume: 'archive' })
   })

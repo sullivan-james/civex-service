@@ -25,20 +25,16 @@ import {
 import { PROJECT } from '../../hooks/useDriveChoice'
 import { Button, ErrorState, Input, Select, Spinner, Stepper } from '../ui'
 import { FilePreviewList } from './FilePreviewList'
-import { FilesStep, LayoutStep, Row } from './ExportSteps'
+import { FilesStep, OneFolder, Row } from './ExportSteps'
 import { JustTheTable } from './JustTheTable'
 import { levelsFor, pluralize } from '../../utils/exportLevels'
 import { MethodStep, type Method } from './MethodStep'
 
-type StepId = 'what' | 'layout' | 'finish'
-const ALL_STEPS: { id: StepId; label: string }[] = [
+type StepId = 'what' | 'finish'
+const STEPS: { id: StepId; label: string }[] = [
   { id: 'what', label: 'What' },
-  { id: 'layout', label: 'Layout' },
   { id: 'finish', label: 'Finish' },
 ]
-/** The folder's layout only matters when there are files to arrange. */
-const stepsFor = (files: boolean) =>
-  files ? ALL_STEPS : ALL_STEPS.filter((s) => s.id !== 'layout')
 
 /** A saved export of this kind can be offered in the Files menu: one click to the
  * builder, already filled in. */
@@ -50,15 +46,16 @@ export interface SavedPreset {
   definition?: ExportDefinition
 }
 
-/** Build an export: which files, how the folder is laid out, then finish.
+/** Build an export: what goes in it, then finish (how it is handed over, and
+ * whether the files share one folder, beside the preview of what it makes).
  *
  * One builder for two jobs, differing only in how it finishes:
  *  - **save** (`attach`): saves it with a schema, to be offered wherever that
  *    schema is. Finishing asks for a name.
  *  - **run** (`run`): gets the files now, from where the person clicked
- *    (a record, a collection, a list). Finishing asks how: a folder of links,
- *    copies on a drive, or a zip. A saved export opens it already filled in, at
- *    the last step, with the other steps a Back away.
+ *    (a record, a collection, a list). Finishing asks what the person wants: a
+ *    folder to open, files on a drive, or a zip. A saved export opens it already filled in, at
+ *    the last step, with the first a Back away.
  *
  * Both show what the folder would hold, against real data, before anything is
  * made. */
@@ -104,10 +101,8 @@ export function ExportBuilder({
       initial.tables.length === 1,
   )
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }))
-  const steps = stepsFor(draft.files)
-  const [step, setStep] = useState(
-    run?.preset ? stepsFor(initial.files).length - 1 : 0,
-  )
+  const steps = STEPS
+  const [step, setStep] = useState(run?.preset ? steps.length - 1 : 0)
   const stepId = steps[Math.min(step, steps.length - 1)].id
 
   // Saving: the kind of record it starts from, which is the one choice that
@@ -206,7 +201,7 @@ export function ExportBuilder({
     : method === 'zip'
       ? 'Download'
       : method === 'copy'
-        ? 'Copy'
+        ? 'Put on drive'
         : 'Open folder'
 
   return (
@@ -280,8 +275,6 @@ export function ExportBuilder({
           </>
         )}
 
-        {stepId === 'layout' && <LayoutStep draft={draft} set={set} />}
-
         {lastStep && (
           <>
             {attach && (
@@ -310,10 +303,12 @@ export function ExportBuilder({
                 setMethod={setMethod}
                 drive={drive}
                 setDrive={setDrive}
+                need={preview.data?.available_bytes ?? 0}
               />
             </Row>
 
             <Row label="What it makes">
+              {draft.files && <OneFolder draft={draft} set={set} />}
               {preview.error != null ? (
                 <ErrorState message={errorMessage(preview.error)} />
               ) : preview.data ? (

@@ -72,7 +72,7 @@ export function NewTransferModal({
                   checked={kind === k}
                   onChange={() => setKind(k)}
                 />
-                {k === 'drain' ? 'Empty a volume' : 'Gather a collection'}
+                {k === 'drain' ? 'Empty a drive' : 'Gather a collection'}
               </label>
             ))}
           </fieldset>
@@ -85,7 +85,7 @@ export function NewTransferModal({
                 value={source}
                 onChange={(e) => setSource(e.target.value)}
               >
-                <option value="">Choose a volume…</option>
+                <option value="">Choose a drive…</option>
                 {volumes.map((v) => (
                   <option key={v.name} value={v.name}>
                     {v.name}
@@ -118,7 +118,7 @@ export function NewTransferModal({
               value={target}
               onChange={(e) => setTarget(e.target.value)}
             >
-              <option value="">Choose a volume…</option>
+              <option value="">Choose a drive…</option>
               {volumes
                 .filter((v) => kind !== 'drain' || v.name !== source)
                 .map((v) => (
@@ -140,7 +140,7 @@ export function NewTransferModal({
                 checked={freeze}
                 onChange={(e) => setFreeze(e.target.checked)}
               />
-              Make the volume read-only while it runs (restored afterwards)
+              Make the drive read-only while it runs (restored afterwards)
             </label>
           )}
           {advanced && (

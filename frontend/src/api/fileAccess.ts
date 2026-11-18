@@ -106,10 +106,8 @@ export interface FilePlanSummary {
   bytes: number
   available_bytes: number
   complete: boolean
-  /** The reachable files are on more than one drive, so one linked folder
-   * can't hold them. */
-  scattered: boolean
-  /** The one drive a linked folder would go on; null if scattered or empty. */
+  /** The drive a folder to open goes on (the one holding most of the files;
+   * the rest are copied into it); null when no file is on a drive. */
   link_volume: string | null
   by_volume: VolumeShare[]
   summary: string
@@ -146,12 +144,11 @@ export interface ExportOptions {
   open: boolean
 }
 
-/** Why an export didn't just happen: the files can't be reached, or are on
- * several drives (so no one linked folder can hold them), or the drive can't
- * link. The server builds nothing in these cases, and says why. */
+/** Why an export didn't just happen: some files can't be reached, or the drive
+ * can't be written to. The server builds nothing in these cases, and says why. */
 export interface ExportProblem {
   kind: 'problem'
-  code: 'files_unavailable' | 'files_scattered' | 'links_not_possible'
+  code: 'files_unavailable' | 'links_not_possible'
   message: string
   /** What the selection holds and where; absent when the server didn't send it. */
   plan?: FilePlanSummary
@@ -160,11 +157,7 @@ export interface ExportProblem {
 export type ExportOutcome =
   { kind: 'done'; result: FileExportResult } | ExportProblem
 
-const PROBLEM_CODES = [
-  'files_unavailable',
-  'files_scattered',
-  'links_not_possible',
-]
+const PROBLEM_CODES = ['files_unavailable', 'links_not_possible']
 
 /** The refusal an error carries, if it is one the server explains (409 with a
  * known `code`). */

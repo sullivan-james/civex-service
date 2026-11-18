@@ -18,9 +18,8 @@ const where = (e: ExportInfo) =>
 
 function describe(e: ExportInfo): string {
   const parts = [`${e.files.toLocaleString()} files`]
+  // What it takes up, not how it was made (links, copies).
   if (e.linked != null && e.copied != null) {
-    if (e.linked > 0) parts.push(`${e.linked.toLocaleString()} linked`)
-    if (e.copied > 0) parts.push(`${e.copied.toLocaleString()} copied`)
     parts.push(
       e.bytes_on_disk
         ? `${formatSize(e.bytes_on_disk)} on disk`
@@ -93,7 +92,7 @@ export function ExportsList() {
       {exports && list.length === 0 && (
         <EmptyState
           title="No exports"
-          message="Folders made with Files → Open in folder or Copy to a drive appear here."
+          message="Folders made with Export → Open as a folder or Put on a drive appear here."
         />
       )}
       {list.length > 0 && (

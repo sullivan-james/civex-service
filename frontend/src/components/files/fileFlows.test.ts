@@ -1,11 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { QueryClient } from '@tanstack/react-query'
-import {
-  downloadFiles,
-  moveFiles,
-  moveThenOpen,
-  type FlowContext,
-} from './fileFlows'
+import { downloadFiles, moveFiles, type FlowContext } from './fileFlows'
 import { exported, fakeServer, json, plan, transfer } from './testSupport'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -26,8 +21,8 @@ function context() {
 
 const gather = { transfer_id: 't1', volume: 'archive', files: 3, bytes: 3000 }
 
-describe('moving, then opening', () => {
-  it('waits for the move, then links and opens', async () => {
+describe('moving files onto a drive', () => {
+  it('waits for the move, then says what it did', async () => {
     const polls = [
       transfer({ status: 'queued' }),
       transfer({ status: 'running' }),
@@ -36,34 +31,31 @@ describe('moving, then opening', () => {
     const calls = fakeServer({
       '/api/file-access/gather': gather,
       '/api/store/transfers/t1': () => json(polls.shift()),
-      '/api/file-access/export': exported({ location: 'archive' }),
     })
     const { ctx, toast } = context()
 
-    await moveThenOpen(ctx, SELECTION, 'hb', 'archive')
+    await moveFiles(ctx, SELECTION, 'archive')
 
     expect(calls.map((c) => c.path)).toEqual([
       '/api/file-access/gather',
       '/api/store/transfers/t1',
       '/api/store/transfers/t1',
       '/api/store/transfers/t1',
-      '/api/file-access/export',
     ])
-    expect(calls[4].body).toMatchObject({ mode: 'link', allow_partial: true })
-    expect(toast.success).toHaveBeenCalledOnce()
+    expect(toast.success).toHaveBeenCalledWith('Moved 3 files onto archive.')
     expect(toast.error).not.toHaveBeenCalled()
   })
 
-  it('does not open a folder when the move was paused, and says what to do', async () => {
-    const calls = fakeServer({
+  it('says what to do when the move was paused', async () => {
+    fakeServer({
       '/api/file-access/gather': gather,
       '/api/store/transfers/t1': () => json(transfer({ status: 'paused' })),
     })
     const { ctx, toast } = context()
 
-    await moveThenOpen(ctx, SELECTION, 'hb', 'archive')
+    await moveFiles(ctx, SELECTION, 'archive')
 
-    expect(calls.map((c) => c.path)).not.toContain('/api/file-access/export')
+    expect(toast.success).not.toHaveBeenCalled()
     expect(toast.error).toHaveBeenCalledWith(
       expect.stringMatching(/was paused.*Resume it in Settings/i),
     )
@@ -74,16 +66,15 @@ describe('moving, then opening', () => {
       transfer({ status: 'paused', auto_resume: true }),
       transfer({ status: 'completed' }),
     ]
-    const calls = fakeServer({
+    fakeServer({
       '/api/file-access/gather': gather,
       '/api/store/transfers/t1': () => json(polls.shift()),
-      '/api/file-access/export': exported(),
     })
     const { ctx, toast } = context()
 
-    await moveThenOpen(ctx, SELECTION, 'hb', 'archive')
+    await moveFiles(ctx, SELECTION, 'archive')
 
-    expect(calls.map((c) => c.path)).toContain('/api/file-access/export')
+    expect(toast.success).toHaveBeenCalledOnce()
     expect(toast.error).not.toHaveBeenCalled()
   })
 
@@ -94,33 +85,10 @@ describe('moving, then opening', () => {
     })
     const { ctx, toast } = context()
 
-    await moveThenOpen(ctx, SELECTION, 'hb', 'archive')
+    await moveFiles(ctx, SELECTION, 'archive')
 
     expect(toast.error).toHaveBeenCalledWith(
       expect.stringMatching(/ended \(failed\)/),
-    )
-  })
-
-  it('goes back to the dialog if something changed while it moved', async () => {
-    fakeServer({
-      '/api/file-access/gather': gather,
-      '/api/store/transfers/t1': () => json(transfer()),
-      '/api/file-access/export': () =>
-        json(
-          {
-            detail: 'These files are on 2 drives',
-            code: 'files_scattered',
-            plan: plan({ scattered: true }),
-          },
-          409,
-        ),
-    })
-    const { ctx, problem } = context()
-
-    await moveThenOpen(ctx, SELECTION, 'hb', 'archive')
-
-    expect(problem).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: 'open' }),
     )
   })
 
@@ -131,7 +99,7 @@ describe('moving, then opening', () => {
     })
     const { ctx, toast } = context()
 
-    await moveThenOpen(ctx, SELECTION, 'hb', 'archive')
+    await moveFiles(ctx, SELECTION, 'archive')
 
     expect(toast.error).toHaveBeenCalledWith(
       expect.stringMatching(/already on archive/),

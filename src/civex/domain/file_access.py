@@ -79,26 +79,10 @@ class FilesUnavailableError(CivexError):
         self.plan = plan
 
 
-class FilesScatteredError(CivexError):
-    """The reachable files are on more than one drive, so no single folder can
-    hard-link them all. Carries the plan; the way forward is to copy them onto
-    one drive."""
-
-    kind = "files_scattered"
-
-    def __init__(self, plan: "FilePlan") -> None:
-        shares = ", ".join(f"{v.volume}: {v.files}" for v in plan.by_volume)
-        super().__init__(
-            f"These files are on {len(plan.by_volume)} drives ({shares}). A linked "
-            "folder has to be on the drive that holds its files, so it can't "
-            "gather them. Copy them onto one drive instead."
-        )
-        self.plan = plan
-
-
 class LinksNotPossibleError(CivexError):
-    """A linked folder can't be made on the drive holding the files (a drive
-    that can't hard link, such as exFAT/FAT32, or one marked read-only)."""
+    """The folder can't be made on the drive it would go on: the drive is marked
+    read-only or can't be written to now. (Files that can't be linked are copied,
+    so this is never about links themselves; the name is kept for the API code.)"""
 
     kind = "links_not_possible"
 
@@ -398,15 +382,11 @@ class FilePlan:
         return sorted(shares.values(), key=lambda v: (-v.bytes, v.volume))
 
     @property
-    def scattered(self) -> bool:
-        """Reachable files on more than one drive: a linked folder can't hold them."""
-        return len(self.by_volume) > 1
-
-    @property
     def link_volume(self) -> str | None:
-        """The one drive a linked folder would go on; None if there isn't one."""
+        """The drive a folder of links goes on: the one holding most of the
+        files' bytes, so the least is copied. None when no file is on a drive."""
         shares = self.by_volume
-        return shares[0].volume if len(shares) == 1 else None
+        return shares[0].volume if shares else None
 
     def summary(self) -> str:
         if self.complete:
@@ -433,7 +413,6 @@ class FilePlan:
             "bytes": self.bytes,
             "available_bytes": self.available_bytes,
             "complete": self.complete,
-            "scattered": self.scattered,
             "link_volume": self.link_volume,
             "by_volume": [
                 {"volume": v.volume, "files": v.files, "bytes": v.bytes}

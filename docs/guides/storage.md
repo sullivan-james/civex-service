@@ -61,7 +61,7 @@ within a few seconds, and work on other volumes carries on.
 
 **Adding a volume checks it first**: whether the folder exists or will be made,
 is writable, has room, is a separate disk from the project, or already belongs to
-another volume. The app's **Add volume** form shows the same checks as you type.
+another volume. The app's **Add drive** form shows the same checks as you type.
 
 ## Files in a bucket instead
 
@@ -201,7 +201,7 @@ attention (an unplugged drive holding files, low space, an interrupted move).
 
 | Tab | For |
 |---|---|
-| **Volumes** | Each drive's status and space. A drive's name opens its own page: which collections are on it, unused files, moves involving it |
+| **Drives** | Each drive's status and space. A drive's name opens its own page: which collections are on it, unused files, moves involving it |
 | **Collections** | Each collection's files by drive, its home, **Gather**, and what this computer keeps when syncing |
 | **Tasks** | **Move files…**, **Clean up…**, and the list of moves |
 

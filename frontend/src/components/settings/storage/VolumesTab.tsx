@@ -55,7 +55,7 @@ export function VolumesTab() {
   if (error || !volumes)
     return (
       <ErrorState
-        message={error ? errorMessage(error) : 'Failed to load volumes'}
+        message={error ? errorMessage(error) : 'Failed to load drives'}
       />
     )
 
@@ -90,7 +90,7 @@ export function VolumesTab() {
       ...(vol.state === 'online' || vol.state === 'readonly'
         ? [
             {
-              label: 'Move files off this volume…',
+              label: 'Move files off this drive…',
               onClick: () =>
                 navigate(
                   `/settings/storage?tab=tasks&from=${encodeURIComponent(vol.name)}`,
@@ -119,11 +119,11 @@ export function VolumesTab() {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-4">
         <p className="text-sm text-fg-muted">
-          {volumes.length} {volumes.length === 1 ? 'volume' : 'volumes'} ·{' '}
+          {volumes.length} {volumes.length === 1 ? 'drive' : 'drives'} ·{' '}
           {formatSize(used)} used
         </p>
         <Button variant="primary" size="sm" onClick={() => setAdding(true)}>
-          <Plus size={14} /> Add volume
+          <Plus size={14} /> Add drive
         </Button>
       </div>
 
@@ -135,7 +135,7 @@ export function VolumesTab() {
           <AlertTriangle size={16} className="shrink-0" aria-hidden="true" />
           {attention.length === 1
             ? `${attention[0].name} needs attention`
-            : `${attention.length} volumes need attention: ${attention.map((v) => v.name).join(', ')}`}
+            : `${attention.length} drives need attention: ${attention.map((v) => v.name).join(', ')}`}
         </div>
       )}
 
@@ -144,7 +144,7 @@ export function VolumesTab() {
         columns={[
           {
             key: 'volume',
-            header: 'Volume',
+            header: 'Drive',
             render: (vol) => (
               <>
                 <span className="flex items-center gap-2 font-medium">
@@ -203,10 +203,10 @@ export function VolumesTab() {
         rowHref={(vol) =>
           `/settings/storage/volumes/${encodeURIComponent(vol.name)}`
         }
-        emptyTitle="No volumes yet"
+        emptyTitle="No drives yet"
         emptyAction={
           <Button variant="primary" size="sm" onClick={() => setAdding(true)}>
-            <Plus size={14} /> Add volume
+            <Plus size={14} /> Add drive
           </Button>
         }
         actionsWidth="4rem"
@@ -232,9 +232,9 @@ export function VolumesTab() {
             <>
               Write order
               <InfoTip>
-                New files go to the first volume here that is online and has
-                room. A volume outside this list is only used by collections
-                that have it as their home.
+                New files go to the first drive here that is online and has
+                room. A drive outside this list is only used by collections that
+                have it as their home.
               </InfoTip>
             </>
           }

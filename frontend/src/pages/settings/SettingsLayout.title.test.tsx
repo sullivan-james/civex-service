@@ -33,7 +33,7 @@ describe('Settings tab titles', () => {
 
   it('say which tab of Storage too', () => {
     at('/settings/storage')
-    expect(document.title).toBe('Volumes · Storage · Settings · civex')
+    expect(document.title).toBe('Drives · Storage · Settings · civex')
   })
 
   it('follow the Storage tab in the address', () => {

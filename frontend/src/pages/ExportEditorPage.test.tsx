@@ -119,7 +119,6 @@ describe('an export on its own page', () => {
     await screen.findByRole('heading', { name: 'Contours' })
 
     await userEvent.click(screen.getByRole('button', { name: /^next/i }))
-    await userEvent.click(screen.getByRole('button', { name: /^next/i }))
     await userEvent.click(
       screen.getByRole('button', { name: /^save changes$/i }),
     )

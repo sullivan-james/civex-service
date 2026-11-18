@@ -205,34 +205,33 @@ def test_zip_refuses_a_partial_selection_unless_told_otherwise(
     assert "far.txt" in zf.read("MISSING.txt").decode()
 
 
-def test_files_on_several_drives_cannot_be_linked_but_can_be_copied_to_one(
+def test_files_on_several_drives_make_one_folder_or_one_copy(
     client, archive: Path
 ) -> None:
-    refused = client.post("/api/file-access/export", json={**BODY, "name": "t"})
+    folder = client.post("/api/file-access/export", json={**BODY, "name": "t"})
     copied = client.post(
         "/api/file-access/export",
-        json={**BODY, "name": "t", "mode": "copy", "volume": "archive"},
+        json={**BODY, "name": "c", "mode": "copy", "volume": "archive"},
     )
 
-    assert refused.status_code == 409
-    body = refused.json()
-    assert body["code"] == "files_scattered" and "2 drives" in body["detail"]
-    assert {v["volume"] for v in body["plan"]["by_volume"]} == {"default", "archive"}
+    assert folder.status_code == 200, folder.text
+    assert folder.json()["linked"] + folder.json()["copied"] == 2
     assert copied.status_code == 200, copied.text
     assert copied.json()["location"] == "archive" and copied.json()["copied"] == 2
-    assert (archive / "_exports" / "t" / "Encounter 7" / "far" / "far.txt").exists()
+    assert (archive / "_exports" / "c" / "Encounter 7" / "far" / "far.txt").exists()
 
 
-def test_plan_says_whether_the_files_can_share_a_linked_folder(
+def test_plan_says_where_a_folder_of_links_would_go(
     client, study, archive: Path
 ) -> None:
     plan = client.post("/api/file-access/plan", json=BODY).json()
 
-    assert plan["scattered"] is True and plan["link_volume"] is None
+    assert "scattered" not in plan
     assert [v["files"] for v in plan["by_volume"]] == [1, 1]
+    assert plan["link_volume"] == plan["by_volume"][0]["volume"]
 
 
-def test_a_drive_that_cannot_link_answers_409(
+def test_a_drive_that_cannot_link_gets_copies(
     client, study, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     study.add("a", b"hello")
@@ -243,8 +242,8 @@ def test_a_drive_that_cannot_link_answers_409(
     monkeypatch.setattr("civex.services.file_access_service.os.link", refuse)
     resp = client.post("/api/file-access/export", json={**BODY, "name": "t"})
 
-    assert resp.status_code == 409
-    assert resp.json()["code"] == "links_not_possible"
+    assert resp.status_code == 200, resp.text
+    assert (resp.json()["linked"], resp.json()["copied"]) == (0, 1)
 
 
 def test_exports_are_listed_and_removed(client, study, project_dir: Path) -> None:
@@ -294,9 +293,6 @@ def _wait_done(client, transfer_id: str) -> dict:
 def test_gathering_a_selection_onto_one_drive_makes_it_linkable(
     client, study, archive: Path
 ) -> None:
-    refused = client.post("/api/file-access/export", json={**BODY, "name": "t"})
-    assert refused.status_code == 409
-
     started = client.post("/api/file-access/gather", json={**BODY, "volume": "archive"})
 
     assert started.status_code == 202, started.text
@@ -304,7 +300,7 @@ def test_gathering_a_selection_onto_one_drive_makes_it_linkable(
     done = _wait_done(client, started.json()["transfer_id"])
     assert done["kind"] == "files" and done["progress"]["files_done"] == 1
     plan = client.post("/api/file-access/plan", json=BODY).json()
-    assert plan["scattered"] is False and plan["link_volume"] == "archive"
+    assert len(plan["by_volume"]) == 1 and plan["link_volume"] == "archive"
     linked = client.post("/api/file-access/export", json={**BODY, "name": "t"})
     assert linked.status_code == 200 and linked.json()["location"] == "archive"
     assert linked.json()["linked"] == 2

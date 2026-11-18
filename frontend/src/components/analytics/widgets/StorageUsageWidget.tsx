@@ -16,9 +16,9 @@ export function StorageUsageWidget() {
   return (
     <WidgetCard
       title="Storage usage"
-      description="Used space by volume"
+      description="Used space by drive"
       viewRunsTo="/settings/storage"
-      viewRunsLabel="Manage volumes"
+      viewRunsLabel="Manage drives"
     >
       {error ? (
         <ErrorState message={errorMessage(error)} />
@@ -28,8 +28,8 @@ export function StorageUsageWidget() {
         </div>
       ) : !volumes || volumes.length === 0 ? (
         <EmptyState
-          title="No volumes configured"
-          message="Add a storage volume in Settings to see usage here."
+          title="No drives configured"
+          message="Add a storage drive in Settings to see usage here."
         />
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">

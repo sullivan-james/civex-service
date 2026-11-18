@@ -83,7 +83,7 @@ export function AddVolumeModal({
       : !NAME_RE.test(trimmedName)
         ? 'Use only letters, digits, hyphens and underscores.'
         : existingNames.includes(trimmedName)
-          ? `A volume called '${trimmedName}' already exists.`
+          ? `A drive called '${trimmedName}' already exists.`
           : undefined
   const limit = limitOn && limitGb !== '' ? Number(limitGb) : undefined
   const limitInvalid = limitOn && !(limit !== undefined && limit > 0)
@@ -128,7 +128,7 @@ export function AddVolumeModal({
     )
 
   const summary = [
-    trimmedName ? `Adds “${trimmedName}”` : 'Adds a volume',
+    trimmedName ? `Adds “${trimmedName}”` : 'Adds a drive',
     trimmedPath ? `at ${trimmedPath}` : null,
     inspection?.is_network ? '(network drive)' : null,
     limit && limit > 0 ? `· limit ${limit} GB` : null,
@@ -139,7 +139,7 @@ export function AddVolumeModal({
 
   return (
     <Modal onClose={onClose} size="lg" dismissible={!addVolume.isPending}>
-      <ModalHeader onClose={onClose}>Add a volume</ModalHeader>
+      <ModalHeader onClose={onClose}>Add a drive</ModalHeader>
       <ModalBody>
         <Step
           n={1}
@@ -147,7 +147,7 @@ export function AddVolumeModal({
           info="How you refer to it in commands and settings."
         >
           <Field
-            label="Volume name"
+            label="Drive name"
             info="Letters, digits, hyphens and underscores."
             error={nameError}
             required
@@ -260,7 +260,7 @@ export function AddVolumeModal({
           Cancel
         </Button>
         <Button variant="primary" onClick={submit} disabled={!canAdd}>
-          {addVolume.isPending ? 'Adding…' : 'Add volume'}
+          {addVolume.isPending ? 'Adding…' : 'Add drive'}
         </Button>
       </ModalFooter>
     </Modal>
