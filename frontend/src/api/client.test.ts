@@ -75,8 +75,8 @@ describe('api client errors', () => {
         async () =>
           new Response(
             JSON.stringify({
-              detail: 'These files are on 2 drives',
-              code: 'files_scattered',
+              detail: '2 files can’t be reached',
+              code: 'files_unavailable',
               plan: { total: 4 },
             }),
             { status: 409, headers: { 'Content-Type': 'application/json' } },
@@ -87,10 +87,10 @@ describe('api client errors', () => {
     const err = (await api.post('/x', {}).catch((e) => e)) as ApiError
 
     expect(err.status).toBe(409)
-    expect(err.message).toBe('These files are on 2 drives')
+    expect(err.message).toBe('2 files can’t be reached')
     expect(err.body).toEqual({
-      detail: 'These files are on 2 drives',
-      code: 'files_scattered',
+      detail: '2 files can’t be reached',
+      code: 'files_unavailable',
       plan: { total: 4 },
     })
   })

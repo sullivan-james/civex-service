@@ -139,7 +139,7 @@ describe('Storage page', () => {
     renderAt()
     const tabs = await screen.findAllByRole('tab')
     expect(tabs.map((t) => t.textContent)).toEqual([
-      'Volumes',
+      'Drives',
       'Collections',
       'Tasks',
     ])
@@ -147,7 +147,7 @@ describe('Storage page', () => {
 
   it('says nothing when all is well', async () => {
     renderAt()
-    await screen.findByRole('tab', { name: 'Volumes' })
+    await screen.findByRole('tab', { name: 'Drives' })
     await waitFor(() =>
       expect(screen.queryByLabelText('Needs attention')).toBeNull(),
     )
@@ -165,8 +165,8 @@ describe('Storage page', () => {
     renderAt('/settings/storage?tab=tasks')
     const alert = await screen.findByLabelText('Needs attention')
     expect(alert).toHaveTextContent('usb: path missing: /media/usb')
-    await userEvent.click(screen.getByRole('button', { name: 'Open Volumes' }))
-    expect(screen.getByRole('tab', { name: 'Volumes' })).toHaveAttribute(
+    await userEvent.click(screen.getByRole('button', { name: 'Open Drives' }))
+    expect(screen.getByRole('tab', { name: 'Drives' })).toHaveAttribute(
       'aria-selected',
       'true',
     )
@@ -182,7 +182,7 @@ describe('Storage page', () => {
       }),
     ]
     renderAt()
-    await screen.findByRole('tab', { name: 'Volumes' })
+    await screen.findByRole('tab', { name: 'Drives' })
     await waitFor(() =>
       expect(screen.queryByLabelText('Needs attention')).toBeNull(),
     )

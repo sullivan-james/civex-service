@@ -39,7 +39,7 @@ export function CleanUpDialog({
   const started = useRef(false)
 
   const days = Math.max(0, Math.floor(Number(graceDays) || 0))
-  const where = volume ? `on '${volume}'` : 'on any volume'
+  const where = volume ? `on '${volume}'` : 'on any drive'
 
   function look() {
     setReport(null)

@@ -17,8 +17,8 @@ type FileLike = Pick<
 
 function whyUnavailable(file: FileLike): string {
   const where = file.location?.volume
-    ? `volume '${file.location.volume}'`
-    : 'its volume'
+    ? `drive '${file.location.volume}'`
+    : 'its drive'
   const fix = file.location?.fix
   return `This file is on ${where}, which isn't available right now.${fix ? ` ${fix}` : ''}`
 }

@@ -1,7 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import type { TableSpec } from '../../api/fileAccess'
 import type { Schema } from '../../api/schemas'
-import type { FilesLayout } from '../../api/views'
 import { describeTable, type Draft } from '../../utils/exportBuilder'
 import {
   filterKind,
@@ -21,13 +20,11 @@ import {
   type TablePattern,
 } from '../../utils/exportLevels'
 import { TableSettings } from './TableSettings'
-import { LAYOUTS, LAYOUT_NAME } from '../../utils/exportLayouts'
 import { filterableFields } from '../../utils/hierarchy'
 import { displayLabel } from '../../utils/naming'
 import { FilterControls } from '../explorer/FilterControls'
-import { Button, CheckRow, InfoTip } from '../ui'
+import { Button, CheckRow } from '../ui'
 import { FolderTree, Plus } from '../ui/icons'
-import { LayoutPreview } from './LayoutPreview'
 
 /** A labelled row of an export form. */
 export function Row({
@@ -293,58 +290,32 @@ function TableOption({
   )
 }
 
-/** How the folder is laid out: three pictures to choose between. */
-export function LayoutStep({
+/** Whether the files share one folder, as the one choice about how the folder
+ * is laid out. Beside the preview, so the person sees their own folders change
+ * as they tick it. Otherwise each record has a folder of its own, inside the
+ * folder of the record it belongs to. A table written in each record's folder
+ * needs those folders, so then it can't be ticked. (An export saved before this
+ * may be `grouped`; it stays so until the box is used.) */
+export function OneFolder({
   draft,
   set,
 }: {
   draft: Draft
   set: (patch: Partial<Draft>) => void
 }) {
-  // A table written in each folder needs a folder per record.
-  const needsTree = draft.tables.some((t) => t.where)
+  const needsFolders = writtenInFolders(draft.tables)
   return (
-    <div className="space-y-3">
-      {needsTree && (
-        <p className="flex items-center gap-1 text-sm text-fg-muted">
-          Folder per record
-          <InfoTip>
-            A table written in each record’s folder needs a folder per record.
-          </InfoTip>
-        </p>
-      )}
-      <div
-        role="radiogroup"
-        aria-label="Layout"
-        className="grid gap-4 md:grid-cols-3"
-      >
-        {LAYOUTS.map((l: FilesLayout) => (
-          <label
-            key={l}
-            className={`flex flex-col gap-3 rounded-lg border p-4 transition-colors ${
-              needsTree && l !== 'tree'
-                ? 'cursor-not-allowed opacity-50'
-                : 'cursor-pointer'
-            } ${
-              draft.layout === l
-                ? 'border-accent bg-accent-subtle ring-1 ring-accent'
-                : 'border-border hover:bg-canvas-subtle'
-            }`}
-          >
-            <span className="flex items-center gap-2.5 text-base font-medium text-fg">
-              <input
-                type="radio"
-                name="layout"
-                checked={draft.layout === l}
-                disabled={needsTree && l !== 'tree'}
-                onChange={() => set({ layout: l })}
-              />
-              {LAYOUT_NAME[l]}
-            </span>
-            <LayoutPreview layout={l} />
-          </label>
-        ))}
-      </div>
-    </div>
+    <CheckRow
+      compact
+      title="Put all the files in one folder"
+      description={
+        needsFolders
+          ? 'A table written in each record’s folder needs a folder for each record.'
+          : 'Otherwise each record gets a folder of its own, inside the folder of the record it belongs to.'
+      }
+      checked={draft.layout === 'flat'}
+      disabled={needsFolders}
+      onChange={(on) => set({ layout: on ? 'flat' : 'tree' })}
+    />
   )
 }

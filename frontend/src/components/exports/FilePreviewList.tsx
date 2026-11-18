@@ -2,6 +2,7 @@ import type { FilePreview } from '../../api/fileAccess'
 import { pathsToRows } from '../../utils/fileTree'
 import { formatSize } from '../../utils/storage'
 import { ToDownloadNotice } from '../files/ToDownloadNotice'
+import { UnreachableList } from '../files/UnreachableList'
 import { FileTree } from './FileTree'
 
 const plural = (n: number, word: string) =>
@@ -9,12 +10,11 @@ const plural = (n: number, word: string) =>
 
 /** What an export would make, as one folder tree: the stored files and the tables
  * the export writes, each in the place it will be, with how many files, how big,
- * and where they are. What a person checks before saving or running an export. */
+ * and any that can't be reached (which drive, what to do). What a person checks before saving or running an export. */
 export function FilePreviewList({ data }: { data: FilePreview }) {
   // Whatever the server sent, a preview never breaks the dialog it sits in.
   const items = data.items ?? []
   const tables = data.tables ?? []
-  const byVolume = data.by_volume ?? []
   const total = data.total ?? items.length
   const toFetch = data.to_fetch?.files ?? 0
   const missing = total - (data.available ?? total) - toFetch
@@ -32,21 +32,21 @@ export function FilePreviewList({ data }: { data: FilePreview }) {
         ]
           .filter(Boolean)
           .join(' · ')}
-        {byVolume.length > 0 && (
-          <>
-            {' '}
-            on{' '}
-            {byVolume
-              .map((v) => `${v.volume} (${v.files.toLocaleString()})`)
-              .join(', ')}
-          </>
-        )}
         .
-        {data.scattered &&
-          ' They are on several drives, so a linked folder can’t hold them; you can move them onto one or copy them.'}
-        {missing > 0 &&
-          ` ${plural(missing, 'file')} can’t be reached right now.`}
       </p>
+      {missing > 0 && (
+        // Said before anything is made, with which drive and what to do, so a
+        // drive can be plugged in first; the preview follows when it changes.
+        <section
+          aria-label="Files that can’t be reached"
+          className="rounded-md border border-attention-muted bg-attention-subtle px-3 py-2"
+        >
+          <p className="mb-2 text-sm font-medium text-fg">
+            {plural(missing, 'file')} can’t be reached right now
+          </p>
+          <UnreachableList groups={data.unavailable ?? []} />
+        </section>
+      )}
       <ToDownloadNotice toFetch={data.to_fetch} />
       {empty ? (
         <p className="text-sm text-fg-muted">

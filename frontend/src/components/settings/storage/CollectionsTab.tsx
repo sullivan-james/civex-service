@@ -157,7 +157,7 @@ function HomeCell({
     <>
       <Select
         size="sm"
-        aria-label={`Home volume for ${collection.name}`}
+        aria-label={`Home drive for ${collection.name}`}
         value={placement?.volume ?? NONE}
         disabled={pending}
         onChange={(e) => changeHome(e.target.value)}
@@ -185,7 +185,7 @@ function PolicyCell({
   return (
     <Select
       size="sm"
-      aria-label={`If the home volume of ${collection.name} can't take a file`}
+      aria-label={`If the home drive of ${collection.name} can't take a file`}
       value={placement.on_unavailable}
       disabled={pending}
       onChange={(e) => changePolicy(e.target.value as PlacementPolicy)}
@@ -281,9 +281,9 @@ export function CollectionsTab({
     <div className="space-y-4">
       {volumes.length < 2 && placements.length === 0 && (
         <div className="flex items-center justify-between gap-4 rounded-md border border-border bg-canvas-subtle px-4 py-3 text-sm text-fg-muted">
-          <span>One volume: every collection uses it.</span>
+          <span>One drive: every collection uses it.</span>
           <Button size="sm" onClick={onGoToVolumes}>
-            Add a volume
+            Add a drive
           </Button>
         </div>
       )}
@@ -299,14 +299,14 @@ export function CollectionsTab({
           className="w-64"
         />
         <InfoTip>
-          Choose which volume receives each collection&apos;s new files. A file
-          whose content is already stored, on any volume, is reused where it is
+          Choose which drive receives each collection&apos;s new files. A file
+          whose content is already stored, on any drive, is reused where it is
           and never copied again.
         </InfoTip>
         {volumeFilter && (
           <Button size="sm" variant="link" onClick={onClearVolumeFilter}>
             On {volumeFilter}
-            <X size={12} aria-label="Clear volume filter" />
+            <X size={12} aria-label="Clear drive filter" />
           </Button>
         )}
       </div>
@@ -320,7 +320,7 @@ export function CollectionsTab({
           <span className="font-medium text-fg">{selected.size} selected</span>
           <Select
             size="sm"
-            aria-label="Home volume for the selected collections"
+            aria-label="Home drive for the selected collections"
             value={bulkVolume}
             onChange={(e) => setBulkVolume(e.target.value)}
             className="w-56"
@@ -402,7 +402,7 @@ export function CollectionsTab({
             : []),
           {
             key: 'home',
-            header: 'Home volume',
+            header: 'Home drive',
             render: (c) => (
               <HomeCell
                 collection={c}
@@ -417,8 +417,8 @@ export function CollectionsTab({
               <span className="inline-flex items-center gap-1">
                 If home is full
                 <InfoTip>
-                  What happens when the home volume can&apos;t take a file:
-                  write it by the general write order, or refuse the upload.
+                  What happens when the home drive can&apos;t take a file: write
+                  it by the general write order, or refuse the upload.
                 </InfoTip>
               </span>
             ),

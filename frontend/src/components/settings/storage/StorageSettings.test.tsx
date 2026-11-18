@@ -211,7 +211,7 @@ describe('Storage > Volumes', () => {
 
     await screen.findByRole('link', { name: /^nas/ })
     const banner = screen.getByRole('alert')
-    expect(banner).toHaveTextContent('2 volumes need attention: nas, usb')
+    expect(banner).toHaveTextContent('2 drives need attention: nas, usb')
     await user.click(within(rowOf('nas')).getByRole('button', { name: 'Why' }))
     expect(screen.getByRole('tooltip')).toHaveTextContent(
       'path missing: /mnt/nas/civex',
@@ -273,14 +273,14 @@ describe('Storage > Volumes', () => {
     await user.click(screen.getByRole('menuitem', { name: 'Remove…' }))
 
     expect(
-      await screen.findByRole('heading', { name: 'Remove volume “scratch”?' }),
+      await screen.findByRole('heading', { name: 'Remove drive “scratch”?' }),
     ).toBeInTheDocument()
     expect(
       screen.getByText('Nothing is deleted from the drive.'),
     ).toBeInTheDocument()
     expect(screen.getByText('Nothing uses it right now.')).toBeInTheDocument()
     expect(screen.queryByLabelText(/to confirm/)).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Remove volume' }))
+    await user.click(screen.getByRole('button', { name: 'Remove drive' }))
 
     await waitFor(() =>
       expect(calls).toContainEqual({
@@ -303,7 +303,7 @@ describe('Storage > Volumes', () => {
     expect(dialog).toHaveTextContent('It leaves the write queue.')
 
     // Losing track of files takes a typed confirmation, then sends force.
-    const remove = screen.getByRole('button', { name: 'Remove volume' })
+    const remove = screen.getByRole('button', { name: 'Remove drive' })
     expect(remove).toBeDisabled()
     await user.type(screen.getByLabelText(/to confirm/), 'archive')
     expect(remove).toBeEnabled()
@@ -327,7 +327,7 @@ describe('Storage > Volumes', () => {
     expect(await screen.findByRole('dialog')).toHaveTextContent(
       "Civex can't see what is on it right now",
     )
-    expect(screen.getByRole('button', { name: 'Remove volume' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Remove drive' })).toBeDisabled()
   })
 
   it('edits a volume’s space limit', async () => {
@@ -337,7 +337,7 @@ describe('Storage > Volumes', () => {
     await user.click(screen.getByRole('menuitem', { name: 'Edit…' }))
 
     expect(
-      await screen.findByRole('heading', { name: 'Edit volume “archive”' }),
+      await screen.findByRole('heading', { name: 'Edit drive “archive”' }),
     ).toBeInTheDocument()
     const save = screen.getByRole('button', { name: 'Save' })
     expect(save).toBeDisabled()
@@ -388,10 +388,10 @@ describe('Storage > Volumes', () => {
     const user = userEvent.setup()
     renderAt()
 
-    await user.click(await screen.findByRole('button', { name: 'Add volume' }))
+    await user.click(await screen.findByRole('button', { name: 'Add drive' }))
 
     expect(
-      await screen.findByRole('heading', { name: 'Add a volume' }),
+      await screen.findByRole('heading', { name: 'Add a drive' }),
     ).toBeInTheDocument()
   })
 })
@@ -400,10 +400,10 @@ describe('Storage > Collections', () => {
   it('lists every collection with its home, and can be linked to', async () => {
     renderAt('/settings/storage?tab=collections')
 
-    const study = await screen.findByLabelText('Home volume for study')
+    const study = await screen.findByLabelText('Home drive for study')
     expect(study).toHaveValue('archive')
-    expect(screen.getByLabelText('Home volume for field-notes')).toHaveValue('')
-    expect(screen.getByLabelText('Home volume for zoo')).toHaveValue('')
+    expect(screen.getByLabelText('Home drive for field-notes')).toHaveValue('')
+    expect(screen.getByLabelText('Home drive for zoo')).toHaveValue('')
     expect(screen.getByRole('link', { name: /^study/ })).toHaveAttribute(
       'href',
       '/collections/c1',
@@ -416,7 +416,7 @@ describe('Storage > Collections', () => {
     renderAt('/settings/storage?tab=collections')
 
     await user.selectOptions(
-      await screen.findByLabelText('Home volume for zoo'),
+      await screen.findByLabelText('Home drive for zoo'),
       'scratch',
     )
 
@@ -434,7 +434,7 @@ describe('Storage > Collections', () => {
     renderAt('/settings/storage?tab=collections')
 
     await user.selectOptions(
-      await screen.findByLabelText('Home volume for study'),
+      await screen.findByLabelText('Home drive for study'),
       '',
     )
 
@@ -453,7 +453,7 @@ describe('Storage > Collections', () => {
 
     await user.selectOptions(
       await screen.findByLabelText(
-        "If the home volume of study can't take a file",
+        "If the home drive of study can't take a file",
       ),
       'fail',
     )
@@ -467,7 +467,7 @@ describe('Storage > Collections', () => {
     )
     // A collection with no home has nothing to choose.
     expect(
-      screen.queryByLabelText("If the home volume of zoo can't take a file"),
+      screen.queryByLabelText("If the home drive of zoo can't take a file"),
     ).not.toBeInTheDocument()
   })
 
@@ -480,7 +480,7 @@ describe('Storage > Collections', () => {
     const bar = screen.getByRole('region', { name: 'Bulk actions' })
     expect(bar).toHaveTextContent('2 selected')
     await user.selectOptions(
-      within(bar).getByLabelText('Home volume for the selected collections'),
+      within(bar).getByLabelText('Home drive for the selected collections'),
       'scratch',
     )
     await user.click(within(bar).getByRole('button', { name: 'Apply' }))
@@ -508,21 +508,21 @@ describe('Storage > Collections', () => {
     const user = userEvent.setup()
     renderAt('/settings/storage?tab=collections&volume=archive')
 
-    await screen.findByLabelText('Home volume for study')
+    await screen.findByLabelText('Home drive for study')
     expect(
-      screen.queryByLabelText('Home volume for zoo'),
+      screen.queryByLabelText('Home drive for zoo'),
     ).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /On archive/ }))
     expect(
-      await screen.findByLabelText('Home volume for zoo'),
+      await screen.findByLabelText('Home drive for zoo'),
     ).toBeInTheDocument()
 
     await user.type(screen.getByLabelText('Filter collections'), 'note')
     expect(
-      screen.queryByLabelText('Home volume for zoo'),
+      screen.queryByLabelText('Home drive for zoo'),
     ).not.toBeInTheDocument()
     expect(
-      screen.getByLabelText('Home volume for field-notes'),
+      screen.getByLabelText('Home drive for field-notes'),
     ).toBeInTheDocument()
   })
 
@@ -532,23 +532,23 @@ describe('Storage > Collections', () => {
 
     // Only that collection's row, with a way to see them all.
     expect(
-      await screen.findByLabelText('Home volume for study'),
+      await screen.findByLabelText('Home drive for study'),
     ).toBeInTheDocument()
     expect(
-      screen.queryByLabelText('Home volume for zoo'),
+      screen.queryByLabelText('Home drive for zoo'),
     ).not.toBeInTheDocument()
     expect(screen.getByLabelText('Filter collections')).toHaveValue('study')
 
     await user.clear(screen.getByLabelText('Filter collections'))
     expect(
-      await screen.findByLabelText('Home volume for zoo'),
+      await screen.findByLabelText('Home drive for zoo'),
     ).toBeInTheDocument()
   })
 
   it('forgets the focused collection when leaving the Collections tab', async () => {
     const user = userEvent.setup()
     renderAt('/settings/storage?tab=collections&focus=c1')
-    await screen.findByLabelText('Home volume for study')
+    await screen.findByLabelText('Home drive for study')
 
     await user.click(screen.getByRole('tab', { name: 'Tasks' }))
 
@@ -567,7 +567,7 @@ describe('Storage > Collections', () => {
     ]
     renderAt('/settings/storage?tab=collections')
 
-    await screen.findByLabelText('Home volume for zoo')
+    await screen.findByLabelText('Home drive for zoo')
     expect(screen.getByText('Home').closest('span')).toHaveTextContent(
       'HomeOffline',
     )
@@ -583,12 +583,12 @@ describe('Storage > Collections', () => {
     const user = userEvent.setup()
     renderAt('/settings/storage?tab=collections')
 
-    expect(await screen.findByText(/One volume/)).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Add a volume' }))
+    expect(await screen.findByText(/One drive/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Add a drive' }))
 
     expect(screen.getByTestId('where')).toHaveTextContent('/settings/storage')
     expect(
-      await screen.findByRole('button', { name: 'Add volume' }),
+      await screen.findByRole('button', { name: 'Add drive' }),
     ).toBeInTheDocument()
   })
 })
@@ -598,14 +598,14 @@ describe('Storage tabs', () => {
     const user = userEvent.setup()
     renderAt()
 
-    expect(await screen.findByRole('tab', { name: 'Volumes' })).toHaveAttribute(
+    expect(await screen.findByRole('tab', { name: 'Drives' })).toHaveAttribute(
       'aria-selected',
       'true',
     )
     await user.click(screen.getByRole('tab', { name: 'Collections' }))
     expect(screen.getByTestId('where')).toHaveTextContent('?tab=collections')
     expect(
-      await screen.findByLabelText('Home volume for study'),
+      await screen.findByLabelText('Home drive for study'),
     ).toBeInTheDocument()
 
     await user.click(screen.getByRole('tab', { name: 'Tasks' }))
@@ -615,7 +615,7 @@ describe('Storage tabs', () => {
       'tab-tasks',
     )
 
-    await user.click(screen.getByRole('tab', { name: 'Volumes' }))
+    await user.click(screen.getByRole('tab', { name: 'Drives' }))
     expect(screen.getByTestId('where')).toHaveTextContent(
       /^\/settings\/storage$/,
     )
@@ -624,7 +624,7 @@ describe('Storage tabs', () => {
   it('ignores an unknown tab name', async () => {
     renderAt('/settings/storage?tab=nonsense')
 
-    expect(await screen.findByRole('tab', { name: 'Volumes' })).toHaveAttribute(
+    expect(await screen.findByRole('tab', { name: 'Drives' })).toHaveAttribute(
       'aria-selected',
       'true',
     )

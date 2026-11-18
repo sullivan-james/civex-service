@@ -6,6 +6,7 @@ be unplugged."""
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 from pathlib import Path
@@ -16,7 +17,6 @@ from sqlalchemy import event
 from civex.context import AppContext
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.file_access import (
-    FilesScatteredError,
     FilesUnavailableError,
     FileSelection,
     LinksNotPossibleError,
@@ -535,23 +535,52 @@ def test_copy_mode_makes_copies_that_can_be_edited_safely(
     assert ctx.file_svc.retrieve(_only_sha(ctx, study)) == b"one"
 
 
-def test_a_folder_that_cannot_hold_links_is_refused_before_anything_is_built(
+def test_a_folder_that_cannot_hold_links_gets_copies_instead(
     ctx: AppContext, study: Study, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     study.selection(study.rec_a, "s1", b"one")
 
     def refuse(*a, **k):
-        raise OSError(18, "Invalid cross-device link")
+        raise OSError(errno.EXDEV, "Invalid cross-device link")
 
     monkeypatch.setattr("civex.services.file_access_service.os.link", refuse)
     dest = tmp_path / "out"
 
-    with pytest.raises(LinksNotPossibleError, match="Copy the files"):
-        ctx.file_access_svc.export(
-            _sel(schema="selection", within=str(study.e7.id)), dest
-        )
+    result = ctx.file_access_svc.export(
+        _sel(schema="selection", within=str(study.e7.id)), dest
+    )
 
-    assert not dest.exists()  # the probe leaves nothing behind either
+    made = dest / "Recording A" / "s1" / "s1.txt"
+    assert (result.linked, result.copied) == (0, 1)
+    assert made.read_bytes() == b"one" and os.access(made, os.W_OK)
+    assert not list(dest.glob(".civex-link-probe-*"))
+
+
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0, reason="root may write anything"
+)
+def test_a_linked_file_is_read_only_so_the_stored_file_cannot_be_edited(
+    ctx: AppContext, study: Study, tmp_path: Path
+) -> None:
+    study.selection(study.rec_a, "s1", b"one")
+    selection = _sel(schema="selection", within=str(study.e7.id))
+    dest = tmp_path / "out"
+
+    ctx.file_access_svc.export(selection, dest)
+    linked = dest / "Recording A" / "s1" / "s1.txt"
+
+    assert not os.access(linked, os.W_OK)
+    with pytest.raises(PermissionError):
+        linked.write_text("edited")
+    assert ctx.file_svc.retrieve(_only_sha(ctx, study)) == b"one"
+    # Read-only never gets in civex's own way: the folder can be made again,
+    # removed, and the stored file deleted.
+    again = ctx.file_access_svc.export(selection, dest, mode="copy")
+    assert again.copied == 1 and os.access(linked, os.W_OK)
+    ctx.file_access_svc.export(selection, dest)
+    ctx.file_access_svc.remove_export(dest)
+    assert not linked.exists()
+    assert ctx.file_svc._store.delete(_only_sha(ctx, study))
 
 
 def test_a_bad_mode_is_refused(ctx: AppContext, study: Study, tmp_path: Path) -> None:
@@ -583,20 +612,64 @@ def _both_drives(ctx: AppContext, study: Study, archive: Path) -> FileSelection:
     return _sel(schema="selection", within=str(study.e7.id))
 
 
-def test_files_on_several_drives_cannot_be_gathered_into_a_linked_folder(
-    ctx: AppContext, study: Study, archive: Path, tmp_path: Path
+def _apart(monkeypatch: pytest.MonkeyPatch, drive: Path) -> None:
+    """Make `drive` a disk of its own: no hard link crosses into or out of it,
+    as between two real drives (the test drives share one temporary disk)."""
+    real = os.link
+
+    def link(source, target, *a, **k):
+        if Path(source).is_relative_to(drive) != Path(target).is_relative_to(drive):
+            raise OSError(errno.EXDEV, "Invalid cross-device link")
+        return real(source, target, *a, **k)
+
+    monkeypatch.setattr("civex.services.file_access_service.os.link", link)
+
+
+def test_files_on_several_drives_are_linked_where_they_can_be_and_copied_where_not(
+    ctx: AppContext, study: Study, archive: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    selection = _both_drives(ctx, study, archive)
+    study.selection(study.rec_a, "near", b"small")
+    study.selection(
+        study.rec_a, "far", b"the bigger one", on=str(study.collection.id)
+    )
+    selection = _sel(schema="selection", within=str(study.e7.id))
+    _apart(monkeypatch, archive)
 
     plan = ctx.file_access_svc.plan(selection)
-    with pytest.raises(FilesScatteredError, match="2 drives"):
-        ctx.file_access_svc.export_managed(selection, "tables")
-    with pytest.raises(FilesScatteredError):
-        ctx.file_access_svc.export(selection, tmp_path / "out")
+    result = ctx.file_access_svc.export_managed(selection, "tables")
 
-    assert plan.scattered and plan.link_volume is None
-    assert {v.volume for v in plan.by_volume} == {"default", "archive"}
-    assert not (tmp_path / "out").exists()
+    dest = archive / "_exports" / "tables" / "Recording A"
+    # The folder goes where most of the bytes are; only the rest is copied.
+    assert plan.link_volume == "archive" and result.location == "archive"
+    assert (result.linked, result.copied) == (1, 1)
+    assert (dest / "near" / "near.txt").read_bytes() == b"small"
+    assert (dest / "far" / "far.txt").read_bytes() == b"the bigger one"
+    assert result.dest in {e.path for e in ctx.file_access_svc.list_exports()}
+
+
+def test_drives_on_one_disk_share_a_folder_of_links(
+    ctx: AppContext, study: Study, archive: Path
+) -> None:
+    selection = _both_drives(ctx, study, archive)  # two drives, one disk
+
+    result = ctx.file_access_svc.export_managed(selection, "tables")
+
+    assert (result.linked, result.copied) == (2, 0)
+
+
+def test_the_copies_a_folder_of_links_needs_must_fit(
+    ctx: AppContext, study: Study, archive: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    study.selection(study.rec_a, "near", b"x" * 5000)
+    study.selection(study.rec_a, "far", b"y" * 9000, on=str(study.collection.id))
+    _apart(monkeypatch, archive)
+    monkeypatch.setattr(ctx.file_access_svc._store, "room_on", lambda volume: 100)
+
+    with pytest.raises(ValidationError, match="Not enough room"):
+        ctx.file_access_svc.export_managed(
+            _sel(schema="selection", within=str(study.e7.id)), "tables"
+        )
+
     assert not (archive / "_exports").exists()
 
 
@@ -727,7 +800,7 @@ def test_gathering_the_selection_makes_it_linkable_without_moving_anything_else(
     selection = _both_drives(ctx, study, archive)
     # Same collection, another encounter: not in the selection, so it must not move.
     bystander = study.selection(study.rec_c, "other", b"not selected")
-    assert ctx.file_access_svc.plan(selection).scattered
+    assert len(ctx.file_access_svc.plan(selection).by_volume) == 2
     shas, _, _ = ctx.file_access_svc.to_move(
         ctx.file_access_svc.plan(selection).items, "archive"
     )
@@ -743,7 +816,7 @@ def test_gathering_the_selection_makes_it_linkable_without_moving_anything_else(
     result = ctx.file_access_svc.export_managed(selection, "tables")
 
     assert outcome.status == "completed"
-    assert not plan.scattered and plan.link_volume == "archive"
+    assert len(plan.by_volume) == 1 and plan.link_volume == "archive"
     assert result.location == "archive" and result.linked == 2
     # A file in the same collection that wasn't selected did not move.
     rest = ctx.file_access_svc.plan(_sel(record_ids=[str(bystander.id)]))

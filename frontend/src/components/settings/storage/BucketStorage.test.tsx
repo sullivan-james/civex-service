@@ -93,7 +93,7 @@ describe('a project keeping its files in a bucket', () => {
 
     expect(await screen.findByText('lab/humpbacks')).toBeInTheDocument()
     expect(screen.getByText('http://127.0.0.1:9000')).toBeInTheDocument()
-    expect(screen.queryByRole('tab', { name: 'Volumes' })).toBeNull()
+    expect(screen.queryByRole('tab', { name: 'Drives' })).toBeNull()
     const drives = screen.getByRole('button', { name: 'Use drives…' })
     expect(drives).toBeDisabled()
     expect(drives).toHaveAttribute(

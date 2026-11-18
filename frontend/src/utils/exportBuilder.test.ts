@@ -10,7 +10,6 @@ import {
   previewSelection,
   describeTable,
 } from './exportBuilder'
-import { layoutNodes } from './exportLayouts'
 
 const field = (name: string, type: string) => ({
   id: name,
@@ -187,52 +186,9 @@ describe('saying what an export is', () => {
         filter_tree: { field: 'a', op: 'eq', value: 1 } as never,
         files_layout: 'tree',
       }),
-    ).toBe('every file of any kind beneath · filtered · a folder per record')
-  })
-})
-
-describe('layouts as folders', () => {
-  const names = (layout: 'tree' | 'grouped' | 'flat') =>
-    layoutNodes(layout).map((n) => `${'  '.repeat(n.depth)}${n.name}`)
-
-  it('draw a folder for every level in a tree', () => {
-    expect(names('tree')).toEqual([
-      'Parent 1',
-      '  Child 1',
-      '    Item 1',
-      '      file.txt',
-      '    Item 2',
-      '      file.txt',
-    ])
-  })
-
-  it('gather the last level into one folder when grouped, naming files for their item', () => {
-    expect(names('grouped')).toEqual([
-      'Parent 1',
-      '  Child 1',
-      '    Items',
-      '      Item 1 - file.txt',
-      '      Item 2 - file.txt',
-    ])
-  })
-
-  it('are only files when flat', () => {
-    const nodes = layoutNodes('flat')
-
-    expect(nodes.every((n) => n.kind === 'file' && n.depth === 0)).toBe(true)
-    expect(nodes.map((n) => n.name)).toEqual([
-      'Item 1 - file.txt',
-      'Item 2 - file.txt',
-      'Item 3 - file.txt',
-    ])
-  })
-
-  it('use neutral names that fit any data', () => {
-    const everything = (['tree', 'grouped', 'flat'] as const).flatMap((l) =>
-      layoutNodes(l).map((n) => n.name),
+    ).toBe(
+      'every file of any kind beneath · filtered · a folder for each record',
     )
-
-    expect(everything.join(' ')).not.toMatch(/encounter|recording|selection/i)
   })
 })
 

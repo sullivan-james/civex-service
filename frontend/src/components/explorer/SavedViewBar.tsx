@@ -21,10 +21,9 @@ import { LAYOUTS, LAYOUT_SHORT } from '../../utils/exportLayouts'
 import { errorMessage } from '../../lib/errors'
 
 const LAYOUT_HINT: Record<FilesLayout, string> = {
-  tree: 'Arrange this view’s files by the records above them, such as Encounter/Recording/Selection.',
-  grouped:
-    'Keep the folders above, but gather the records that hold the files into one folder named for their kind, such as Encounter/Recording/Selections.',
-  flat: 'Put every file in a single folder.',
+  tree: 'Give each record a folder of its own, inside the folder of the record it belongs to.',
+  grouped: 'Gather the files of each kind of record into one folder.',
+  flat: 'Put every file in one folder.',
 }
 
 /** Asks for a view's name -- free text, in the user's own words. */

@@ -48,7 +48,7 @@ saved filter. Add `--paths` to print where each file is on disk, for scripts.
 
 | You want… | Command | Takes space? |
 |---|---|---|
-| A folder to open, instantly | `civex files export --in survey-2024 --name photos` | No: hard links on the files' drive |
+| A folder to open, instantly | `civex files export --in survey-2024 --name photos` | Only for files on another drive |
 | Copies you can edit, or on another drive | `… --name photos --mode copy --to archive` | Yes |
 | One file to send | `civex files download photos.zip --in survey-2024` | Yes |
 
@@ -61,15 +61,18 @@ civex files export --in survey-2024 --name photos --table csv
 ```text
 /media/new-archive/civex/_exports/photos on new-archive: 0 copied, 3 linked, 0 already there,
 0 removed, 1 table(s) written.
-A linked file is the stored file itself: don't edit it in place (use --mode copy for files you will
-change).
+Linked files are the stored files themselves, so they are read-only (use --mode copy for files you
+will change).
 ```
 
-- **Links** are free and instant, but must be on the drive that holds the files.
-  If the files are spread over several drives, civex says so and offers a copy,
-  or move them onto one drive first with `civex files gather --in survey-2024 --to archive`.
-  A drive that can't make links (exFAT, FAT32) is refused before anything is
-  built.
+- **Links** are free and instant. The folder goes on the drive holding most of
+  the files; files on other drives, or on a drive that can't make links (exFAT,
+  FAT32), are copied into it, and the room for those copies is checked first.
+  To have no copies at all, move the files onto one drive first with
+  `civex files gather --in survey-2024 --to archive`.
+- **Linked files are read-only**, because each is the stored file itself: a
+  program can open them but not save over them. Use `--mode copy` for files you
+  will change.
 - **Running it again** with the same `--name` updates the folder: new files are
   added and ones no longer selected are removed.
 - **An unplugged drive:** files that can't be reached are listed first and nothing
@@ -135,9 +138,11 @@ folder).
 Use the **Export** menu on any list of records, on a record's page, or on a
 collection's **Exports** tab. It takes exactly what the list shows, or the rows
 you ticked. From a list, it starts as the table on screen. **Add files or more
-tables…** opens the full builder (What · Layout · Finish), with a live preview
-of the folder tree. Finish with **Open as folder**, **Copy to a drive** or
-**Download**.
+tables…** opens the full builder (What · Finish), with a live preview of the
+folder tree; tick **Put all the files in one folder** beside it to drop the
+folder for each record. Finish with **Open as a folder**, **Put on a drive** or
+**Download as a zip**. Files on a drive that isn't plugged in are listed in the
+preview, with what to do, before anything is made.
 
 Saved exports are on the **Exports** page in the sidebar. Its **Made** tab lists
 the folders made, with the space they use.

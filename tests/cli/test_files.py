@@ -91,7 +91,7 @@ def test_export_links_into_the_exports_folder_and_run_again_changes_nothing(
     out = _flat(first.output)
     assert first.exit_code == 0, first.output
     assert "1 linked" in out and "0 copied" in out
-    assert "don't edit it in place" in out
+    assert "read-only" in out
     dest = project_dir / "_civex" / "exports" / "tables"
     assert (dest / "Encounter 7" / "a" / "a.txt").read_bytes() == b"alpha"
     assert "1 already there" in _flat(again.output)
@@ -186,15 +186,11 @@ def two_drives(ctx: AppContext, study, tmp_path_factory: pytest.TempPathFactory)
     return drive
 
 
-def test_files_on_two_drives_cannot_be_linked_and_the_error_says_what_to_do(
-    two_drives, project_dir: Path
-) -> None:
+def test_files_on_two_drives_still_make_one_folder(two_drives: Path) -> None:
     result = _invoke("export", "--in", "hb", "--schema", "recording", "--name", "t")
 
-    out = _flat(result.output)
-    assert result.exit_code == 1
-    assert "2 drives" in out and "--mode copy --to" in out
-    assert not (project_dir / "_civex" / "exports" / "t").exists()
+    assert result.exit_code == 0, result.output
+    assert "2 linked" in _flat(result.output)  # the test drives share one disk
 
 
 def test_the_same_files_can_be_copied_onto_one_drive(two_drives: Path) -> None:
@@ -271,9 +267,6 @@ def test_remove_older_than_keeps_recent_exports(study, project_dir: Path) -> Non
 def test_gather_moves_just_the_selection_so_it_can_be_linked(
     two_drives, project_dir: Path
 ) -> None:
-    before = _invoke("export", "--in", "hb", "--schema", "recording", "--name", "t")
-    assert before.exit_code == 1  # scattered
-
     dry = _invoke(
         "gather", "--to", "archive", "--in", "hb", "--schema", "recording", "--dry-run"
     )

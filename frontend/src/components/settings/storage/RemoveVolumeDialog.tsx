@@ -24,8 +24,8 @@ export function RemoveVolumeDialog({
 
   return (
     <ConfirmDialog
-      title={`Remove volume “${vol.name}”?`}
-      confirmLabel="Remove volume"
+      title={`Remove drive “${vol.name}”?`}
+      confirmLabel="Remove drive"
       variant="danger"
       // Losing track of files is the one consequential outcome, so it takes a
       // typed confirmation; an unused volume is just one click.
@@ -37,7 +37,7 @@ export function RemoveVolumeDialog({
       body={
         <div className="space-y-3 text-sm">
           <p>
-            This removes the volume from Civex.{' '}
+            This removes the drive from Civex.{' '}
             <strong>Nothing is deleted from the drive.</strong>
           </p>
           <ul className="list-disc space-y-1 pl-5 text-fg-muted">
@@ -45,14 +45,14 @@ export function RemoveVolumeDialog({
               <li>
                 Civex can&apos;t see what is on it right now, so it may hold
                 files. Records that use them will show those files as
-                unavailable until the volume is added back with the same folder.
+                unavailable until the drive is added back with the same folder.
               </li>
             ) : (
               used > 0 && (
                 <li>
                   It holds <strong>{formatSize(used)}</strong> of Civex files.
                   Records that use them will show those files as unavailable
-                  until the volume is added back with the same folder.
+                  until the drive is added back with the same folder.
                 </li>
               )
             )}

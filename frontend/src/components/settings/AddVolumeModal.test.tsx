@@ -81,10 +81,10 @@ function renderIt(existingNames: string[] = ['default']) {
   return { onClose }
 }
 
-const addButton = () => screen.getByRole('button', { name: 'Add volume' })
+const addButton = () => screen.getByRole('button', { name: 'Add drive' })
 
 async function fill(user: ReturnType<typeof userEvent.setup>, path: string) {
-  await user.type(screen.getByLabelText(/volume name/i), 'archive')
+  await user.type(screen.getByLabelText(/drive name/i), 'archive')
   await user.type(screen.getByLabelText(/^folder/i), path)
 }
 
@@ -184,15 +184,15 @@ describe('AddVolumeModal', () => {
     const user = userEvent.setup()
     renderIt(['default', 'archive'])
 
-    await user.type(screen.getByLabelText(/volume name/i), 'my drive')
+    await user.type(screen.getByLabelText(/drive name/i), 'my drive')
     expect(
       screen.getByText('Use only letters, digits, hyphens and underscores.'),
     ).toBeInTheDocument()
 
-    await user.clear(screen.getByLabelText(/volume name/i))
-    await user.type(screen.getByLabelText(/volume name/i), 'archive')
+    await user.clear(screen.getByLabelText(/drive name/i))
+    await user.type(screen.getByLabelText(/drive name/i), 'archive')
     expect(
-      screen.getByText("A volume called 'archive' already exists."),
+      screen.getByText("A drive called 'archive' already exists."),
     ).toBeInTheDocument()
   })
 

@@ -56,11 +56,9 @@ describe('The exports made', () => {
 
     expect(await screen.findByText('hb-selection')).toBeTruthy()
     expect(screen.getByText(/on the project folder/i)).toBeTruthy()
-    expect(screen.getByText(/4 files · 4 linked · no space used/)).toBeTruthy()
+    expect(screen.getByText(/4 files · no space used/)).toBeTruthy()
     expect(screen.getByText(/on archive/)).toBeTruthy()
-    expect(
-      screen.getByText(/2 files · 2 copied · 3\.0 GB on disk/),
-    ).toBeTruthy()
+    expect(screen.getByText(/2 files · 3\.0 GB on disk/)).toBeTruthy()
     expect(screen.getByText(/copies are using 3\.0 GB/i)).toBeTruthy()
   })
 

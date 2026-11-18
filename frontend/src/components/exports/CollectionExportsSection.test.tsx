@@ -96,7 +96,7 @@ describe('a collection’s Exports tab', () => {
     const row = (await screen.findByText('All files')).closest('li')!
 
     await userEvent.click(within(row).getByRole('button', { name: /^export/i }))
-    await finishExport('folder', 2)
+    await finishExport('folder', 1)
 
     await waitFor(() =>
       expect(calls.some((c) => c.path === '/api/file-access/export')).toBe(

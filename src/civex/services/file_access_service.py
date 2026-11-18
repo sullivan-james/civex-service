@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-from civex import __version__
+from civex import __version__, file_modes
 from civex.domain.dtos import FileRef, RecordDTO
 from civex.domain import features
 from civex.domain.exceptions import (
@@ -66,7 +66,6 @@ from civex.domain.file_access import (
     FileItem,
     FilePlan,
     FileSelection,
-    FilesScatteredError,
     FilesUnavailableError,
     LinksNotPossibleError,
     PlannedTable,
@@ -932,8 +931,8 @@ class FileAccessService:
         plan: FilePlan | None = None,
         progress: Progress | None = None,
     ) -> ExportResult:
-        """Export into civex's own exports folder. `link` puts it on the one
-        drive that holds the files (refusing files scattered over several);
+        """Export into civex's own exports folder. `link` puts it on the drive
+        that holds most of the files, linking what it can and copying the rest;
         `copy` puts real copies on `volume` (or in the project if none is
         named), wherever the files are. Both can be cleaned up with
         `list_exports` / `remove_export`."""
@@ -944,8 +943,6 @@ class FileAccessService:
         if not plan.complete and not allow_partial:
             raise FilesUnavailableError(plan)
         if mode == "link":
-            if plan.scattered:
-                raise FilesScatteredError(plan)
             location = (
                 self.location_of(plan.link_volume) if plan.link_volume else PROJECT
             )
@@ -977,23 +974,23 @@ class FileAccessService:
     ) -> ExportResult:
         """Make the selection's folder tree at `dest`.
 
-        Nothing is made, and an error says why, if: any file is out of reach and
-        `allow_partial` is not set (`FilesUnavailableError`); for `link`, the
-        files are on more than one drive (`FilesScatteredError`) or `dest` isn't
-        somewhere a hard link to them can be made (`LinksNotPossibleError`); for
-        `copy`, `dest` hasn't room. Running it again on the same folder brings it
-        up to date: what is there is left, what is new is added, what is no longer
-        selected is removed -- but only in a folder an earlier export made, never
-        one that holds other files. A link *is* the stored file, so don't edit it
-        in place; a copy is yours to change."""
+        Nothing is made, and an error says why, if any file is out of reach and
+        `allow_partial` is not set (`FilesUnavailableError`), or `dest` hasn't
+        room for the copies it needs. `link` makes a hard link wherever one can
+        be made (a file on the same drive as `dest`, a drive that supports them)
+        and a copy of every other file, so how the files are spread over drives
+        never stops a folder being made; `copy` copies everything. Running it
+        again on the same folder brings it up to date: what is there is left,
+        what is new is added, what is no longer selected is removed -- but only
+        in a folder an earlier export made, never one that holds other files. A
+        link *is* the stored file, so it is made read-only
+        (`file_modes.make_read_only`); a copy is yours to change."""
         if mode not in EXPORT_MODES:
             raise ValidationError(f"mode must be one of: {', '.join(EXPORT_MODES)}")
         self._drives()  # folders of links or copies need drives
         plan = plan or self.plan(selection, progress=progress, fetch=True)
         if not plan.complete and not allow_partial:
             raise FilesUnavailableError(plan)
-        if mode == "link" and plan.scattered:
-            raise FilesScatteredError(plan)
 
         dest = Path(dest)
         previous = _read_marker(dest)
@@ -1006,19 +1003,35 @@ class FileAccessService:
                     "(or one a civex export made), so nothing of yours is touched."
                 )
         previous = previous or {}
-        want = "hardlinked" if mode == "link" else "copied"
+        reachable = [i for i in plan.items if i.available and i.volume]
+        # Which drives' files can be linked at dest: one try per drive.
+        linkable: dict[str, bool] = {}
+        if mode == "link":
+            for item in reachable:
+                if item.volume and item.volume not in linkable:
+                    linkable[item.volume] = self._can_link(self._source(item), dest)
+
+        def how_now(item: FileItem) -> str:
+            return "hardlinked" if linkable.get(item.volume or "") else "copied"
 
         def in_place(item: FileItem) -> bool:
+            # What an earlier export left is kept if it is made as this one
+            # would make it: a copy turns into a link once the file can be
+            # linked (freeing its space), and a link into a copy for `copy`.
             entry = previous.get(item.path)
-            return bool(entry and entry["sha"] == item.sha256 and entry["how"] == want)
-
-        reachable = [i for i in plan.items if i.available and i.volume]
-        if mode == "link" and reachable:
-            self._probe_link(self._source(reachable[0]), dest)
-        if mode == "copy":
-            self._check_room(
-                dest, location, sum(i.size for i in reachable if not in_place(i))
+            return bool(
+                entry and entry["sha"] == item.sha256 and entry["how"] == how_now(item)
             )
+
+        self._check_room(
+            dest,
+            location,
+            sum(
+                i.size
+                for i in reachable
+                if not in_place(i) and not linkable.get(i.volume or "")
+            ),
+        )
         dest.mkdir(parents=True, exist_ok=True)
 
         result = ExportResult(dest=str(dest), location=location)
@@ -1057,7 +1070,11 @@ class FileAccessService:
                     if not made:
                         where.mkdir(parents=True, exist_ok=True)
                         made = True
-                    how = _place(source, where / name, mode)
+                    how = _place(
+                        source,
+                        where / name,
+                        "link" if how_now(item) == "hardlinked" else "copy",
+                    )
                 except FileNotFoundError:
                     result.missing.append(_gone(item))
                     continue
@@ -1090,10 +1107,11 @@ class FileAccessService:
         _write_missing_note(dest, result.missing)
         return result
 
-    def _probe_link(self, source: Path, dest: Path) -> None:
+    def _can_link(self, source: Path, dest: Path) -> bool:
         """Whether a hard link to `source` can be made at `dest`, tried with a
         throwaway name in the nearest folder that exists, before anything is
-        built. Fails with the reason a person can act on."""
+        built. Not when they are on different drives, or the drive can't hold
+        links (exFAT, FAT32); those files are copied instead."""
         anchor = dest
         while not anchor.exists() and anchor != anchor.parent:
             anchor = anchor.parent
@@ -1101,16 +1119,12 @@ class FileAccessService:
         try:
             os.link(source, probe)
         except FileNotFoundError:
-            return  # the file itself is gone; the build reports that per file
-        except OSError as e:
-            raise LinksNotPossibleError(
-                f"A linked folder can't be made at {dest}: {e.strerror or e}. "
-                "Links need the folder to be on the same drive as the files, on a "
-                "drive that supports them (not exFAT or FAT32). Copy the files "
-                "to a drive instead."
-            ) from e
-        finally:
-            probe.unlink(missing_ok=True)
+            return True  # the file itself is gone; the build reports that per file
+        except OSError:
+            return False
+        else:
+            file_modes.remove(probe, missing_ok=True)
+        return True
 
     def _check_room(self, dest: Path, location: str | None, need: int) -> None:
         if need <= 0:
@@ -1187,7 +1201,7 @@ class FileAccessService:
             if target is None:
                 continue  # a path that leads out of the folder: never followed
             try:
-                target.unlink()  # a link is removed, never what it points at
+                file_modes.remove(target)  # a link goes, never what it points at
             except FileNotFoundError:
                 continue
             removed += 1
@@ -1584,12 +1598,21 @@ def _unavailable_groups(items: list[FileItem]) -> list[UnavailableGroup]:
 
 def _place(source: Path, target: Path, mode: str) -> str:
     """Put one file at `target`: "hardlinked" (the stored file under another
-    name; same drive only) or "copied" (written beside the target and renamed
-    into place, so a half-written file never appears)."""
-    target.unlink(missing_ok=True)
+    name, made read-only so it can't be edited by mistake; same drive only) or
+    "copied" (written beside the target and renamed into place, so a
+    half-written file never appears). A link that can't be made after all (the
+    drive's limit on links to one file) is a copy instead."""
+    file_modes.remove(target, missing_ok=True)
     if mode == "link":
-        os.link(source, target)
-        return "hardlinked"
+        try:
+            os.link(source, target)
+        except FileNotFoundError:
+            raise
+        except OSError:
+            pass
+        else:
+            file_modes.make_read_only(target)
+            return "hardlinked"
     part = target.with_name(target.name + ".part")
     try:
         shutil.copyfile(source, part)
@@ -1740,7 +1763,7 @@ def _remove(dest: Path, path: str) -> None:
     target = _inside(dest, path)
     if target is None:
         return
-    target.unlink(missing_ok=True)
+    file_modes.remove(target, missing_ok=True)
     _prune_empty(dest, target.parent)
 
 

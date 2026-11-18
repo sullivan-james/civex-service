@@ -157,7 +157,7 @@ describe('CleanUpDialog', () => {
     renderIt()
 
     expect(
-      await screen.findByText(/Nothing to clean up on any volume/),
+      await screen.findByText(/Nothing to clean up on any drive/),
     ).toBeVisible()
     expect(
       screen.getByText(/added in the last 14 days \(2 files\)/),

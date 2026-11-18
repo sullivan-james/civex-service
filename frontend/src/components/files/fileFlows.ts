@@ -265,51 +265,6 @@ export function copyToDrive(
   })
 }
 
-/** Move just the selection's files onto one drive (the ordinary move, shown in
- * the status bar), then link them as a folder and open it: one action for the
- * person, however long the move takes. */
-export function moveThenOpen(
-  ctx: FlowContext,
-  selection: FileSelection,
-  name: string,
-  volume: string,
-) {
-  return job(ctx, 'Preparing the move…', async (j) => {
-    const started = await tracked(ctx, j, (progressId) =>
-      fileAccessApi.gather(selection, volume, progressId),
-    )
-    void ctx.qc.invalidateQueries({ queryKey: ['store'] })
-    if (started.transfer_id) {
-      const title = `Moving ${plural(started.files, 'file')} to ${volume}…`
-      j.update({ title })
-      await waitForMove(ctx, j, started.transfer_id, title)
-    }
-
-    j.update({
-      title: 'Opening folder…',
-      detail: undefined,
-      progress: undefined,
-    })
-    const out = await tracked(ctx, j, (progressId) =>
-      fileAccessApi.tryExport(selection, {
-        name,
-        mode: 'link',
-        allowPartial: true,
-        open: true,
-        progressId,
-      }),
-    )
-    if (out.kind === 'done') return reportExport(ctx.toast, out.result)
-    ctx.problem({
-      kind: 'open',
-      selection,
-      name,
-      plan: await planFor(selection, out.plan),
-      message: out.plan ? undefined : out.message,
-    })
-  })
-}
-
 /** Move picked files (the Files tab: a selection narrowed by place, name or
  * ticks) onto one drive, as one job: downloading any that are only on the
  * server, then the move itself, each with its progress in the status bar. */
@@ -417,8 +372,8 @@ async function followMove(
       t.status === 'interrupted'
     )
       throw new Error(
-        `The move ${t.status === 'paused' ? 'was paused' : `ended (${t.status})`}, so the folder wasn't opened. ` +
-          'Resume it in Settings → Storage → Tasks, then open the folder again.',
+        `The move ${t.status === 'paused' ? 'was paused' : `ended (${t.status})`}. ` +
+          'Resume it in Settings → Storage → Tasks.',
       )
     await new Promise((r) => setTimeout(r, wait))
   }
