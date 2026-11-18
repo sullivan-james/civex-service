@@ -95,9 +95,36 @@ export function missingSettings(
 export interface Source {
   /** What goes in the YAML: "step_id.output" or "__input__.name". */
   ref: string
-  /** "the file from step 1, Read a file" */
+  /** Where it comes from and what it is: "Step 1: the file's contents". */
   label: string
+  /** Just what it is, said in a sentence: "the file's contents". */
+  words: string
+  /** Where it comes from: "Step 1, Read a file" or "Given when it runs". */
+  origin: string
   type: string
+}
+
+const lower = (t: string) => t.charAt(0).toLowerCase() + t.slice(1)
+
+/** An input as a person would name it: its description's first clause
+ * ("The files to put on records" -> "Files to put on records"), else its
+ * name. */
+export function inputLabel(spec: PluginIOSpec): string {
+  const first = spec.description?.split(/[.;:(]/)[0]?.trim()
+  if (first && first.length <= 48) {
+    const t = first.replace(/^The /, '')
+    return t.charAt(0).toUpperCase() + t.slice(1)
+  }
+  return titleOf(spec.name)
+}
+
+/** The sentence a plugin gives for what a step does, with `{setting}` and
+ * `{input}` blanks; null when it gives none. */
+export function sentenceOf(plugin: PluginInfo | undefined): string | null {
+  const says = (
+    plugin?.config_schema as { 'x-civex-says'?: unknown } | undefined
+  )?.['x-civex-says']
+  return typeof says === 'string' && says ? says : null
 }
 
 function fits(want: string, have: string): boolean {
@@ -117,12 +144,18 @@ export function sourcesFor(
 ): { fitting: Source[]; others: Source[] } {
   const all: Source[] = []
   for (const input of inputs) {
+    const what = input.type === 'files' ? 'the files' : 'the value'
+    // "(Files)" says nothing beside "the files".
+    const named =
+      input.label && input.label.toLowerCase() !== what.slice(4)
+        ? ` (${input.label})`
+        : ''
+    const words = `${what} given when it is run${named}`
     all.push({
       ref: `${INPUT_SOURCE}.${input.key}`,
-      label:
-        input.type === 'files'
-          ? `The files given when it is run${input.label ? ` (${input.label})` : ''}`
-          : `The value given when it is run${input.label ? ` (${input.label})` : ''}`,
+      label: words.charAt(0).toUpperCase() + words.slice(1),
+      words,
+      origin: 'Given when it runs',
       type: input.type === 'files' ? 'files' : 'any',
     })
   }
@@ -130,9 +163,12 @@ export function sourcesFor(
     const step = steps[i]
     const plugin = plugins.find((p) => p.id === step.plugin)
     for (const out of plugin?.outputs ?? []) {
+      const words = lower(outputWords(out))
       all.push({
         ref: `${step.id}.${out.name}`,
-        label: `${outputWords(out)} from step ${i + 1}${plugin ? `, ${plugin.name}` : ''}`,
+        label: `Step ${i + 1}: ${words}`,
+        words,
+        origin: `Step ${i + 1}${plugin ? `, ${plugin.name}` : ''}`,
         type: out.type,
       })
     }
@@ -146,9 +182,9 @@ export function sourcesFor(
 /** An output said the way a person would: its description's first clause,
  * else its name. */
 function outputWords(out: PluginIOSpec): string {
-  const first = out.description?.split(/[.;(]/)[0]?.trim()
-  if (first && first.length <= 48) return first.replace(/^The /, 'The ')
-  return out.name.replace(/_/g, ' ')
+  const first = out.description?.split(/[.;(:]/)[0]?.trim()
+  if (first && first.length <= 48) return first
+  return `its ${out.name.replace(/_/g, ' ')}`
 }
 
 /** The step with every empty input that has exactly one fitting source
