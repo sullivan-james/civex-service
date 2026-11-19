@@ -371,9 +371,10 @@ class Record(Base):
         # GIN index enables containment (@>) queries on JSONB data fields.
         # On SQLite this degrades to a plain B-tree on the JSON text column (harmless).
         Index("ix_records_data_gin", "data", postgresql_using="gin"),
-        # Full-text search (`search_vector @@ plainto_tsquery`) is a scan of
-        # every record without this. SQLite never populates the column, so
-        # there the (partial) index stays empty.
+        # Full-text ranking of the jump-to box (`ts_rank(search_vector, ...)`);
+        # matching is `record_repo.text_match`, a substring of the values,
+        # which this index does not serve. SQLite never populates the column,
+        # so there the (partial) index stays empty.
         Index(
             "ix_records_search_vector",
             "search_vector",

@@ -9,6 +9,7 @@ import {
   useRecordCounts,
   useRecordPage,
 } from '../../hooks/useRecords'
+import { useFieldTypes } from '../../hooks/useFieldTypes'
 import { useSchemas } from '../../hooks/useSchemas'
 import { useViews } from '../../hooks/useViews'
 import {
@@ -201,16 +202,33 @@ export function useExplorer(scope: ExplorerScope) {
   }, [state.cols, listed, baseFields, joinable])
   const columnNames = cols ?? defaultColumns
 
+  // --- the search: every searchable field, or the one picked (kept only
+  // while the listed kind has it, like the columns)
+  const fieldTypes = useFieldTypes()
+  const searchFields = useMemo(() => {
+    // Until the field types load (or if they can't), only "every field".
+    const types = fieldTypes?.types ?? []
+    const searchable = new Set(
+      types.filter((t) => t.searchable).map((t) => t.type),
+    )
+    // Its own fields only: an inherited one's value is the record above's.
+    return (listed?.fields ?? []).filter((f) => searchable.has(f.type))
+  }, [listed, fieldTypes])
+  const searchIn = searchFields.some((f) => f.name === state.qin)
+    ? state.qin
+    : null
+
   // --- the query, and its first page
   const query = useMemo<RecordQueryParams>(
     () => ({
       schema: listedName,
       within: rootId,
       search: state.q || undefined,
+      search_fields: state.q && searchIn ? [searchIn] : undefined,
       filter,
       sort,
     }),
-    [listedName, rootId, state.q, filter, sort],
+    [listedName, rootId, state.q, searchIn, filter, sort],
   )
   const page = useRecordPage(
     { datasetName: scope.dataset, schemaName: listedName ?? undefined },
@@ -256,6 +274,8 @@ export function useExplorer(scope: ExplorerScope) {
     ignoredConditions,
     filterFields,
     baseFields,
+    searchFields,
+    searchIn,
     joinable,
     defaultColumns,
     columnNames,

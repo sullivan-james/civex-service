@@ -190,13 +190,32 @@ def record_find(
     where: Optional[list[str]] = typer.Option(
         None, "--where", help="field=value filter (repeatable)"
     ),
+    search: Optional[str] = typer.Option(
+        None,
+        "--search",
+        "-q",
+        help="Text to look for in the records' values (text, numbers, list "
+        "items, file names), ignoring case. A record id prefix matches too.",
+    ),
+    search_field: Optional[list[str]] = typer.Option(
+        None,
+        "--search-field",
+        help="Look for the --search text only in this field (repeatable). "
+        "Needs --schema.",
+    ),
     limit: int = typer.Option(50, "--limit", "-n", help="Maximum records to return"),
 ) -> None:
-    """List records in a dataset. Use --schema to filter by type and show field columns."""
+    """List records in a dataset. Use --schema to filter by type and show field
+    columns, and --search to find records by what they hold."""
     ctx = _ctx()
     try:
         records = ctx.record_svc.find(
-            dataset_name, schema_name=schema_name, filters=where or [], limit=limit
+            dataset_name,
+            schema_name=schema_name,
+            filters=where or [],
+            search=search,
+            search_fields=search_field or None,
+            limit=limit,
         )
     except (NotFoundError, ValidationError, ValueError) as e:
         console.print(f"[error]{e}[/error]")

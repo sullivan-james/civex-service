@@ -23,6 +23,7 @@ export interface MoveRecordsRequest {
   filter?: FilterTreeWire | null
   where?: string[]
   search?: string | null
+  search_fields?: string[] | null
 }
 
 export interface RecordMovePlan {

@@ -57,7 +57,7 @@ from civex.domain.dtos import (
 from civex.domain.filters import FilterNode
 from civex.domain.library import LibraryItemDTO
 from civex.domain.placement import Pointer
-from civex.domain.query import ResolvedQuery
+from civex.domain.query import ResolvedQuery, TextSearch
 from civex.domain.transfers import CopyResult, TransferRecord
 
 # (day, dataset_name, schema_name, count) -- see LocalRecordRepository.growth_by_period
@@ -302,18 +302,18 @@ class RecordRepository(Protocol):
     def list_by_schema(
         self,
         schema_id: uuid.UUID,
-        search: str | None = None,
+        search: TextSearch | None = None,
         limit: int = 20,
         dataset_ids: list[uuid.UUID] | None = None,
     ) -> list[RecordDTO]: ...
     def search_all(
         self,
-        search: str,
+        search: TextSearch,
         limit: int = 20,
         dataset_id: uuid.UUID | None = None,
     ) -> list[RecordDTO]: ...
     def count_schema_matches(
-        self, schema_id: uuid.UUID, search: str | None = None
+        self, schema_id: uuid.UUID, search: TextSearch | None = None
     ) -> int: ...
     def count_by_schema_ids(self, schema_ids: list[uuid.UUID]) -> int: ...
     def list_children(

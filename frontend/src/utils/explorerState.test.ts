@@ -17,6 +17,7 @@ describe('explorer URL state', () => {
       schema: null,
       within: null,
       q: '',
+      qin: null,
       filter: null,
       sort: [],
       cols: null,
@@ -32,6 +33,7 @@ describe('explorer URL state', () => {
       schema: 'selection',
       within: 'abc',
       q: 'S02',
+      qin: 'site',
       filter: tree,
       sort: [{ field: 'age', direction: 'desc' }],
       cols: ['a', 'b'],
@@ -43,6 +45,7 @@ describe('explorer URL state', () => {
       schema: 'selection',
       within: 'abc',
       q: 'S02',
+      qin: 'site',
       filter: tree,
       sort: [{ field: 'age', direction: 'desc' }],
       cols: ['a', 'b'],
@@ -60,6 +63,7 @@ describe('explorer URL state', () => {
   it('goes back to page 1 when what is listed changes, not when paging', () => {
     const base = params('page=4&schema=a')
     expect(applyExplorerPatch(base, { q: 'x' }).get('page')).toBeNull()
+    expect(applyExplorerPatch(base, { qin: 'site' }).get('page')).toBeNull()
     expect(applyExplorerPatch(base, { schema: 'b' }).get('page')).toBeNull()
     expect(applyExplorerPatch(base, { page: 5 }).get('page')).toBe('6')
   })

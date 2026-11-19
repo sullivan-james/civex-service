@@ -50,6 +50,8 @@ export interface FieldTypeDescriptor {
   example: string
   restrictions: RestrictionDescriptor[]
   supports_default: boolean
+  /** Whether a text search looks in values of this type. */
+  searchable: boolean
 }
 
 /** An entry in the "what kind of data is this?" picker. */
