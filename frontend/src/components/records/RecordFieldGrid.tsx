@@ -55,8 +55,12 @@ function sameValue(a: unknown, b: unknown) {
 }
 
 /** The draft as the API wants it; `undefined` clears the field, `null`
- * means the draft is unusable and the edit should be dropped. */
-function toSaved(field: Field, draft: unknown): unknown | undefined | null {
+ * means the draft is unusable and the edit should be dropped. The one
+ * conversion from an input's draft to a stored value (also a bulk edit's). */
+export function toSaved(
+  field: Field,
+  draft: unknown,
+): unknown | undefined | null {
   if (isEmpty(draft)) return undefined
   if (field.type === 'integer') {
     const n = parseInt(draft as string, 10)

@@ -244,7 +244,7 @@ function filenameOf(res: Response): string | null {
 }
 
 /** Headers that tag a request with a progress id (JSON, as every body here is). */
-const tagged = (progressId?: string) =>
+export const progressHeaders = (progressId?: string) =>
   progressId
     ? { 'Content-Type': 'application/json', [PROGRESS_HEADER]: progressId }
     : undefined
@@ -394,7 +394,7 @@ export const fileAccessApi = {
     api.post<FilePlanSummary>(
       '/file-access/plan',
       { ...selection, include_items: false },
-      tagged(progressId),
+      progressHeaders(progressId),
     ),
 
   /** How far the request tagged with this id has got. 404 until it has begun. */
@@ -426,7 +426,7 @@ export const fileAccessApi = {
         allow_partial: options.allowPartial,
         open: options.open,
       },
-      tagged(options.progressId),
+      progressHeaders(options.progressId),
     ),
 
   /** The same files and tables, as a zip with the same paths (or the table
@@ -439,7 +439,9 @@ export const fileAccessApi = {
   ) => {
     const res = await fetch(apiUrl('/file-access/zip'), {
       method: 'POST',
-      headers: tagged(progressId) ?? { 'Content-Type': 'application/json' },
+      headers: progressHeaders(progressId) ?? {
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({ ...selection, allow_partial: allowPartial, name }),
     })
     if (!res.ok) {
@@ -456,7 +458,11 @@ export const fileAccessApi = {
 
   /** Bring the picked files that are only on the server to this computer. */
   download: (pick: FilePick, progressId?: string) =>
-    api.post<DownloadResult>('/file-access/download', pick, tagged(progressId)),
+    api.post<DownloadResult>(
+      '/file-access/download',
+      pick,
+      progressHeaders(progressId),
+    ),
 
   /** Remove this computer's copies of the picked files the server holds;
    * `dryRun` only counts. */
@@ -482,7 +488,7 @@ export const fileAccessApi = {
     api.post<GatherResult>(
       '/file-access/gather',
       { ...selection, volume },
-      tagged(progressId),
+      progressHeaders(progressId),
     ),
 
   /** `export`, but a refusal the server explains comes back as a value to act on

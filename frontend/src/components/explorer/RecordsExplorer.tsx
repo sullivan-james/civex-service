@@ -42,6 +42,8 @@ import { SavedViewBar } from './SavedViewBar'
 import { ScopeTrail, type TrailItem } from './ScopeTrail'
 import { SelectionBar } from './SelectionBar'
 import { MoveRecordsDialog } from './MoveRecordsDialog'
+import { BulkEditDialog } from './BulkEditDialog'
+import { bulkEditableFields } from '../../utils/bulkEdit'
 import { FilesView } from '../files/FilesView'
 import { MoveToDriveButton } from '../files/MoveDialog'
 import { useBulkSelection } from '../../hooks/useBulkSelection'
@@ -124,6 +126,7 @@ export function RecordsExplorer({
   const showFiles = params.get('show') === 'files'
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [moving, setMoving] = useState(false)
+  const [editing, setEditing] = useState(false)
   const deleteMany = useDeleteManyRecords(dataset ?? '')
   const deleteMatching = useDeleteMatchingRecords(dataset ?? '')
   const createView = useCreateView(listedName ?? '')
@@ -700,6 +703,16 @@ export function RecordsExplorer({
                         onStarted={picked.clear}
                       />
                     )}
+                    {listed && bulkEditableFields(listed).length > 0 && (
+                      <Button
+                        size="sm"
+                        disabled={!mayWrite}
+                        title={mayWrite ? undefined : why('write_records')}
+                        onClick={() => setEditing(true)}
+                      >
+                        Edit…
+                      </Button>
+                    )}
                     {listed && (
                       // Moving takes the records out of this collection, so
                       // it asks for the same permission as deleting here.
@@ -812,6 +825,20 @@ export function RecordsExplorer({
           from={dataset}
           onClose={() => setMoving(false)}
           onMoved={picked.clear}
+        />
+      )}
+
+      {editing && dataset && listed && (
+        <BulkEditDialog
+          selection={
+            allMatching
+              ? { query: x.query, collection: dataset }
+              : { ids: [...selected] }
+          }
+          count={bulkCount}
+          listed={listed}
+          onClose={() => setEditing(false)}
+          onDone={picked.clear}
         />
       )}
 

@@ -120,6 +120,11 @@ export function describeAuditEvent(event: AuditEvent): AuditSummary {
         title: `Moved ${describeParts(event.parts).replace(/ updated/g, '')}`,
         detail: null,
       }
+    case 'edit':
+      return {
+        title: `Edited ${describeParts(event.parts).replace(/ updated/g, '')}`,
+        detail: batch.label ? `Changed ${batch.label}` : null,
+      }
     default:
       return {
         title: `${batch.kind} (${items(total)})`,

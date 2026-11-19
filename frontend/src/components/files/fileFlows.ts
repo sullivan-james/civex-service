@@ -67,7 +67,7 @@ async function job(
 }
 
 /** A plain id to tag a request with, so the server can say how far it has got. */
-const newProgressId = () =>
+export const newProgressId = () =>
   typeof crypto !== 'undefined' && crypto.randomUUID
     ? crypto.randomUUID()
     : `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
