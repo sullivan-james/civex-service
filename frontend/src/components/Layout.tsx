@@ -46,6 +46,7 @@ import {
   FolderTree,
   ChevronDown,
   LayoutGrid,
+  House,
   Database,
   Workflow,
   ListChecks,
@@ -68,6 +69,7 @@ declare global {
         create_project: () => Promise<{ ok?: boolean; error?: string } | null>
         browse_folder: () => Promise<{ path: string | null }>
         open_data_dir: () => Promise<{ ok?: boolean; error?: string }>
+        show_start: () => Promise<{ ok?: boolean }>
       }
     }
   }
@@ -452,6 +454,12 @@ export default function Layout({ children }: { children: ReactNode }) {
             <Dropdown
               align="left"
               items={[
+                {
+                  label: 'Start screen',
+                  icon: House,
+                  onClick: () => window.pywebview!.api.show_start(),
+                },
+                { separator: true },
                 {
                   label: 'Open project',
                   icon: FolderOpen,

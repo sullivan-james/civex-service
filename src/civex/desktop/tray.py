@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 import os
@@ -17,6 +18,7 @@ from typing import TYPE_CHECKING
 from civex.project import scaffold_project
 
 if TYPE_CHECKING:
+    import uvicorn
     import webview
 
 # Stored alongside other per-user config, outside any project directory.
@@ -137,27 +139,115 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def _run_server(port: int, errors: list[str]) -> None:
+class _ProjectServer:
+    """The one server the window shows a project from. Opening another project
+    (or going back to the start screen) stops it first: two servers in one
+    process share the background workers and the current folder, so the one
+    left behind would carry on against the wrong project."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._server: "uvicorn.Server | None" = None
+        self._thread: threading.Thread | None = None
+
+    def start(self, port: int, errors: list[str]) -> threading.Thread:
+        """Serve the project in the current folder on `port`. A factory, so
+        each project's app is made with its own settings (its log file)."""
+        import uvicorn
+
+        config = uvicorn.Config(
+            "civex.server.app:create_app",
+            factory=True,
+            host="127.0.0.1",
+            port=port,
+            log_level="warning",
+            # The window has moved on; don't wait on a page's open requests.
+            timeout_graceful_shutdown=3,
+        )
+        server = uvicorn.Server(config)
+        thread = threading.Thread(
+            target=_serve, args=(server, port, errors), daemon=True, name="civex-server"
+        )
+        with self._lock:
+            self._server, self._thread = server, thread
+        thread.start()
+        return thread
+
+    def running(self) -> bool:
+        with self._lock:
+            return self._thread is not None and self._thread.is_alive()
+
+    def stop(self, timeout: float = 15.0) -> None:
+        """Stop the server, if one runs, and wait for it (its lifespan stops
+        the background workers)."""
+        with self._lock:
+            server, thread = self._server, self._thread
+            self._server = self._thread = None
+        if server is None or thread is None:
+            return
+        server.should_exit = True
+        thread.join(timeout)
+        if thread.is_alive():
+            _log.warning("The previous project's server is still stopping")
+
+
+_server = _ProjectServer()
+#: One project change at a time (a quick second click waits for the first).
+_switching = threading.Lock()
+
+
+def _serve(server: "uvicorn.Server", port: int, errors: list[str]) -> None:
     import asyncio
-    import uvicorn
 
     # On Windows the default ProactorEventLoop must be set explicitly in a
-    # non-main thread; without this uvicorn.run() can silently fail.
+    # non-main thread; without this the server can silently fail.
     if sys.platform == "win32":
         asyncio.set_event_loop(asyncio.ProactorEventLoop())
     _log.info("Starting uvicorn on port %d", port)
     try:
-        uvicorn.run(
-            "civex.server.app:app", host="127.0.0.1", port=port, log_level="warning"
-        )
-    except Exception as exc:
-        _log.exception("Server failed to start on port %d", port)
-        errors.append(str(exc))
+        server.run()
+    except BaseException as exc:  # SystemExit too: it would end only this thread
+        _log.exception("Server failed on port %d", port)
+        errors.append(str(exc) or type(exc).__name__)
+        return
+    if not server.started:
+        errors.append("The server stopped while starting.")
 
 
-def _wait_for_server(url: str, timeout: float = 30.0) -> bool:
+def _preload_server() -> None:
+    """Load what the server is made of while the welcome screen waits for a
+    click, so a project opens in a fraction of a second instead of two (the
+    imports are nearly all of it). Not `civex.server.app` itself: making the
+    app reads the project's settings from the current folder, and no project
+    is chosen yet. Best-effort: anything that fails here fails again, and is
+    reported, when the server starts."""
+
+    def load() -> None:
+        import importlib
+        import pkgutil
+
+        try:
+            import uvicorn  # noqa: F401
+
+            import civex.server.routers as routers
+
+            for module in pkgutil.iter_modules(routers.__path__):
+                importlib.import_module(f"{routers.__name__}.{module.name}")
+        except Exception:
+            _log.debug("Preloading the server failed", exc_info=True)
+
+    threading.Thread(target=load, name="civex-preload", daemon=True).start()
+
+
+def _wait_for_server(
+    url: str, timeout: float = 30.0, running: threading.Thread | None = None
+) -> bool:
+    """Whether the server at `url` answers within `timeout`; False at once
+    when its thread (`running`) has ended."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        if running is not None and not running.is_alive():
+            return False
         try:
             urllib.request.urlopen(f"{url}/health", timeout=1)
             return True
@@ -264,36 +354,70 @@ def _place_project_window(window: "webview.Window") -> None:
     _remember_window(window)
 
 
+def _message_page(text: str) -> str:
+    """A plain page saying what the window is doing (between projects)."""
+    return (
+        "<body style='font-family:sans-serif;background:#f6f8fa;color:#656d76;"
+        "height:100vh;margin:0;display:flex;align-items:center;"
+        "justify-content:center;font-size:13px'>"
+        f"{html.escape(text)}</body>"
+    )
+
+
+def _error_page(detail: str) -> str:
+    return (
+        "<body style='font-family:sans-serif;padding:2rem;color:#d1242f'>"
+        "<h2>civex couldn't open this project</h2>"
+        f"<pre style='white-space:pre-wrap;font-size:13px'>{html.escape(detail)}</pre>"
+        "<p style='margin-top:1rem;color:#57606a;font-size:13px'>"
+        f"Details are in {html.escape(str(_LOG_FILE))}. Running "
+        "<code>civex doctor</code> in the project folder says what to fix.</p>"
+        "<p style='margin-top:1.5rem'><button style='font:inherit;padding:6px 14px'"
+        " onclick='window.pywebview.api.show_start()'>Back to the start screen"
+        "</button></p></body>"
+    )
+
+
 def _launch_project(path: Path) -> dict:
-    """Start the server for path and navigate the window to it."""
+    """Start the server for path and navigate the window to it (stopping the
+    one for the project open now, if any)."""
     _save_recent(path)
-    os.chdir(path)
 
-    port = _free_port()
-    url = f"http://127.0.0.1:{port}"
-
-    errors: list[str] = []
-    threading.Thread(target=_run_server, args=(port, errors), daemon=True).start()
-
-    def _navigate() -> None:
+    def _switch() -> None:
         assert _window is not None
-        if _wait_for_server(url):
-            _place_project_window(_window)
-            _window.load_url(url)
-        else:
-            detail = errors[0] if errors else "The server did not respond within 30 s."
-            _window.load_html(
-                "<body style='font-family:sans-serif;padding:2rem;color:#d1242f'>"
-                "<h2>Failed to start server</h2>"
-                f"<pre style='white-space:pre-wrap;font-size:13px'>{detail}</pre>"
-                "<p style='margin-top:1rem;color:#57606a;font-size:13px'>"
-                "Check that all civex dependencies are installed: "
-                '<code>pip install -e ".[server]"</code></p>'
-                "</body>"
-            )
+        with _switching:
+            if _server.running():
+                _window.load_html(_message_page(f"Opening {path.name}…"))
+                _server.stop()
+            os.chdir(path)
+            port = _free_port()
+            url = f"http://127.0.0.1:{port}"
+            errors: list[str] = []
+            thread = _server.start(port, errors)
+            if _wait_for_server(url, running=thread):
+                _place_project_window(_window)
+                _window.load_url(url)
+            else:
+                detail = (
+                    errors[0] if errors else "The server did not respond within 30 s."
+                )
+                _window.load_html(_error_page(detail))
 
-    threading.Thread(target=_navigate, daemon=True).start()
+    threading.Thread(target=_switch, daemon=True).start()
     return {"ok": True}
+
+
+def _show_start() -> None:
+    """Back to the start screen: the window shows it at once and the
+    project's server stops behind it."""
+    assert _window is not None
+    _window.load_html(_WELCOME_HTML)
+
+    def _stop() -> None:
+        with _switching:
+            _server.stop()
+
+    threading.Thread(target=_stop, daemon=True).start()
 
 
 # ── JS bridge ─────────────────────────────────────────────────────────────────
@@ -333,6 +457,11 @@ class _Api:
             _remove_from_recent(path_str)
             return {"error": f"Project not found: {path_str}"}
         return _launch_project(path)
+
+    def show_start(self) -> dict:
+        """The start screen (open, create, recent projects), from a project."""
+        _show_start()
+        return {"ok": True}
 
     def remove_recent(self, path_str: str) -> dict:
         _remove_from_recent(path_str)
@@ -692,6 +821,7 @@ def main() -> None:
             storage_path=storage,
         )
     else:
+        _preload_server()
         webview.start(private_mode=False, storage_path=storage)
 
 

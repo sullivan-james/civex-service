@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -237,7 +238,38 @@ def ask_retry(title: str, message: str) -> bool:
     return bool(again)
 
 
+def site_packages(home: Path) -> list[Path]:
+    """Where civex's own Python keeps its packages (one folder, normally)."""
+    tool = home / "tools" / "civex"
+    if sys.platform == "win32":
+        return [tool / "Lib" / "site-packages"]
+    return sorted(tool.glob("lib/python*/site-packages"))
+
+
+def installed_version(home: Path) -> str | None:
+    """The civex installed here, read from its package metadata: no program
+    is started, so it costs nothing (asking `civex --version` imported all of
+    civex, a second or more on every start). None when it can't be told
+    (no install, or more than one civex there)."""
+    found = [d for sp in site_packages(home) for d in sp.glob("civex-*.dist-info")]
+    if len(found) != 1:
+        return None
+    try:
+        with open(found[0] / "METADATA", encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("Version:"):
+                    return line.split(":", 1)[1].strip() or None
+                if not line.strip():
+                    break  # the headers are over
+    except OSError:
+        pass
+    return None
+
+
 def civex_version(home: Path, env: dict[str, str]) -> str | None:
+    """The civex installed here: from its metadata, else by asking it."""
+    if version := installed_version(home):
+        return version
     result = subprocess.run(
         [str(home / "bin" / f"civex{EXE}"), "--version"],
         env=env,
@@ -428,6 +460,8 @@ def older_than_release(home: Path, env: dict[str, str], installed: str) -> bool:
     wanted = released_with()
     if not wanted or installed == wanted:
         return False
+    if (decided := _release_older(installed, wanted)) is not None:
+        return decided
     result = subprocess.run(
         [
             str(tool_python(home)),
@@ -442,6 +476,30 @@ def older_than_release(home: Path, env: dict[str, str], installed: str) -> bool:
         **_no_window(),
     )
     return result.returncode == 0
+
+
+def _release_older(a: str, b: str) -> bool | None:
+    """Whether version `a` is older than `b`, when their release numbers
+    settle it (1.2.0 < 2.0.0rc1, 2.0.0 == 2.0); None when only the suffixes
+    differ (rc, post, dev), which needs `packaging`'s rules."""
+
+    def numbers(v: str) -> tuple[list[int], str] | None:
+        match = re.match(r"v?(\d+(?:\.\d+)*)(.*)$", v.strip())
+        if not match:
+            return None
+        return [int(n) for n in match.group(1).split(".")], match.group(2)
+
+    left, right = numbers(a), numbers(b)
+    if left is None or right is None:
+        return None
+    width = max(len(left[0]), len(right[0]))
+    x = left[0] + [0] * (width - len(left[0]))
+    y = right[0] + [0] * (width - len(right[0]))
+    if x != y:
+        return x < y
+    if not left[1] and not right[1]:
+        return False
+    return None
 
 
 def ensure_installed(home: Path, uv: Path, env: dict[str, str], log: Path) -> None:

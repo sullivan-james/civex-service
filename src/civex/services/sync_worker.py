@@ -156,6 +156,13 @@ class SyncWorker:
         self._send_asked.set()
         self._files_wake.set()
 
+    def wake(self) -> None:
+        """Look now instead of at the end of the wait, asking for nothing: so a
+        stop is noticed at once (the server closing, or the desktop app moving
+        to another project), not up to a poll later."""
+        self._wake.set()
+        self._files_wake.set()
+
     def request(self) -> None:
         """Ask for a sync at the next tick, whatever the schedule says. Files
         are looked at again too (a person asking wants everything up to date)."""

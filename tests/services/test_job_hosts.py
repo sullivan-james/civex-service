@@ -68,3 +68,18 @@ def test_the_default_is_the_project_in_the_current_directory(
         assert ctx.config.project_root == root
     finally:
         ctx.close()
+
+
+def test_sync_jobs_stop_at_once_not_a_poll_later(tmp_path: Path):
+    """The desktop app stops a project's server to open another one: the
+    sync worker used to finish its 2 s wait before it noticed."""
+    import time
+
+    root = _project(tmp_path)
+    jobs = SyncJobs(lambda: load_config_at(root), build_local_context)
+    jobs.ensure_worker()
+    time.sleep(0.2)  # into its wait
+    started = time.monotonic()
+    jobs.shutdown()
+    assert time.monotonic() - started < 1.0
+    assert not jobs._thread.is_alive()

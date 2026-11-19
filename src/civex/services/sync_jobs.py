@@ -86,6 +86,7 @@ class SyncJobs:
 
     def shutdown(self) -> None:
         self._stop.set()
+        self.worker.wake()
         with self._lock:
             thread = self._thread
         if thread is not None:
