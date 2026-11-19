@@ -133,6 +133,7 @@ def _base_selection(body: FileSelectionRequest, ctx: AppContext) -> FileSelectio
             filter_tree=body.filter,
             where=body.where,
             search=body.search,
+            search_fields=body.search_fields,
         ),
         record_ids=body.record_ids,
         fields=body.fields,

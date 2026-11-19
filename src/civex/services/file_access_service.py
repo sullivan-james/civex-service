@@ -528,7 +528,7 @@ class FileAccessService:
         found: dict[str, list[RecordDTO]] = {}
         for kind in wanted:
             query = dataclasses.replace(
-                selection.query, schema=kind, filter_tree=None, where=[], search=None
+                selection.query.for_kind(kind), filter_tree=None, where=[], search=None
             )
             found[str(kind)] = [
                 r for page in self._records.stream_records(query) for r in page
@@ -792,13 +792,10 @@ class FileAccessService:
             ]
             if allowed is None or anchor.schema_name in allowed:
                 found.append(anchor)
-            queries = [dataclasses.replace(query, schema=name) for name in below]
+            queries = [query.for_kind(name) for name in below]
         elif allowed and not query.schema:
             # Several kinds, whole collection: each kind in turn.
-            queries = [
-                dataclasses.replace(query, schema=name)
-                for name in selection.schemas or []
-            ]
+            queries = [query.for_kind(name) for name in selection.schemas or []]
         else:
             queries = [query]
             if selection.with_within and query.within and query.schema:
@@ -861,9 +858,7 @@ class FileAccessService:
         kinds = {r.schema_name for r in beneath}
         listed: set[uuid.UUID] = set()
         for kind in kinds:
-            for page in self._records.stream_records(
-                dataclasses.replace(query, schema=kind)
-            ):
+            for page in self._records.stream_records(query.for_kind(kind)):
                 listed.update(r.id for r in page)
         return [r for r in beneath if r.id in listed]
 

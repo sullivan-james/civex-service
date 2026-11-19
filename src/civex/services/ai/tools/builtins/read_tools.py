@@ -59,7 +59,12 @@ class QueryRecordsTool(AiTool):
             },
             "search": {
                 "type": "string",
-                "description": "Full-text search string across all field values",
+                "description": "Text to look for, ignoring case, in the records' "
+                "field values (text, numbers, list items, file names)",
+            },
+            "search_field": {
+                "type": "string",
+                "description": "Optional: look for 'search' only in this field",
             },
             "limit": {
                 "type": "integer",
@@ -78,15 +83,22 @@ class QueryRecordsTool(AiTool):
     def run(self, tool_input: dict, ctx: AiToolContext) -> Any:
         schema = tool_input["schema"]
         search = tool_input.get("search")
+        fields = (
+            [tool_input["search_field"]] if tool_input.get("search_field") else None
+        )
         limit = min(int(tool_input.get("limit", 5)), 20)
         count_only = bool(tool_input.get("count_only", False))
 
-        total = ctx.record_svc.count_by_schema_search(schema, search=search)
+        total = ctx.record_svc.count_by_schema_search(
+            schema, search=search, search_fields=fields
+        )
 
         if count_only:
             return {"total": str(total)}
 
-        records = ctx.record_svc.find_by_schema(schema, search=search, limit=limit)
+        records = ctx.record_svc.find_by_schema(
+            schema, search=search, limit=limit, search_fields=fields
+        )
         return {"total": str(total), "records": [record_summary(r) for r in records]}
 
 
@@ -110,7 +122,8 @@ class ListRecordsTool(AiTool):
             },
             "search": {
                 "type": "string",
-                "description": "Optional full-text search across all field values",
+                "description": "Optional text to look for, ignoring case, in "
+                "the records' field values",
             },
             "filters": {
                 "type": "array",

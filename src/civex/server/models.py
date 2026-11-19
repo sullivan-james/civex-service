@@ -598,7 +598,13 @@ class MoveRecordsRequest(BaseModel):
         default=None, description="A filter tree, as for listing records."
     )
     where: list[str] = Field(default_factory=list, description="'field=value' terms.")
-    search: str | None = Field(default=None, description="Full-text search.")
+    search: str | None = Field(
+        default=None, description="Text to look for in the records' values."
+    )
+    search_fields: list[str] | None = Field(
+        default=None,
+        description="Look for 'search' only in these fields of 'schema_name'.",
+    )
 
 
 class RecordMovePlanResponse(BaseModel):
@@ -2475,6 +2481,9 @@ class FieldTypeDescriptorResponse(BaseModel):
     supports_default: bool = Field(
         description="Whether a default value can be set when creating the field."
     )
+    searchable: bool = Field(
+        description="Whether a text search looks in values of this type."
+    )
 
 
 class FieldKindResponse(BaseModel):
@@ -2578,7 +2587,13 @@ class FileSelectionRequest(BaseModel):
         default=None, description="A filter tree, as for listing records."
     )
     where: list[str] = Field(default_factory=list, description="'field=value' terms.")
-    search: str | None = Field(default=None, description="Full-text search.")
+    search: str | None = Field(
+        default=None, description="Text to look for in the records' values."
+    )
+    search_fields: list[str] | None = Field(
+        default=None,
+        description="Look for 'search' only in these fields of 'schema_name'.",
+    )
     record_ids: list[str] | None = Field(
         default=None,
         description="Exactly these records (the rows ticked in a list); the other "

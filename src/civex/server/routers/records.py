@@ -38,7 +38,16 @@ router = APIRouter(tags=["records"])
 @router.get("/records", response_model=list[RecordResponse])
 def search_records_global(
     schema: str = Query(..., description="Schema name to search within"),
-    search: Optional[str] = Query(default=None),
+    search: Optional[str] = Query(
+        default=None,
+        description="Text to look for in the records' values, as for "
+        "listing records; a record id prefix matches too.",
+    ),
+    search_field: list[str] = Query(
+        default=[],
+        description="Repeatable field name of 'schema': look for 'search' "
+        "only in these. Omitted, every searchable field.",
+    ),
     limit: int = Query(default=20, le=100),
     reachable_from: Optional[str] = Query(
         default=None,
@@ -54,6 +63,7 @@ def search_records_global(
             search=search or None,
             limit=limit,
             reachable_from=reachable_from or None,
+            search_fields=search_field or None,
         )
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
@@ -486,6 +496,7 @@ def _move_selection(body: MoveRecordsRequest) -> dict:
             filter_tree=body.filter,
             where=body.where,
             search=body.search,
+            search_fields=body.search_fields,
         )
     }
 

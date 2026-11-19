@@ -54,7 +54,12 @@ from civex.domain.filters import (
     map_leaves,
     parse_filter_tree,
 )
-from civex.domain.query import RecordQuery, ResolvedQuery
+from civex.domain.query import (
+    UNSEARCHED_DTYPES,
+    RecordQuery,
+    ResolvedQuery,
+    TextSearch,
+)
 from civex.domain.scopes import GLOBAL, can_reference
 from civex.domain.timezones import parse_datetime
 from civex.domain.uniqueness import key_values
@@ -2041,9 +2046,61 @@ class RecordService:
             parent_record_id=parent_uuid,
             within=within,
             field_filters=field_filters,
-            search=query.search or None,
+            search=self.text_search(query.search, schema, query.search_fields),
             filter_tree=self._resolve_filter(schema, query.filter_tree),
             sort=self._resolve_sort(schema, query.sort),
+        )
+
+    def text_search(
+        self,
+        term: str | None,
+        schema: SchemaDTO | None = None,
+        field_names: list[str] | None = None,
+    ) -> TextSearch | None:
+        """A search term resolved to the fields it looks in: the one rule
+        behind the explorer, reference pickers, the jump-to box and the AI
+        tools. Without `field_names` that is every searchable field of
+        `schema`, or of every schema when there is none; with them, exactly
+        those fields of `schema`. Only a kind's own fields: a record holds no
+        value for a field it inherits (that is the record above's). A field of a type in
+        `UNSEARCHED_DTYPES` (a reference, a boolean, a geometry) can't be
+        searched. None when there is nothing to search for."""
+        term = (term or "").strip()
+        if not term:
+            return None
+        if field_names:
+            if schema is None:
+                raise ValidationError(
+                    "To search one field, also choose a schema. To search "
+                    "every field, leave the field out."
+                )
+            by_name = {f.name: f for f in schema.fields}
+            ids = []
+            for name in field_names:
+                f = by_name.get(name)
+                if f is None:
+                    raise ValidationError(
+                        f"'{schema.name}' has no field '{name}' of its own to "
+                        "search (an inherited field's value is on the record "
+                        "above: search that kind instead)"
+                    )
+                if f.dtype in UNSEARCHED_DTYPES:
+                    raise ValidationError(
+                        f"'{name}' is a {f.dtype} field and can't be searched"
+                    )
+                ids.append(str(f.id))
+            return TextSearch(term, tuple(dict.fromkeys(ids)))
+        if schema is not None:
+            fields = list(schema.fields)
+        else:
+            fields = [f for s in self._schema_svc.list_all() for f in s.fields]
+        return TextSearch(
+            term,
+            tuple(
+                dict.fromkeys(
+                    str(f.id) for f in fields if f.dtype not in UNSEARCHED_DTYPES
+                )
+            ),
         )
 
     def _relations(self, schema: SchemaDTO) -> dict[str, tuple[SchemaDTO, Relation]]:
@@ -2229,9 +2286,7 @@ class RecordService:
             for descendant, _ in self._schema_svc.descendants(
                 self._schema_svc.get(ancestor.schema_name)
             ):
-                n = self.count_records(
-                    dataclasses.replace(query, schema=descendant.name)
-                )
+                n = self.count_records(query.for_kind(descendant.name))
                 if n:
                     counts[descendant.name] = n
             return counts
@@ -2250,6 +2305,7 @@ class RecordService:
         search: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        search_fields: list[str] | None = None,
     ) -> list[RecordDTO]:
         return self.query_records(
             RecordQuery(
@@ -2259,6 +2315,7 @@ class RecordService:
                 where=filters or [],
                 filter_tree=filter_tree,
                 search=search,
+                search_fields=search_fields,
             ),
             limit=limit,
             offset=offset,
@@ -2272,6 +2329,7 @@ class RecordService:
         filters: list[str] | None = None,
         filter_tree: dict[str, Any] | None = None,
         search: str | None = None,
+        search_fields: list[str] | None = None,
     ) -> int:
         return self.count_records(
             RecordQuery(
@@ -2281,6 +2339,7 @@ class RecordService:
                 where=filters or [],
                 filter_tree=filter_tree,
                 search=search,
+                search_fields=search_fields,
             )
         )
 
@@ -2293,6 +2352,7 @@ class RecordService:
         filter_tree: dict[str, Any] | None = None,
         search: str | None = None,
         page_size: int = 500,
+        search_fields: list[str] | None = None,
     ) -> Iterator[list[RecordDTO]]:
         return self.stream_records(
             RecordQuery(
@@ -2302,16 +2362,22 @@ class RecordService:
                 where=filters or [],
                 filter_tree=filter_tree,
                 search=search,
+                search_fields=search_fields,
             ),
             page_size=page_size,
         )
 
     def count_by_schema_search(
-        self, schema_name: str, search: str | None = None
+        self,
+        schema_name: str,
+        search: str | None = None,
+        search_fields: list[str] | None = None,
     ) -> int:
         """Total matching `find_by_schema` -- same predicate, in SQL."""
         schema = self._schema_svc.get(schema_name)
-        return self._records.count_schema_matches(schema.id, search=search)
+        return self._records.count_schema_matches(
+            schema.id, search=self.text_search(search, schema, search_fields)
+        )
 
     def find_by_schema(
         self,
@@ -2319,6 +2385,7 @@ class RecordService:
         search: str | None = None,
         limit: int = 20,
         reachable_from: str | None = None,
+        search_fields: list[str] | None = None,
     ) -> list[RecordDTO]:
         """`reachable_from` (a collection name) limits the search to records a
         record in that collection may reference: its own collection's plus
@@ -2337,7 +2404,10 @@ class RecordService:
                 if d.scope == GLOBAL and d.id != source.id
             ]
         records = self._records.list_by_schema(
-            schema.id, search=search, limit=limit, dataset_ids=dataset_ids
+            schema.id,
+            search=self.text_search(search, schema, search_fields),
+            limit=limit,
+            dataset_ids=dataset_ids,
         )
         return self._attach_reference_labels(self._with_names_many(records))
 
@@ -2351,8 +2421,8 @@ class RecordService:
         jump-to box searches. Every collection unless `collection` (a name)
         narrows it; each result carries its collection's name, since the same
         schema's records can live in several."""
-        query = query.strip()
-        if not query:
+        search = self.text_search(query)
+        if search is None:
             return []
         dataset_id = None
         if collection:
@@ -2360,7 +2430,7 @@ class RecordService:
             if not dataset:
                 raise NotFoundError(f"Dataset '{collection}' not found")
             dataset_id = dataset.id
-        records = self._records.search_all(query, limit=limit, dataset_id=dataset_id)
+        records = self._records.search_all(search, limit=limit, dataset_id=dataset_id)
         return self._attach_reference_labels(self._with_names_many(records))
 
     # ------------------------------------------------------------------

@@ -15,6 +15,8 @@ export interface ExplorerState {
   /** Record whose descendants are listed; null = the explorer's own scope. */
   within: string | null
   q: string
+  /** The one field `q` looks in; null = every searchable field. */
+  qin: string | null
   filter: FilterTreeWire | null
   sort: SortEntry[]
   /** Chosen columns; null = the schema's default columns. */
@@ -32,6 +34,7 @@ export const EMPTY_EXPLORER_STATE: ExplorerState = {
   schema: null,
   within: null,
   q: '',
+  qin: null,
   filter: null,
   sort: [],
   cols: null,
@@ -60,6 +63,7 @@ export function parseExplorerState(sp: URLSearchParams): ExplorerState {
     schema: sp.get('schema') || null,
     within: sp.get('within') || null,
     q: sp.get('q') ?? '',
+    qin: sp.get('qin') || null,
     filter: parseFilter(sp.get('filter')),
     sort: sp
       .getAll('sort')
@@ -77,6 +81,7 @@ const RESETS_PAGE: (keyof ExplorerState)[] = [
   'schema',
   'within',
   'q',
+  'qin',
   'filter',
   'sort',
   'view',
@@ -97,6 +102,7 @@ export function applyExplorerPatch(
     'schema',
     'within',
     'q',
+    'qin',
     'filter',
     'sort',
     'cols',
@@ -108,6 +114,7 @@ export function applyExplorerPatch(
   if (next.schema) out.set('schema', next.schema)
   if (next.within) out.set('within', next.within)
   if (next.q) out.set('q', next.q)
+  if (next.qin) out.set('qin', next.qin)
   if (next.filter) out.set('filter', JSON.stringify(next.filter))
   next.sort.forEach((s) => out.append('sort', encodeSort(s)))
   if (next.cols) out.set('cols', next.cols.join(','))

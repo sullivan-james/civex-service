@@ -25,6 +25,7 @@ const DESCRIPTORS: FieldTypes = {
       example: '',
       restrictions: [R('choices', 'Allowed values', 'choices')],
       supports_default: true,
+      searchable: true,
     },
     {
       type: 'float',
@@ -38,6 +39,7 @@ const DESCRIPTORS: FieldTypes = {
         R('unit', 'Unit', 'unit'),
       ],
       supports_default: true,
+      searchable: true,
     },
     {
       type: 'geo',
@@ -51,6 +53,7 @@ const DESCRIPTORS: FieldTypes = {
         R('bbox', 'Restrict to an area', 'bbox'),
       ],
       supports_default: false,
+      searchable: false,
     },
   ],
   kinds: [

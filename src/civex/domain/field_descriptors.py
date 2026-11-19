@@ -60,6 +60,9 @@ class FieldTypeDescriptor:
     restrictions: tuple[RestrictionDescriptor, ...] = ()
     #: Whether "default value" makes sense when creating the field.
     supports_default: bool = True
+    #: Whether a text search looks in values of this type (a reference holds
+    #: another record's id; a yes/no or a geometry holds no text anyone typed).
+    searchable: bool = True
 
 
 @dataclass(frozen=True)
@@ -177,6 +180,7 @@ FIELD_TYPES: dict[str, FieldTypeDescriptor] = {
             "True or false",
             "Tick for yes.",
             "true",
+            searchable=False,
         ),
         FieldTypeDescriptor(
             "date",
@@ -240,6 +244,7 @@ FIELD_TYPES: dict[str, FieldTypeDescriptor] = {
                 ),
             ),
             supports_default=False,
+            searchable=False,
         ),
         FieldTypeDescriptor(
             "file",
@@ -270,6 +275,7 @@ FIELD_TYPES: dict[str, FieldTypeDescriptor] = {
             "Deployment GS-2026-014",
             _REFERENCE_RULES,
             supports_default=False,
+            searchable=False,
         ),
         FieldTypeDescriptor(
             "reference_list",
@@ -280,6 +286,7 @@ FIELD_TYPES: dict[str, FieldTypeDescriptor] = {
             "Two deployments",
             _REFERENCE_RULES,
             supports_default=False,
+            searchable=False,
         ),
         FieldTypeDescriptor(
             "enum",

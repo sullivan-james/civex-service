@@ -82,6 +82,7 @@ export function MoveRecordsDialog({
                 filter: selection.query.filter ?? null,
                 where: selection.query.where ?? [],
                 search: selection.query.search ?? null,
+                search_fields: selection.query.search_fields ?? null,
               }),
         }
       : null

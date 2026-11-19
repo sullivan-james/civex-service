@@ -7,10 +7,13 @@ from typing import Any
 
 from sqlalchemy import (
     and_,
+    case,
     cast,
     delete,
+    false,
     func,
     literal,
+    literal_column,
     not_,
     or_,
     select,
@@ -24,7 +27,7 @@ from civex.db.models import Dataset, Record, RecordReference, Schema, WorkflowJo
 from civex.domain.dtos import RecordDTO
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.filters import FilterCondition, FilterGroup, FilterNode, SortKey
-from civex.domain.query import ResolvedQuery
+from civex.domain.query import ID_PREFIX_MIN, ResolvedQuery, TextSearch
 from civex.repositories.local._ids import prefix_span
 from civex.repositories.local._bucketing import day_bucket
 from civex.repositories.local._jobs import bulk_delete_jobs
@@ -309,23 +312,18 @@ class LocalRecordRepository:
             counts.setdefault(parent_id, {})[schema_name] = n
         return counts
 
-    def _by_schema_query(self, schema_id: uuid.UUID, search: str | None):
+    def _by_schema_query(self, schema_id: uuid.UUID, search: TextSearch | None):
         q = self._s.query(Record).filter(
             Record.schema_id == schema_id, Record.deleted_at.is_(None)
         )
         if search:
-            q = q.filter(
-                or_(
-                    cast(Record.data, String).ilike(f"%{search}%"),
-                    cast(Record.id, String).ilike(f"{search}%"),
-                )
-            )
+            q = q.filter(text_match(search, self._pg))
         return q
 
     def list_by_schema(
         self,
         schema_id: uuid.UUID,
-        search: str | None = None,
+        search: TextSearch | None = None,
         limit: int = 20,
         dataset_ids: list[uuid.UUID] | None = None,
     ) -> list[RecordDTO]:
@@ -337,7 +335,7 @@ class LocalRecordRepository:
 
     def search_all(
         self,
-        search: str,
+        search: TextSearch,
         limit: int = 20,
         dataset_id: uuid.UUID | None = None,
     ) -> list[RecordDTO]:
@@ -346,10 +344,9 @@ class LocalRecordRepository:
         One query across every schema (and, unless `dataset_id` narrows it,
         every collection). Records whose collection or schema is soft-deleted
         are left out, even though the record row itself may not be marked.
-        On PostgreSQL the match is the same indexed full-text search the
-        explorer uses, ranked by relevance; elsewhere it is a substring match
-        on the record's data, newest first. An id prefix always matches, so a
-        pasted id finds its record."""
+        The match is `text_match`, the explorer's; on PostgreSQL results are
+        ranked by full-text relevance, elsewhere (and among equals) newest
+        first."""
         q = (
             self._s.query(Record)
             .join(Dataset, Record.dataset_id == Dataset.id)
@@ -362,24 +359,17 @@ class LocalRecordRepository:
         )
         if dataset_id is not None:
             q = q.filter(Record.dataset_id == dataset_id)
-        like = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        id_match = cast(Record.id, String).ilike(f"{like}%", escape="\\")
+        q = q.filter(text_match(search, self._pg))
         newest: list[Any] = [Record.created_at.desc(), Record.id.desc()]
         if self._pg:
-            tsquery = func.plainto_tsquery("simple", search)
-            q = q.filter(or_(Record.search_vector.op("@@")(tsquery), id_match))
+            tsquery = func.plainto_tsquery("simple", search.term)
             q = q.order_by(func.ts_rank(Record.search_vector, tsquery).desc(), *newest)
         else:
-            q = q.filter(
-                or_(
-                    cast(Record.data, String).ilike(f"%{like}%", escape="\\"),
-                    id_match,
-                )
-            ).order_by(*newest)
+            q = q.order_by(*newest)
         return [_to_dto(r) for r in q.limit(limit).all()]
 
     def count_schema_matches(
-        self, schema_id: uuid.UUID, search: str | None = None
+        self, schema_id: uuid.UUID, search: TextSearch | None = None
     ) -> int:
         """Same predicate as list_by_schema, so a count and a page agree."""
         return self._by_schema_query(schema_id, search).count()
@@ -919,15 +909,99 @@ def _base_query(session: Session, query: ResolvedQuery, is_postgres: bool = Fals
     if query.filter_tree is not None:
         q = q.filter(_build_filter_condition(query.filter_tree))
     if query.search:
-        if is_postgres:
-            q = q.filter(
-                Record.search_vector.op("@@")(
-                    func.plainto_tsquery("simple", query.search)
-                )
-            )
-        else:
-            q = q.filter(cast(Record.data, String).ilike(f"%{query.search}%"))
+        q = q.filter(text_match(query.search, is_postgres))
     return q
+
+
+def _like_pattern(term: str) -> str:
+    escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+def text_match(search: TextSearch, is_postgres: bool = False):
+    """The one rule for which records a text search finds (see TextSearch):
+    a value of one of its fields contains the term, case-insensitively, or
+    the record's id starts with it. A value is a top-level string or number,
+    a list's string or number items, or the `filename` of a file (or of each
+    file in a list); keys, hashes, sizes and nested structure never match.
+
+    One correlated EXISTS over the record's own JSON (`json_each` on SQLite,
+    `jsonb_each`/`jsonb_array_elements` on PostgreSQL), so a search stays one
+    statement. It reads every candidate row's data: no index serves a
+    substring match (a trigram index over the values would, on PostgreSQL)."""
+    like = _like_pattern(search.term)
+    matches = []
+    if search.field_ids:
+        matches.append(_values_contain(list(search.field_ids), like, is_postgres))
+    digits = search.term.strip().lower().replace("-", "")
+    span = prefix_span(digits) if len(digits) >= ID_PREFIX_MIN else None
+    if span is not None:
+        matches.append(Record.id.between(*span))
+    return or_(*matches) if matches else false()
+
+
+def _values_contain(field_ids: list[str], like: str, is_postgres: bool):
+    """EXISTS a top-level entry of one of `field_ids` whose value, a list
+    item of it, or a file's name in either, contains `like`."""
+    entry: Any
+    entry_type: Any
+    item: Any
+    item_type: Any
+    if is_postgres:
+        # render_derived names the columns (`AS e(key, value)`), so they
+        # don't depend on how PostgreSQL names a set-returning function's.
+        entry = (
+            func.jsonb_each(Record.data).table_valued("key", "value").render_derived()
+        )
+        entry_type = func.jsonb_typeof(entry.c.value)
+        items = case(
+            (entry_type == "array", entry.c.value),
+            else_=cast(literal_column("'[]'"), PG_JSONB),
+        )
+        item = func.jsonb_array_elements(items).table_valued("value").render_derived()
+        item_type = func.jsonb_typeof(item.c.value)
+        scalars, objects = ["string", "number"], "object"
+
+        def text_of(value: Any) -> Any:
+            return value.op("#>>")(literal_column("'{}'"))
+
+        def name_of(value: Any) -> Any:
+            return value.op("->>")(literal_column("'filename'"))
+    else:
+        entry = func.json_each(Record.data).table_valued("key", "value", "type")
+        entry_type = entry.c.type
+        items = case((entry_type == "array", entry.c.value), else_=literal("[]"))
+        item = func.json_each(items).table_valued("value", "type")
+        item_type = item.c.type
+        scalars, objects = ["text", "integer", "real"], "object"
+
+        def text_of(value: Any) -> Any:
+            return value
+
+        def name_of(value: Any) -> Any:
+            return func.json_extract(value, "$.filename")
+
+    def found(value: Any, kind: Any) -> Any:
+        return or_(
+            and_(kind.in_(scalars), text_of(value).ilike(like, escape="\\")),
+            and_(kind == objects, name_of(value).ilike(like, escape="\\")),
+        )
+
+    in_a_list = (
+        select(literal(1))
+        .select_from(item)
+        .where(found(item.c.value, item_type))
+        .exists()
+    )
+    return (
+        select(literal(1))
+        .select_from(entry)
+        .where(
+            entry.c.key.in_(field_ids),
+            or_(found(entry.c.value, entry_type), in_a_list),
+        )
+        .exists()
+    )
 
 
 def _build_filter_condition(node: FilterNode):

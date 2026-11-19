@@ -100,7 +100,13 @@ A collection's page (and a record's **Contains** tab) is one explorer:
 - **Levels:** the collection's schemas top-down (Site → Visit → Sample),
   with counts. A row shows its children ("3 visits →"). Click to go down, and
   use the trail to go back up.
-- **Search** is scoped to where you are.
+- **Search** is scoped to where you are. It looks, ignoring case, in what the
+  records hold: text, numbers, the items of a list (tags, choices) and the
+  names of files. It never matches a file's hash, a reference or a location,
+  so a short search like `a3` finds only records that show `a3`. Typing the
+  start of a record's id (four characters or more) finds that record too.
+  Beside the box, **In all fields** can be narrowed to one field of the kind
+  listed (`qin` in the address).
 - **+ Filter** builds AND/OR conditions on this level's fields, a parent's, or
   any child's: "Visits that have a Sample whose `depth` is empty" is one
   condition. Reference values are picked by name.
@@ -117,7 +123,9 @@ A collection's page (and a record's **Contains** tab) is one explorer:
 
 Everything is in the address, so a filtered list can be bookmarked and Back
 undoes a step. Scripts get the same from `GET /api/records` with `schema`,
-`within`, `filter`, `sort` and `search`.
+`within`, `filter`, `sort`, `search` and `search_field` (repeatable: the fields
+to search in), and from `civex record find --in <collection> --schema <kind>
+--search <text> [--search-field <field>]`.
 
 A record's **Referenced by** section counts the records linking to it, per
 collection, schema and field (`GET /api/records/{id}/referrers`).

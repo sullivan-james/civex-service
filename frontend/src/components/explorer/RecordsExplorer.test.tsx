@@ -10,6 +10,7 @@ import type { CivexRecord } from '../../api/records'
 import type { Schema } from '../../api/schemas'
 import type { View } from '../../api/views'
 import { finishExport } from '../files/testSupport'
+import { setFieldTypesForTest } from '../../hooks/useFieldTypes'
 
 // --- a tiny in-memory API: just enough shape to drive the explorer -------
 
@@ -1150,5 +1151,60 @@ describe('what this person may do', () => {
       'title',
       'You may not add, change and restore records, and save filters and exports here.',
     )
+  })
+
+  describe('searching one field', () => {
+    const fieldTypes = (searchable: string[]) => ({
+      types: ['string', 'reference'].map((type) => ({
+        type,
+        label: type,
+        description: '',
+        stored_as: '',
+        entry_hint: '',
+        example: '',
+        restrictions: [],
+        supports_default: true,
+        searchable: searchable.includes(type),
+      })),
+      kinds: [],
+    })
+    beforeEach(() => {
+      const two = schema('encounter', null, ['site', 'observer'])
+      two.fields.push({
+        ...two.fields[0],
+        id: 'enc-ref',
+        name: 'boat',
+        type: 'reference',
+      })
+      override = (url: URL) => {
+        if (url.pathname === '/api/schemas')
+          return json([two, recording, selection])
+        return undefined
+      }
+    })
+    beforeEach(() => setFieldTypesForTest(fieldTypes(['string'])))
+    afterEach(() => setFieldTypesForTest(null))
+
+    it('offers every searchable field of the listed kind, and sends the one picked', async () => {
+      const user = userEvent.setup()
+      renderExplorer({}, '/collections/hb?q=stell')
+      const pick = await screen.findByRole('combobox', { name: 'Search in' })
+      const options = within(pick)
+        .getAllByRole('option')
+        .map((o) => o.textContent)
+      expect(options).toEqual(['In all fields', 'In Site', 'In Observer'])
+
+      await user.selectOptions(pick, 'site')
+      expect(search().get('qin')).toBe('site')
+      await waitFor(() =>
+        expect(lastRecordCall().params.getAll('search_field')).toEqual([
+          'site',
+        ]),
+      )
+      expect(lastRecordCall().params.get('search')).toBe('stell')
+
+      await user.selectOptions(pick, '')
+      expect(search().get('qin')).toBeNull()
+    })
   })
 })

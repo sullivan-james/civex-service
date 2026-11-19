@@ -39,6 +39,8 @@ export interface FileSelection {
   filter?: FilterTreeWire
   where?: string[]
   search?: string
+  /** Look for `search` only in these fields of `schema_name`. */
+  search_fields?: string[]
   record_ids?: string[]
   fields?: string[]
   /** tree: a folder per record above each file (the default); flat: all in
@@ -268,6 +270,7 @@ export function selectionFor(
     filter: query.filter ?? undefined,
     where: query.where,
     search: query.search || undefined,
+    search_fields: query.search ? query.search_fields : undefined,
   }
 }
 

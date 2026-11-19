@@ -56,7 +56,11 @@ samples = pd.DataFrame(rows)
 To narrow the list, pass `filters=["site=A3"]` (each entry is `field=value`)
 together with `schema_name`. A field's name only means something within its
 schema, so a filter without one raises `ValidationError`. `search="..."`
-searches the records' text.
+looks for text, ignoring case, in the records' values (text, numbers, list
+items and file names; never a file's hash, a reference or a location), or the
+start of a record's id. `search_fields=["site"]` looks only in those fields of
+`schema_name`. `find`, `count`, `iter_find`, `find_by_schema` and
+`count_by_schema_search` all take them, and match the same way.
 
 ## Writing results back
 
