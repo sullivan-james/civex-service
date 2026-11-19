@@ -1098,6 +1098,76 @@ class RecordMoveResultDTO:
 
 
 @dataclass
+class BulkEditSkipDTO:
+    """A chosen record a bulk edit leaves as it is, and why, in plain words."""
+
+    record_id: uuid.UUID
+    name: str | None  # the record's natural name
+    reason: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "record_id": str(self.record_id),
+            "name": self.name,
+            "reason": self.reason,
+        }
+
+
+@dataclass
+class RecordBulkEditPlanDTO:
+    """What setting (or clearing) some fields on many records would do,
+    worked out without doing it. A record takes every change or none: one
+    that can't (no such field of its own, a value its field won't take, a
+    uniqueness key taken) is skipped and named, and the rest go ahead."""
+
+    fields: list[str]  # the fields being set or cleared
+    records: int  # chosen (live) records
+    changing: int  # would change
+    unchanged: int  # already hold every value
+    skipped: int  # can't take the change, exactly counted
+    skipped_records: list[BulkEditSkipDTO]  # the first MAX_REPORTED of them
+    runs: int  # workflow runs the edit would queue
+    workflows: list[str]  # which workflows those are
+    automation_paused: bool  # so no runs would start
+
+    @property
+    def can_apply(self) -> bool:
+        return self.changing > 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "fields": self.fields,
+            "records": self.records,
+            "changing": self.changing,
+            "unchanged": self.unchanged,
+            "skipped": self.skipped,
+            "skipped_records": [s.to_dict() for s in self.skipped_records],
+            "runs": self.runs,
+            "workflows": self.workflows,
+            "automation_paused": self.automation_paused,
+            "can_apply": self.can_apply,
+        }
+
+
+@dataclass
+class RecordBulkEditResultDTO:
+    changed: int  # records changed
+    unchanged: int  # already held every value
+    skipped: int  # left as they were, exactly counted
+    skipped_records: list[BulkEditSkipDTO]  # the first MAX_REPORTED of them
+    runs: int  # workflow runs queued
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "changed": self.changed,
+            "unchanged": self.unchanged,
+            "skipped": self.skipped,
+            "skipped_records": [s.to_dict() for s in self.skipped_records],
+            "runs": self.runs,
+        }
+
+
+@dataclass
 class RestoreSetResultDTO:
     restored: int  # records restored in their own right
     came_back: int  # records live again in all, with what went with them

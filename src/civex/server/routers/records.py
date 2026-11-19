@@ -11,6 +11,9 @@ from civex.server.background import run_pending_jobs
 from civex.server.deps import get_ctx
 from civex.server.downloads import new_temp_path, serve, temp_paths
 from civex.server.models import (
+    BulkEditPlanResponse,
+    BulkEditRequest,
+    BulkEditResponse,
     CreateRecordRequest,
     MoveRecordsRequest,
     MoveRecordsResponse,
@@ -24,12 +27,15 @@ from civex.server.models import (
     OrphansResponse,
     RecordRef,
     RecordResponse,
+    RecordSelectionRequest,
     RestorePlanResponse,
     ReferrerGroupResponse,
     UpdateRecordRequest,
 )
 from civex.server.query_params import record_query
+from civex.server.routers.file_access import report_progress
 from civex.services.archive import write_zip
+from civex.services.progress import Progress
 from civex.services.table_files import write_table
 
 router = APIRouter(tags=["records"])
@@ -480,13 +486,15 @@ def bulk_delete_records(
     return {"deleted": deleted}
 
 
-def _move_selection(body: MoveRecordsRequest) -> dict:
+def _selection(body: RecordSelectionRequest, verb: str) -> dict:
+    """The `ids` or `query` a request's selection is, for the service."""
     if body.ids is not None:
         return {"ids": body.ids}
     if not body.collection:
         raise HTTPException(
             422,
-            detail="Choose the records to move: 'ids', or a query with 'collection'.",
+            detail=f"Choose the records to {verb}: 'ids', or a query with "
+            "'collection'.",
         )
     return {
         "query": RecordQuery(
@@ -508,7 +516,9 @@ def plan_move_records(body: MoveRecordsRequest, ctx: AppContext = Depends(get_ct
     the way, such as references that would break or a uniqueness key already
     taken there. The same rule as the move itself."""
     try:
-        plan = ctx.record_svc.plan_move(body.to, body.parent, **_move_selection(body))
+        plan = ctx.record_svc.plan_move(
+            body.to, body.parent, **_selection(body, "move")
+        )
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except (ValueError, ValidationError) as e:
@@ -525,7 +535,7 @@ def move_records(body: MoveRecordsRequest, ctx: AppContext = Depends(get_ctx)):
     whole (422, saying why) when anything is in the way; `POST
     /records/move/plan` says so beforehand."""
     try:
-        result = ctx.record_svc.move(body.to, body.parent, **_move_selection(body))
+        result = ctx.record_svc.move(body.to, body.parent, **_selection(body, "move"))
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except (ValueError, ValidationError) as e:
@@ -534,6 +544,55 @@ def move_records(body: MoveRecordsRequest, ctx: AppContext = Depends(get_ctx)):
     return MoveRecordsResponse(
         roots=result.roots, records=result.records, collection=result.collection
     )
+
+
+@router.post("/records/bulk-edit/plan", response_model=BulkEditPlanResponse)
+def plan_bulk_edit(
+    body: BulkEditRequest,
+    ctx: AppContext = Depends(get_ctx),
+    progress: Progress | None = Depends(report_progress),
+):
+    """What setting (or clearing) these fields on the chosen records would do,
+    without doing it: how many would change, how many already hold the values,
+    which can't take them and why (a value its field won't take, a uniqueness
+    key taken, a field the record hasn't got of its own), and how many
+    workflow runs it would start. The same rule as the edit itself."""
+    try:
+        plan = ctx.record_svc.plan_bulk_edit(
+            body.changes, progress=progress, **_selection(body, "edit")
+        )
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except (ValueError, ValidationError) as e:
+        raise HTTPException(422, detail=str(e))
+    return BulkEditPlanResponse.from_dto(plan)
+
+
+@router.post("/records/bulk-edit", response_model=BulkEditResponse)
+def bulk_edit_records(
+    body: BulkEditRequest,
+    background_tasks: BackgroundTasks,
+    ctx: AppContext = Depends(get_ctx),
+    progress: Progress | None = Depends(report_progress),
+):
+    """Set (or, with null, clear) these fields on every chosen record. Each
+    record is saved as an edit of just those fields, held to the same rules
+    as any edit and logged in its history; the lot is one event in Activity.
+    A record that can't take the change is left as it is and named in the
+    answer, and the others go ahead (`POST /records/bulk-edit/plan` says so
+    beforehand). Tag the request with `X-Civex-Progress` to follow it."""
+    try:
+        result = ctx.record_svc.bulk_edit(
+            body.changes, progress=progress, **_selection(body, "edit")
+        )
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except (ValueError, ValidationError) as e:
+        raise HTTPException(422, detail=str(e))
+    ctx.commit()
+    if result.runs:
+        background_tasks.add_task(run_pending_jobs, context_factory(ctx.project))
+    return BulkEditResponse.from_dto(result)
 
 
 @router.delete("/collections/{dataset_name}/records")

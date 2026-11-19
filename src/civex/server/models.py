@@ -20,6 +20,8 @@ from civex.domain.dtos import (
     FieldDTO,
     NameIssue,
     RecordDTO,
+    RecordBulkEditPlanDTO,
+    RecordBulkEditResultDTO,
     RecordMovePlanDTO,
     ReferrerGroupDTO,
     RestoreAllPlanDTO,
@@ -567,22 +569,16 @@ class RestoreSelectedResponse(BaseModel):
     left: int = Field(description="Chosen records still deleted, and why not.")
 
 
-class MoveRecordsRequest(BaseModel):
-    """Which records to move, and where to. Either exactly `ids`, or every
-    record the query (`collection`, `schema_name`, `within`, `filter`, `where`,
-    `search`) lists: the same selectors as listing records, so "move all N
-    matching" moves exactly what a list with those filters shows."""
+class RecordSelectionRequest(BaseModel):
+    """Which records: either exactly `ids`, or every record the query
+    (`collection`, `schema_name`, `within`, `filter`, `where`, `search`)
+    lists: the same selectors as listing records, so "all N matching" is
+    exactly what a list with those filters shows."""
 
-    to: str = Field(description="The collection to move them to.")
-    parent: str | None = Field(
-        default=None,
-        description="The record (id or prefix) in that collection they go inside. "
-        "Omit to put them at its top level.",
-    )
     ids: list[str] | None = Field(
         default=None,
-        description="Exactly these records (ids or prefixes), each with "
-        "everything beneath it. The query fields are then ignored.",
+        description="Exactly these records (ids or prefixes). The query fields "
+        "are then ignored.",
     )
     collection: str | None = Field(
         default=None, description="With a query: the collection the records are in."
@@ -604,6 +600,17 @@ class MoveRecordsRequest(BaseModel):
     search_fields: list[str] | None = Field(
         default=None,
         description="Look for 'search' only in these fields of 'schema_name'.",
+    )
+
+
+class MoveRecordsRequest(RecordSelectionRequest):
+    """Which records to move (each with everything beneath it), and where to."""
+
+    to: str = Field(description="The collection to move them to.")
+    parent: str | None = Field(
+        default=None,
+        description="The record (id or prefix) in that collection they go inside. "
+        "Omit to put them at its top level.",
     )
 
 
@@ -637,6 +644,61 @@ class MoveRecordsResponse(BaseModel):
         description="Records moved in all, with everything beneath them."
     )
     collection: str = Field(description="Where they are now.")
+
+
+class BulkEditRequest(RecordSelectionRequest):
+    """Which records to edit, and the fields to set on every one of them."""
+
+    changes: dict[str, Any] = Field(
+        description="Field name -> the value every chosen record gets, as a "
+        "record's data holds it (null clears the field). A record's own fields "
+        "only: an inherited field's value is on the record above."
+    )
+
+
+class BulkEditSkipResponse(BaseModel):
+    record_id: str
+    name: str | None = Field(default=None, description="The record's name.")
+    reason: str = Field(description="Why it is left as it is, in plain words.")
+
+
+class BulkEditPlanResponse(BaseModel):
+    """What a bulk edit would do. A record takes every change or none; the
+    ones that can't are skipped (counted exactly, the first 200 named) and
+    the rest go ahead."""
+
+    fields: list[str] = Field(description="The fields being set or cleared.")
+    records: int = Field(description="Chosen records (live ones).")
+    changing: int = Field(description="Records that would change.")
+    unchanged: int = Field(description="Records that already hold every value.")
+    skipped: int = Field(description="Records that can't take the change.")
+    skipped_records: list[BulkEditSkipResponse] = Field(
+        description="The first of the skipped records, each with why."
+    )
+    runs: int = Field(description="Workflow runs the edit would start.")
+    workflows: list[str] = Field(description="The workflows those runs are of.")
+    automation_paused: bool = Field(
+        description="Automation is paused, so no runs would start."
+    )
+    can_apply: bool = Field(description="True when any record would change.")
+
+    @classmethod
+    def from_dto(cls, dto: RecordBulkEditPlanDTO) -> BulkEditPlanResponse:
+        return cls(**dto.to_dict())
+
+
+class BulkEditResponse(BaseModel):
+    changed: int = Field(description="Records changed.")
+    unchanged: int = Field(description="Records that already held every value.")
+    skipped: int = Field(description="Records left as they were.")
+    skipped_records: list[BulkEditSkipResponse] = Field(
+        description="The first of the skipped records, each with why."
+    )
+    runs: int = Field(description="Workflow runs queued.")
+
+    @classmethod
+    def from_dto(cls, dto: RecordBulkEditResultDTO) -> BulkEditResponse:
+        return cls(**dto.to_dict())
 
 
 class RecordLabelsRequest(BaseModel):

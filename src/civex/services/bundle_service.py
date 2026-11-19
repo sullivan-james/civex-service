@@ -47,14 +47,12 @@ from civex.domain.exceptions import (
 from civex.services.dataset_service import DatasetService
 from civex.services.file_service import FileService
 from civex.services.progress import Progress
-from civex.services.record_service import RecordService
+from civex.services.record_service import MAX_REPORTED, RecordService
 from civex.services.schema_service import SchemaService
 
 # Records written per commit while importing: a commit per record made a large
 # import dominated by fsyncs.
 IMPORT_BATCH = 1000
-# How many skipped records an import result names (the count is exact).
-MAX_REPORTED = 200
 _CHUNK = 1024 * 1024
 
 

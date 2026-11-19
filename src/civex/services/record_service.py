@@ -21,6 +21,9 @@ from civex.domain.dtos import (
     FieldDTO,
     FieldValueDTO,
     FileRef,
+    BulkEditSkipDTO,
+    RecordBulkEditPlanDTO,
+    RecordBulkEditResultDTO,
     RecordDTO,
     RecordMovePlanDTO,
     RecordMoveResultDTO,
@@ -69,6 +72,7 @@ from civex.repositories.protocols import (
     ObjectStore,
     RecordRepository,
 )
+from civex.services.progress import Progress
 from civex.services.schema_service import SchemaResolver, SchemaService
 
 from typing import TYPE_CHECKING
@@ -352,6 +356,46 @@ def _audit_batch(audit: AuditRepository | None, kind: str, many: bool):
     """One batch for an operation that touches several records, so history
     shows it as one event. A single record is just its own entry."""
     return audit.batch(kind) if audit is not None and many else nullcontext()
+
+
+# Records read and saved at a time by a bulk edit.
+BULK_EDIT_PAGE = 500
+# How many skipped records a bulk change names (the count is exact).
+MAX_REPORTED = 200
+
+
+def _bulk_edit_problem(shape: ResolvedSchema | None, fields: list[str]) -> str | None:
+    """Why a record of `shape` can't take a bulk edit of `fields`, or None. A
+    record holds values only for its schema's *own* fields: an inherited one's
+    value is on the record above, so it is that kind that is edited."""
+    if shape is None:
+        return "Its schema no longer exists"
+    own = {f.name for f in shape.schema.fields}
+    kind = shape.schema.display_name
+    for name in fields:
+        if name in own:
+            continue
+        if name in shape.by_name:
+            source = next(
+                (rf.source_schema_name for rf in shape.fields if rf.field.name == name),
+                "the record above",
+            )
+            return (
+                f"'{name}' is a field of the {source} a {kind} sits in, not of "
+                f"the {kind} itself: edit the {source} records instead"
+            )
+        return f"A {kind} has no field '{name}'"
+    return None
+
+
+def _patched(existing: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any] | None:
+    """The whole data a record holding `existing` (by field name) would hold
+    with only `fields` changed, or None when they already hold those values:
+    the one "change only these fields" rule, behind `patch` and a bulk edit.
+    A field set to None is cleared; one already empty counts as holding it."""
+    if all(existing.get(k) == v for k, v in fields.items()):
+        return None
+    return {**existing, **fields}
 
 
 def _is_blank_value(value: Any) -> bool:
@@ -1496,10 +1540,7 @@ class RecordService:
         that knows only some fields must start from the current ones: this is
         the one place that does, for `patch` and for a plugin's `patch_record`."""
         current = self.get(record_id)
-        existing = without_file_locations(current.data)
-        if all(existing.get(k) == v for k, v in fields.items()):
-            return current, None
-        return current, {**existing, **fields}
+        return current, _patched(without_file_locations(current.data), fields)
 
     def patch(
         self,
@@ -1901,7 +1942,33 @@ class RecordService:
             raise NotFoundError(f"Record '{record_id}' not found")
         self._permissions.require(permissions.WRITE_RECORDS, raw.dataset_id)
         shapes = self._schema_svc.resolver()
-        shape = shapes(raw.schema_id)
+        dataset = (
+            self._datasets.get_by_id(
+                raw.dataset_id,
+                include_deleted=True,
+                with_count=False,
+            )
+            if raw.dataset_id
+            else None
+        )
+        named, _ = self._write_update(
+            raw, data, shapes, dataset, _job_depth=_job_depth, _cause=_cause
+        )
+        return self._attach_reference_labels([named], shapes)[0]
+
+    def _checked_update(
+        self,
+        raw: RecordDTO,
+        data: dict[str, Any],
+        shape: ResolvedSchema | None,
+        dataset: DatasetDTO | None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """What `raw` would store if saved with `data` (its whole data, by
+        field name), checked as every save is: values read from file names,
+        defaults, datetimes normalised, restrictions, references and unique
+        keys. The record's data as it was (by name) and the data to store (by
+        field id); raises `ValidationError` and writes nothing. The one set of
+        checks behind `update` and a bulk edit's plan."""
         old_data = self._ids_to_names(raw.data, shape)
         # Fields read from a file's name first, then defaults, then validation.
         # The stored data says whether the file changed; the parent is only
@@ -1914,15 +1981,6 @@ class RecordService:
             stored=old_data,
         )
         data = self._apply_defaults(data, shape)
-        dataset = (
-            self._datasets.get_by_id(
-                raw.dataset_id,
-                include_deleted=True,
-                with_count=False,
-            )
-            if raw.dataset_id
-            else None
-        )
         if shape is not None:
             data = _strip_derived_file_keys(data, shape.fields)
         data = self._normalise_datetimes(
@@ -1950,6 +2008,23 @@ class RecordService:
                 exclude_id=raw.id,
                 unchanged=raw.data,
             )
+        return old_data, id_data
+
+    def _write_update(
+        self,
+        raw: RecordDTO,
+        data: dict[str, Any],
+        shapes: SchemaResolver,
+        dataset: DatasetDTO | None,
+        _job_depth: int = 0,
+        _cause: dict[str, Any] | None = None,
+    ) -> tuple[RecordDTO, int]:
+        """Save `raw` with `data` (checked first, `_checked_update`), log it and
+        fire its triggers: the record as saved, by name and without reference
+        labels, and how many workflow runs were queued. Permission is the
+        caller's to ask."""
+        shape = shapes(raw.schema_id)
+        old_data, id_data = self._checked_update(raw, data, shape, dataset)
         dto = self._records.update(id=raw.id, data=id_data)
         named = self._with_names(dto, shapes)
         # What was stored, by field name, with nothing the server adds on a read
@@ -1969,7 +2044,7 @@ class RecordService:
                 for k in set(old_data) | set(new_data)
                 if old_data.get(k) != new_data.get(k)
             }
-            self._job_svc.trigger_for_record(
+            runs = self._job_svc.trigger_for_record(
                 named,
                 "record_updated",
                 changed_fields=changed,
@@ -1977,7 +2052,8 @@ class RecordService:
                 changes={k: (old_data.get(k), new_data.get(k)) for k in changed},
                 cause=_cause,
             )
-        return self._attach_reference_labels([named], shapes)[0]
+            return named, len(runs)
+        return named, 0
 
     # ------------------------------------------------------------------
     # Queries -- every read path (collection list, a record's descendants,
@@ -3001,6 +3077,16 @@ class RecordService:
     ) -> list[RecordDTO]:
         """The live records a person picked: by id (full or prefix), or every
         one a query lists."""
+        found = self._records.list_by_ids(self._chosen_ids(ids, query, "move"))
+        return [r for r in found if r.deleted_at is None]
+
+    def _chosen_ids(
+        self, ids: list[str] | None, query: RecordQuery | None, verb: str
+    ) -> list[uuid.UUID]:
+        """The ids of the records a person picked, in order: exactly `ids`
+        (full or prefix), or every record `query` lists. The one reading of
+        "these, or all N matching" behind a move and a bulk edit. Deleted
+        records may be among them: the caller leaves them out as it loads."""
         if ids is not None:
             full: list[uuid.UUID] = []
             for rid in ids:
@@ -3010,14 +3096,198 @@ class RecordService:
                     record = self._records.get_by_prefix(rid)
                     if record:
                         full.append(record.id)
-            found = self._records.list_by_ids(list(dict.fromkeys(full)))
-        elif query is not None:
-            found = self._records.list_by_ids(
-                self._records.list_ids(self.resolve(query))
-            )
-        else:
-            raise ValidationError("Choose the records to move: ids, or a query")
-        return [r for r in found if r.deleted_at is None]
+            return list(dict.fromkeys(full))
+        if query is not None:
+            return self._records.list_ids(self.resolve(query))
+        raise ValidationError(f"Choose the records to {verb}: ids, or a query")
+
+    # ------------------------------------------------------------------
+    # Editing many records at once
+    # ------------------------------------------------------------------
+
+    def plan_bulk_edit(
+        self,
+        changes: dict[str, Any],
+        *,
+        ids: list[str] | None = None,
+        query: RecordQuery | None = None,
+        progress: Progress | None = None,
+    ) -> RecordBulkEditPlanDTO:
+        """What setting `changes` ({field name: value, None to clear}) on the
+        chosen records (`ids`, or every record `query` lists) would do,
+        without doing it: how many would change, how many already hold the
+        values, which can't take them and why, and how many workflow runs it
+        would start. The same walk as `bulk_edit`, so they can't disagree."""
+        return self._bulk_edit(changes, ids, query, write=False, progress=progress)[0]
+
+    def bulk_edit(
+        self,
+        changes: dict[str, Any],
+        *,
+        ids: list[str] | None = None,
+        query: RecordQuery | None = None,
+        progress: Progress | None = None,
+    ) -> RecordBulkEditResultDTO:
+        """Set (or, with None, clear) `changes` on every chosen record. Each
+        record is saved as an edit of only those fields (`_patched`, the rule
+        behind `patch`), through the checks, history and triggers of any save;
+        one that already holds the values is not written. A record that can't
+        take the change is left as it is and reported, the others go ahead:
+        `plan_bulk_edit` says which beforehand. The lot is one event in
+        Activity. `write_records` is asked for every collection involved
+        before anything is written."""
+        return self._bulk_edit(changes, ids, query, write=True, progress=progress)[1]
+
+    def _bulk_edit(
+        self,
+        changes: dict[str, Any],
+        ids: list[str] | None,
+        query: RecordQuery | None,
+        *,
+        write: bool,
+        progress: Progress | None = None,
+    ) -> tuple[RecordBulkEditPlanDTO, RecordBulkEditResultDTO]:
+        """The one walk behind the plan and the edit. Records are read a page
+        at a time and each schema resolved once; when `write`, each record
+        that can change is saved as it is reached, so a key one record takes
+        is taken for the next. Planning stands in for that by remembering the
+        keys the records before it would take."""
+        fields = list(changes)
+        if not fields:
+            raise ValidationError("Choose a field to set or clear")
+        chosen = self._chosen_ids(ids, query, "edit")
+        for dataset_id in self._records.collections_of(chosen):
+            self._permissions.require(permissions.WRITE_RECORDS, dataset_id)
+        shapes = self._schema_svc.resolver()
+        datasets: dict[uuid.UUID, DatasetDTO | None] = {}
+        claimed: dict[tuple[Any, ...], uuid.UUID] = {}
+        paused = self._job_svc.is_paused() if self._job_svc else True
+        workflows: dict[str, int] = {}
+        skips: list[BulkEditSkipDTO] = []
+        counts = {"records": 0, "changing": 0, "unchanged": 0, "skipped": 0}
+        runs = 0
+
+        def skip(raw: RecordDTO, reason: str) -> None:
+            counts["skipped"] += 1
+            if len(skips) < MAX_REPORTED:
+                skips.append(
+                    BulkEditSkipDTO(
+                        record_id=raw.id,
+                        name=self._with_names(raw, shapes).natural_name,
+                        reason=reason,
+                    )
+                )
+
+        batch = (
+            self._audit.batch("edit", ", ".join(fields))
+            if write and self._audit is not None and len(chosen) > 1
+            else nullcontext()
+        )
+        if progress:
+            progress.phase("Changing records" if write else "Checking", len(chosen))
+        done = 0
+        with batch:
+            for start in range(0, len(chosen), BULK_EDIT_PAGE):
+                page = chosen[start : start + BULK_EDIT_PAGE]
+                by_id = {r.id: r for r in self._records.list_by_ids(page)}
+                for rid in page:
+                    raw = by_id.get(rid)
+                    if raw is None or raw.deleted_at is not None:
+                        continue
+                    counts["records"] += 1
+                    shape = shapes(raw.schema_id)
+                    problem = _bulk_edit_problem(shape, fields)
+                    if problem or shape is None:
+                        skip(raw, problem or "Its schema no longer exists")
+                        continue
+                    wanted = _strip_derived_file_keys(changes, shape.fields)
+                    merged = _patched(self._ids_to_names(raw.data, shape), wanted)
+                    if merged is None:
+                        counts["unchanged"] += 1
+                        continue
+                    if raw.dataset_id not in datasets:
+                        datasets[raw.dataset_id] = self._datasets.get_by_id(
+                            raw.dataset_id, include_deleted=True, with_count=False
+                        )
+                    dataset = datasets[raw.dataset_id]
+                    try:
+                        if write:
+                            runs += self._write_update(raw, merged, shapes, dataset)[1]
+                        else:
+                            before, id_data = self._checked_update(
+                                raw, merged, shape, dataset
+                            )
+                            self._claim_keys(claimed, shape, raw, id_data)
+                            if not paused and self._job_svc is not None:
+                                after = self._ids_to_names(id_data, shape)
+                                changed = {
+                                    k
+                                    for k in set(before) | set(after)
+                                    if before.get(k) != after.get(k)
+                                }
+                                for wf in self._job_svc.triggered_by(
+                                    shape.schema.name, "record_updated", changed
+                                ):
+                                    runs += 1
+                                    workflows[wf.name] = workflows.get(wf.name, 0) + 1
+                    except ValidationError as e:
+                        skip(raw, str(e))
+                        continue
+                    counts["changing"] += 1
+                done += len(page)
+                if progress:
+                    progress.advance(done)
+        plan = RecordBulkEditPlanDTO(
+            fields=fields,
+            records=counts["records"],
+            changing=counts["changing"],
+            unchanged=counts["unchanged"],
+            skipped=counts["skipped"],
+            skipped_records=skips,
+            runs=runs,
+            workflows=sorted(workflows),
+            automation_paused=paused and self._job_svc is not None,
+        )
+        result = RecordBulkEditResultDTO(
+            changed=counts["changing"],
+            unchanged=counts["unchanged"],
+            skipped=counts["skipped"],
+            skipped_records=skips,
+            runs=runs,
+        )
+        return plan, result
+
+    def _claim_keys(
+        self,
+        claimed: dict[tuple[Any, ...], uuid.UUID],
+        shape: ResolvedSchema,
+        raw: RecordDTO,
+        id_data: dict[str, Any],
+    ) -> None:
+        """For a plan: refuse a record whose new values would share a unique
+        key with an earlier record of the same plan (`_check_unique` only sees
+        what is stored, and the earlier one isn't yet), else remember its keys.
+        A key whose values the record already held is not taken anew."""
+        for key in shape.schema.unique_keys:
+            values = key_values(id_data, key)
+            if values is None or key_values(raw.data, key) == values:
+                continue
+            slot = (raw.dataset_id, shape.schema.id, raw.parent_record_id, tuple(key))
+            spot = (*slot, *values)
+            if spot in claimed and claimed[spot] != raw.id:
+                names = [shape.id_to_name.get(i, i) for i in key]
+                raise DuplicateRecordError(
+                    f"Another of the chosen records would get the same "
+                    f"{_join_names(names)}. {_join_names(names, cap=True)} must be "
+                    + (
+                        "unique within its parent."
+                        if raw.parent_record_id
+                        else "unique within the collection."
+                    ),
+                    existing_id=str(claimed[spot]),
+                    fields=names,
+                )
+            claimed[spot] = raw.id
 
     def _move_kind_problems(
         self, roots: list[RecordDTO], above: RecordDTO | None

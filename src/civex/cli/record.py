@@ -472,6 +472,136 @@ def record_move_all(
     _move(to=to, under=under, dry_run=dry_run, query=query)
 
 
+def _print_bulk_edit(plan) -> None:
+    console.print(
+        f"{plan.records} record(s) chosen: {plan.changing} would change, "
+        f"{plan.unchanged} already hold the value(s), {plan.skipped} can't."
+    )
+    for skip in plan.skipped_records:
+        name = skip.name or str(skip.record_id)[:8]
+        console.print(f"  [warning]{name}[/warning]: {skip.reason}")
+    if plan.skipped > len(plan.skipped_records):
+        console.print(f"  ...and {plan.skipped - len(plan.skipped_records)} more.")
+    if plan.runs:
+        console.print(
+            f"{plan.runs} workflow run(s) would start ({', '.join(plan.workflows)})."
+        )
+    elif plan.automation_paused:
+        console.print("Automation is paused: no workflow runs would start.")
+
+
+def _typed_changes(ctx, assignments: list[str], schema_name: str) -> dict:
+    """`field=value` terms as the values the fields hold: each read as its
+    field's type (`coerce_value`), an empty value clearing the field. A
+    datetime stays as written, so each record reads it in its own
+    collection's zone."""
+    fields = {
+        rf.field.name: rf.field
+        for rf in ctx.record_svc.get_resolved_fields(schema_name)
+    }
+    changes: dict = {}
+    for term in assignments:
+        if "=" not in term:
+            raise ValidationError(f"'{term}' is not field=value")
+        name, _, raw = term.partition("=")
+        name = name.strip()
+        field = fields.get(name)
+        if field is None:
+            raise ValidationError(f"'{schema_name}' has no field '{name}' of its own")
+        if raw == "":
+            changes[name] = None
+        elif field.dtype == "datetime":
+            changes[name] = raw
+        else:
+            changes[name] = ctx.record_svc.coerce_value(
+                raw, field.dtype, name, field.restrictions
+            )
+    return changes
+
+
+@app.command("set")
+def record_set(
+    assignments: list[str] = typer.Argument(
+        ...,
+        help="field=value terms; an empty value (field=) clears the field",
+    ),
+    record_ids: Optional[list[str]] = typer.Option(
+        None, "--id", help="A record to edit (id or prefix); repeat for several"
+    ),
+    collection: Optional[str] = typer.Option(
+        None, "--in", help="Edit every record this collection lists (with the filters)"
+    ),
+    schema: Optional[str] = typer.Option(
+        None, "--schema", "-s", help="Only records of this schema"
+    ),
+    where: Optional[list[str]] = typer.Option(
+        None, "--where", "-w", help="Only records with field=value; repeatable"
+    ),
+    search: Optional[str] = typer.Option(
+        None, "--search", "-q", help="Only records whose values contain this text"
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Say what would change and what can't, only"
+    ),
+) -> None:
+    """Set (or clear) fields on many records at once.
+
+    Choose the records with --id (repeatable), or with --in and the same
+    filters as listing them. Each value is read as its field's type. A record
+    takes every change or none: one that can't (a value its field won't take,
+    a uniqueness key already used, a field it hasn't got of its own) is left as
+    it is and named, and the others are changed. The plan is shown first; the
+    edit is one event in Activity, and may start workflow runs that watch the
+    fields.
+    """
+    from civex.domain.query import RecordQuery
+
+    if bool(record_ids) == bool(collection):
+        console.print("[error]Choose the records: --id, or --in a collection.[/error]")
+        raise typer.Exit(1)
+    ctx = _ctx()
+    try:
+        query = (
+            RecordQuery(
+                dataset=collection, schema=schema, where=where or [], search=search
+            )
+            if collection
+            else None
+        )
+        kind = schema or (
+            ctx.record_svc.get(record_ids[0]).schema_name if record_ids else None
+        )
+        if kind is None:
+            raise ValidationError(
+                "Choose the kind of record with --schema, so each value can be "
+                "read as its field's type"
+            )
+        changes = _typed_changes(ctx, assignments, kind)
+        selection = {"ids": record_ids} if record_ids else {"query": query}
+        plan = ctx.record_svc.plan_bulk_edit(changes, **selection)
+        _print_bulk_edit(plan)
+        if dry_run or not plan.can_apply:
+            # Nothing to do is fine; nothing that *could* be done is not.
+            raise typer.Exit(1 if plan.skipped and not plan.changing else 0)
+        if not yes:
+            typer.confirm(f"Change {plan.changing} record(s)?", abort=True)
+        result = ctx.record_svc.bulk_edit(changes, **selection)
+        ctx.commit()
+        console.print(
+            f"[success]Changed {result.changed} record(s)."
+            + (f" {result.skipped} left as they were." if result.skipped else "")
+            + "[/success]"
+        )
+        if result.runs:
+            drain_jobs(ctx)
+    except (NotFoundError, ValidationError, CoercionError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+
+
 @app.command("delete-all")
 def record_delete_all(
     dataset_name: str = typer.Argument(..., help="Dataset to delete records from"),

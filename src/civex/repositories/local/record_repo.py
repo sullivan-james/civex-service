@@ -250,6 +250,19 @@ class LocalRecordRepository:
             for r in self._s.query(Record).filter(Record.id.in_(chunk)).all()
         ]
 
+    def collections_of(self, ids: list[uuid.UUID]) -> set[uuid.UUID]:
+        """The collections these records are in: one query per chunk of ids,
+        no rows hydrated (what a bulk change asks permission for up front)."""
+        found: set[uuid.UUID] = set()
+        for chunk in _chunks(ids):
+            found.update(
+                did
+                for (did,) in self._s.query(Record.dataset_id)
+                .filter(Record.id.in_(chunk))
+                .distinct()
+            )
+        return found
+
     def list_filtered(
         self,
         query: ResolvedQuery,
