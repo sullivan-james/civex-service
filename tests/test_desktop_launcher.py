@@ -356,3 +356,63 @@ def test_getting_there_counts_whatever_uv_said(
     monkeypatch.setattr(launcher, "civex_version", lambda h, env: "2.0.0rc6")
     launcher.main([])
     assert json.loads(result.read_text())["ok"] is True
+
+
+def _metadata(home: Path, version: str) -> None:
+    site = launcher.tool_python(home).parent.parent / (
+        "Lib/site-packages" if sys.platform == "win32" else "lib/python3.13/site-packages"
+    )
+    info = site / f"civex-{version}.dist-info"
+    info.mkdir(parents=True)
+    (info / "METADATA").write_text(
+        f"Metadata-Version: 2.4\nName: civex\nVersion: {version}\n\nVersion: no\n"
+    )
+
+
+def test_the_installed_version_is_read_without_starting_civex(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`civex --version` imported all of civex on every start of the app."""
+    home = tmp_path / "app"
+    _metadata(home, "2.0.0rc3")
+    monkeypatch.setattr(
+        launcher.subprocess, "run", lambda *a, **k: pytest.fail("started civex")
+    )
+    assert launcher.installed_version(home) == "2.0.0rc3"
+    assert launcher.civex_version(home, {}) == "2.0.0rc3"
+
+
+def test_two_installed_versions_ask_civex_itself(tmp_path: Path) -> None:
+    home = tmp_path / "app"
+    _metadata(home, "1.2.0")
+    _metadata(home, "2.0.0")
+    assert launcher.installed_version(home) is None
+    assert launcher.installed_version(tmp_path / "nothing") is None
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "older"),
+    [
+        ("1.2.0", "2.0.0rc1", True),
+        ("2.0.1", "2.0.0rc1", False),
+        ("2.0", "2.0.0", False),
+        ("2.0.0", "2.0.0rc1", None),  # suffixes: packaging's rules
+        ("2.0.0rc1", "2.0.0rc2", None),
+        ("not a version", "2.0.0", None),
+    ],
+)
+def test_release_numbers_settle_most_comparisons(
+    a: str, b: str, older: bool | None
+) -> None:
+    assert launcher._release_older(a, b) is older
+
+
+def test_a_comparison_the_numbers_settle_starts_nothing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _released(monkeypatch, tmp_path, "2.0.0rc1")
+    monkeypatch.setattr(
+        launcher.subprocess, "run", lambda *a, **k: pytest.fail("started python")
+    )
+    assert launcher.older_than_release(tmp_path, {}, "1.2.0")
+    assert not launcher.older_than_release(tmp_path, {}, "2.1.0")

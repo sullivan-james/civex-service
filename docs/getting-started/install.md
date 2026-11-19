@@ -73,7 +73,7 @@ folder of its own, separate from any `uv` install. To use the app's copy from a
 terminal, use **Settings → Updates → Command line** (on Windows, the installer's
 *Add the civex command to PATH*).
 
-With civex already installed by uv, `uv tool install "civex[desktop]"` then
+With civex already installed by uv, `uv tool install --force "civex[desktop]"` then
 `civex desktop` opens the same window.
 
 ## Updating
