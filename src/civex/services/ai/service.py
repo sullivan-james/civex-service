@@ -318,7 +318,11 @@ Available collections: {collections_csv}
    modify anything else.
 
 ## Other guidelines
-- For count/aggregate questions about ONE schema, use query_records with count_only: true.
+- For a plain count of ONE schema's records (filtered or not), use query_records with count_only: true.
+- For counts per group, averages, totals, min/max or distributions, call summarise_records (call
+  describe_schema first for the field keys, units and allowed measures). Never work these out from
+  listed records: query_records returns at most 20, a sample, not the data.
+- If a filter or summary comes back as an error, read the message, fix that part and call again.
 - For "how many records total" (across every schema/collection), there is no single count-everything tool —
   call list_collections and sum the `record_count` of every collection. Do this in one tool call, not a
   guess-and-retry loop.

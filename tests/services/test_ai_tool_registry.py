@@ -37,11 +37,13 @@ def test_all_tools_declare_a_description_and_input_schema() -> None:
         assert isinstance(cls.input_schema, dict)
 
 
-def test_all_tools_covers_the_22_expected_tools() -> None:
+def test_all_tools_covers_the_24_expected_tools() -> None:
     assert set(all_tools()) == {
         "list_schemas",
         "list_collections",
         "query_records",
+        "summarise_records",
+        "describe_schema",
         "list_records",
         "get_job_log",
         "list_workflows",
@@ -186,8 +188,8 @@ def test_query_records_limit_bounds_returned_records_not_total(
 
 def test_query_records_unknown_schema_returns_error(ctx: AppContext) -> None:
     result = json.loads(dispatch("query_records", {"schema": "ghost"}, _tool_ctx(ctx)))
-    assert "error" in result
-    assert "ghost" in result["error"]
+    assert result["status"] == "error"
+    assert "ghost" in result["message"]
 
 
 def test_list_workflows_tool_reads_via_workflow_service(ctx: AppContext) -> None:
