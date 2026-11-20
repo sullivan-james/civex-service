@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { Field as SchemaField, FieldKind, Schema } from '../../api/schemas'
+import { Link } from 'react-router'
+import type {
+  Field as SchemaField,
+  FieldCheck,
+  FieldKind,
+  Schema,
+} from '../../api/schemas'
 import { errorMessage } from '../../lib/errors'
-import { useAddField, useUpdateField } from '../../hooks/useSchemas'
+import {
+  useAddField,
+  useFieldCheck,
+  useUpdateField,
+} from '../../hooks/useSchemas'
 import { useFieldTypes } from '../../hooks/useFieldTypes'
 import {
   Button,
@@ -104,6 +114,25 @@ export function FieldForm(props: FieldFormProps) {
   useEffect(() => {
     onDirtyChange?.(dirty)
   }, [dirty, onDirtyChange])
+
+  // Changing a rule never re-checks what is stored, so before saving: what
+  // the rules as they would be make of the values already there.
+  const rulesChanged =
+    mode === 'edit' &&
+    JSON.stringify(tidy(rules) ?? {}) !==
+      JSON.stringify(tidy(editing!.restrictions ?? {}) ?? {})
+  const nowRequired = mode === 'edit' && required && !editing!.required
+  const check = useFieldCheck(
+    schemaName,
+    editing?.name ?? '',
+    rulesChanged || nowRequired
+      ? { restrictions: tidy(rules) ?? {}, required }
+      : null,
+  )
+  const leftBehind =
+    (rulesChanged || nowRequired) && check.data && !check.isFetching
+      ? check.data
+      : null
 
   const problemList = Object.values(problems).filter((p): p is string => !!p)
   const canSubmit =
@@ -263,6 +292,14 @@ export function FieldForm(props: FieldFormProps) {
         </ul>
       )}
 
+      {leftBehind && (leftBehind.breaks_rule > 0 || leftBehind.blank > 0) && (
+        <FieldCheckWarning
+          check={leftBehind}
+          schemaName={schemaName}
+          fieldName={editing!.name}
+        />
+      )}
+
       <div className="flex flex-wrap items-center gap-3 border-t border-border pt-5">
         <Button
           variant="primary"
@@ -292,6 +329,68 @@ export function FieldForm(props: FieldFormProps) {
           </Button>
         )}
       </div>
+    </div>
+  )
+}
+
+/** What saving these rules would leave behind: records whose values they
+ * refuse (kept as they are, but not savable until put right) and records
+ * that leave a now-required field empty, with a few named and a way to the
+ * data check that lists them all. */
+function FieldCheckWarning({
+  check,
+  schemaName,
+  fieldName,
+}: {
+  check: FieldCheck
+  schemaName: string
+  fieldName: string
+}) {
+  const parts = [
+    check.breaks_rule > 0 &&
+      `${check.breaks_rule.toLocaleString()} record${check.breaks_rule === 1 ? '' : 's'} no longer pass${check.breaks_rule === 1 ? 'es' : ''} these rules`,
+    check.blank > 0 &&
+      `${check.blank.toLocaleString()} leave${check.blank === 1 ? 's' : ''} this field empty`,
+  ].filter(Boolean)
+  const issue = check.breaks_rule > 0 ? 'breaks_rule' : 'blank'
+  const seeAll = `/collections?${new URLSearchParams({
+    tab: 'records',
+    schema: schemaName,
+    show: 'checks',
+    'chk.issue': issue,
+    'chk.field': fieldName,
+  })}`
+  return (
+    <div
+      role="status"
+      className="space-y-2 rounded-md border border-attention-muted bg-attention-subtle p-3 text-sm"
+    >
+      <p>
+        <span className="font-medium">{parts.join(', and ')}.</span> They are
+        kept as they are, but can't be saved again until put right.
+      </p>
+      {check.examples.length > 0 && (
+        <ul className="space-y-0.5">
+          {check.examples.map((e) => (
+            <li key={e.record_id}>
+              <Link
+                className="text-accent hover:underline"
+                to={`/records/${e.record_id}`}
+              >
+                {e.record_name ?? e.record_id.slice(0, 8)}
+              </Link>{' '}
+              <span className="text-fg-muted">{e.message}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="text-fg-muted">
+        Once saved,{' '}
+        <Link className="text-accent hover:underline" to={seeAll}>
+          see them all
+        </Link>{' '}
+        to put them right.
+      </p>
     </div>
   )
 }

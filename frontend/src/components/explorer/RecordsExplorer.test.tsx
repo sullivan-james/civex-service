@@ -1600,3 +1600,146 @@ describe('what this person may do', () => {
     })
   })
 })
+
+describe('checks', () => {
+  const blankFilter = {
+    or: [
+      { field: 'rate', op: 'is_null', schema: 'recording' },
+      { field: 'rate', op: 'eq', value: '', schema: 'recording' },
+    ],
+  }
+  const report = {
+    records: 3,
+    records_with_issues: 2,
+    issues: [
+      {
+        name: 'breaks_rule',
+        label: 'Breaks a rule',
+        description: 'A stored value the rules refuse now.',
+      },
+      { name: 'blank', label: 'Required but empty', description: '' },
+    ],
+    kinds: [
+      {
+        schema_name: 'recording',
+        schema_label: 'Recording',
+        records: 3,
+        records_with_issues: 2,
+        issues: [
+          {
+            issue: 'breaks_rule',
+            field: 'rate',
+            field_label: 'Rate',
+            count: 2,
+            examples: [
+              {
+                record_id: 'r1',
+                record_name: 'R1',
+                message: "Field 'rate': 96 exceeds maximum (50)",
+              },
+            ],
+            filter: null,
+          },
+          {
+            issue: 'blank',
+            field: 'rate',
+            field_label: 'Rate',
+            count: 1,
+            examples: [],
+            filter: blankFilter,
+          },
+        ],
+        blanks: [
+          {
+            field: 'rate',
+            field_label: 'Rate',
+            required: true,
+            blank: 1,
+            filter: blankFilter,
+          },
+        ],
+      },
+    ],
+  }
+  beforeEach(() => {
+    override = (url: URL, method: string) => {
+      if (url.pathname === '/api/records/quality' && method === 'POST')
+        return json(report)
+      if (url.pathname === '/api/records/quality/records' && method === 'POST')
+        return json({
+          items: [
+            {
+              record_id: 'r1',
+              record_name: 'R1',
+              schema_name: 'recording',
+              field: 'rate',
+              message: "Field 'rate': 96 exceeds maximum (50)",
+            },
+            {
+              record_id: 'r2',
+              record_name: 'R2',
+              schema_name: 'recording',
+              field: 'rate',
+              message: "Field 'rate': 60 exceeds maximum (50)",
+            },
+          ],
+          total: 2,
+          offset: 0,
+          limit: 25,
+        })
+      return undefined
+    }
+  })
+
+  it('checks exactly what the list shows, and opens the records with an issue', async () => {
+    renderExplorer({}, '/collections/hb?schema=recording&q=9')
+    await userEvent.click(await screen.findByRole('radio', { name: 'Checks' }))
+    expect(search().get('show')).toBe('checks')
+    await waitFor(() =>
+      expect(
+        calls.find((c) => c.path === '/api/records/quality')?.body,
+      ).toMatchObject({
+        collection: 'hb',
+        schema_name: 'recording',
+        search: '9',
+      }),
+    )
+    expect(
+      await screen.findByText(/have\s+something to look at/),
+    ).toBeInTheDocument()
+
+    // A line opens its records (held in the address), to tick and edit.
+    await userEvent.click(screen.getByText('Breaks a rule'))
+    expect(search().get('chk.issue')).toBe('breaks_rule')
+    expect(search().get('chk.field')).toBe('rate')
+    await waitFor(() =>
+      expect(
+        calls.find((c) => c.path === '/api/records/quality/records')?.body,
+      ).toMatchObject({
+        issue: 'breaks_rule',
+        field: 'rate',
+        kind: 'recording',
+      }),
+    )
+    const region = await screen.findByRole('region', {
+      name: 'Breaks a rule: Rate',
+    })
+    expect(within(region).getByText('R2')).toBeInTheDocument()
+    await userEvent.click(within(region).getAllByRole('checkbox')[1])
+    await userEvent.click(within(region).getByRole('button', { name: 'Edit…' }))
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('lists the records that leave a field empty in the explorer', async () => {
+    renderExplorer({}, '/collections/hb?schema=recording&show=checks')
+    await userEvent.click(await screen.findByText('Required but empty'))
+    const region = await screen.findByRole('region', {
+      name: 'Required but empty: Rate',
+    })
+    await userEvent.click(
+      within(region).getByRole('button', { name: 'Show in the list' }),
+    )
+    await waitFor(() => expect(search().get('show')).toBeNull())
+    expect(JSON.parse(search().get('filter')!)).toEqual(blankFilter)
+  })
+})

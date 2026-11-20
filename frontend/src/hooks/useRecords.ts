@@ -17,6 +17,8 @@ import {
   type BulkEditRequest,
   type MoveRecordsRequest,
   type SummaryRequest,
+  type QualityRecordsRequest,
+  type RecordSelectionBody,
   type PointsRequest,
 } from '../api/records'
 import type { RecordQueryParams } from '../api/query'
@@ -145,6 +147,26 @@ export function useRecordSummary(body: SummaryRequest | null) {
   return useQuery({
     queryKey: ['records', 'summary', body],
     queryFn: () => recordsApi.summary(body!),
+    enabled: body !== null,
+    placeholderData: keepPreviousData,
+  })
+}
+
+/** What needs a look in the records a query lists (`null`: not asked). */
+export function useRecordQuality(body: RecordSelectionBody | null) {
+  return useQuery({
+    queryKey: ['records', 'quality', body],
+    queryFn: () => recordsApi.quality(body!),
+    enabled: body !== null,
+    placeholderData: keepPreviousData,
+  })
+}
+
+/** The records with one issue, a page at a time (`null`: none chosen). */
+export function useQualityRecords(body: QualityRecordsRequest | null) {
+  return useQuery({
+    queryKey: ['records', 'quality', 'records', body],
+    queryFn: () => recordsApi.qualityRecords(body!),
     enabled: body !== null,
     placeholderData: keepPreviousData,
   })

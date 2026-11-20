@@ -46,6 +46,7 @@ import { BulkEditDialog } from './BulkEditDialog'
 import { bulkEditableFields } from '../../utils/bulkEdit'
 import { FilesView } from '../files/FilesView'
 import { SummaryView } from './SummaryView'
+import { ChecksView } from './ChecksView'
 import { MapView, mapFields } from './MapView'
 import { withCondition } from '../../utils/summary'
 import { MoveToDriveButton } from '../files/MoveDialog'
@@ -129,6 +130,8 @@ export function RecordsExplorer({
   const show = params.get('show')
   const showFiles = show === 'files'
   const showSummary = show === 'summary' && !!listed
+  // What in the listed records needs a look (`ChecksView`).
+  const showChecks = show === 'checks' && !!listed
   // A map is offered where the listed kind, or one above it, has a location.
   const canMap = !!listed && mapFields(x.filterFields).length > 0
   const showMap = show === 'map' && canMap
@@ -624,9 +627,11 @@ export function RecordsExplorer({
                   ? 'files'
                   : showSummary
                     ? 'summary'
-                    : showMap
-                      ? 'map'
-                      : 'records'
+                    : showChecks
+                      ? 'checks'
+                      : showMap
+                        ? 'map'
+                        : 'records'
               }
               onChange={(v) =>
                 setParams(
@@ -643,13 +648,33 @@ export function RecordsExplorer({
                 { value: 'records', label: 'Records' },
                 { value: 'files', label: 'Their files' },
                 ...(listed ? [{ value: 'summary', label: 'Summary' }] : []),
+                ...(listed ? [{ value: 'checks', label: 'Checks' }] : []),
                 ...(canMap ? [{ value: 'map', label: 'Map' }] : []),
               ]}
             />
           </div>
         )}
 
-        {showSummary ? (
+        {showChecks && listed ? (
+          <ChecksView
+            query={x.query}
+            collection={dataset}
+            listed={listed}
+            mayWrite={mayWrite}
+            cannotWrite={why('write_records')}
+            // The records: the condition added to the filter, listed, in one
+            // change to the address (as a summary's group).
+            onDrill={(where) =>
+              setParams((prev) => {
+                const out = applyExplorerPatch(prev, {
+                  filter: withCondition(x.filter, where),
+                })
+                out.delete('show')
+                return out
+              })
+            }
+          />
+        ) : showSummary ? (
           <SummaryView
             query={x.query}
             collection={dataset}

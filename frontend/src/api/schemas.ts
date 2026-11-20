@@ -204,8 +204,29 @@ export const schemasApi = {
       restrictions?: Record<string, unknown> | null
     },
   ) => api.patch<Field>(`/schemas/${name}/fields/${fieldName}`, body),
+  /** What a field's rules as they would be make of the values stored: how
+   * many records' values they refuse (a rule never re-checks stored values),
+   * and how many leave it empty if it were required. Nothing is changed. */
+  checkField: (
+    name: string,
+    fieldName: string,
+    body: { restrictions?: Record<string, unknown> | null; required?: boolean },
+  ) =>
+    api.post<FieldCheck>(
+      `/schemas/${encodeURIComponent(name)}/fields/${encodeURIComponent(fieldName)}/check`,
+      body,
+    ),
   deleteField: (name: string, fieldName: string) =>
     api.delete<void>(`/schemas/${name}/fields/${fieldName}`),
   reorderFields: (name: string, order: string[]) =>
     api.put<void>(`/schemas/${name}/fields/reorder`, { order }),
+}
+
+/** What a field's rules would leave behind (`checkField`). */
+export interface FieldCheck {
+  schema_name: string
+  field: string
+  breaks_rule: number
+  blank: number
+  examples: { record_id: string; record_name: string | null; message: string }[]
 }

@@ -10,6 +10,7 @@ import { displayLabel } from '../utils/naming'
 import { useToast } from '../components/ui/ToastProvider'
 import { invalidateRecordNames } from './useRecordName'
 import { errorMessage } from '../lib/errors'
+import { useDebouncedValue } from './useDebouncedValue'
 
 /**
  * Applies `updater` to every cached schema (list entries and single-schema
@@ -319,5 +320,30 @@ export function useReorderFields(schemaName: string) {
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['schemas'] })
     },
+  })
+}
+
+/** What a field's rules as they would be (`body`; `null`: not asked) make of
+ * the values already stored: how many records' values they refuse and how
+ * many leave it empty if it were required. Asked once the rules stop
+ * changing, since a rule never re-checks what is stored. */
+export function useFieldCheck(
+  schemaName: string,
+  fieldName: string,
+  body: {
+    restrictions?: Record<string, unknown> | null
+    required?: boolean
+  } | null,
+) {
+  const key = useDebouncedValue(
+    body === null ? null : JSON.stringify(body),
+    400,
+  )
+  return useQuery({
+    queryKey: ['schemas', schemaName, 'field-check', fieldName, key],
+    queryFn: () =>
+      schemasApi.checkField(schemaName, fieldName, JSON.parse(key!)),
+    enabled: key !== null,
+    staleTime: 0,
   })
 }
