@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from civex.services.transfer_service import TransferService
     from civex.services.plugin_service import PluginService
     from civex.services.policy_service import PolicyService
+    from civex.services.quality_service import QualityService
     from civex.services.record_service import RecordService
     from civex.services.retention_service import RetentionService
     from civex.services.schema_service import SchemaService
@@ -119,6 +120,8 @@ class AppContext:
     sync_svc: SyncService
     library_svc: LibraryService
     compaction_svc: HistoryCompactionService
+    # Data checks: what in the records needs a look (`domain/quality`).
+    quality_svc: QualityService
     # Where files are kept: drives or a bucket (`features.STORE_ADMIN`).
     bucket_svc: BucketService
     project: Project
@@ -390,6 +393,7 @@ def build_context(
     from civex.services.transfer_service import TransferService
     from civex.services.plugin_service import PluginService
     from civex.services.policy_service import PolicyService
+    from civex.services.quality_service import QualityService
     from civex.services.record_service import RecordService
     from civex.services.retention_service import RetentionService
     from civex.services.schema_service import SchemaService
@@ -625,6 +629,7 @@ def build_context(
         audit_svc=audit_repo,
         history_svc=history_svc,
         compaction_svc=HistoryCompactionService(audit_repo, LocalDbSpace(engine)),
+        quality_svc=QualityService(record_svc, schema_svc, permissions=may),
         retention_svc=retention_svc,
         ai_svc=ai_svc,
         ai_usage_svc=ai_usage_svc,

@@ -5,13 +5,16 @@ import { viewsApi } from '../../api/views'
 import {
   useDeleteManyRecords,
   useDeleteMatchingRecords,
+  useRecordQuality,
 } from '../../hooks/useRecords'
+import { queryBody } from '../../api/records'
 import {
   useCreateView,
   useDeleteView,
   useUpdateView,
 } from '../../hooks/useViews'
 import {
+  Badge,
   Button,
   ConfirmDialog,
   EmptyState,
@@ -46,6 +49,7 @@ import { BulkEditDialog } from './BulkEditDialog'
 import { bulkEditableFields } from '../../utils/bulkEdit'
 import { FilesView } from '../files/FilesView'
 import { SummaryView } from './SummaryView'
+import { ChecksView } from './ChecksView'
 import { MapView, mapFields } from './MapView'
 import { withCondition } from '../../utils/summary'
 import { MoveToDriveButton } from '../files/MoveDialog'
@@ -69,6 +73,10 @@ import { HIGH_IMPACT_RECORD_THRESHOLD } from '../../lib/deleteImpact'
 import { errorMessage } from '../../lib/errors'
 import { pluralise } from '../../lib/utils'
 import { displayLabel } from '../../utils/naming'
+
+/** Past this many listed records, the data check is not run just to count
+ * (it reads every record): the count waits until Checks is opened. */
+const CHECK_COUNT_UP_TO = 5000
 
 export interface RecordsExplorerProps extends ExplorerScope {
   /** Shown as the first crumb when browsing a whole collection. */
@@ -129,9 +137,36 @@ export function RecordsExplorer({
   const show = params.get('show')
   const showFiles = show === 'files'
   const showSummary = show === 'summary' && !!listed
+  // What in the listed records needs a look (`ChecksView`).
+  const showChecks = show === 'checks' && !!listed
+  const setShow = (v: string | null) =>
+    setParams(
+      (prev) => {
+        const out = new URLSearchParams(prev)
+        if (v === null) out.delete('show')
+        else out.set('show', v)
+        return out
+      },
+      { replace: true },
+    )
   // A map is offered where the listed kind, or one above it, has a location.
   const canMap = !!listed && mapFields(x.filterFields).length > 0
   const showMap = show === 'map' && canMap
+  // How many listed records have something to look at: the data check reads
+  // every listed record, so it is asked by itself only for a list up to
+  // CHECK_COUNT_UP_TO records; a bigger one is counted once Checks is opened.
+  // Shared with ChecksView (the same query, under `records`, so an edit
+  // counts again).
+  const listedTotal = x.page.data?.total ?? 0
+  const checkCount = useRecordQuality(
+    listed &&
+      !x.page.error &&
+      x.page.data !== undefined &&
+      (showChecks || listedTotal <= CHECK_COUNT_UP_TO)
+      ? queryBody({ ...x.query, sort: undefined }, dataset)
+      : null,
+  )
+  const issuesFound = checkCount.data?.records_with_issues
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [moving, setMoving] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -624,9 +659,13 @@ export function RecordsExplorer({
                   ? 'files'
                   : showSummary
                     ? 'summary'
-                    : showMap
-                      ? 'map'
-                      : 'records'
+                    : showChecks
+                      ? // Checks is a task, not a way of showing them: none
+                        // of the ways is picked while it is open.
+                        ''
+                      : showMap
+                        ? 'map'
+                        : 'records'
               }
               onChange={(v) =>
                 setParams(
@@ -646,10 +685,65 @@ export function RecordsExplorer({
                 ...(canMap ? [{ value: 'map', label: 'Map' }] : []),
               ]}
             />
+            {listed && (
+              <div className="ml-auto flex items-center gap-2">
+                {showChecks ? (
+                  <Button
+                    size="sm"
+                    variant="link"
+                    onClick={() => setShow(null)}
+                  >
+                    Back to records
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    onClick={() => setShow('checks')}
+                    title="Find what in these records needs a look: values the rules refuse, required fields left empty, duplicates, broken links, missing files"
+                  >
+                    Check data
+                    {issuesFound !== undefined && (
+                      <Badge
+                        variant={issuesFound > 0 ? 'attention' : 'success'}
+                        className="ml-1"
+                      >
+                        <span className="sr-only">
+                          {issuesFound === 1
+                            ? '1 record needs a look'
+                            : `${issuesFound} records need a look`}
+                        </span>
+                        <span aria-hidden="true">
+                          {issuesFound.toLocaleString()}
+                        </span>
+                      </Badge>
+                    )}
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
         )}
 
-        {showSummary ? (
+        {showChecks && listed ? (
+          <ChecksView
+            query={x.query}
+            collection={dataset}
+            listed={listed}
+            mayWrite={mayWrite}
+            cannotWrite={why('write_records')}
+            // The records: the condition added to the filter, listed, in one
+            // change to the address (as a summary's group).
+            onDrill={(where) =>
+              setParams((prev) => {
+                const out = applyExplorerPatch(prev, {
+                  filter: withCondition(x.filter, where),
+                })
+                out.delete('show')
+                return out
+              })
+            }
+          />
+        ) : showSummary ? (
           <SummaryView
             query={x.query}
             collection={dataset}

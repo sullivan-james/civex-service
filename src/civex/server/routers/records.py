@@ -25,6 +25,11 @@ from civex.server.models import (
     MoveRecordsRequest,
     MoveRecordsResponse,
     PaginatedRecordResponse,
+    QualityFindingResponse,
+    QualityRecordsRequest,
+    QualityRecordsResponse,
+    QualityReportResponse,
+    RecordQueryRequest,
     RecordMovePlanResponse,
     RecordLabelResponse,
     RecordLabelsRequest,
@@ -553,6 +558,58 @@ def summarise_records(
         return serve(
             path, media_type(format), f"{result.schema}-summary{extension(format)}"
         )
+
+
+@router.post("/records/quality", response_model=QualityReportResponse)
+def check_records(body: RecordQueryRequest, ctx: AppContext = Depends(get_ctx)):
+    """Check the records a query lists (the same selectors as listing them)
+    for what needs a look, per kind and field: values their field's rules now
+    refuse (a rule tightened after they were entered), required fields left
+    empty, records sharing a unique key, links to records that are gone, and
+    files that are nowhere. Each line counts exactly and names a few records;
+    every field's empty count is given too. Nothing is changed."""
+    try:
+        report = ctx.quality_svc.check(body.to_query())
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except (ValueError, ValidationError) as e:
+        raise HTTPException(422, detail=str(e))
+    return QualityReportResponse.from_dto(report)
+
+
+@router.post("/records/quality/records", response_model=QualityRecordsResponse)
+def records_with_issue(body: QualityRecordsRequest, ctx: AppContext = Depends(get_ctx)):
+    """The records a query lists that have one issue (on one field, of one
+    kind, when given), a page at a time, each with what is wrong: what a line
+    of the check opens, to look at the records or tick them and edit them."""
+    try:
+        found, total = ctx.quality_svc.records_with(
+            body.to_query(),
+            body.issue,
+            field=body.field,
+            schema=body.kind,
+            limit=body.limit,
+            offset=body.offset,
+        )
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except (ValueError, ValidationError) as e:
+        raise HTTPException(422, detail=str(e))
+    return QualityRecordsResponse(
+        items=[
+            QualityFindingResponse(
+                record_id=f.record_id,
+                record_name=f.record_name,
+                schema_name=f.schema,
+                field=f.field,
+                message=f.message,
+            )
+            for f in found
+        ],
+        total=total,
+        offset=body.offset,
+        limit=body.limit,
+    )
 
 
 @router.post("/records/points", response_model=RecordPointsResponse)

@@ -318,6 +318,24 @@ def _check_restrictions(
                 )
 
 
+def restriction_problem(
+    value: Any, field: FieldDTO, restrictions: dict[str, Any] | None = None
+) -> str | None:
+    """Why `field`'s rules (or `restrictions`, rules it would have) refuse a
+    stored value, or None: `_check_restrictions` asked without raising, for
+    the data check, which reports every value instead of stopping at one."""
+    try:
+        _check_restrictions(
+            value,
+            field.dtype,
+            field.restrictions if restrictions is None else restrictions,
+            field.name,
+        )
+    except ValidationError as e:
+        return str(e)
+    return None
+
+
 # Path separators and characters invalid in filenames on common filesystems —
 # template values come from user-entered field data, so they're untrusted.
 _UNSAFE_FILENAME_CHARS_RE = re.compile(r'[\\/\x00-\x1f:*?"<>|]')
@@ -415,6 +433,21 @@ def _file_dicts(value: Any) -> list[dict[str, Any]]:
     if isinstance(value, list):
         return [item for item in value if isinstance(item, dict)]
     return []
+
+
+def _changed_values(
+    data: dict[str, Any], stored: dict[str, Any] | None
+) -> dict[str, Any]:
+    """The values in `data` (by field name) that differ from `stored`, the
+    record's values now, or all of them when there is none (a create). The
+    one rule for what an update checks: a value the record already holds is
+    not checked again against restrictions, references or unique keys, so a
+    rule tightened since it was stored never blocks an edit to another field.
+    Compare after `_strip_derived_file_keys` and `_normalise_datetimes`, so an
+    echoed-back file or datetime counts as unchanged."""
+    if stored is None:
+        return data
+    return {k: v for k, v in data.items() if k not in stored or stored[k] != v}
 
 
 def _strip_derived_file_keys(
@@ -1431,15 +1464,14 @@ class RecordService:
         editing a record never fails over a reference it already held."""
         if shape is None:
             return
+        changed = _changed_values(data, unchanged)
         wanted: list[tuple[str, Any]] = []
         for rf in shape.fields:
             field = rf.field
             if field.dtype not in ("reference", "reference_list"):
                 continue
-            value = data.get(field.name)
-            if value is None or (
-                unchanged is not None and unchanged.get(field.name) == value
-            ):
+            value = changed.get(field.name)
+            if value is None:
                 continue
             for item in value if isinstance(value, list) else [value]:
                 wanted.append((field.name, item))
@@ -1452,23 +1484,44 @@ class RecordService:
         the target must be a live record here or in a global collection. All
         the targets are fetched together, and each collection looked up once,
         however many references a record holds."""
+        for problem in self.reference_problems(wanted, dataset.id):
+            if problem:
+                raise ValidationError(problem)
+
+    def reference_problems(
+        self,
+        wanted: list[tuple[str, Any]],
+        dataset_id: uuid.UUID,
+        owners: dict[uuid.UUID, DatasetDTO | None] | None = None,
+    ) -> list[str | None]:
+        """For each (field name, record id) in `wanted`, why a record in
+        collection `dataset_id` can't hold that reference, or None: the target
+        must be a live record there or in a global collection. The one rule
+        behind a save and the data check. All the targets are fetched
+        together, and each collection looked up once (`owners` carries the
+        lookups across calls), however many references there are."""
         if not wanted:
-            return
-        ids: list[uuid.UUID] = []
-        for field_name, raw in wanted:
+            return []
+        ids: list[uuid.UUID | None] = []
+        for _, raw in wanted:
             try:
                 ids.append(uuid.UUID(str(raw)))
             except ValueError:
-                raise ValidationError(
-                    f"Field '{field_name}': '{raw}' is not a record id"
-                ) from None
-        targets = {t.id: t for t in self._records.list_by_ids(ids)}
-        owners: dict[uuid.UUID, DatasetDTO | None] = {}
+                ids.append(None)
+        found = [i for i in ids if i is not None]
+        targets = {t.id: t for t in self._records.list_by_ids(found)} if found else {}
+        owners = {} if owners is None else owners
+        problems: list[str | None] = []
         for (field_name, raw), target_id in zip(wanted, ids):
+            if target_id is None:
+                problems.append(f"Field '{field_name}': '{raw}' is not a record id")
+                continue
             target = targets.get(target_id)
             if target is None or target.deleted_at is not None:
-                raise ValidationError(f"Field '{field_name}': record {raw} not found")
-            if target.dataset_id == dataset.id:
+                problems.append(f"Field '{field_name}': record {raw} not found")
+                continue
+            if target.dataset_id == dataset_id:
+                problems.append(None)
                 continue
             if target.dataset_id not in owners:
                 owners[target.dataset_id] = self._datasets.get_by_id(
@@ -1477,13 +1530,16 @@ class RecordService:
                     with_count=False,
                 )
             owner = owners[target.dataset_id]
-            if owner is None or not can_reference(dataset.id, owner.id, owner.scope):
+            if owner is None or not can_reference(dataset_id, owner.id, owner.scope):
                 where = f"collection '{owner.name}'" if owner else "another collection"
-                raise ValidationError(
+                problems.append(
                     f"Field '{field_name}': record {str(target_id)[:8]} is in "
                     f"{where}, which is local. A record can only reference "
                     f"records in its own collection or in a global collection."
                 )
+                continue
+            problems.append(None)
+        return problems
 
     def referrer_counts(self, record_id: str) -> list[ReferrerGroupDTO]:
         """What points at this record: live records holding a reference to it,
@@ -1697,12 +1753,7 @@ class RecordService:
         before = head.get("data") or {} if head and not head.get("deleted_at") else None
         named = self._ids_to_names(data, shape)
         before_named = self._ids_to_names(before, shape) if before is not None else None
-        changed = {
-            k: v
-            for k, v in named.items()
-            if before_named is None or before_named.get(k) != v
-        }
-        self._validate_data(changed, shape)
+        self._validate_data(_changed_values(named, before_named), shape)
         self._check_references(named, shape, dataset, unchanged=before_named)
         self._check_unique(
             shape, dataset.id, parent_id, data, exclude_id=record_id, unchanged=before
@@ -1995,7 +2046,10 @@ class RecordService:
             dataset.timezone if dataset else None,
             unchanged=old_data,
         )
-        self._validate_data(data, shape)
+        # Only what this save changes is checked (`_changed_values`): a value
+        # the record already holds may break a rule tightened since, and must
+        # not stop an edit to another field (the data check finds it).
+        self._validate_data(_changed_values(data, old_data), shape)
         if dataset:
             self._check_references(data, shape, dataset, unchanged=old_data)
         id_data = self._names_to_ids(data, shape)

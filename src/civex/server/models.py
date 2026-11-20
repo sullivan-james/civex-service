@@ -647,6 +647,191 @@ class RecordSummaryRequest(RecordQueryRequest):
     )
 
 
+class QualityRecordsRequest(RecordQueryRequest):
+    """The records a query lists that have one issue, a page at a time."""
+
+    issue: str = Field(
+        description="The kind of issue: breaks_rule, blank, duplicate_key, "
+        "broken_reference or missing_file."
+    )
+    field: str | None = Field(
+        default=None,
+        description="Only this field's issue (a uniqueness key is named by its "
+        "fields, comma-separated). Omitted, any field.",
+    )
+    kind: str | None = Field(
+        default=None,
+        description="Only records of this kind (when the query lists several).",
+    )
+    limit: int = Field(default=50, ge=1, le=1000, description="The most records.")
+    offset: int = Field(default=0, ge=0, description="How many to skip.")
+
+
+class QualityExampleResponse(BaseModel):
+    record_id: str = Field(description="The record.")
+    record_name: str | None = Field(description="Its name, as lists show it.")
+    message: str = Field(description="What is wrong with it, in plain words.")
+
+
+class QualityIssueResponse(BaseModel):
+    issue: str = Field(description="The kind of issue (see 'issues').")
+    field: str = Field(
+        description="The field's name, or a uniqueness key's fields comma-separated."
+    )
+    field_label: str = Field(description="The field (or key) as a person reads it.")
+    count: int = Field(description="How many times it was found (exact).")
+    examples: list[QualityExampleResponse] = Field(
+        description="A few of the records (at most 5)."
+    )
+    filter: dict[str, Any] | None = Field(
+        description="A filter tree listing exactly these records, when one can "
+        "say it (an empty field); else list them with /records/quality/records."
+    )
+
+
+class QualityBlanksResponse(BaseModel):
+    field: str = Field(description="The field's name.")
+    field_label: str = Field(description="The field as a person reads it.")
+    required: bool = Field(description="Whether the field is marked required.")
+    blank: int = Field(description="How many records leave it empty.")
+    filter: dict[str, Any] | None = Field(
+        description="A filter tree listing those records, when one can say it."
+    )
+
+
+class QualityKindResponse(BaseModel):
+    schema_name: str = Field(description="The kind of record.")
+    schema_label: str = Field(description="The kind as a person reads it.")
+    records: int = Field(description="How many of the records checked are this kind.")
+    records_with_issues: int = Field(description="How many of them have any issue.")
+    issues: list[QualityIssueResponse] = Field(
+        description="One line per issue and field, issues in a fixed order."
+    )
+    blanks: list[QualityBlanksResponse] = Field(
+        description="Every own field of the kind and how many leave it empty "
+        "(an issue only where the field is required)."
+    )
+
+
+class QualityIssueKindResponse(BaseModel):
+    name: str = Field(description="The issue's name.")
+    label: str = Field(description="A few words, as a heading.")
+    description: str = Field(description="What it means, in one sentence.")
+
+
+class QualityReportResponse(BaseModel):
+    records: int = Field(description="How many records were checked.")
+    records_with_issues: int = Field(description="How many have any issue.")
+    kinds: list[QualityKindResponse] = Field(description="Per kind of record.")
+    issues: list[QualityIssueKindResponse] = Field(
+        description="Every kind of issue a check looks for, in order."
+    )
+
+    @classmethod
+    def from_dto(cls, r: Any) -> QualityReportResponse:
+        from civex.domain.quality import ISSUES
+
+        def example(e: Any) -> QualityExampleResponse:
+            return QualityExampleResponse(
+                record_id=e.record_id, record_name=e.record_name, message=e.message
+            )
+
+        return cls(
+            records=r.records,
+            records_with_issues=r.records_with_issues,
+            kinds=[
+                QualityKindResponse(
+                    schema_name=k.schema,
+                    schema_label=k.schema_label,
+                    records=k.records,
+                    records_with_issues=k.records_with_issues,
+                    issues=[
+                        QualityIssueResponse(
+                            issue=i.issue,
+                            field=i.field,
+                            field_label=i.field_label,
+                            count=i.count,
+                            examples=[example(e) for e in i.examples],
+                            filter=i.filter,
+                        )
+                        for i in k.issues
+                    ],
+                    blanks=[
+                        QualityBlanksResponse(
+                            field=b.field,
+                            field_label=b.field_label,
+                            required=b.required,
+                            blank=b.blank,
+                            filter=b.filter,
+                        )
+                        for b in k.blanks
+                    ],
+                )
+                for k in r.kinds
+            ],
+            issues=[
+                QualityIssueKindResponse(
+                    name=i.name, label=i.label, description=i.description
+                )
+                for i in ISSUES.values()
+            ],
+        )
+
+
+class QualityFindingResponse(BaseModel):
+    record_id: str = Field(description="The record.")
+    record_name: str | None = Field(description="Its name, as lists show it.")
+    schema_name: str = Field(description="Its kind.")
+    field: str = Field(description="The field (or key) the issue is in.")
+    message: str = Field(description="What is wrong, in plain words.")
+
+
+class QualityRecordsResponse(BaseModel):
+    items: list[QualityFindingResponse] = Field(description="This page of records.")
+    total: int = Field(description="How many records have the issue.")
+    offset: int = Field(description="Where this page starts.")
+    limit: int = Field(description="The most records on a page.")
+
+
+class FieldCheckRequest(BaseModel):
+    restrictions: dict[str, Any] | None = Field(
+        default=None,
+        description="The rules the field would have (omitted: as they are now).",
+    )
+    required: bool | None = Field(
+        default=None, description="Whether it would be required (omitted: as now)."
+    )
+
+
+class FieldCheckResponse(BaseModel):
+    schema_name: str = Field(description="The kind of record.")
+    field: str = Field(description="The field.")
+    breaks_rule: int = Field(
+        description="How many records hold a value those rules refuse."
+    )
+    blank: int = Field(
+        description="How many leave the field empty, when it would be required."
+    )
+    examples: list[QualityExampleResponse] = Field(
+        description="A few of those records (at most 5)."
+    )
+
+    @classmethod
+    def from_dto(cls, c: Any) -> FieldCheckResponse:
+        return cls(
+            schema_name=c.schema,
+            field=c.field,
+            breaks_rule=c.breaks_rule,
+            blank=c.blank,
+            examples=[
+                QualityExampleResponse(
+                    record_id=e.record_id, record_name=e.record_name, message=e.message
+                )
+                for e in c.examples
+            ],
+        )
+
+
 class RecordPointsRequest(RecordQueryRequest):
     """Where the records a query lists are, for a map. `schema_name` is
     required (the kind listed); `collection` may be left out for every

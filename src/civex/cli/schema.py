@@ -694,6 +694,29 @@ def schema_update_field(
                 )
                 typer.confirm("Relabel the unit anyway?", abort=True)
 
+        if new_restrictions:
+            # Changing a rule doesn't re-check what is stored: say what it
+            # would leave behind (the data check's count), and ask.
+            check = ctx.quality_svc.check_field(
+                schema_name, field_name, restrictions=new_restrictions
+            )
+            if check.breaks_rule:
+                console.print(
+                    f"[warning]{check.breaks_rule} record(s) hold a value these "
+                    "rules refuse. They are kept as they are; a later edit of that "
+                    "value must put it right, e.g.:[/warning]"
+                )
+                for example in check.examples:
+                    console.print(
+                        f"  {example.record_id[:8]}  "
+                        f"{example.record_name or ''}  {example.message}"
+                    )
+                console.print(
+                    f"See them all with: civex record check -s {schema_name} "
+                    f"--issue breaks_rule --field {field_name}"
+                )
+                typer.confirm("Change the rules anyway?", abort=True)
+
         updated = ctx.schema_svc.update_field(
             schema_name,
             field_name,

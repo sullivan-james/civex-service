@@ -114,6 +114,77 @@ export interface RecordSummary {
 
 /** Where the records a query lists are, for a map: `field` is a location
  * field of the kind listed, or (`field_schema`) of a kind above it. */
+/** Data checks (`POST /records/quality`): what needs a look in the records a
+ * query lists, per kind and field. */
+export interface QualityExample {
+  record_id: string
+  record_name: string | null
+  message: string
+}
+
+export interface QualityIssue {
+  issue: string
+  field: string
+  field_label: string
+  count: number
+  examples: QualityExample[]
+  /** Lists exactly these records in the explorer, when a filter can say it. */
+  filter: FilterTreeWire | null
+}
+
+export interface QualityBlanks {
+  field: string
+  field_label: string
+  required: boolean
+  blank: number
+  filter: FilterTreeWire | null
+}
+
+export interface QualityKind {
+  schema_name: string
+  schema_label: string
+  records: number
+  records_with_issues: number
+  issues: QualityIssue[]
+  blanks: QualityBlanks[]
+}
+
+export interface QualityIssueKind {
+  name: string
+  label: string
+  description: string
+}
+
+export interface QualityReport {
+  records: number
+  records_with_issues: number
+  kinds: QualityKind[]
+  issues: QualityIssueKind[]
+}
+
+export interface QualityRecordsRequest extends RecordSelectionBody {
+  issue: string
+  field?: string | null
+  kind?: string | null
+  limit?: number
+  offset?: number
+}
+
+export interface QualityFinding {
+  record_id: string
+  record_name: string | null
+  schema_name: string
+  field: string
+  message: string
+}
+
+export interface QualityRecords {
+  items: QualityFinding[]
+  total: number
+  offset: number
+  limit: number
+}
+
 export interface PointsRequest extends RecordSelectionBody {
   field: string
   field_schema?: string
@@ -473,6 +544,14 @@ export const recordsApi = {
   /** Group the records a query lists and work out measures over each group. */
   summary: (body: SummaryRequest) =>
     api.post<RecordSummary>('/records/summary', body),
+
+  /** What needs a look in the records a query lists (nothing is changed). */
+  quality: (body: RecordSelectionBody) =>
+    api.post<QualityReport>('/records/quality', body),
+
+  /** The records a query lists that have one issue, a page at a time. */
+  qualityRecords: (body: QualityRecordsRequest) =>
+    api.post<QualityRecords>('/records/quality/records', body),
 
   /** Where the records a query lists are (id, name, geometry), for a map. */
   points: (body: PointsRequest) =>

@@ -186,6 +186,32 @@ with civex.open() as project:
         print(f"first {len(found.points)} of {found.total}")
 ```
 
+## Checking the data
+
+`quality_svc.check(query)` says what in the records a `RecordQuery` lists
+needs a look, per kind and field (values their field's rules now refuse,
+required fields left empty, shared unique keys, broken links, missing files),
+and `quality_svc.records_with(query, issue, field=...)` lists exactly the
+records with one issue, ready for `record_svc.bulk_edit(..., ids=...)`:
+
+```python
+import civex
+from civex.domain.query import RecordQuery
+
+with civex.open() as project:
+    query = RecordQuery(dataset="survey-2024", schema="sample")
+    for kind in project.quality_svc.check(query).kinds:
+        for line in kind.issues:
+            print(kind.schema, line.field, line.issue, line.count)
+    found, total = project.quality_svc.records_with(
+        query, "breaks_rule", field="depth", limit=1000
+    )
+    project.record_svc.bulk_edit({"depth": None}, ids=[f.record_id for f in found])
+```
+
+`quality_svc.check_field(schema, field, restrictions={...})` counts what a
+rule would leave behind before you change it.
+
 ## Writing results back
 
 - `record_svc.add(collection, schema, data, parent_record_id=...)` adds a

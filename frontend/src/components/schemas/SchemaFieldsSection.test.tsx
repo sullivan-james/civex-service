@@ -122,8 +122,14 @@ const json = (body: unknown, status = 200) =>
   })
 
 let calls: { method: string; path: string; body: unknown }[]
+// What the field editor asked before saving (`/fields/{f}/check`), and what
+// the stored values make of the rules asked about.
+let checks: unknown[]
+let breaking = 0
 beforeEach(() => {
   calls = []
+  checks = []
+  breaking = 0
   setFieldTypesForTest(DESCRIPTORS)
   vi.stubGlobal(
     'fetch',
@@ -131,6 +137,24 @@ beforeEach(() => {
       const url = new URL(String(input), 'http://x')
       const method = init?.method ?? 'GET'
       const body = init?.body ? JSON.parse(String(init.body)) : undefined
+      if (url.pathname.endsWith('/check')) {
+        checks.push(body)
+        return json({
+          schema_name: 'deployment',
+          field: 'depth',
+          breaks_rule: breaking,
+          blank: 0,
+          examples: breaking
+            ? [
+                {
+                  record_id: 'rec1',
+                  record_name: 'Deployment 7',
+                  message: "Field 'depth': -3 is below minimum (0)",
+                },
+              ]
+            : [],
+        })
+      }
       if (method !== 'GET') calls.push({ method, path: url.pathname, body })
       if (method === 'POST' && url.pathname.endsWith('/fields'))
         return json(
@@ -249,5 +273,33 @@ describe('schema fields section', () => {
       }),
     )
     expect(screen.getByRole('heading', { name: 'Depth' })).toBeInTheDocument()
+  })
+
+  it('says before saving how many records a tightened rule leaves behind', async () => {
+    breaking = 4
+    renderSection()
+    await userEvent.click(
+      within(screen.getByRole('list', { name: 'Fields' })).getByRole('button', {
+        name: /Depth/,
+      }),
+    )
+    expect(checks).toHaveLength(0) // nothing asked until a rule changes
+    await userEvent.click(screen.getByRole('button', { name: /more rules/i }))
+    await userEvent.type(screen.getByLabelText('Smallest allowed'), '0')
+    expect(
+      await screen.findByText(/4 records no longer pass these rules/),
+    ).toBeInTheDocument()
+    expect(checks[checks.length - 1]).toMatchObject({
+      restrictions: { unit: 'm', min: 0 },
+    })
+    expect(screen.getByRole('link', { name: 'Deployment 7' })).toHaveAttribute(
+      'href',
+      '/records/rec1',
+    )
+    const seeAll = screen.getByRole('link', { name: 'see them all' })
+    expect(seeAll.getAttribute('href')).toContain('show=checks')
+    expect(seeAll.getAttribute('href')).toContain('chk.field=depth')
+    // Saving is still allowed: it is a warning, not a refusal.
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled()
   })
 })

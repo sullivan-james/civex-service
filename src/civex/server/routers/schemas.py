@@ -11,6 +11,8 @@ from civex.server.deps import get_ctx
 from civex.server.models import (
     AddFieldRequest,
     CreateSchemaRequest,
+    FieldCheckRequest,
+    FieldCheckResponse,
     FieldResponse,
     FieldTypesResponse,
     FromFilenamePreviewRequest,
@@ -270,6 +272,29 @@ def restore_field(name: str, field_id: uuid.UUID, ctx: AppContext = Depends(get_
     except ValidationError as e:
         raise HTTPException(422, detail=str(e))
     return FieldResponse.from_dto(dto)
+
+
+@router.post("/{name}/fields/{field_name}/check", response_model=FieldCheckResponse)
+def check_field(
+    name: str,
+    field_name: str,
+    body: FieldCheckRequest,
+    ctx: AppContext = Depends(get_ctx),
+):
+    """What the values already stored for a field make of its rules as they
+    would be (or as they are, given nothing): how many records' values those
+    rules refuse, how many leave it empty if it were required, and a few of
+    them named. Changing a rule never re-checks stored values, so the field
+    editor asks this before saving. Every collection; nothing is changed."""
+    try:
+        check = ctx.quality_svc.check_field(
+            name, field_name, restrictions=body.restrictions, required=body.required
+        )
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    return FieldCheckResponse.from_dto(check)
 
 
 @router.patch("/{name}/fields/{field_name}", response_model=FieldResponse)
