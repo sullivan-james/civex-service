@@ -155,3 +155,29 @@ def test_uncertainty_is_validated_and_kept() -> None:
             geo.positions({**p, "uncertainty_m": bad})
     # a point with extras can't be written as a plain "lat, lon"
     assert geo.parse_text(geo.to_text(p)) == p
+
+
+@pytest.mark.parametrize(
+    "geometry, wkt",
+    [
+        ({"type": "Point", "coordinates": [-3.5, 56.25]}, "POINT (-3.5 56.25)"),
+        ({"type": "Point", "coordinates": [1, 2, -40]}, "POINT Z (1 2 -40)"),
+        (
+            {"type": "MultiPoint", "coordinates": [[0, 0], [1, 1]]},
+            "MULTIPOINT ((0 0), (1 1))",
+        ),
+        (
+            {"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 0]]]},
+            "POLYGON ((0 0, 1 0, 1 1, 0 0))",
+        ),
+        (
+            {
+                "type": "MultiPolygon",
+                "coordinates": [[[[0, 0], [1, 0], [0, 1], [0, 0]]]],
+            },
+            "MULTIPOLYGON (((0 0, 1 0, 0 1, 0 0)))",
+        ),
+    ],
+)
+def test_well_known_text(geometry, wkt):
+    assert geo.to_wkt(geometry) == wkt

@@ -19,13 +19,14 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Iterator
+from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from civex.domain.dtos import RecordUse
 from civex.config import Config, ConfigStore
 from civex.domain import features
 from civex.domain.exceptions import FeatureUnavailableError
 from civex.domain.permissions import Permissions
+from civex.domain.query import RecordQuery
 from civex.project import Project
 
 if TYPE_CHECKING:
@@ -189,6 +190,47 @@ class AppContext:
         finally:
             self.close()
 
+    def frame(
+        self,
+        collection: str | None,
+        schema: str,
+        *,
+        where: dict[str, Any] | list[str] | None = None,
+        search: str | None = None,
+        search_fields: list[str] | None = None,
+        within: str | None = None,
+        **options: Any,
+    ) -> Any:
+        """The records of `schema` in `collection` (None: every collection)
+        as a pandas DataFrame with typed columns: `file_access_svc.frame`
+        over the query these arguments make. `where` is a filter tree (the
+        explorer's) or `["field=value", ...]`; `within` a record id (only
+        what is beneath it). `options` are `frame`'s: `columns`, `geo`,
+        `files`, `references`."""
+        return self.file_access_svc.frame(
+            _frame_query(collection, schema, where, search, search_fields, within),
+            **options,
+        )
+
+    def rows(
+        self,
+        collection: str | None,
+        schema: str,
+        *,
+        where: dict[str, Any] | list[str] | None = None,
+        search: str | None = None,
+        search_fields: list[str] | None = None,
+        within: str | None = None,
+        **options: Any,
+    ) -> list[dict[str, Any]]:
+        """`frame`'s rows as a list of dicts of Python values, without
+        pandas (`file_access_svc.typed_rows`, all pages)."""
+        pages = self.file_access_svc.typed_rows(
+            _frame_query(collection, schema, where, search, search_fields, within),
+            **options,
+        )
+        return [row for page in pages for row in page]
+
     @contextmanager
     def all_or_nothing(self) -> Iterator[None]:
         """Keep everything done inside it, or, when it raises, nothing: a SQL
@@ -229,6 +271,26 @@ class AppContext:
             yield
         finally:
             nested.rollback()
+
+
+def _frame_query(
+    collection: str | None,
+    schema: str,
+    where: dict[str, Any] | list[str] | None,
+    search: str | None,
+    search_fields: list[str] | None,
+    within: str | None,
+) -> RecordQuery:
+    """The query `AppContext.frame`/`rows` take apart as keyword arguments."""
+    return RecordQuery(
+        dataset=collection,
+        schema=schema,
+        within=within,
+        filter_tree=where if isinstance(where, dict) else None,
+        where=list(where) if isinstance(where, list) else [],
+        search=search,
+        search_fields=search_fields,
+    )
 
 
 # How a background host opens a context when it needs one: a fresh session

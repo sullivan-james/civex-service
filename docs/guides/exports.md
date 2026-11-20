@@ -67,7 +67,7 @@ A table has three independent choices:
 |---|---|
 | **Rows** | One kind of record, e.g. every Visit |
 | **Where it's written** | Once at the top, or in each folder of a kind ("a table of each Visit's Samples") |
-| **Columns** | Own fields, fields of the records above, one hop through a reference (`species.common`), `id`, `created_at`, `updated_at` |
+| **Columns** | Own fields, fields of the records above, one hop through a reference (`species.common`), `id`, `schema`, `parent_record_id` (the record it is inside), `created_at`, `updated_at` |
 
 A column holding files gives each file's **path in the export**, so the table
 and the folder agree. A *details sheet* is a table in a record's own folder with
