@@ -14,6 +14,7 @@ import {
   type FileUpload,
   type PaginatedRecords,
   type ListParams,
+  type BulkEditRequest,
   type MoveRecordsRequest,
 } from '../api/records'
 import type { RecordQueryParams } from '../api/query'
@@ -355,6 +356,50 @@ export function useMovePlan(body: MoveRecordsRequest | null) {
     queryFn: () => recordsApi.movePlan(body!),
     enabled: body !== null,
     placeholderData: keepPreviousData,
+  })
+}
+
+/** What a bulk edit would do, asked again as the choices change (null waits). */
+export function useBulkEditPlan(body: BulkEditRequest | null) {
+  return useQuery({
+    queryKey: ['record-bulk-edit-plan', body],
+    queryFn: () => recordsApi.bulkEditPlan(body!),
+    enabled: body !== null,
+    placeholderData: keepPreviousData,
+  })
+}
+
+/** Sets fields on many records. Every list and record page may show them,
+ * and runs may have been started. */
+export function useBulkEdit() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  return useMutation({
+    mutationFn: ({
+      body,
+      progressId,
+    }: {
+      body: BulkEditRequest
+      progressId?: string
+    }) => recordsApi.bulkEdit(body, progressId),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ['records'] })
+      qc.invalidateQueries({ queryKey: ['record'] })
+      qc.invalidateQueries({ queryKey: ['record-bulk-edit-plan'] })
+      qc.invalidateQueries({ queryKey: ['audit'] })
+      invalidateRecordNames(qc)
+      if (result.runs) {
+        qc.invalidateQueries({ queryKey: ['jobs'] })
+        qc.invalidateQueries({ queryKey: ['automation'] })
+      }
+      toast.success(
+        `${result.changed.toLocaleString()} record${result.changed === 1 ? '' : 's'} changed` +
+          (result.skipped
+            ? `, ${result.skipped.toLocaleString()} left as ${result.skipped === 1 ? 'it was' : 'they were'}`
+            : ''),
+      )
+    },
+    onError: (err) => toast.error(errorMessage(err)),
   })
 }
 

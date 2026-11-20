@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react'
-import type { MoveRecordsRequest } from '../../api/records'
-import type { RecordQueryParams } from '../../api/query'
+import {
+  selectionBody,
+  type MoveRecordsRequest,
+  type RecordSelection,
+} from '../../api/records'
 import type { Schema } from '../../api/schemas'
 import { useCollections } from '../../hooks/useCollections'
 import { useMovePlan, useMoveRecords } from '../../hooks/useRecords'
@@ -20,8 +23,7 @@ import {
 import { RecordSearchPicker } from '../records/RecordSearchPicker'
 
 /** The records to move: the rows ticked, or everything the list's query shows. */
-export type MoveSelection =
-  { ids: string[] } | { query: RecordQueryParams; collection: string }
+export type MoveSelection = RecordSelection
 
 /** Move the chosen records to another collection, or inside another record
  * there, after the server says what that does (how many go, with everything
@@ -73,17 +75,7 @@ export function MoveRecordsDialog({
       ? {
           to: target,
           parent: parent ?? null,
-          ...('ids' in selection
-            ? { ids: selection.ids }
-            : {
-                collection: selection.collection,
-                schema_name: selection.query.schema ?? null,
-                within: selection.query.within ?? null,
-                filter: selection.query.filter ?? null,
-                where: selection.query.where ?? [],
-                search: selection.query.search ?? null,
-                search_fields: selection.query.search_fields ?? null,
-              }),
+          ...selectionBody(selection),
         }
       : null
   const plan = useMovePlan(body)

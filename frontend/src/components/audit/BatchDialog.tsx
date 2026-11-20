@@ -17,6 +17,7 @@ import {
 } from '../ui'
 import { RestoreBatchDialog } from '../trash/RestoreBatchDialog'
 import { AuditEntryDialog } from './AuditEntryDialog'
+import { UndoEditDialog } from './UndoEditDialog'
 import { EntrySubject } from './EntrySubject'
 
 const PAGE = 25
@@ -36,6 +37,7 @@ export function BatchDialog({
   const [page, setPage] = useState(0)
   const [member, setMember] = useState<AuditLogEntry | null>(null)
   const [restoring, setRestoring] = useState(false)
+  const [undoing, setUndoing] = useState(false)
   // Picked records, by entry id -> the record's id; kept across pages so a
   // choice made on page one survives looking at page two.
   const [picked, setPicked] = useState<Map<string, string>>(new Map())
@@ -161,7 +163,15 @@ export function BatchDialog({
             Restore everything…
           </Button>
         )}
+        {batch.kind === 'edit' && (
+          <Button variant="primary" onClick={() => setUndoing(true)}>
+            Undo this edit…
+          </Button>
+        )}
       </ModalFooter>
+      {undoing && (
+        <UndoEditDialog batchId={batch.id} onClose={() => setUndoing(false)} />
+      )}
       {restoring && (
         <RestoreBatchDialog
           batchId={batch.id}

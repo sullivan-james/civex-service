@@ -26,6 +26,7 @@ import {
   Pagination,
 } from '../ui'
 import { RestoreBatchDialog } from '../trash/RestoreBatchDialog'
+import { UndoEditDialog } from './UndoEditDialog'
 import { RestoreDialog } from '../trash/RestoreDialog'
 import { AuditEntryDialog } from './AuditEntryDialog'
 import { BatchDialog } from './BatchDialog'
@@ -48,6 +49,7 @@ const BATCH_LABEL: Record<string, string> = {
   restore: 'restore',
   purge: 'purge',
   move: 'move',
+  edit: 'edit',
   workflow: 'workflow',
 }
 
@@ -116,6 +118,7 @@ export function ActivityFeed({
   const [open, setOpen] = useState<AuditEvent | null>(null)
   const [restoring, setRestoring] = useState<RestoreTarget | null>(null)
   const [restoringBatch, setRestoringBatch] = useState<AuditEvent | null>(null)
+  const [undoingBatch, setUndoingBatch] = useState<string | null>(null)
   const [confirmAll, setConfirmAll] = useState(false)
   const narrowed = !!(filter || list.q)
   const deletedOn = isDeletedView(filter)
@@ -176,6 +179,13 @@ export function ActivityFeed({
             return (
               <Button size="sm" onClick={() => setRestoringBatch(e)}>
                 Restore
+              </Button>
+            )
+          // A bulk edit likewise: put every record it changed back at once.
+          if (e.batch?.kind === 'edit')
+            return (
+              <Button size="sm" onClick={() => setUndoingBatch(e.batch!.id)}>
+                Undo
               </Button>
             )
           const now = e.entry?.now
@@ -284,6 +294,12 @@ export function ActivityFeed({
       )}
       {restoring && (
         <RestoreDialog target={restoring} onClose={() => setRestoring(null)} />
+      )}
+      {undoingBatch && (
+        <UndoEditDialog
+          batchId={undoingBatch}
+          onClose={() => setUndoingBatch(null)}
+        />
       )}
       {restoringBatch && (
         <RestoreBatchDialog

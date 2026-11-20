@@ -185,6 +185,30 @@ export const auditApi = {
   /** Undo the entry. Fields edited since are left alone unless `force`. */
   revert: (id: string, options: { fields?: string[]; force?: boolean } = {}) =>
     api.post<RevertResult>(`/audit/${id}/revert`, options),
+
+  /** What undoing a whole bulk edit would do, each change judged as a single
+   * revert would judge it. */
+  batchRevertPlan: (batchId: string, force = false) =>
+    api.get<BatchRevert>(`/audit/batches/${batchId}/revert?force=${force}`),
+
+  /** Undo a whole bulk edit, as one new event in history. */
+  revertBatch: (batchId: string, force = false) =>
+    api.post<BatchRevert>(`/audit/batches/${batchId}/revert`, { force }),
+}
+
+/** Undoing a whole bulk edit: planned, or done. */
+export interface BatchRevert {
+  batch_id: string
+  entries: number
+  /** Changes undone, or that would be. */
+  applied: number
+  /** Changes with a field edited since (left as it is unless forced). */
+  conflicts: number
+  /** Changes with nothing left to undo. */
+  same: number
+  /** Changes that can't be undone; the first few, with why, in `reasons`. */
+  left: number
+  reasons: { record_id: string; reason: string }[]
 }
 
 /** What restoring everything deleted that a filter matches would do. */
@@ -211,7 +235,7 @@ export interface RestoreAllResult {
  * workflow run. */
 export interface AuditBatch {
   id: string
-  kind: 'import' | 'delete' | 'restore' | 'purge' | 'workflow' | 'move'
+  kind: 'import' | 'delete' | 'restore' | 'purge' | 'workflow' | 'move' | 'edit'
   /** A workflow's name, or the file imported. */
   label: string | null
   /** What started it: a workflow run's id. */

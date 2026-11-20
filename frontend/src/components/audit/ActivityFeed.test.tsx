@@ -139,6 +139,18 @@ beforeEach(() => {
         return init?.method === 'POST'
           ? json({ restored: 3, records: 1206, blocked: 1 })
           : json(restoreAll)
+      if (url.pathname === '/api/audit/batches/e1/revert')
+        return json({
+          batch_id: 'e1',
+          entries: 40,
+          applied: init?.method === 'POST' ? 39 : 38,
+          conflicts: 1,
+          same: 0,
+          left: 1,
+          reasons: [
+            { record_id: 'r9', reason: 'This record no longer exists.' },
+          ],
+        })
       if (url.pathname === '/api/audit/filter-fields') return json(FIELDS)
       if (url.pathname === '/api/collections') return json([])
       if (url.pathname === '/api/schemas') return json([])
@@ -401,6 +413,44 @@ describe('ActivityFeed', () => {
       expect(
         calls.some(
           (c) => c.method === 'POST' && c.path === '/api/audit/restore-all',
+        ),
+      ).toBe(true),
+    )
+  })
+
+  it('undoes a whole bulk edit from its one line, after saying what goes back', async () => {
+    events = [
+      {
+        ...batch,
+        id: 'e1',
+        count: 40,
+        batch: { ...batch.batch!, id: 'e1', kind: 'edit', label: 'status' },
+        parts: [{ entity_type: 'record', action: 'update', count: 40 }],
+      },
+    ]
+    renderFeed()
+    await userEvent.click(await screen.findByRole('button', { name: 'Undo' }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('38 records get their old values back')
+    expect(dialog).toHaveTextContent('This record no longer exists.')
+    // Overwriting later edits is a choice, and asks again.
+    await userEvent.click(within(dialog).getByRole('checkbox'))
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) =>
+            c.path === '/api/audit/batches/e1/revert' &&
+            c.params.get('force') === 'true',
+        ),
+      ).toBe(true),
+    )
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Undo' }))
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) =>
+            c.method === 'POST' && c.path === '/api/audit/batches/e1/revert',
         ),
       ).toBe(true),
     )

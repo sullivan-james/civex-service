@@ -139,6 +139,32 @@ civex record update f623        # asks for each field, current value as default
 In the app, edit on the record's page. With a file attached, text, number and
 date fields have **from filename** to fill them from the file's name.
 
+### Changing many records at once
+
+To set a field to the same value on many records (mark a batch as checked,
+fill in the site for a day's uploads), tick them in the explorer, or tick a
+whole page and choose **Select all N matching**, then choose **Edit…**. Pick
+the field (and **Another field** for more), enter the value with the field's
+usual input, or choose **Clear** to empty it. Before you confirm, the dialog
+says how many records would change, how many already have the value, which
+can't take it and why, and how many workflow runs the change would start.
+From the command line:
+
+```bash
+civex record set status=checked --id f623 --id a91c            # these records
+civex record set status=checked --in survey -s sample -w status=new   # all a list shows
+civex record set notes= --in survey -s sample --dry-run         # clear; say what would happen
+```
+
+Each value is read as its field's type. A record takes every change or none:
+one that can't (a value outside the field's limits, a uniqueness key another
+record already uses, a field its kind doesn't have) is left as it is and named,
+and the others are changed. Only a kind's own fields are offered: a field it
+inherits holds its value on the record above, so edit that kind instead. Files
+are added one record at a time. Each record's history shows the change, and
+the whole edit is one event in Activity, where **Undo** puts it all back
+(see [Undo a mistake](../how-to/undo-mistakes.md#undo-a-bulk-edit)).
+
 ### Moving records to another collection
 
 A record can be moved to another collection, or inside another record there.

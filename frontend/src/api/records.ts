@@ -1,6 +1,7 @@
 import { api, ApiError } from './client'
 import { apiUrl } from '../utils/host'
 import { UploadConnectionError, type UploadInfo } from './files'
+import { progressHeaders } from './fileAccess'
 import type { Field } from './schemas'
 import { auditUrl, type AuditView, type PaginatedAuditLog } from './audit'
 import {
@@ -10,12 +11,9 @@ import {
 } from './query'
 import type { FilterTreeWire } from '../utils/filterTree'
 
-/** Which records to move and where: exactly `ids`, or every record the query
- * (`collection` with the list's selectors) shows. */
-export interface MoveRecordsRequest {
-  to: string
-  /** The record in `to` they go inside; omit for its top level. */
-  parent?: string | null
+/** Which records: exactly `ids`, or every record the query (`collection`
+ * with the list's selectors) shows. */
+export interface RecordSelectionBody {
   ids?: string[] | null
   collection?: string | null
   schema_name?: string | null
@@ -24,6 +22,68 @@ export interface MoveRecordsRequest {
   where?: string[]
   search?: string | null
   search_fields?: string[] | null
+}
+
+/** The records a person chose in a list: the rows ticked, or everything the
+ * list's query shows. */
+export type RecordSelection =
+  { ids: string[] } | { query: RecordQueryParams; collection: string }
+
+/** A selection as the request body every bulk action takes. */
+export function selectionBody(selection: RecordSelection): RecordSelectionBody {
+  if ('ids' in selection) return { ids: selection.ids }
+  const q = selection.query
+  return {
+    collection: selection.collection,
+    schema_name: q.schema ?? null,
+    within: q.within ?? null,
+    filter: q.filter ?? null,
+    where: q.where ?? [],
+    search: q.search ?? null,
+    search_fields: q.search_fields ?? null,
+  }
+}
+
+/** Which records to move and where. */
+export interface MoveRecordsRequest extends RecordSelectionBody {
+  to: string
+  /** The record in `to` they go inside; omit for its top level. */
+  parent?: string | null
+}
+
+/** Which records to edit, and the value each field gets (null clears it). */
+export interface BulkEditRequest extends RecordSelectionBody {
+  changes: Record<string, unknown>
+}
+
+export interface BulkEditSkip {
+  record_id: string
+  name: string | null
+  reason: string
+}
+
+/** What a bulk edit would do. A record takes every change or none. */
+export interface BulkEditPlan {
+  fields: string[]
+  records: number
+  changing: number
+  unchanged: number
+  /** Exact count; `skipped_records` names the first of them. */
+  skipped: number
+  skipped_records: BulkEditSkip[]
+  /** Workflow runs the edit would start. */
+  runs: number
+  workflows: string[]
+  automation_paused: boolean
+  can_apply: boolean
+}
+
+export interface BulkEditResult {
+  changed: number
+  unchanged: number
+  skipped: number
+  skipped_records: BulkEditSkip[]
+  runs: number
 }
 
 export interface RecordMovePlan {
@@ -313,6 +373,21 @@ export const recordsApi = {
    * anything is in the way. */
   move: (body: MoveRecordsRequest) =>
     api.post<MoveRecordsResult>('/records/move', body),
+
+  /** What setting (or clearing) fields on the chosen records would do: how
+   * many change, how many already hold the values, which can't and why, and
+   * how many workflow runs would start. The same rule as the edit. */
+  bulkEditPlan: (body: BulkEditRequest) =>
+    api.post<BulkEditPlan>('/records/bulk-edit/plan', body),
+
+  /** Sets the fields on every chosen record that can take them; the others
+   * are named in the answer. Tag it with a progress id to follow it. */
+  bulkEdit: (body: BulkEditRequest, progressId?: string) =>
+    api.post<BulkEditResult>(
+      '/records/bulk-edit',
+      body,
+      progressHeaders(progressId),
+    ),
 
   /** `reachableFrom` (a collection name) limits results to records a record
    * there may reference: its own collection's and global collections'. */
