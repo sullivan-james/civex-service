@@ -4,10 +4,13 @@ import { useFileUploads } from '../../hooks/useFileUploads'
 import type { Field } from '../../api/schemas'
 import { utcToZonedLocal, datetimeInputToWire } from '../../utils/dates'
 import { useFieldTimeZone } from './timeZoneContext'
+import { precisionHelp } from '../../utils/partialDates'
 import { formatBytes, toInputProps } from '../../utils/restrictions'
 import {
   Button,
   Checkbox,
+  DateInput,
+  DateTimeInput,
   FileDropZone,
   IconButton,
   InfoTip,
@@ -33,12 +36,6 @@ import {
 import { LocatorMap } from '../ui/LocatorMap'
 import { GeoEditorModal } from '../geo/GeoEditorModal'
 import { useMapSettings } from '../../hooks/useMapSettings'
-import {
-  isValidPartialDate,
-  placeholderFor,
-  precisionHelp,
-  type Precision,
-} from '../../utils/partialDates'
 import { Paperclip, X } from '../ui/icons'
 import {
   RecordSearchPicker,
@@ -492,46 +489,6 @@ function GeoInput({
   )
 }
 
-/** A date that may be a year or a month, when the schema allows it. */
-function PartialDateInput({
-  id,
-  required,
-  value,
-  onChange,
-  precision,
-  'aria-describedby': ariaDescribedby,
-  'aria-invalid': ariaInvalid,
-}: InputBase & {
-  value: unknown
-  onChange: (value: unknown) => void
-  precision: Precision
-}) {
-  const text = (value as string) ?? ''
-  const bad = text.trim() !== '' && !isValidPartialDate(text)
-  return (
-    <div>
-      <Input
-        id={id}
-        aria-describedby={ariaDescribedby}
-        aria-invalid={ariaInvalid || bad}
-        required={required}
-        aria-required={required}
-        type="text"
-        value={text}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholderFor(precision)}
-        title={`${precisionHelp(precision)} Stored exactly as you write it.`}
-        className="w-full"
-      />
-      {bad && (
-        <p role="alert" className="mt-1 text-xs text-danger">
-          {`Not a valid date. Use ${placeholderFor(precision)}.`}
-        </p>
-      )}
-    </div>
-  )
-}
-
 export function DynamicField({
   field,
   value,
@@ -661,31 +618,23 @@ export function DynamicField({
 
     case 'date': {
       const { minDate, maxDate, precision } = toInputProps(field)
-      // The browser's date picker can only produce full dates.
-      if (precision && precision !== 'day')
-        return (
-          <PartialDateInput
-            id={id}
-            aria-describedby={ariaDescribedby}
-            aria-invalid={ariaInvalid}
-            required={field.required}
-            value={value}
-            onChange={onChange}
-            precision={precision}
-          />
-        )
       return (
-        <Input
+        <DateInput
           id={id}
           aria-describedby={ariaDescribedby}
           aria-invalid={ariaInvalid}
           required={field.required}
-          aria-required={field.required}
-          type="date"
           value={(value as string) ?? ''}
           min={minDate}
           max={maxDate}
-          onChange={(e) => onChange(e.target.value)}
+          precision={precision}
+          // Only worth saying when a month or a year will do.
+          title={
+            precision && precision !== 'day'
+              ? precisionHelp(precision)
+              : undefined
+          }
+          onChange={onChange}
           className="w-full"
         />
       )
@@ -693,27 +642,24 @@ export function DynamicField({
 
     case 'datetime': {
       const { minDate: rMin, maxDate: rMax } = toInputProps(field, timeZone)
+      // A stored instant is shown as wall time in the field's zone; text that
+      // isn't one yet (still being typed) goes back and forth as it is.
+      const stored = typeof value === 'string' ? value : ''
+      const local = /^\d{4}-\d{2}-\d{2}T/.test(stored)
+        ? utcToZonedLocal(stored, timeZone) || stored
+        : stored
       return (
         <div>
-          <Input
+          <DateTimeInput
             id={id}
             aria-describedby={ariaDescribedby}
             aria-invalid={ariaInvalid}
             required={field.required}
-            aria-required={field.required}
-            type="datetime-local"
-            // Whole seconds: the default step of a minute hides the seconds
-            // field and drops them from what is typed.
-            step={1}
-            value={value ? utcToZonedLocal(value as string, timeZone) : ''}
+            value={local}
             min={rMin}
             max={rMax}
-            onChange={(e) =>
-              onChange(
-                e.target.value
-                  ? datetimeInputToWire(e.target.value, timeZone)
-                  : '',
-              )
+            onChange={(next) =>
+              onChange(next ? datetimeInputToWire(next, timeZone) : '')
             }
             className="w-full"
           />

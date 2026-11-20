@@ -10,6 +10,7 @@ export interface ChartTooltipProps {
   label?: string | number
   payload?: ChartTooltipPayloadEntry[]
   formatValue?: (value: number) => string
+  formatLabel?: (label: string) => string
 }
 
 /** Recharts `content` renderer shared by every primitive in this directory,
@@ -20,12 +21,17 @@ export function ChartTooltip({
   label,
   payload,
   formatValue = (value) => String(value),
+  formatLabel = (label) => label,
 }: ChartTooltipProps) {
   if (!active || !payload?.length) return null
 
   return (
     <div className="rounded-md border border-border bg-canvas px-3 py-2 text-xs shadow-sm">
-      {label != null && <div className="mb-1 font-medium text-fg">{label}</div>}
+      {label != null && (
+        <div className="mb-1 font-medium text-fg">
+          {formatLabel(String(label))}
+        </div>
+      )}
       <div className="flex flex-col gap-1">
         {payload.map((entry, index) => (
           <div

@@ -5,6 +5,28 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
 import eslintConfigPrettier from 'eslint-config-prettier'
 
+// Dates are written only by utils/dates.ts and utils/dateFormat.ts, in the
+// pattern chosen in Settings → Appearance. A number's toLocaleString() can't be
+// told from a date's by syntax, so only `new Date(…).toLocaleString()` is
+// caught; the date-only and time-only forms exist only on dates.
+const DATE_FORMATTING = [
+  {
+    selector:
+      'CallExpression[callee.property.name=/^toLocale(Date|Time)String$/]',
+    message: 'Format dates with utils/dates (formatDate, formatTimestamp, …).',
+  },
+  {
+    selector:
+      "CallExpression[callee.property.name='toLocaleString'][callee.object.type='NewExpression'][callee.object.callee.name='Date']",
+    message: 'Format dates with utils/dates (formatTimestamp, …).',
+  },
+  {
+    selector:
+      "NewExpression[callee.object.name='Intl'][callee.property.name='DateTimeFormat']",
+    message: 'Format dates with utils/dates (formatDate, formatTimestamp, …).',
+  },
+]
+
 export default tseslint.config(
   { ignores: ['dist'] },
   {
@@ -31,6 +53,15 @@ export default tseslint.config(
     },
   },
   {
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: [
+      'src/utils/dates.ts',
+      'src/utils/dateFormat.ts',
+      '**/*.test.{ts,tsx}',
+    ],
+    rules: { 'no-restricted-syntax': ['warn', ...DATE_FORMATTING] },
+  },
+  {
     // One component per concept: use ui/ Button, IconButton, DataTable, TabNav
     // and Card instead of raw elements. Warn while pages are migrated.
     files: ['src/**/*.tsx'],
@@ -52,6 +83,8 @@ export default tseslint.config(
           message:
             'Split large pages into tabs (<TabNav>); explain with <InfoTip>.',
         },
+        // Repeated: this block's list replaces the one above for these files.
+        ...DATE_FORMATTING,
       ],
     },
   },

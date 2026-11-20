@@ -2,6 +2,7 @@ import type { DeletedFieldValue } from '../../api/records'
 import { AuditValue } from '../audit/AuditValue'
 import { RestoreFieldButton } from '../trash/RestoreFieldButton'
 import { Subheading } from '../ui'
+import { formatInstantDate } from '../../utils/dates'
 
 /** Values a record still holds for fields that have been deleted from its
  * schema. They are not lost: each says when the field was deleted and can be
@@ -26,10 +27,8 @@ export function DeletedFieldValues({
               <AuditValue value={f.value} dtype={f.dtype} />
               <span className="block text-xs text-attention">
                 Deleted
-                {f.deleted_at
-                  ? ` ${new Date(f.deleted_at).toLocaleDateString()}`
-                  : ''}
-                . It can be restored, and this value comes back with it.
+                {f.deleted_at ? ` ${formatInstantDate(f.deleted_at)}` : ''}. It
+                can be restored, and this value comes back with it.
               </span>
             </dd>
             <RestoreFieldButton fieldId={f.id} schemaName={f.schema_name} />

@@ -37,7 +37,7 @@ import { fieldSaveErrors } from '../components/records/saveErrors'
 import { recordTrail } from '../utils/recordTrail'
 import { recordTarget } from '../utils/navTargets'
 import { recordRecent } from '../hooks/usePins'
-import { formatDate } from '../lib/utils'
+import { formatRecent } from '../lib/utils'
 import { errorMessage } from '../lib/errors'
 import { ApiError } from '../api/client'
 import { RecordMissing } from '../components/records/RecordMissing'
@@ -295,9 +295,9 @@ export default function RecordDetailPage() {
         }
         meta={
           <>
-            Added {formatDate(record.created_at)}
+            Added {formatRecent(record.created_at)}
             {record.created_at !== record.updated_at &&
-              ` · Updated ${formatDate(record.updated_at)}`}
+              ` · Updated ${formatRecent(record.updated_at)}`}
           </>
         }
       >

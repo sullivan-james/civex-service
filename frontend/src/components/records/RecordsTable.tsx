@@ -1,8 +1,10 @@
-import type { ReactNode } from 'react'
+import { useContext, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { DataTable, Badge, type DataTableColumn } from '../ui'
 import { displayLabel } from '../../utils/naming'
-import { formatDate } from '../../lib/utils'
+import { formatRecent } from '../../lib/utils'
+import { formatFieldDate } from '../../utils/dates'
+import { TimeZoneContext } from './timeZoneContext'
 import { ReferenceLink } from './ReferenceLink'
 import { FileCell } from './FileCell'
 import { fileRefsIn } from '../../utils/fileRefs'
@@ -75,6 +77,8 @@ function CellValue({
   col: RecordsTableColumn
   row: RecordsTableRow
 }) {
+  // The collection's zone: a column carries no field restrictions.
+  const timeZone = useContext(TimeZoneContext)
   const value = row.data[col.name]
   if (value === undefined || value === null) return <Dash />
   if (col.type === 'reference' && typeof value === 'string')
@@ -114,7 +118,9 @@ function CellValue({
         {value.replace(/\s*\n\s*/g, ' ')}
       </span>
     )
-  return <>{formatCellValue(value)}</>
+  return (
+    <>{formatFieldDate(value, col.type, timeZone) ?? formatCellValue(value)}</>
+  )
 }
 
 /** The records table shared by the collection detail page and the view
@@ -178,7 +184,7 @@ export function RecordsTable({
       header: 'Added',
       width: '8rem',
       className: 'text-fg-muted',
-      render: (r) => (r.created_at ? formatDate(r.created_at) : '—'),
+      render: (r) => (r.created_at ? formatRecent(r.created_at) : '—'),
     })
   if (trailing)
     cols.push({

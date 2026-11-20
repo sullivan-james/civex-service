@@ -30,6 +30,7 @@ import RecordsTouched from '../components/jobs/RecordsTouched'
 import FailureExplanation from '../components/jobs/FailureExplanation'
 import { RefreshCw } from '../components/ui/icons'
 import { RecordLink } from '../components/records/RecordLink'
+import { formatTimestamp } from '../utils/dates'
 
 const RUN_TABS = [
   { id: 'summary' },
@@ -218,16 +219,12 @@ export default function JobDetailPage() {
             </div>
             <div>
               <dt className="text-fg-muted font-medium">Created</dt>
-              <dd className="text-fg">
-                {new Date(job.created_at).toLocaleString()}
-              </dd>
+              <dd className="text-fg">{formatTimestamp(job.created_at)}</dd>
             </div>
             {job.finished_at && (
               <div>
                 <dt className="text-fg-muted font-medium">Finished</dt>
-                <dd className="text-fg">
-                  {new Date(job.finished_at).toLocaleString()}
-                </dd>
+                <dd className="text-fg">{formatTimestamp(job.finished_at)}</dd>
               </div>
             )}
           </dl>

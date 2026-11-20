@@ -10,7 +10,7 @@ import {
   useUpdateStatus,
   writeUpdatePref,
 } from '../../hooks/useUpdate'
-import { formatDateTime } from '../../utils/dates'
+import { formatTimestamp } from '../../utils/dates'
 import {
   clearRestartProblem,
   restartForUpdate,
@@ -116,7 +116,7 @@ function LastUpdate({
   last: UpdateAttempt
   installer: string
 }) {
-  const when = formatDateTime(last.at)
+  const when = formatTimestamp(last.at)
   const dismiss = useDismissLastUpdate()
   return (
     <div className="flex flex-wrap items-center gap-2">

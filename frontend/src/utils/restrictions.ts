@@ -1,5 +1,5 @@
 import type { Field } from '../api/schemas'
-import { utcToZonedLocal } from './dates'
+import { formatDate, formatDateTime, utcToZonedLocal } from './dates'
 import type { Precision } from './partialDates'
 
 /**
@@ -69,8 +69,14 @@ export function summarise(
       parts.push(`max ${formatBytes(Number(restrictions.max_size))}`)
   }
   if (type === 'date' || type === 'datetime') {
-    if (restrictions.min !== undefined) parts.push(`from ${restrictions.min}`)
-    if (restrictions.max !== undefined) parts.push(`until ${restrictions.max}`)
+    const zone =
+      typeof restrictions.timezone === 'string' ? restrictions.timezone : null
+    const show = (v: unknown) =>
+      type === 'date' ? formatDate(String(v)) : formatDateTime(String(v), zone)
+    if (restrictions.min !== undefined)
+      parts.push(`from ${show(restrictions.min)}`)
+    if (restrictions.max !== undefined)
+      parts.push(`until ${show(restrictions.max)}`)
   }
   if (type === 'datetime' && typeof restrictions.timezone === 'string')
     parts.push(`timezone ${restrictions.timezone}`)

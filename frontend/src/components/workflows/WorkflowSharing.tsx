@@ -17,9 +17,10 @@ import {
 } from '../ui'
 import { LibraryInstallDialog } from './LibraryInstallDialog'
 import { PublishDialog } from './PublishDialog'
+import { formatTimestamp } from '../../utils/dates'
 
 function when(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleString() : ''
+  return iso ? formatTimestamp(iso) : ''
 }
 
 function pinsText(pins: Record<string, number>): string {

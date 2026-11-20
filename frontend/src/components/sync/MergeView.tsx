@@ -8,7 +8,7 @@ import {
   useSyncConflicts,
 } from '../../hooks/useRemote'
 import { errorMessage } from '../../lib/errors'
-import { formatDate } from '../../lib/utils'
+import { formatRecent } from '../../lib/utils'
 import {
   buildMerge,
   type MergeRow,
@@ -325,7 +325,7 @@ function AttemptHeader({ conflict: c }: { conflict: SyncConflict }) {
   const choices = c.takes.filter((t) => t !== 'value' && t !== 'edited')
   return (
     <div className="space-y-2 rounded-lg border border-attention-muted bg-attention-subtle p-3">
-      <p className="text-sm">{describeAttempt(c, formatDate)}</p>
+      <p className="text-sm">{describeAttempt(c, formatRecent)}</p>
       {open ? (
         <div className="flex flex-wrap items-center gap-2">
           {c.kind === 'rejected' && c.attempted !== 'delete' && (

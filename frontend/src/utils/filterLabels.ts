@@ -8,6 +8,7 @@ import {
 } from './filterTree'
 import { findFilterField, type FilterableField } from './hierarchy'
 import { displayLabel } from './naming'
+import { formatFieldDate } from './dates'
 
 function isGroup(
   wire: FilterTreeWire,
@@ -47,10 +48,12 @@ export function conditionLabel(
   // record since deleted) falls back to the id's short form.
   const isReference =
     field?.type === 'reference' || field?.type === 'reference_list'
-  const value = formatValue(
-    c.value,
-    isReference ? (id) => labels?.[id] ?? id.slice(0, 8) : undefined,
-  )
+  const value =
+    formatFieldDate(c.value, field?.type) ??
+    formatValue(
+      c.value,
+      isReference ? (id) => labels?.[id] ?? id.slice(0, 8) : undefined,
+    )
   return `${prefix}${name} ${op} ${value}`
 }
 

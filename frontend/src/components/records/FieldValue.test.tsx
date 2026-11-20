@@ -23,7 +23,7 @@ describe('FieldValue datetime', () => {
         <FieldValue value="2024-03-01T21:30:00+00:00" field={field()} />
       </CollectionTimeZone>,
     )
-    const el = screen.getByText(/3:30 PM CST/)
+    const el = screen.getByText(/^01\/03\/2024 15:30 CST$/)
     expect(el).toHaveAttribute('title', '2024-03-01T21:30:00+00:00')
   })
 
@@ -36,7 +36,7 @@ describe('FieldValue datetime', () => {
         />
       </CollectionTimeZone>,
     )
-    expect(screen.getByText(/12:00 PM/)).toBeInTheDocument()
+    expect(screen.getByText(/^01\/03\/2024 12:00 /)).toBeInTheDocument()
   })
 
   it('reads an offset-less stored value as UTC', () => {
@@ -45,7 +45,7 @@ describe('FieldValue datetime', () => {
         <FieldValue value="2024-03-01T15:30:00" field={field()} />
       </CollectionTimeZone>,
     )
-    expect(screen.getByText(/3:30 PM UTC/)).toBeInTheDocument()
+    expect(screen.getByText(/^01\/03\/2024 15:30 UTC$/)).toBeInTheDocument()
   })
 
   it('leaves non-datetime strings alone', () => {
@@ -56,5 +56,21 @@ describe('FieldValue datetime', () => {
       />,
     )
     expect(screen.getByText('2024-03-01T21:30:00+00:00')).toBeInTheDocument()
+  })
+})
+
+describe('FieldValue date', () => {
+  it('shows a date in the chosen pattern at its own precision', () => {
+    render(
+      <>
+        <FieldValue value="2019-06-14" field={field({ type: 'date' })} />
+        <FieldValue value="2019-06" field={field({ type: 'date' })} />
+      </>,
+    )
+    expect(screen.getByText('14/06/2019')).toHaveAttribute(
+      'title',
+      '2019-06-14',
+    )
+    expect(screen.getByText('06/2019')).toBeInTheDocument()
   })
 })

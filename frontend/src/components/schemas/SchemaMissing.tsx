@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useRestorePlan } from '../../hooks/useRestore'
 import { RestoreDialog } from '../trash/RestoreDialog'
 import { Button, ErrorState } from '../ui'
+import { formatInstantDate } from '../../utils/dates'
 
 /** What a schema's page says when there is no such schema to show. One that was
  * deleted says when and can be restored from here, with the records that went
@@ -17,7 +18,7 @@ export function SchemaMissing({
   const [restoring, setRestoring] = useState(false)
   if (!plan) return <ErrorState message={message} />
   const when = plan.deleted_at
-    ? ` on ${new Date(plan.deleted_at).toLocaleDateString()}`
+    ? ` on ${formatInstantDate(plan.deleted_at)}`
     : ''
   return (
     <div className="space-y-3">

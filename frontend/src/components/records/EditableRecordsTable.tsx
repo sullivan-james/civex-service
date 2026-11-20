@@ -14,7 +14,7 @@ import {
 } from '../ui'
 import { Plus, X } from '../ui/icons'
 import { displayLabel } from '../../utils/naming'
-import { formatDate } from '../../lib/utils'
+import { formatRecent } from '../../lib/utils'
 import { buildRecordData, withFieldValue } from '../../utils/recordValues'
 import { EditableCell } from './EditableCell'
 
@@ -97,7 +97,7 @@ export function EditableRecordsTable({
       header: 'Added',
       width: '8rem',
       className: 'text-fg-muted',
-      render: (r) => formatDate(r.created_at),
+      render: (r) => formatRecent(r.created_at),
     },
     {
       key: '__delete',
