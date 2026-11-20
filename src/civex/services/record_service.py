@@ -8,6 +8,7 @@ import uuid
 from datetime import date as _date, datetime as _dt, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
+from zoneinfo import ZoneInfo
 
 from civex.domain import permissions
 from civex.domain.permissions import EVERYTHING, Permissions
@@ -64,7 +65,8 @@ from civex.domain.query import (
     TextSearch,
 )
 from civex.domain.scopes import GLOBAL, can_reference
-from civex.domain.timezones import parse_datetime
+from civex.domain import summary
+from civex.domain.timezones import offset_changes, parse_datetime
 from civex.domain.uniqueness import key_values
 from civex.repositories.protocols import (
     AuditRepository,
@@ -2287,6 +2289,191 @@ class RecordService:
                 )
             )
         return keys
+
+    def summarise(
+        self, query: RecordQuery, request: summary.SummaryRequest
+    ) -> summary.SummaryResult:
+        """Group the records `query` lists by field values and work out
+        measures over each group and over them all (see `domain/summary`).
+        The query must name the kind summarised (`schema`); a grouping or a
+        measure names one of its fields, or (`schema`) a field of a kind above
+        it, like a filter condition. In SQL, one statement however many
+        records; a link field's groups are named in one more lookup."""
+        self._permissions.require(permissions.READ)
+        request.check()
+        if not query.schema:
+            raise ValidationError(
+                "Choose the kind of record to summarise: a summary groups the "
+                "values of one kind's fields"
+            )
+        resolved = self.resolve(query)
+        schema = self._schema_svc.get(query.schema)
+        related = self._relations(schema)
+        owners = {rel: s for s, rel in related.values()}
+        zone_default = "UTC"
+        if query.dataset:
+            dataset = self._datasets.get_by_name(query.dataset, with_count=False)
+            if dataset and dataset.timezone:
+                zone_default = dataset.timezone
+
+        def locate(field: str, schema_name: str | None, what: str):
+            f, rel = self._locate(schema, related, field, schema_name, what)
+            if rel.direction == "down":
+                raise ValidationError(
+                    f"Can't {what} '{field}' of '{schema_name}': each record "
+                    "has many of those beneath it"
+                )
+            owner = owners[rel]
+            label = f.display_name
+            if owner.id != schema.id:
+                label = f"{owner.display_name} {label}"
+            return f, rel.hops, owner.name, label
+
+        group_plans: list[summary.GroupPlan] = []
+        group_columns: list[summary.GroupColumn] = []
+        zone_used: str | None = None
+        for g in request.group_by:
+            f, hops, owner, label = locate(g.field, g.schema, "group by")
+            problem = summary.group_problem(g, f.dtype, f.name)
+            if problem:
+                raise ValidationError(problem)
+            zone = None
+            if f.dtype == "datetime" and g.bucket:
+                zone = f.restrictions.get("timezone") or zone_default
+                zone_used = zone
+            group_plans.append(
+                summary.GroupPlan(
+                    summary.FieldPlan(str(f.id), f.dtype, hops),
+                    bucket=g.bucket,
+                    bin=g.bin,
+                    zone=zone,
+                    zone_offsets=offset_changes(zone) if zone else None,
+                )
+            )
+            if g.bucket:
+                label = f"{label} ({g.bucket})"
+            group_columns.append(
+                summary.GroupColumn(
+                    key=g.key,
+                    field=f.name,
+                    schema=owner,
+                    label=label,
+                    dtype=f.dtype,
+                    bucket=g.bucket,
+                    bin=g.bin,
+                    unit=f.restrictions.get("unit"),
+                )
+            )
+
+        measure_plans: list[summary.MeasurePlan] = []
+        measure_columns: list[summary.MeasureColumn] = []
+        for m in request.measures:
+            if m.field is None:
+                measure_plans.append(summary.MeasurePlan("count"))
+                measure_columns.append(
+                    summary.MeasureColumn(m.key, "count", summary.MEASURES["count"])
+                )
+                continue
+            f, hops, owner, label = locate(m.field, m.schema, "work out")
+            problem = summary.measure_problem(m.measure, f.dtype, f.name)
+            if problem:
+                raise ValidationError(problem)
+            measure_plans.append(
+                summary.MeasurePlan(
+                    m.measure, summary.FieldPlan(str(f.id), f.dtype, hops)
+                )
+            )
+            unit = (
+                f.restrictions.get("unit")
+                if m.measure in summary.VALUE_MEASURES
+                else None
+            )
+            measure_columns.append(
+                summary.MeasureColumn(
+                    key=m.key,
+                    measure=m.measure,
+                    label=summary.measure_label(m.measure, label),
+                    field=f.name,
+                    schema=owner,
+                    dtype=f.dtype,
+                    unit=unit,
+                )
+            )
+
+        raw = self._records.summarise(
+            resolved,
+            summary.SummaryPlan(group_plans, measure_plans, request.limit),
+        )
+
+        # Records a link field's groups point at, named as everywhere else.
+        linked = {
+            str(r[i])
+            for r in raw.rows
+            for i, c in enumerate(group_columns)
+            if c.dtype in ("reference", "reference_list") and r[i] is not None
+        }
+        names = (
+            {
+                str(r.id): r.natural_name or str(r.id)[:8]
+                for r in self.labels(sorted(linked))
+            }
+            if linked
+            else {}
+        )
+
+        def to_utc(zone: str):
+            def convert(local_date: str) -> str:
+                start = _dt.fromisoformat(local_date).replace(tzinfo=ZoneInfo(zone))
+                return start.astimezone(timezone.utc).isoformat()
+
+            return convert
+
+        rows: list[summary.SummaryRow] = []
+        width = len(group_columns)
+        for r in raw.rows:
+            groups = []
+            conditions: list[dict[str, Any]] | None = []
+            for i, (column, plan) in enumerate(zip(group_columns, group_plans)):
+                value, where = summary.group_value(
+                    column,
+                    r[i],
+                    each=plan.each,
+                    names=names,
+                    to_utc=to_utc(plan.zone) if plan.zone else None,
+                )
+                groups.append(value)
+                if where is None:
+                    conditions = None
+                elif conditions is not None:
+                    conditions.append(where)
+            rows.append(
+                summary.SummaryRow(
+                    groups=groups,
+                    values=[
+                        summary.measure_value(c, v)
+                        for c, v in zip(measure_columns, r[width:])
+                    ],
+                    where=(
+                        None
+                        if not conditions
+                        else conditions[0]
+                        if len(conditions) == 1
+                        else {"and": conditions}
+                    ),
+                )
+            )
+        return summary.SummaryResult(
+            schema=schema.name,
+            group_columns=group_columns,
+            measure_columns=measure_columns,
+            rows=rows,
+            total=[
+                summary.measure_value(c, v) for c, v in zip(measure_columns, raw.total)
+            ],
+            truncated=raw.truncated,
+            limit=request.limit,
+            timezone=zone_used,
+        )
 
     def query_records(
         self,

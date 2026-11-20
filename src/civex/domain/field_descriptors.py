@@ -63,6 +63,25 @@ class FieldTypeDescriptor:
     #: Whether a text search looks in values of this type (a reference holds
     #: another record's id; a yes/no or a geometry holds no text anyone typed).
     searchable: bool = True
+    #: What a summary can work out over a field of this type
+    #: (`domain/summary.MEASURES`; `count`, the number of records, needs no
+    #: field and is always offered).
+    measures: tuple[str, ...] = ("filled",)
+    #: How a summary groups records by a field of this type: "value" (each
+    #: value its own group), "bin" (each value, or ranges of a width),
+    #: "bucket" (each value, or a period: `buckets`), "each" (a list: each
+    #: item its own group, so a record is in as many groups as it has
+    #: items), or None (can't be grouped by).
+    grouping: str | None = None
+    #: The periods a "bucket" grouping offers, coarsest first.
+    buckets: tuple[str, ...] = ()
+
+
+#: What a summary works out per type (see FieldTypeDescriptor.measures).
+_LABELS = ("filled", "distinct")
+_TEXTS = ("filled", "distinct", "min", "max")
+_NUMBERS = ("filled", "distinct", "min", "max", "mean", "sum")
+_PERIODS = ("year", "month", "week", "day")
 
 
 @dataclass(frozen=True)
@@ -143,6 +162,8 @@ FIELD_TYPES: dict[str, FieldTypeDescriptor] = {
                 _R("max_length", "Longest allowed", "integer"),
                 _FROM_FILENAME,
             ),
+            measures=_TEXTS,
+            grouping="value",
         ),
         FieldTypeDescriptor(
             "integer",
@@ -152,6 +173,8 @@ FIELD_TYPES: dict[str, FieldTypeDescriptor] = {
             "Enter a whole number.",
             "42",
             (*_MIN_MAX_NUM, _FROM_FILENAME),
+            measures=_NUMBERS,
+            grouping="bin",
         ),
         FieldTypeDescriptor(
             "float",
@@ -172,6 +195,8 @@ FIELD_TYPES: dict[str, FieldTypeDescriptor] = {
                 ),
                 _FROM_FILENAME,
             ),
+            measures=_NUMBERS,
+            grouping="bin",
         ),
         FieldTypeDescriptor(
             "boolean",
@@ -181,6 +206,7 @@ FIELD_TYPES: dict[str, FieldTypeDescriptor] = {
             "Tick for yes.",
             "true",
             searchable=False,
+            grouping="value",
         ),
         FieldTypeDescriptor(
             "date",
@@ -200,6 +226,9 @@ FIELD_TYPES: dict[str, FieldTypeDescriptor] = {
                 _R("max", "Latest", "date_bound"),
                 _FROM_FILENAME,
             ),
+            measures=_TEXTS,
+            grouping="bucket",
+            buckets=_PERIODS,
         ),
         FieldTypeDescriptor(
             "datetime",
@@ -220,6 +249,9 @@ FIELD_TYPES: dict[str, FieldTypeDescriptor] = {
                 _R("max", "Not after", "datetime_bound"),
                 _FROM_FILENAME,
             ),
+            measures=_TEXTS,
+            grouping="bucket",
+            buckets=_PERIODS,
         ),
         FieldTypeDescriptor(
             "geo",
@@ -276,6 +308,8 @@ FIELD_TYPES: dict[str, FieldTypeDescriptor] = {
             _REFERENCE_RULES,
             supports_default=False,
             searchable=False,
+            measures=_LABELS,
+            grouping="value",
         ),
         FieldTypeDescriptor(
             "reference_list",
@@ -287,6 +321,7 @@ FIELD_TYPES: dict[str, FieldTypeDescriptor] = {
             _REFERENCE_RULES,
             supports_default=False,
             searchable=False,
+            grouping="each",
         ),
         FieldTypeDescriptor(
             "enum",
@@ -296,6 +331,8 @@ FIELD_TYPES: dict[str, FieldTypeDescriptor] = {
             "Pick a value.",
             "left",
             (_R("choices", "Allowed values", "choices"),),
+            measures=_LABELS,
+            grouping="value",
         ),
         FieldTypeDescriptor(
             "url",
@@ -304,6 +341,8 @@ FIELD_TYPES: dict[str, FieldTypeDescriptor] = {
             "Text",
             "Enter a web address.",
             "https://example.org/data",
+            measures=_LABELS,
+            grouping="value",
         ),
         FieldTypeDescriptor(
             "longtext",
@@ -323,6 +362,7 @@ FIELD_TYPES: dict[str, FieldTypeDescriptor] = {
             "Enter tags separated by commas.",
             "seal, tagged",
             supports_default=False,
+            grouping="each",
         ),
     )
 }

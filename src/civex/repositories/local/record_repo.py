@@ -28,6 +28,7 @@ from civex.domain.dtos import RecordDTO
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.filters import FilterCondition, FilterGroup, FilterNode, SortKey
 from civex.domain.query import ID_PREFIX_MIN, ResolvedQuery, TextSearch
+from civex.domain.summary import RawSummary, SummaryPlan
 from civex.repositories.local._ids import prefix_span
 from civex.repositories.local._bucketing import day_bucket
 from civex.repositories.local._jobs import bulk_delete_jobs
@@ -546,6 +547,16 @@ class LocalRecordRepository:
             .all()
         )
         return {name: count for name, count in rows}
+
+    def summarise(self, query: ResolvedQuery, plan: SummaryPlan) -> RawSummary:
+        """Group the records `query` lists by field values and work out the
+        plan's measures over each group and over them all: one statement
+        (`summary_sql`)."""
+        from civex.repositories.local import summary_sql
+
+        return summary_sql.summarise(
+            self._s, _base_query(self._s, query, self._pg), plan, self._pg
+        )
 
     def growth_by_period(
         self,

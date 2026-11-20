@@ -250,6 +250,128 @@ def record_find(
     console.print(table)
 
 
+@app.command("summarise")
+def record_summarise(
+    collection: Optional[str] = typer.Option(
+        None, "--in", help="The collection (omit for every collection)"
+    ),
+    schema: str = typer.Option(
+        ..., "--schema", "-s", help="The kind of record to summarise"
+    ),
+    by: Optional[list[str]] = typer.Option(
+        None,
+        "--by",
+        "-b",
+        help="Group by a field (repeatable, up to 3): 'field', or 'kind.field' "
+        "for a field of a kind above; add ':year', ':month', ':week' or ':day' "
+        "for a date, or ':5' for a number in ranges 5 wide.",
+    ),
+    measure: Optional[list[str]] = typer.Option(
+        None,
+        "--measure",
+        "-m",
+        help="What to work out (repeatable): 'count' (records, the default), or "
+        "'filled', 'distinct', 'min', 'max', 'mean' or 'sum' then ':field', "
+        "e.g. 'mean:depth'.",
+    ),
+    where: Optional[list[str]] = typer.Option(
+        None, "--where", "-w", help="Only records with field=value; repeatable"
+    ),
+    search: Optional[str] = typer.Option(
+        None, "--search", "-q", help="Only records whose values contain this text"
+    ),
+    within: Optional[str] = typer.Option(
+        None, "--within", help="Only records beneath this record (id or prefix)"
+    ),
+    limit: int = typer.Option(1000, "--limit", "-n", help="The most groups to show"),
+    fmt: Optional[str] = typer.Option(
+        None,
+        "--format",
+        "-f",
+        help="Print the summary as csv, tsv, json or jsonl instead of a table "
+        "(a last row holds the totals).",
+    ),
+    csv_out: bool = typer.Option(False, "--csv", help="The same as --format csv"),
+) -> None:
+    """Summarise records: group them by field values and work out counts,
+    averages, totals and more over each group.
+
+    The records are those `record find` would list with the same options. A
+    date groups by year, month, week or day (one known only to the year keeps
+    a group of its own), a date and time in its field's or collection's time
+    zone, a number by value or in ranges, a list (tags, links) by each item.
+    The last row is the totals over every record, each counted once.
+    """
+    import tempfile
+    from pathlib import Path
+
+    from civex.domain import summary
+    from civex.domain.query import RecordQuery
+    from civex.domain.tables import check_format
+    from civex.services.table_files import write_table
+
+    out_format = "csv" if csv_out else fmt
+    ctx = _ctx()
+    try:
+        if out_format is not None and out_format not in ("csv", "tsv", "json", "jsonl"):
+            check_format(out_format)
+            raise ValidationError("xlsx can't be printed; use the API to get a file")
+        request = summary.SummaryRequest(
+            group_by=[summary.parse_group_by(b) for b in by or []],
+            measures=[summary.parse_measure(m) for m in measure or ["count"]],
+            limit=limit,
+        )
+        result = ctx.record_svc.summarise(
+            RecordQuery(
+                dataset=collection,
+                schema=schema,
+                within=within,
+                where=where or [],
+                search=search,
+            ),
+            request,
+        )
+    except (NotFoundError, ValidationError, ValueError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+
+    columns, rows = summary.table_of(result)
+    if out_format is not None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / f"summary.{out_format}"
+            write_table(path, out_format, columns, [rows])
+            typer.echo(path.read_text(encoding="utf-8"), nl=False)
+        return
+
+    table = Table(*columns)
+    for i, row in enumerate(rows):
+        cells = [
+            "" if row.get(c) is None else _summary_cell(row.get(c)) for c in columns
+        ]
+        if i == len(rows) - 1:
+            table.add_section()
+            cells = [f"[bold]{c}[/bold]" for c in cells]
+        table.add_row(*cells)
+    console.print(table)
+    if result.truncated:
+        console.print(
+            f"[warning]Only the first {result.limit} groups are shown; "
+            "use --limit for more.[/warning]"
+        )
+    if result.timezone:
+        console.print(f"Dates and times are grouped in {result.timezone}.")
+
+
+def _summary_cell(value) -> str:
+    if isinstance(value, float):
+        return f"{value:,.6g}" if not value.is_integer() else f"{value:,.0f}"
+    if isinstance(value, int) and not isinstance(value, bool):
+        return f"{value:,}"
+    return str(value)
+
+
 @app.command("delete")
 def record_delete(
     record_id: str = typer.Argument(..., help="Record ID or short prefix"),
