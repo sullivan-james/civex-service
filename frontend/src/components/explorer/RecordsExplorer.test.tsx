@@ -262,6 +262,8 @@ afterEach(() => vi.unstubAllGlobals())
 async function openNew() {
   await userEvent.click(await screen.findByRole('button', { name: /^New$/ }))
 }
+const COLLECTION_ID = 'c0ffee00-0000-4000-8000-000000000001'
+
 const item = (name: RegExp) => screen.queryByRole('menuitem', { name })
 
 describe('RecordsExplorer', () => {
@@ -1324,6 +1326,14 @@ describe('summary', () => {
   it('saves the summary on screen as an analysis', async () => {
     const prev = override
     override = (url, method) => {
+      // The address names the collection; the analysis keeps its id.
+      if (url.pathname === '/api/collections/hb')
+        return json({
+          id: COLLECTION_ID,
+          name: 'hb',
+          description: null,
+          timezone: null,
+        })
       if (url.pathname.endsWith('/views') && method === 'POST')
         return json({
           ...EMPTY_TABLES,
@@ -1352,7 +1362,7 @@ describe('summary', () => {
           group_by: ['encounter.site'],
           measures: ['count'],
           show: 'table',
-          collection: 'hb',
+          collection: COLLECTION_ID,
           search: '96',
         },
       }),

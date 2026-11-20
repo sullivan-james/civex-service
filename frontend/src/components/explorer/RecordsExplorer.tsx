@@ -807,7 +807,7 @@ export function RecordsExplorer({
             kindLabel={listedLabel}
             analysis={x.activeView}
             where={{
-              collection: dataset ?? null,
+              collection: collection?.id ?? null,
               within: state.within ?? null,
               search: state.q || null,
             }}
