@@ -12,6 +12,21 @@ import type { View } from '../../api/views'
 import { finishExport } from '../files/testSupport'
 import { setFieldTypesForTest } from '../../hooks/useFieldTypes'
 
+// A chart's container measures its parent, which has no size here: draw at a
+// fixed size instead.
+vi.mock('recharts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('recharts')>()
+  const { cloneElement } = await import('react')
+  return {
+    ...actual,
+    ResponsiveContainer: ({ children }: { children: React.ReactElement }) =>
+      cloneElement(children as React.ReactElement<object>, {
+        width: 600,
+        height: 300,
+      }),
+  }
+})
+
 // --- a tiny in-memory API: just enough shape to drive the explorer -------
 
 function schema(name: string, parent: Schema | null, fields: string[]): Schema {
@@ -1266,6 +1281,138 @@ describe('summary', () => {
     await waitFor(() => expect(search().get('show')).toBeNull())
     expect(JSON.parse(search().get('filter')!)).toEqual({
       and: [filter, where],
+    })
+  })
+})
+
+describe('summary as a chart', () => {
+  const where = { field: 'rate', op: 'eq', value: '96' }
+  beforeEach(() => {
+    setFieldTypesForTest({
+      types: [
+        {
+          type: 'string',
+          label: 'Text',
+          description: '',
+          stored_as: '',
+          entry_hint: '',
+          example: '',
+          restrictions: [],
+          supports_default: true,
+          searchable: true,
+          measures: ['filled'],
+          grouping: 'value' as const,
+          buckets: [],
+        },
+      ],
+      kinds: [],
+      summary_measures: [{ key: 'count', label: 'Records', help: '' }],
+    })
+    const group = (value: string | null) => ({
+      value,
+      label: value ?? 'No value',
+      lower: null,
+      upper: null,
+      precision: null,
+    })
+    override = (url: URL, method: string) => {
+      if (url.pathname === '/api/records/summary' && method === 'POST')
+        return json({
+          schema_name: 'recording',
+          group_columns: [
+            {
+              key: 'rate',
+              field: 'rate',
+              schema_name: 'recording',
+              label: 'Rate',
+              type: 'string',
+              bucket: null,
+              bin: null,
+              unit: null,
+            },
+          ],
+          measure_columns: [
+            {
+              key: 'count',
+              measure: 'count',
+              label: 'Records',
+              field: null,
+              schema_name: null,
+              type: null,
+              unit: null,
+            },
+          ],
+          rows: [
+            {
+              groups: [group('48')],
+              values: [1],
+              where: { ...where, value: '48' },
+            },
+            { groups: [group('96')], values: [2], where },
+            {
+              groups: [group(null)],
+              values: [3],
+              where: { field: 'rate', op: 'is_null' },
+            },
+          ],
+          total: [6],
+          truncated: false,
+          limit: 1000,
+          timezone: null,
+        })
+      return undefined
+    }
+  })
+  afterEach(() => setFieldTypesForTest(null))
+
+  it('switches to a chart held in the address, the blanks said beside it', async () => {
+    renderExplorer(
+      {},
+      '/collections/hb?schema=recording&show=summary&sum.by=rate',
+    )
+    expect(await screen.findByText('48')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('radio', { name: 'Chart' }))
+    await waitFor(() => expect(search().get('sum.view')).toBe('chart'))
+    const figure = await screen.findByRole('figure', {
+      name: 'Records by Rate',
+    })
+    expect(figure).toHaveAttribute('data-chart-form', 'bars')
+    // No value is not a bar: it is named below, with its count.
+    expect(screen.getByText(/Not on the axis: no value/)).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'No value (3)' }),
+    ).toBeInTheDocument()
+  })
+
+  it("clicking a bar lists its records, as the table's row does", async () => {
+    const { container } = renderExplorer(
+      {},
+      '/collections/hb?schema=recording&show=summary&sum.by=rate&sum.view=chart',
+    )
+    await screen.findByRole('figure')
+    await waitFor(() =>
+      expect(
+        container.querySelectorAll('.recharts-bar-rectangle path').length,
+      ).toBe(2),
+    )
+    const bars = container.querySelectorAll('.recharts-bar-rectangle path')
+    await userEvent.click(bars[1])
+    await waitFor(() => expect(search().get('show')).toBeNull())
+    expect(JSON.parse(search().get('filter')!)).toEqual(where)
+  })
+
+  it('the no-value group lists its records too', async () => {
+    renderExplorer(
+      {},
+      '/collections/hb?schema=recording&show=summary&sum.by=rate&sum.view=chart',
+    )
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'No value (3)' }),
+    )
+    await waitFor(() => expect(search().get('show')).toBeNull())
+    expect(JSON.parse(search().get('filter')!)).toEqual({
+      field: 'rate',
+      op: 'is_null',
     })
   })
 })
