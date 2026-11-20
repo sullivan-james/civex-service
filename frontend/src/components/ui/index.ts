@@ -30,7 +30,7 @@ export {
   TONE_TEXT,
   type Tone,
 } from './Status'
-export { Menu, type MenuItem } from './Menu'
+export { Menu, type MenuEntry, type MenuItem } from './Menu'
 export { Popover } from './Popover'
 export { TriggerPopover } from './TriggerPopover'
 export { MultiPick, type MultiPickOption } from './MultiPick'

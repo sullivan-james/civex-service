@@ -11,6 +11,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from civex.domain.audit_diff import entry_snapshots
+from civex.domain.query import RecordQuery
 from civex.domain.dtos import (
     ExportDefinitionDTO,
     AuditBatchDTO,
@@ -569,17 +570,10 @@ class RestoreSelectedResponse(BaseModel):
     left: int = Field(description="Chosen records still deleted, and why not.")
 
 
-class RecordSelectionRequest(BaseModel):
-    """Which records: either exactly `ids`, or every record the query
-    (`collection`, `schema_name`, `within`, `filter`, `where`, `search`)
-    lists: the same selectors as listing records, so "all N matching" is
-    exactly what a list with those filters shows."""
+class RecordQueryRequest(BaseModel):
+    """Every record a query (`collection`, `schema_name`, `within`, `filter`,
+    `where`, `search`) lists: the same selectors as listing records."""
 
-    ids: list[str] | None = Field(
-        default=None,
-        description="Exactly these records (ids or prefixes). The query fields "
-        "are then ignored.",
-    )
     collection: str | None = Field(
         default=None, description="With a query: the collection the records are in."
     )
@@ -601,6 +595,183 @@ class RecordSelectionRequest(BaseModel):
         default=None,
         description="Look for 'search' only in these fields of 'schema_name'.",
     )
+
+    def to_query(self) -> RecordQuery:
+        return RecordQuery(
+            dataset=self.collection,
+            schema=self.schema_name,
+            within=self.within,
+            filter_tree=self.filter,
+            where=self.where,
+            search=self.search,
+            search_fields=self.search_fields,
+        )
+
+
+class RecordSelectionRequest(RecordQueryRequest):
+    """Which records: either exactly `ids`, or every record the query
+    (`collection`, `schema_name`, `within`, `filter`, `where`, `search`)
+    lists: the same selectors as listing records, so "all N matching" is
+    exactly what a list with those filters shows."""
+
+    ids: list[str] | None = Field(
+        default=None,
+        description="Exactly these records (ids or prefixes). The query fields "
+        "are then ignored.",
+    )
+
+
+class RecordSummaryRequest(RecordQueryRequest):
+    """Summarise the records a query lists: group them by field values and
+    work out measures over each group. `schema_name` is required (the kind
+    summarised); `collection` may be left out for every collection."""
+
+    group_by: list[str] = Field(
+        default_factory=list,
+        description="Up to 3 groupings, each 'field' or 'schema.field' (a field "
+        "of a kind above), then optionally ':year', ':month', ':week' or ':day' "
+        "for a date, or ':<width>' for a number in ranges that wide (e.g. "
+        "'depth:5'). A list field (tags, links) groups by each item.",
+    )
+    measures: list[str] = Field(
+        default_factory=lambda: ["count"],
+        description="What to work out: 'count' (records), or 'measure:field' "
+        "with measure one of filled, distinct, min, max, mean, sum (which a "
+        "field allows is its type's 'measures' in GET /schemas/field-types).",
+    )
+    limit: int = Field(
+        default=1000,
+        description="The most groups returned; past it the answer is 'truncated'.",
+    )
+
+
+class SummaryGroupColumnResponse(BaseModel):
+    key: str = Field(description="The grouping as asked for, e.g. 'site.region'.")
+    field: str = Field(description="The field's name.")
+    schema_name: str = Field(description="The kind of record whose field it is.")
+    label: str = Field(description="The column's heading.")
+    type: str = Field(description="The field's type.")
+    bucket: str | None = Field(description="The period a date is grouped by.")
+    bin: float | None = Field(description="The width of a number's ranges.")
+    unit: str | None = Field(description="The field's unit, if it has one.")
+
+
+class SummaryMeasureColumnResponse(BaseModel):
+    key: str = Field(description="The measure as asked for, e.g. 'mean:depth'.")
+    measure: str = Field(description="count, filled, distinct, min, max, mean or sum.")
+    label: str = Field(description="The column's heading.")
+    field: str | None = Field(description="The field's name (none for count).")
+    schema_name: str | None = Field(description="The kind of record whose field it is.")
+    type: str | None = Field(description="The field's type.")
+    unit: str | None = Field(
+        description="The unit of a smallest, largest, average or total."
+    )
+
+
+class SummaryGroupValueResponse(BaseModel):
+    value: Any = Field(
+        description="What the records hold: a number, text, true/false, a record "
+        "id, or a period such as '2019-06'. Null for the records with no value."
+    )
+    label: str = Field(description="How the value reads.")
+    lower: Any = Field(
+        default=None,
+        description="Where a range or period starts (a number, or an ISO date).",
+    )
+    upper: Any = Field(
+        default=None,
+        description="Where a range or period ends (not included).",
+    )
+    precision: str | None = Field(
+        default=None,
+        description="Set when a date is less precise than the period grouped by: "
+        "'year' (only the year is known) or 'month'.",
+    )
+
+
+class SummaryRowResponse(BaseModel):
+    groups: list[SummaryGroupValueResponse] = Field(
+        description="The group's value for each grouping, in order."
+    )
+    values: list[Any] = Field(description="Each measure's value, in order.")
+    where: dict[str, Any] | None = Field(
+        description="A filter tree listing exactly this group's records (add it "
+        "to the query's filter), or null when a filter can't say it (an item "
+        "of a list)."
+    )
+
+
+class RecordSummaryResponse(BaseModel):
+    schema_name: str = Field(description="The kind of record summarised.")
+    group_columns: list[SummaryGroupColumnResponse] = Field(
+        description="The groupings, in order."
+    )
+    measure_columns: list[SummaryMeasureColumnResponse] = Field(
+        description="The measures, in order."
+    )
+    rows: list[SummaryRowResponse] = Field(
+        description="One per group, ordered by the groupings' values (no value last)."
+    )
+    total: list[Any] = Field(
+        description="Each measure over every record listed, each counted once."
+    )
+    truncated: bool = Field(description="Whether there were more groups than 'limit'.")
+    limit: int = Field(description="The most groups returned.")
+    timezone: str | None = Field(
+        description="The zone dates and times were grouped in, when any were."
+    )
+
+    @classmethod
+    def from_dto(cls, r: Any) -> RecordSummaryResponse:
+        return cls(
+            schema_name=r.schema,
+            group_columns=[
+                SummaryGroupColumnResponse(
+                    key=c.key,
+                    field=c.field,
+                    schema_name=c.schema,
+                    label=c.label,
+                    type=c.dtype,
+                    bucket=c.bucket,
+                    bin=c.bin,
+                    unit=c.unit,
+                )
+                for c in r.group_columns
+            ],
+            measure_columns=[
+                SummaryMeasureColumnResponse(
+                    key=c.key,
+                    measure=c.measure,
+                    label=c.label,
+                    field=c.field,
+                    schema_name=c.schema,
+                    type=c.dtype,
+                    unit=c.unit,
+                )
+                for c in r.measure_columns
+            ],
+            rows=[
+                SummaryRowResponse(
+                    groups=[
+                        SummaryGroupValueResponse(
+                            value=g.value,
+                            label=g.label,
+                            lower=g.lower,
+                            upper=g.upper,
+                            precision=g.precision,
+                        )
+                        for g in row.groups
+                    ],
+                    values=row.values,
+                    where=row.where,
+                )
+                for row in r.rows
+            ],
+            total=r.total,
+            truncated=r.truncated,
+            limit=r.limit,
+            timezone=r.timezone,
+        )
 
 
 class MoveRecordsRequest(RecordSelectionRequest):
@@ -2568,6 +2739,16 @@ class FieldTypeDescriptorResponse(BaseModel):
     searchable: bool = Field(
         description="Whether a text search looks in values of this type."
     )
+    measures: list[str] = Field(
+        description="What a summary can work out over a field of this type "
+        "(besides 'count', which counts records)."
+    )
+    grouping: str | None = Field(
+        description="How a summary groups by a field of this type: 'value', "
+        "'bin' (or ranges of a width), 'bucket' (or a period: 'buckets'), 'each' "
+        "(each item of a list), or null (it can't)."
+    )
+    buckets: list[str] = Field(description="The periods a 'bucket' grouping offers.")
 
 
 class FieldKindResponse(BaseModel):
@@ -2580,6 +2761,12 @@ class FieldKindResponse(BaseModel):
     )
 
 
+class SummaryMeasureResponse(BaseModel):
+    key: str = Field(description="The measure's name, as a summary request writes it.")
+    label: str = Field(description="Its plain name.")
+    help: str = Field(description="What it is, in a sentence.")
+
+
 class FieldTypesResponse(BaseModel):
     types: list[FieldTypeDescriptorResponse] = Field(
         description="Every field type, with the rules each can carry."
@@ -2587,12 +2774,16 @@ class FieldTypesResponse(BaseModel):
     kinds: list[FieldKindResponse] = Field(
         description="The 'what kind of data is this?' picker, in display order."
     )
+    summary_measures: list[SummaryMeasureResponse] = Field(
+        description="Every measure a summary can work out, in the order offered."
+    )
 
     @classmethod
     def build(cls) -> FieldTypesResponse:
         from dataclasses import asdict
 
         from civex.domain.field_descriptors import FIELD_KINDS, FIELD_TYPES
+        from civex.domain.summary import MEASURE_HELP, MEASURES
 
         return cls(
             types=[
@@ -2600,6 +2791,10 @@ class FieldTypesResponse(BaseModel):
                 for d in FIELD_TYPES.values()
             ],
             kinds=[FieldKindResponse.model_validate(asdict(k)) for k in FIELD_KINDS],
+            summary_measures=[
+                SummaryMeasureResponse(key=k, label=label, help=MEASURE_HELP[k])
+                for k, label in MEASURES.items()
+            ],
         )
 
 

@@ -117,7 +117,8 @@ A collection's page (and a record's **Contains** tab) is one explorer:
 - **Export** takes exactly the rows listed or ticked. See
   [Get files out](../how-to/export-files.md).
 - **Records | Their files** switches to the files of what's listed. See
-  [Files](files.md#working-on-many-files-their-files).
+  [Files](files.md#working-on-many-files-their-files). **Summary** counts and
+  averages them by group: see [Summaries](#summaries).
 - Tick rows (shift-click for a range) to **Delete** or **Run workflow on N**.
   Ticking a whole page offers **Select all N matching**.
 
@@ -129,6 +130,38 @@ to search in), and from `civex record find --in <collection> --schema <kind>
 
 A record's **Referenced by** section counts the records linking to it, per
 collection, schema and field (`GET /api/records/{id}/referrers`).
+
+### Summaries
+
+**Records | Their files | Summary** switches the explorer to a summary of
+exactly what it lists (the same level, filters, search and saved filter):
+
+- **Group by…** a field of the kind listed, or of a kind above it ("Samples
+  by Site › Region"), up to three at once. A date groups by each value or by
+  year, month, week (starting Monday) or day; a date and time does the same
+  in its field's time zone, else the collection's, else UTC. A number groups
+  by each value or into ranges of a width you choose ("0 to under 5 m"). A
+  list (tags, links to records) puts a record in a group for each item, so
+  the groups can add up to more than the total.
+- **Show** what to work out: **Records** (how many), and per field what its
+  type allows: **Filled** (how many have a value), **Different values**,
+  **Smallest** and **Largest** (for text, dates and numbers), **Average** and
+  **Total** (numbers). A field with a unit gives its results in that unit.
+  There is no median.
+- A date is kept at the precision it was written, so grouped by month a
+  sample dated only `2019` sits in its own group, **2019, month not known**,
+  rather than being guessed into January.
+- The last row is the totals over every record listed, each counted once.
+- Click a group to list its records: its condition is added to the filter.
+- **Download** saves the summary as CSV, Excel, TSV or JSON.
+
+The choices are in the address (`show=summary&sum.by=site.region,taken:month&sum.m=count,mean:depth`),
+so a summary can be bookmarked or pinned. Scripts get the same from
+`POST /api/records/summary` (the list's selectors plus `group_by` and
+`measures`, written the same way; `?format=csv` for a file) and from
+`civex record summarise --in <collection> -s <kind> --by <field>[:month|:5]
+-m count -m mean:<field> [--csv]`. Which measures and groupings each type
+allows is in `GET /api/schemas/field-types`.
 
 ## Changing records
 

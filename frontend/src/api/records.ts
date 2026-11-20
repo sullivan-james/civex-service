@@ -1,7 +1,7 @@
 import { api, ApiError } from './client'
 import { apiUrl } from '../utils/host'
 import { UploadConnectionError, type UploadInfo } from './files'
-import { progressHeaders } from './fileAccess'
+import { filenameOf, progressHeaders } from './fileAccess'
 import type { Field } from './schemas'
 import { auditUrl, type AuditView, type PaginatedAuditLog } from './audit'
 import {
@@ -32,9 +32,17 @@ export type RecordSelection =
 /** A selection as the request body every bulk action takes. */
 export function selectionBody(selection: RecordSelection): RecordSelectionBody {
   if ('ids' in selection) return { ids: selection.ids }
-  const q = selection.query
+  return queryBody(selection.query, selection.collection)
+}
+
+/** A list's query as the request body every query endpoint takes (no
+ * collection: every collection). */
+export function queryBody(
+  q: RecordQueryParams,
+  collection?: string | null,
+): RecordSelectionBody {
   return {
-    collection: selection.collection,
+    collection: collection ?? null,
     schema_name: q.schema ?? null,
     within: q.within ?? null,
     filter: q.filter ?? null,
@@ -42,6 +50,66 @@ export function selectionBody(selection: RecordSelection): RecordSelectionBody {
     search: q.search ?? null,
     search_fields: q.search_fields ?? null,
   }
+}
+
+/** Summarise the records a query lists: `group_by` and `measures` are
+ * written as the CLI and the explorer's address write them (`site.region`,
+ * `taken:month`, `depth:5`; `count`, `mean:depth`). */
+export interface SummaryRequest extends RecordSelectionBody {
+  group_by: string[]
+  measures: string[]
+  limit?: number
+}
+
+export interface SummaryGroupColumn {
+  key: string
+  field: string
+  schema_name: string
+  label: string
+  type: string
+  bucket: string | null
+  bin: number | null
+  unit: string | null
+}
+
+export interface SummaryMeasureColumn {
+  key: string
+  measure: string
+  label: string
+  field: string | null
+  schema_name: string | null
+  type: string | null
+  unit: string | null
+}
+
+/** One group's value for one grouping. `lower`/`upper` bound a range or a
+ * period (upper excluded); `precision` is set for a date less precise than
+ * the period grouped by. */
+export interface SummaryGroupValue {
+  value: unknown
+  label: string
+  lower: unknown
+  upper: unknown
+  precision: string | null
+}
+
+export interface SummaryRow {
+  groups: SummaryGroupValue[]
+  values: unknown[]
+  /** The filter condition listing exactly this group's records (null when a
+   * filter can't say it: an item of a list). */
+  where: FilterTreeWire | null
+}
+
+export interface RecordSummary {
+  schema_name: string
+  group_columns: SummaryGroupColumn[]
+  measure_columns: SummaryMeasureColumn[]
+  rows: SummaryRow[]
+  total: unknown[]
+  truncated: boolean
+  limit: number
+  timezone: string | null
 }
 
 /** Which records to move and where. */
@@ -377,6 +445,27 @@ export const recordsApi = {
   /** What setting (or clearing) fields on the chosen records would do: how
    * many change, how many already hold the values, which can't and why, and
    * how many workflow runs would start. The same rule as the edit. */
+  /** Group the records a query lists and work out measures over each group. */
+  summary: (body: SummaryRequest) =>
+    api.post<RecordSummary>('/records/summary', body),
+
+  /** The same summary as a table file (a last row of totals). */
+  summaryFile: async (body: SummaryRequest, format: string) => {
+    const res = await fetch(
+      apiUrl(`/records/summary?format=${encodeURIComponent(format)}`),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    )
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}))
+      throw new ApiError(detail.detail, res.status, detail)
+    }
+    return { blob: await res.blob(), filename: filenameOf(res) }
+  },
+
   bulkEditPlan: (body: BulkEditRequest) =>
     api.post<BulkEditPlan>('/records/bulk-edit/plan', body),
 

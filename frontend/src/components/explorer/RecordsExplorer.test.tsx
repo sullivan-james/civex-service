@@ -1123,6 +1123,153 @@ describe('RecordsExplorer', () => {
   })
 })
 
+describe('summary', () => {
+  const summaryTypes = {
+    types: [
+      {
+        type: 'string',
+        label: 'Text',
+        description: '',
+        stored_as: '',
+        entry_hint: '',
+        example: '',
+        restrictions: [],
+        supports_default: true,
+        searchable: true,
+        measures: ['filled', 'distinct', 'min', 'max'],
+        grouping: 'value' as const,
+        buckets: [],
+      },
+    ],
+    kinds: [],
+    summary_measures: [
+      { key: 'count', label: 'Records', help: 'How many records.' },
+      { key: 'distinct', label: 'Different values', help: '' },
+    ],
+  }
+  const where = {
+    field: 'site',
+    schema: 'encounter',
+    op: 'eq',
+    value: 'Georges',
+  }
+  beforeEach(() => {
+    setFieldTypesForTest(summaryTypes)
+    override = (url: URL, method: string) => {
+      if (url.pathname === '/api/records/summary' && method === 'POST')
+        return json({
+          schema_name: 'recording',
+          group_columns: [
+            {
+              key: 'encounter.site',
+              field: 'site',
+              schema_name: 'encounter',
+              label: 'Encounter Site',
+              type: 'string',
+              bucket: null,
+              bin: null,
+              unit: null,
+            },
+          ],
+          measure_columns: [
+            {
+              key: 'count',
+              measure: 'count',
+              label: 'Records',
+              field: null,
+              schema_name: null,
+              type: null,
+              unit: null,
+            },
+          ],
+          rows: [
+            {
+              groups: [
+                {
+                  value: 'Georges',
+                  label: 'Georges',
+                  lower: null,
+                  upper: null,
+                  precision: null,
+                },
+              ],
+              values: [1],
+              where,
+            },
+            {
+              groups: [
+                {
+                  value: 'Stellwagen',
+                  label: 'Stellwagen',
+                  lower: null,
+                  upper: null,
+                  precision: null,
+                },
+              ],
+              values: [2],
+              where: { ...where, value: 'Stellwagen' },
+            },
+          ],
+          total: [3],
+          truncated: false,
+          limit: 1000,
+          timezone: null,
+        })
+      return undefined
+    }
+  })
+  afterEach(() => setFieldTypesForTest(null))
+
+  it('summarises exactly what the list shows, held in the address', async () => {
+    const filter = JSON.stringify({ field: 'rate', op: 'eq', value: '96' })
+    renderExplorer(
+      {},
+      `/collections/hb?schema=recording&q=96&filter=${encodeURIComponent(filter)}`,
+    )
+    await userEvent.click(await screen.findByRole('radio', { name: 'Summary' }))
+    expect(search().get('show')).toBe('summary')
+    await waitFor(() =>
+      expect(
+        calls.find((c) => c.path === '/api/records/summary')?.body,
+      ).toMatchObject({
+        collection: 'hb',
+        schema_name: 'recording',
+        search: '96',
+        filter: JSON.parse(filter),
+        group_by: [],
+        measures: ['count'],
+      }),
+    )
+    // Group by a field of the kind above: the choice goes in the address.
+    await userEvent.click(screen.getByRole('button', { name: /Group by/ }))
+    await userEvent.click(
+      await screen.findByRole('menuitem', { name: /site/i }),
+    )
+    await waitFor(() => expect(search().get('sum.by')).toBe('encounter.site'))
+    await waitFor(() =>
+      expect(
+        calls.filter((c) => c.path === '/api/records/summary').reverse()[0]
+          ?.body,
+      ).toMatchObject({ group_by: ['encounter.site'] }),
+    )
+    expect(await screen.findByText('Stellwagen')).toBeInTheDocument()
+    expect(screen.getByText('Total')).toBeInTheDocument()
+  })
+
+  it("lists a group's records when it is clicked: its condition joins the filter", async () => {
+    const filter = { field: 'rate', op: 'eq', value: '96' }
+    renderExplorer(
+      {},
+      `/collections/hb?schema=recording&show=summary&sum.by=encounter.site&filter=${encodeURIComponent(JSON.stringify(filter))}`,
+    )
+    await userEvent.click(await screen.findByText('Georges'))
+    await waitFor(() => expect(search().get('show')).toBeNull())
+    expect(JSON.parse(search().get('filter')!)).toEqual({
+      and: [filter, where],
+    })
+  })
+})
+
 describe('what this person may do', () => {
   it('shows New switched off, saying why, for someone who may only read', async () => {
     override = (url: URL) => {
@@ -1165,8 +1312,12 @@ describe('what this person may do', () => {
         restrictions: [],
         supports_default: true,
         searchable: searchable.includes(type),
+        measures: ['filled'],
+        grouping: 'value' as const,
+        buckets: [],
       })),
       kinds: [],
+      summary_measures: [],
     })
     beforeEach(() => {
       const two = schema('encounter', null, ['site', 'observer'])

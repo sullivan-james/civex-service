@@ -7,6 +7,13 @@ from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Qu
 from civex.context import AppContext, context_factory
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.query import RecordQuery
+from civex.domain.summary import (
+    SummaryRequest,
+    parse_group_by,
+    parse_measure,
+    table_of,
+)
+from civex.domain.tables import check_format, extension, media_type
 from civex.server.background import run_pending_jobs
 from civex.server.deps import get_ctx
 from civex.server.downloads import new_temp_path, serve, temp_paths
@@ -28,6 +35,8 @@ from civex.server.models import (
     RecordRef,
     RecordResponse,
     RecordSelectionRequest,
+    RecordSummaryRequest,
+    RecordSummaryResponse,
     RestorePlanResponse,
     ReferrerGroupResponse,
     UpdateRecordRequest,
@@ -496,17 +505,52 @@ def _selection(body: RecordSelectionRequest, verb: str) -> dict:
             detail=f"Choose the records to {verb}: 'ids', or a query with "
             "'collection'.",
         )
-    return {
-        "query": RecordQuery(
-            dataset=body.collection,
-            schema=body.schema_name,
-            within=body.within,
-            filter_tree=body.filter,
-            where=body.where,
-            search=body.search,
-            search_fields=body.search_fields,
+    return {"query": body.to_query()}
+
+
+@router.post("/records/summary", response_model=RecordSummaryResponse)
+def summarise_records(
+    body: RecordSummaryRequest,
+    format: Optional[str] = Query(
+        default=None,
+        description="Answer with the summary as a table file instead: csv, tsv, "
+        "xlsx, json or jsonl. A last row holds the totals.",
+    ),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Summarise the records a query lists (the same selectors as listing
+    them): group them by field values, of their own kind or of a kind above
+    it, and work out measures over each group and over them all. Dates group
+    by year, month, week or day (a date known only to the year keeps a group
+    of its own), numbers by value or in ranges, a list field by each item.
+    Each group carries the filter condition that lists exactly its records.
+    Worked out in the database in one statement, however many records."""
+    try:
+        request = SummaryRequest(
+            group_by=[parse_group_by(g) for g in body.group_by],
+            measures=[parse_measure(m) for m in body.measures],
+            limit=body.limit,
         )
-    }
+        result = ctx.record_svc.summarise(body.to_query(), request)
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except (ValueError, ValidationError) as e:
+        raise HTTPException(422, detail=str(e))
+    if format is None:
+        return RecordSummaryResponse.from_dto(result)
+    try:
+        check_format(format)
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    columns, rows = table_of(result)
+    with temp_paths() as tmp:
+        path = new_temp_path(extension(format))
+        tmp.append(path)
+        write_table(path, format, columns, [rows], sheet="Summary")
+        tmp.remove(path)
+        return serve(
+            path, media_type(format), f"{result.schema}-summary{extension(format)}"
+        )
 
 
 @router.post("/records/move/plan", response_model=RecordMovePlanResponse)
