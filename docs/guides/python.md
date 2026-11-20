@@ -62,6 +62,40 @@ start of a record's id. `search_fields=["site"]` looks only in those fields of
 `schema_name`. `find`, `count`, `iter_find`, `find_by_schema` and
 `count_by_schema_search` all take them, and match the same way.
 
+## Summaries
+
+`record_svc.summarise(query, request)` groups the records a `RecordQuery`
+lists and works out measures over each group, in the database (one query,
+however many records). It is what the explorer's **Summary** and
+`civex record summarise` use:
+
+```python
+import civex
+from civex.domain.query import RecordQuery
+from civex.domain.summary import GroupBy, Measure, SummaryRequest
+
+with civex.open() as project:
+    result = project.record_svc.summarise(
+        RecordQuery(dataset="survey-2024", schema="sample"),
+        SummaryRequest(
+            group_by=[GroupBy("region", schema="site"), GroupBy("taken", bucket="month")],
+            measures=[Measure("count"), Measure("mean", "depth")],
+        ),
+    )
+    for row in result.rows:
+        print([g.label for g in row.groups], row.values)
+    print("total", result.total)
+```
+
+A `GroupBy` names a field of the kind summarised, or of a kind above it
+(`schema=`); `bucket` (year, month, week, day) groups a date, `bin` a number
+into ranges that wide. A `Measure` is `count` (records) or one of `filled`,
+`distinct`, `min`, `max`, `mean`, `sum` over a field. Each group value carries
+`lower`/`upper` for a range or period, and each row `where`, the filter tree
+that lists exactly its records (pass it as `filter_tree`). `parse_group_by`
+and `parse_measure` read the CLI's written forms (`site.region`,
+`taken:month`, `mean:depth`).
+
 ## Writing results back
 
 - `record_svc.add(collection, schema, data, parent_record_id=...)` adds a
@@ -109,7 +143,7 @@ The opened project has one service per area, for example:
 |---|---|
 | `schema_svc` | Schemas and their fields |
 | `dataset_svc` | Collections |
-| `record_svc` | Records: find, add, patch, update, delete, restore, move |
+| `record_svc` | Records: find, summarise, add, patch, update, delete, restore, move |
 | `file_svc` | Storing and reading files |
 | `view_svc` | Saved views |
 | `file_access_svc` | Exports of files and tables |
