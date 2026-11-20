@@ -89,6 +89,15 @@ imports and workflows.
 | `--references` | `reference`, `reference_list` | `--references species` |
 | `--from-file` + `--filename-pattern` | `string`, `integer`, `float`, `date`, `datetime` | `--from-file reading --filename-pattern "YYYYMMDD[-_]HHmmSS"` (read from the file's name when the file is attached or replaced; see [Fill fields from file names](../how-to/fill-fields-from-filenames.md)) |
 
+Changing a rule doesn't re-check the values already stored. Before you save,
+the field editor says how many records hold a value the new rules refuse (or
+leave a newly required field empty), names a few, and links to the
+[data check](collections-and-records.md#checking-the-data) that lists them all;
+`civex schema update-field` says the same and asks before going on
+(`POST /api/schemas/{schema}/fields/{field}/check` with the rules you would
+set). Those records keep their values, but can't be saved again until each is
+put right.
+
 Some rules are set in the app (or over the API, as `restrictions`) only: a
 `date`/`datetime` minimum and maximum, a `datetime` field's own timezone, and a
 file's download-name template.

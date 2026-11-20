@@ -119,7 +119,8 @@ A collection's page (and a record's **Contains** tab) is one explorer:
 - **Records | Their files** switches to the files of what's listed. See
   [Files](files.md#working-on-many-files-their-files). **Summary** counts and
   averages them by group, as a table or a chart: see [Summaries](#summaries).
-  **Map** shows them on a map: see [On a map](#on-a-map).
+  **Map** shows them on a map: see [On a map](#on-a-map). **Checks** says
+  what in them needs a look: see [Checking the data](#checking-the-data).
 - Tick rows (shift-click for a range) to **Delete** or **Run workflow on N**.
   Ticking a whole page offers **Select all N matching**.
 
@@ -194,6 +195,42 @@ offline, plus street detail when a tile address is set in
 **Settings → Map**. Scripts get the points from `POST /api/records/points`
 (the list's selectors plus `field`, and `field_schema` for a kind above).
 Drawing a box on the map to filter is not possible yet.
+
+### Checking the data
+
+**Checks** beside **Summary** looks through exactly the records the list shows
+(the same level, filters, search and saved filter) for what needs a look, and
+counts it per field:
+
+- **Breaks a rule**: a value its field's rules refuse now. Rules are checked
+  when a value is saved, so tightening one later (a lower maximum, fewer
+  choices, a finer date precision) leaves the values already stored as they
+  were. Such a record can't be saved again until the value is put right, and
+  an edit of any of its fields says so.
+- **Required but empty**: a field marked required with no value.
+- **Shares a unique key**: records in one place with the same values for
+  fields that should be unique together.
+- **Broken link**: a link to a record that was deleted, or that the record can
+  no longer reach.
+- **Missing file**: a file that is on no drive here and not on the server.
+
+Each line gives the count and a few of the records. Click it to list them all:
+open one, or tick them and choose **Edit…** to put them right in one go (see
+[Changing many records at once](#changing-many-records-at-once)). A required
+field left empty has **Show in the list**, which adds the condition to the
+explorer's filter. Below, **How full each field is** counts the empty values
+of every field; click one to list them. Unusual numbers are not looked for.
+
+From the command line, with the same options as `record find`:
+
+```bash
+civex record check --in survey -s sample                       # one line per field and issue
+civex record check --in survey --issue breaks_rule --field depth   # the records, with their ids
+```
+
+Scripts use `POST /api/records/quality` (the list's selectors) and
+`POST /api/records/quality/records` (`issue`, `field`, `kind`, `limit`,
+`offset`).
 
 ## Changing records
 
