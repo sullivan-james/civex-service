@@ -12,6 +12,7 @@ import {
   Spinner,
   useToast,
 } from '../ui'
+import { formatTimestamp } from '../../utils/dates'
 
 const where = (e: ExportInfo) =>
   e.location === 'project' ? 'The project folder' : e.location
@@ -26,7 +27,7 @@ function describe(e: ExportInfo): string {
         : 'no space used',
     )
   }
-  if (e.updated) parts.push(`updated ${new Date(e.updated).toLocaleString()}`)
+  if (e.updated) parts.push(`updated ${formatTimestamp(e.updated)}`)
   return parts.join(' · ')
 }
 

@@ -23,6 +23,7 @@ import {
 import { AuditChangeList } from './AuditChanges'
 import { EntrySubject } from './EntrySubject'
 import { SyncOutcome } from './SyncOutcome'
+import { formatTimestamp } from '../../utils/dates'
 
 const REVERTIBLE_ACTIONS = ['update', 'create']
 
@@ -67,7 +68,7 @@ export function AuditEntryDialog({
           <ModalBody className="space-y-3">
             <EntrySubject entry={entry} full />
             <p className="text-xs text-fg-muted">
-              {new Date(entry.timestamp).toLocaleString()}
+              {formatTimestamp(entry.timestamp)}
               {entry.actor ? ` · by ${byWhom(entry.actor, entry.device)}` : ''}
             </p>
             <SyncOutcome entry={entry} />

@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router'
 import Layout from './components/Layout'
 import HomePage from './pages/HomePage'
+import { useDateFormat } from './hooks/useDateFormat'
 import { RouteErrorBoundary } from './components/RouteErrorBoundary'
 import { LoadingState } from './components/ui/States'
 
@@ -71,6 +72,9 @@ const AdvancedSection = lazy(
 const LegalPage = lazy(() => import('./pages/LegalPage'))
 
 export default function App() {
+  // Every date on screen is written in the chosen pattern; reading it here
+  // re-renders the whole app when it changes (nothing below is memoised).
+  useDateFormat()
   return (
     <Layout>
       <RouteErrorBoundary>

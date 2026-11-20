@@ -53,6 +53,7 @@ import {
   summarizeRun,
   watchedChanges,
 } from '../../utils/runNarrative'
+import { formatTimestamp } from '../../utils/dates'
 
 function duration(job: WorkflowJob): string {
   if (!job.started_at) return '—'
@@ -93,10 +94,7 @@ function When({ job }: { job: WorkflowJob }) {
   return (
     <div className="whitespace-nowrap">
       <div className="text-xs text-fg-muted">
-        {new Date(job.created_at).toLocaleString([], {
-          dateStyle: 'short',
-          timeStyle: 'short',
-        })}
+        {formatTimestamp(job.created_at, { seconds: false })}
       </div>
       {job.started_at && (
         <div className="text-xs text-fg-subtle">{duration(job)}</div>

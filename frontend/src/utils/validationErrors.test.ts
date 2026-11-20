@@ -20,9 +20,9 @@ describe('parseValidationError', () => {
     )
     const parsed = parseValidationError(e)
     expect(parsed?.fieldErrors).toEqual({
-      recorded_on: 'Must be on or after 1 January 2020.',
+      recorded_on: 'Must be on or after 01/01/2020.',
     })
-    expect(parsed?.message).toBe('Must be on or after 1 January 2020.')
+    expect(parsed?.message).toBe('Must be on or after 01/01/2020.')
     expect(parsed?.technical).toBe(e.detail)
   })
 
@@ -32,7 +32,7 @@ describe('parseValidationError', () => {
       422,
     )
     expect(parseValidationError(e)?.fieldErrors.recorded_on).toBe(
-      'Must be on or before 31 December 2029.',
+      'Must be on or before 31/12/2029.',
     )
   })
 

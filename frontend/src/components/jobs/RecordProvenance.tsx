@@ -1,6 +1,7 @@
 import { Link } from 'react-router'
 import { useJobsAffectingRecord } from '../../hooks/useWorkflows'
 import { Badge, Card } from '../ui'
+import { formatTimestamp } from '../../utils/dates'
 
 // The reverse of JobsTable's recordId filter: not "runs this record
 // triggered" but "runs that created or changed this record" -- so a
@@ -33,7 +34,7 @@ export default function RecordProvenance({ recordId }: { recordId: string }) {
                 {job.workflow_name}
               </Link>
               <span className="text-fg-muted text-xs">
-                {new Date(job.created_at).toLocaleString()}
+                {formatTimestamp(job.created_at)}
               </span>
             </li>
           )

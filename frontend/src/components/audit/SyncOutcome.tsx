@@ -1,6 +1,6 @@
 import type { AuditLogEntry } from '../../api/audit'
 import type { SyncConflict } from '../../api/remote'
-import { formatDate } from '../../lib/utils'
+import { formatRecent } from '../../lib/utils'
 import {
   byWhom,
   describeAttempt,
@@ -73,7 +73,7 @@ function Clash({ c }: { c: SyncConflict }) {
 function Attempt({ c }: { c: SyncConflict }) {
   return (
     <div className="space-y-2">
-      <p className="text-sm">{describeAttempt(c, formatDate)}</p>
+      <p className="text-sm">{describeAttempt(c, formatRecent)}</p>
       {c.changes.map((ch) => (
         <div key={ch.field_id} className="space-y-1">
           <div className="text-xs font-medium text-fg-muted">
@@ -128,7 +128,7 @@ export function SyncOutcome({ entry }: { entry: AuditLogEntry }) {
             ) : (
               <Badge variant="success">
                 {settledLabel(c.resolution)}
-                {c.resolved_at ? ` · ${formatDate(c.resolved_at)}` : ''}
+                {c.resolved_at ? ` · ${formatRecent(c.resolved_at)}` : ''}
               </Badge>
             )}
           </div>

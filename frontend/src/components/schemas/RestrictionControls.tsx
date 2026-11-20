@@ -11,6 +11,8 @@ import {
   Chip,
   IconButton,
   InfoTip,
+  DateInput,
+  DateTimeInput,
   Input,
   Select,
   TimeZoneSelect,
@@ -22,13 +24,14 @@ import {
   zonedLocalToUTC,
   utcToZonedLocal,
   knownTimeZone,
+  isWallTime,
+  datePlaceholder,
 } from '../../utils/dates'
 import { ACCEPT_PRESETS, buildAccept, parseAccept } from '../../utils/accept'
 import { GEOMETRY_TYPES } from '../../utils/geo'
 import {
   PRECISIONS,
   isValidPartialDate,
-  placeholderFor,
   type Precision,
 } from '../../utils/partialDates'
 import { UNIT_GROUPS, canonicalUnit } from '../../utils/units'
@@ -566,13 +569,12 @@ export function TimezoneControl({ desc, rules, set }: ControlProps) {
 export function DateBoundControl({ desc, rules, set, problem }: ControlProps) {
   const stored =
     typeof rules[desc.key] === 'string' ? (rules[desc.key] as string) : ''
-  const precision = (rules.precision as Precision | undefined) ?? 'day'
   const bad = stored !== '' && !isValidPartialDate(stored)
   useEffect(() => {
     problem(
       desc.key,
       bad
-        ? `${desc.label}: use a year, month or day, such as 2020, 2020-03 or 2020-03-14.`
+        ? `${desc.label}: use a year, a month or a day: ${datePlaceholder('year')}.`
         : null,
     )
     return () => problem(desc.key, null)
@@ -583,12 +585,14 @@ export function DateBoundControl({ desc, rules, set, problem }: ControlProps) {
       help={desc.help}
       error={bad ? 'Not a valid date.' : null}
     >
-      <Input
+      <DateInput
         size="sm"
         value={stored}
-        placeholder={placeholderFor(precision)}
+        // A bound may be a year, a month or a day, whatever the field takes.
+        precision="year"
+        hideError
         aria-label={desc.label}
-        onChange={(e) => set(desc.key, e.target.value.trim() || undefined)}
+        onChange={(next) => set(desc.key, next.trim() || undefined)}
         className="w-56"
       />
     </Shell>
@@ -609,7 +613,9 @@ export function DatetimeBoundControl({
   const [local, setLocal] = useState(
     stored ? utcToZonedLocal(stored, zone) : '',
   )
-  const unresolved = local !== '' && zonedLocalToUTC(local, zone) === null
+  const unreadable = local !== '' && !isWallTime(local)
+  const unresolved =
+    local !== '' && !unreadable && zonedLocalToUTC(local, zone) === null
   const first = useRef(true)
   useEffect(() => {
     // Typed wall time is what the person means; if the zone changes, the
@@ -626,24 +632,31 @@ export function DatetimeBoundControl({
   useEffect(() => {
     problem(
       desc.key,
-      unresolved
-        ? `${desc.label}: that time doesn't exist or is ambiguous in ${zone ?? 'your timezone'} (a clock change). Pick another time.`
-        : null,
+      unreadable
+        ? `${desc.label}: not a date and time.`
+        : unresolved
+          ? `${desc.label}: that time doesn't exist or is ambiguous in ${zone ?? 'your timezone'} (a clock change). Pick another time.`
+          : null,
     )
     return () => problem(desc.key, null)
-  }, [unresolved, zone, desc.key, desc.label, problem])
+  }, [unreadable, unresolved, zone, desc.key, desc.label, problem])
   return (
     <Shell
       label={desc.label}
-      error={unresolved ? "That time doesn't exist in this zone." : null}
+      error={
+        unreadable
+          ? 'Not a date and time.'
+          : unresolved
+            ? "That time doesn't exist in this zone."
+            : null
+      }
     >
-      <Input
+      <DateTimeInput
         size="sm"
-        type="datetime-local"
-        step={1}
         value={local}
+        hideError
         aria-label={desc.label}
-        onChange={(e) => setLocal(e.target.value)}
+        onChange={setLocal}
         className="w-56"
       />
     </Shell>

@@ -11,13 +11,6 @@ export interface AiTokenUsageWidgetProps {
   filters: AnalyticsFiltersState
 }
 
-function formatBucketLabel(value: string): string {
-  const parsed = new Date(value)
-  return isNaN(parsed.getTime())
-    ? value
-    : parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-}
-
 /** Token usage over time, split into input vs. output series, with
  * provider/model as a widget-local filter -- unlike the shared filter
  * bar's dimensions (dataset, schema, workflow, ...), provider/model are
@@ -145,7 +138,6 @@ export function AiTokenUsageWidget({ filters }: AiTokenUsageWidgetProps) {
               { key: 'output_tokens', label: 'Output tokens' },
             ]}
             formatValue={formatCompactNumber}
-            formatXAxis={formatBucketLabel}
           />
         </>
       )}

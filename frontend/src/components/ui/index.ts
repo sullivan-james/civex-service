@@ -46,6 +46,7 @@ export {
 export { ConfirmDialog } from './ConfirmDialog'
 export { FormError } from './FormError'
 export { Input, type InputProps } from './Input'
+export { DateInput, DateTimeInput } from './DateInput'
 export { Textarea, type TextareaProps } from './Textarea'
 export { Select, type SelectProps } from './Select'
 export { TabNav, TabPanel, Tabs, type TabDef } from './TabNav'

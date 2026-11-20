@@ -10,6 +10,7 @@ import type { AuditSummary } from '../../utils/schemaAudit'
 import { DataTable, Badge, ListToolbar, Pagination } from '../ui'
 import { errorMessage } from '../../lib/errors'
 import { AuditEntryDialog } from './AuditEntryDialog'
+import { formatTimestamp } from '../../utils/dates'
 
 const ACTION_VARIANT: Record<
   string,
@@ -91,8 +92,7 @@ export function AuditTrail({
             sortable: true,
             width: '12rem',
             className: 'text-fg-muted whitespace-nowrap',
-            render: (e: AuditLogEntry) =>
-              new Date(e.timestamp).toLocaleString(),
+            render: (e: AuditLogEntry) => formatTimestamp(e.timestamp),
           },
           {
             key: 'action',

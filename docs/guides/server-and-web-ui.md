@@ -63,6 +63,14 @@ A few things work everywhere:
   one you clicked.
 - **The status bar** at the bottom shows work going on in the background (file
   moves, workflow runs, sync) and anything that needs you.
+- **Dates** are shown and typed as **DD/MM/YYYY** unless you choose another
+  pattern in **Settings → Appearance → Date format**: MM/DD/YYYY, YYYY-MM-DD
+  or D MMM YYYY (14 Jun 2019). Times are 24-hour. A date field that takes a
+  month or a year shows it the same way (`06/2019`, `2019`). Every date box
+  reads what you type in that pattern (an ISO date like `2019-06-14` works in
+  any) and has a calendar button. The choice is kept in this browser only, and
+  it changes only what you see: what is stored, the API, exported tables and
+  the CLI keep `YYYY-MM-DD`.
 
 ## HTTP API
 

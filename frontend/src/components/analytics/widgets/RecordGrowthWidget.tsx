@@ -9,13 +9,6 @@ import { StatTile } from '../StatTile'
 import { formatCompactNumber } from '../format'
 import { WidgetCard } from '../WidgetCard'
 
-function formatBucketLabel(value: string): string {
-  const parsed = new Date(value)
-  return isNaN(parsed.getTime())
-    ? value
-    : parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-}
-
 export interface RecordGrowthWidgetProps {
   filters: AnalyticsFiltersState
 }
@@ -56,7 +49,6 @@ export function RecordGrowthWidget({ filters }: RecordGrowthWidgetProps) {
             data={series}
             series={seriesKeys}
             formatValue={formatCompactNumber}
-            formatXAxis={formatBucketLabel}
           />
         </>
       )}

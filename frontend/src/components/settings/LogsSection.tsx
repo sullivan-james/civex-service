@@ -4,7 +4,7 @@ import { logsApi, type LogLine } from '../../api/logs'
 import { useLog, useLogSources } from '../../hooks/useLogs'
 import { useListParams } from '../../hooks/useListParams'
 import { errorMessage } from '../../lib/errors'
-import { formatDateTime } from '../../utils/dates'
+import { formatTimestamp } from '../../utils/dates'
 import {
   Badge,
   Button,
@@ -40,9 +40,7 @@ const TONE: Record<string, 'default' | 'attention' | 'danger'> = {
 function when(time: string | null): string {
   if (!time) return ''
   const parsed = new Date(time.replace(',', '.'))
-  return Number.isNaN(parsed.getTime())
-    ? time
-    : formatDateTime(parsed.toISOString())
+  return Number.isNaN(parsed.getTime()) ? time : formatTimestamp(parsed)
 }
 
 const COLUMNS: DataTableColumn<LogLine & { key: string }>[] = [

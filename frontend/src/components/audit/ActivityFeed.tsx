@@ -31,6 +31,7 @@ import { AuditEntryDialog } from './AuditEntryDialog'
 import { BatchDialog } from './BatchDialog'
 import { EntrySubject } from './EntrySubject'
 import { SyncBadge } from './SyncOutcome'
+import { formatTimestamp } from '../../utils/dates'
 
 type Variant = 'default' | 'accent' | 'success' | 'danger' | 'attention'
 
@@ -256,7 +257,7 @@ export function ActivityFeed({
             sortable: true,
             width: '12rem',
             className: 'text-fg-muted whitespace-nowrap',
-            render: (e: AuditEvent) => new Date(e.timestamp).toLocaleString(),
+            render: (e: AuditEvent) => formatTimestamp(e.timestamp),
           },
         ]}
         rows={data?.items ?? []}
