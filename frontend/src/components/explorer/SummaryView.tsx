@@ -275,6 +275,9 @@ export function SummaryView({
                     placeholder="Each value"
                     title="Group into ranges this wide (leave empty for each value)"
                     defaultValue={how}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') e.currentTarget.blur()
+                    }}
                     onBlur={(e) => {
                       const w = Number(e.target.value)
                       const next =
