@@ -16,6 +16,7 @@ import {
   type ListParams,
   type BulkEditRequest,
   type MoveRecordsRequest,
+  type SummaryRequest,
 } from '../api/records'
 import type { RecordQueryParams } from '../api/query'
 import { ApiError } from '../api/client'
@@ -124,6 +125,17 @@ export function useRecordCounts(
     queryKey: ['record-counts', datasetName, params ?? null],
     queryFn: () => recordsApi.counts(datasetName ?? '', params),
     enabled: datasetName !== '',
+  })
+}
+
+/** A summary of the records a query lists (`null` waits). Keyed under
+ * `records`, so any record edit refreshes it. */
+export function useRecordSummary(body: SummaryRequest | null) {
+  return useQuery({
+    queryKey: ['records', 'summary', body],
+    queryFn: () => recordsApi.summary(body!),
+    enabled: body !== null,
+    placeholderData: keepPreviousData,
   })
 }
 

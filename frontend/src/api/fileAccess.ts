@@ -236,7 +236,7 @@ export interface FileProgress {
 const PROGRESS_HEADER = 'X-Civex-Progress'
 
 /** The file name a download response carries, if it says. */
-function filenameOf(res: Response): string | null {
+export function filenameOf(res: Response): string | null {
   const header = res.headers.get('Content-Disposition') ?? ''
   const star = /filename\*=UTF-8''([^;]+)/i.exec(header)
   if (star) return decodeURIComponent(star[1])

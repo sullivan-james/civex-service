@@ -199,13 +199,18 @@ export function downloadZip(
         name,
       })
     }
-    const url = URL.createObjectURL(got.blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = got.filename ?? `${name}.zip`
-    link.click()
-    URL.revokeObjectURL(url)
+    saveBlob(got.blob, got.filename ?? `${name}.zip`)
   })
+}
+
+/** Hand a downloaded file to the browser to save, under `filename`. */
+export function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
 }
 
 /** Link what can be reached (the person has seen what can't). */

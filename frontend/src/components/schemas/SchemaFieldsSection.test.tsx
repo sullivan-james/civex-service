@@ -26,6 +26,9 @@ const DESCRIPTORS: FieldTypes = {
       restrictions: [R('choices', 'Allowed values', 'choices')],
       supports_default: true,
       searchable: true,
+      measures: ['filled'],
+      grouping: null,
+      buckets: [],
     },
     {
       type: 'float',
@@ -40,6 +43,9 @@ const DESCRIPTORS: FieldTypes = {
       ],
       supports_default: true,
       searchable: true,
+      measures: ['filled'],
+      grouping: null,
+      buckets: [],
     },
     {
       type: 'geo',
@@ -54,6 +60,9 @@ const DESCRIPTORS: FieldTypes = {
       ],
       supports_default: false,
       searchable: false,
+      measures: ['filled'],
+      grouping: null,
+      buckets: [],
     },
   ],
   kinds: [
@@ -79,6 +88,7 @@ const DESCRIPTORS: FieldTypes = {
       focus: 'geometry_types',
     },
   ],
+  summary_measures: [],
 }
 
 const field = (id: string, name: string, type: string, restrictions = {}) => ({

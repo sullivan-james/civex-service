@@ -52,6 +52,22 @@ export interface FieldTypeDescriptor {
   supports_default: boolean
   /** Whether a text search looks in values of this type. */
   searchable: boolean
+  /** What a summary can work out over a field of this type (besides
+   * `count`, which counts records). */
+  measures: string[]
+  /** How a summary groups by it: each `value`, a number by value or in
+   * ranges (`bin`), a date by value or a period (`bucket`), a list by `each`
+   * item, or not at all (null). */
+  grouping: 'value' | 'bin' | 'bucket' | 'each' | null
+  /** The periods a `bucket` grouping offers. */
+  buckets: string[]
+}
+
+/** A measure a summary can work out. */
+export interface SummaryMeasure {
+  key: string
+  label: string
+  help: string
 }
 
 /** An entry in the "what kind of data is this?" picker. */
@@ -67,6 +83,7 @@ export interface FieldKind {
 export interface FieldTypes {
   types: FieldTypeDescriptor[]
   kinds: FieldKind[]
+  summary_measures: SummaryMeasure[]
 }
 
 export interface SchemaDeleteImpact {

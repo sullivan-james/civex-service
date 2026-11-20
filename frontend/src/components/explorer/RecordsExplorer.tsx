@@ -45,6 +45,8 @@ import { MoveRecordsDialog } from './MoveRecordsDialog'
 import { BulkEditDialog } from './BulkEditDialog'
 import { bulkEditableFields } from '../../utils/bulkEdit'
 import { FilesView } from '../files/FilesView'
+import { SummaryView } from './SummaryView'
+import { withCondition } from '../../utils/summary'
 import { MoveToDriveButton } from '../files/MoveDialog'
 import { useBulkSelection } from '../../hooks/useBulkSelection'
 import { BulkRunWorkflow, bulkRunnable } from '../workflows/BulkRunWorkflow'
@@ -60,7 +62,7 @@ import { usePermissions } from '../../hooks/useMe'
 import { EmptyCollectionGuide } from './EmptyCollectionGuide'
 import { recordRecent } from '../../hooks/usePins'
 import { placeTarget, viewTarget } from '../../utils/navTargets'
-import { viewPatch } from '../../utils/explorerState'
+import { applyExplorerPatch, viewPatch } from '../../utils/explorerState'
 import { ancestorSchemas } from '../../utils/hierarchy'
 import { HIGH_IMPACT_RECORD_THRESHOLD } from '../../lib/deleteImpact'
 import { errorMessage } from '../../lib/errors'
@@ -123,7 +125,9 @@ export function RecordsExplorer({
   // The same records, as their files (and those of everything beneath them):
   // one set of filters for both, held in the address like the rest.
   const [params, setParams] = useSearchParams()
-  const showFiles = params.get('show') === 'files'
+  const show = params.get('show')
+  const showFiles = show === 'files'
+  const showSummary = show === 'summary' && !!listed
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [moving, setMoving] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -611,13 +615,13 @@ export function RecordsExplorer({
             <SegmentedControl
               size="sm"
               label="Show"
-              value={showFiles ? 'files' : 'records'}
+              value={showFiles ? 'files' : showSummary ? 'summary' : 'records'}
               onChange={(v) =>
                 setParams(
                   (prev) => {
                     const out = new URLSearchParams(prev)
-                    if (v === 'files') out.set('show', 'files')
-                    else out.delete('show')
+                    if (v === 'records') out.delete('show')
+                    else out.set('show', v)
                     return out
                   },
                   { replace: true },
@@ -626,12 +630,30 @@ export function RecordsExplorer({
               options={[
                 { value: 'records', label: 'Records' },
                 { value: 'files', label: 'Their files' },
+                ...(listed ? [{ value: 'summary', label: 'Summary' }] : []),
               ]}
             />
           </div>
         )}
 
-        {showFiles ? (
+        {showSummary ? (
+          <SummaryView
+            query={x.query}
+            collection={dataset}
+            fields={x.filterFields}
+            // A group's records: its condition added to the filter, listed. One
+            // change to the address, so the two can't undo each other.
+            onDrill={(where) =>
+              setParams((prev) => {
+                const out = applyExplorerPatch(prev, {
+                  filter: withCondition(x.filter, where),
+                })
+                out.delete('show')
+                return out
+              })
+            }
+          />
+        ) : showFiles ? (
           <FilesView
             // The search box looks for files here (their names, and the
             // records they sit under), not for the records listed above them.
