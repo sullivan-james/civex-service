@@ -12,9 +12,10 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from datetime import date, datetime, timezone
 from typing import Any
 
-from civex.domain import geo
+from civex.domain import geo, partial_dates
 from civex.domain.exceptions import ValidationError
 
 # format -> (extension, media type). The first is the default.
@@ -34,7 +35,18 @@ DEFAULT_FORMAT = "csv"
 TEXT_FORMATS = ("csv", "tsv")
 
 # Columns that come from the record itself rather than from one of its fields.
-META_COLUMNS = ("id", "schema", "created_at", "updated_at")
+# `parent_record_id` is the record this one is inside (None at the top), named as
+# on the record so that no field's name is shadowed by it.
+META_COLUMNS = ("id", "schema", "parent_record_id", "created_at", "updated_at")
+# The type each of those has, in the terms of a field's dtype, so a typed table
+# (the Python form below) converts them like any field.
+META_DTYPES = {
+    "id": "string",
+    "schema": "string",
+    "parent_record_id": "string",
+    "created_at": "datetime",
+    "updated_at": "datetime",
+}
 # What a table starts with when no columns are chosen: the id, so a row can be
 # matched back to its record, then every field.
 DEFAULT_META = ("id",)
@@ -147,13 +159,37 @@ def media_type(fmt: str) -> str:
     return FORMATS[fmt][1]
 
 
-def cell(value: Any, fmt: str) -> Any:
+# Not a file format: the form a table's cells take for a Python caller
+# (`FileAccessService.typed_rows`/`frame`, through `civex.open()`), each value as
+# the Python type it is rather than as text. Never offered as an export format
+# (`check_format` refuses it), so it isn't in FORMATS.
+PYTHON = "python"
+
+# How a location reaches Python: the GeoJSON dict, plus `<column>_lat` and
+# `<column>_lon` beside it for points (split, the default); the dict alone; or
+# well-known text.
+GEO_SPLIT = "split"
+GEO_GEOJSON = "geojson"
+GEO_WKT = "wkt"
+GEO_FORMS = (GEO_SPLIT, GEO_GEOJSON, GEO_WKT)
+
+
+def cell(
+    value: Any,
+    fmt: str,
+    dtype: str | None = None,
+    restrictions: dict[str, Any] | None = None,
+    geo_form: str = GEO_SPLIT,
+) -> Any:
     """One value as it is written in `fmt`.
 
     Text formats (csv, tsv) write a point as `lat, lon` and any other list or
     object as JSON, so a cell is never Python's repr. xlsx keeps numbers, true/
     false as themselves and writes a list or object as JSON text. json and jsonl
-    keep everything as it is."""
+    keep everything as it is. `PYTHON` gives the value as its Python type, which
+    needs the column's `dtype` (see `python_value`)."""
+    if fmt == PYTHON:
+        return python_value(value, dtype, restrictions, geo_form)
     if fmt in ("json", "jsonl"):
         return value
     if geo.is_geometry(value):
@@ -162,6 +198,54 @@ def cell(value: Any, fmt: str) -> Any:
         return json.dumps(value)
     if fmt in TEXT_FORMATS:
         return "" if value is None else value
+    return value
+
+
+def python_value(
+    value: Any,
+    dtype: str | None,
+    restrictions: dict[str, Any] | None = None,
+    geo_form: str = GEO_SPLIT,
+) -> Any:
+    """A stored value as the Python type it stands for:
+
+    - integer and float as numbers, boolean as bool;
+    - `date` as a `datetime.date` when the field takes only full days (its
+      `precision` is `day`, the default); a field that takes a year or a month
+      keeps every value as its ISO string ("2019", "2019-06"), because a year is
+      not its first day (`partial_dates.period` gives the days it covers);
+    - `datetime` (and a record's `created_at`/`updated_at`) as a UTC-aware
+      `datetime`;
+    - `geo` as its GeoJSON dict, or with `geo_form="wkt"` well-known text;
+    - lists (tags, file lists, reference lists) as lists;
+    - anything else (text, choices, a file's path or name, a reference's name or
+      id, already worked out by the caller) as it is.
+
+    A value that doesn't read as its type (a legacy row) is left as it is,
+    never dropped."""
+    if value is None:
+        return None
+    try:
+        if dtype == "integer" and not isinstance(value, bool):
+            return int(value)
+        if dtype == "float" and not isinstance(value, bool):
+            return float(value)
+        if dtype == "boolean" and isinstance(value, bool):
+            return value
+        if dtype == "date" and isinstance(value, str):
+            precision = (restrictions or {}).get("precision") or "day"
+            if precision == "day" and partial_dates.precision_of(value) == "day":
+                return date.fromisoformat(value.strip())
+            return value
+        if dtype == "datetime" and isinstance(value, str):
+            moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if moment.tzinfo is None:
+                moment = moment.replace(tzinfo=timezone.utc)
+            return moment.astimezone(timezone.utc)
+        if dtype == "geo" and geo_form == GEO_WKT and geo.is_geometry(value):
+            return geo.to_wkt(value)
+    except (TypeError, ValueError):
+        return value
     return value
 
 

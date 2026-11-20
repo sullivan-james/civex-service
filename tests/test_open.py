@@ -56,3 +56,23 @@ def test_a_block_that_raises_leaves_nothing(project_dir: Path):
 
     with civex.open(project_dir) as project:
         assert project.record_svc.find("survey") == []
+
+
+def test_a_collection_as_a_typed_table(project_dir: Path):
+    with civex.open(project_dir) as project:
+        project.schema_svc.create("sample")
+        project.schema_svc.add_field(
+            "sample", "depth", "float", restrictions={"unit": "m"}
+        )
+        project.schema_svc.add_field("sample", "count", "integer")
+        project.dataset_svc.create("survey")
+        project.record_svc.add("survey", "sample", {"depth": 1.5, "count": 2})
+
+    with civex.open(project_dir) as project:
+        assert [(r["depth"], r["count"]) for r in project.rows("survey", "sample")] == [
+            (1.5, 2)
+        ]
+        df = project.frame("survey", "sample", columns=["depth", "count"])
+    assert list(df.columns) == ["depth", "count"]
+    assert str(df["count"].dtype) == "Int64"
+    assert df.attrs["units"] == {"depth": "m"}

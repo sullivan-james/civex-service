@@ -37,23 +37,91 @@ when you're done.
 
 ## Reading into pandas
 
-`iter_find` returns records a page at a time, so large collections never have
-to fit in memory at once. Each record's `data` uses field names as its keys:
+`project.frame(collection, schema)` gives the records of one kind as a pandas
+DataFrame whose columns already have their types. It is the same table an
+export writes (the same columns, the same rule for fields of the records
+above and for links), with Python values instead of text:
 
 ```python
-import pandas as pd
 import civex
 
 with civex.open() as project:
-    rows = [
-        {"id": str(r.id), **r.data}
-        for page in project.record_svc.iter_find("survey-2024", schema_name="sample")
-        for r in page
-    ]
-samples = pd.DataFrame(rows)
+    samples = project.frame("survey-2024", "sample")
+
+samples.dtypes
+# id                  string
+# depth              float64
+# count                Int64      (whole numbers; a blank stays <NA>)
+# taken    datetime64[UTC]      (date and time, in UTC)
+# day           datetime64      (a date field that takes whole days)
+# region            category      (a choice)
+# site_name           string      (a field of the site each sample is inside)
+# place               object      (the location as GeoJSON)
+# place_lat, place_lon float64    (for points)
+# audio               string      (where the file is on this computer)
 ```
 
-To narrow the list, pass `filters=["site=A3"]` (each entry is `field=value`)
+What each kind of field becomes:
+
+| Field | In the DataFrame |
+|---|---|
+| Whole number, decimal, true/false | `Int64`, `float64`, `boolean` (blanks stay blank) |
+| Date | a date (`datetime64`) when the field takes whole days. A field that also takes a year or a month keeps its values as written (`"2019"`, `"2019-06"`), because a year is not its first day; `civex.domain.partial_dates.period(value)` gives the first and last day it covers |
+| Date and time | `datetime64` in UTC (`samples.taken.dt.tz_convert("Europe/London")` for local time) |
+| Location | the GeoJSON geometry, plus `<field>_lat` and `<field>_lon` for points (`geo="split"`, the default); `geo="geojson"` leaves out the two columns, `geo="wkt"` gives well-known text (`POINT (-3.41 56.12)`) for shapely or GeoPandas |
+| File | the path of the file on this computer, ready for `open()` (`files="path"`, the default); `files="name"` gives its name. A file that isn't here right now (a drive not plugged in, files kept in a bucket, only on the server) gives its name |
+| List of files, tags, links to several records | a list |
+| Link to a record | the record's name (`references="name"`, the default) or its id (`references="id"`) |
+| Choice | `category` |
+| Text | `string` |
+
+A file's path is where civex keeps it, named by its content, so it has no
+extension: libraries that read the file's own header (soundfile, Pillow,
+pandas' readers) open it as it is. Read it, never write to it.
+
+**Columns.** `columns=[...]` picks and orders them. A column is a field of the
+kind, a field of a record it sits inside (a sample inside a site has the
+site's fields as columns, by their names), a field of the record a link
+points at (`lab.title`), or one of `id`, `schema`, `parent_record_id`,
+`created_at`, `updated_at`. Without `columns` the table is the id and every
+field, those of the records above included. A name that isn't any of these
+raises `ValidationError`.
+
+```python
+with civex.open() as project:
+    df = project.frame(
+        "survey-2024",
+        "sample",
+        columns=["id", "site_name", "place", "depth", "audio", "lab.title"],
+        where={"field": "depth", "op": "gt", "value": 10},
+    )
+
+df.attrs["units"]   # {"depth": "m"}: each decimal field's unit
+df.attrs["types"]   # {"depth": "float", "place": "geo", ...}: each column's civex type
+
+import soundfile
+for path in df.audio.dropna():
+    signal, rate = soundfile.read(path)
+```
+
+A decimal field with a unit keeps its name as the column's; every value is in
+that unit, which `df.attrs["units"]` names.
+
+**Which records.** `where` is a filter, either the explorer's (a dict, as
+saved in a view) or a list of `"field=value"` terms; `search="..."` and
+`search_fields=[...]` look for text as the app's search box does; `within=`
+takes a record id and keeps only what is beneath it. The collection may be
+`None` for every collection.
+
+`project.rows(...)` takes the same arguments and gives a list of dicts with
+the same values (a `datetime.date`, a UTC `datetime`, a list), for code that
+doesn't use pandas. Both read the records a page at a time, so the memory
+used is the table's own. They are `project.file_access_svc.frame(query, ...)`
+and `typed_rows(query, ...)` over a `RecordQuery`.
+
+For records as civex holds them (field values as stored, names as keys),
+`record_svc.iter_find(collection, schema_name=...)` returns them a page at a
+time. To narrow it, pass `filters=["site=A3"]` (each entry is `field=value`)
 together with `schema_name`. A field's name only means something within its
 schema, so a filter without one raises `ValidationError`. `search="..."`
 looks for text, ignoring case, in the records' values (text, numbers, list
@@ -168,7 +236,7 @@ The opened project has one service per area, for example:
 | `record_svc` | Records: find, summarise, points, add, patch, update, delete, restore, move |
 | `file_svc` | Storing and reading files |
 | `view_svc` | Saved views |
-| `file_access_svc` | Exports of files and tables |
+| `file_access_svc` | Exports of files and tables; `frame` and `typed_rows` |
 | `history_svc` | History and revert |
 | `bundle_svc` | Bundles for moving data between projects |
 | `config` | The project's settings and its folder (`config.project_root`) |

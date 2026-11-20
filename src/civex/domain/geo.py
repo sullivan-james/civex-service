@@ -283,3 +283,58 @@ def to_text(geometry: dict[str, Any]) -> str:
     ):
         return f"{coords[1]}, {coords[0]}"
     return json.dumps(geometry, separators=(",", ":"))
+
+
+def to_wkt(geometry: dict[str, Any]) -> str:
+    """Well-known text for a geometry (`POINT (lon lat)`, `POINT Z (lon lat
+    depth)`), longitude first as in GeoJSON. What GIS tools and shapely read.
+    Foreign members such as `uncertainty_m` have no place in WKT and are left
+    out."""
+    kind = str(geometry.get("type", ""))
+    coords = geometry.get("coordinates")
+
+    def depth(c: Any) -> int:
+        while isinstance(c, list) and c and isinstance(c[0], list):
+            c = c[0]
+        return len(c) if isinstance(c, list) else 2
+
+    def pos(p: list[Any]) -> str:
+        return " ".join(_number(v) for v in p)
+
+    def seq(ps: list[Any]) -> str:
+        return "(" + ", ".join(pos(p) for p in ps) + ")"
+
+    def rings(rs: list[Any]) -> str:
+        return "(" + ", ".join(seq(r) for r in rs) + ")"
+
+    body = {
+        "Point": lambda c: f"({pos(c)})",
+        "MultiPoint": lambda c: "(" + ", ".join(f"({pos(p)})" for p in c) + ")",
+        "LineString": seq,
+        "MultiLineString": rings,
+        "Polygon": rings,
+        "MultiPolygon": lambda c: "(" + ", ".join(rings(p) for p in c) + ")",
+    }.get(kind)
+    if body is None or not isinstance(coords, list):
+        raise ValueError(f"not a geometry: {geometry!r}")
+    if not coords:
+        return f"{kind.upper()} EMPTY"
+    z = " Z" if depth(coords) >= 3 else ""
+    return f"{kind.upper()}{z} {body(coords)}"
+
+
+def _number(value: Any) -> str:
+    return str(int(value)) if float(value).is_integer() else repr(float(value))
+
+
+def point_lat_lon(value: Any) -> tuple[float, float] | None:
+    """(latitude, longitude) of a point, None for any other value."""
+    if (
+        is_geometry(value)
+        and value["type"] == "Point"
+        and isinstance(value["coordinates"], list)
+        and len(value["coordinates"]) >= 2
+    ):
+        lon, lat = value["coordinates"][:2]
+        return float(lat), float(lon)
+    return None
