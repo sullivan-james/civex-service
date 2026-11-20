@@ -435,6 +435,21 @@ def _file_dicts(value: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _changed_values(
+    data: dict[str, Any], stored: dict[str, Any] | None
+) -> dict[str, Any]:
+    """The values in `data` (by field name) that differ from `stored`, the
+    record's values now, or all of them when there is none (a create). The
+    one rule for what an update checks: a value the record already holds is
+    not checked again against restrictions, references or unique keys, so a
+    rule tightened since it was stored never blocks an edit to another field.
+    Compare after `_strip_derived_file_keys` and `_normalise_datetimes`, so an
+    echoed-back file or datetime counts as unchanged."""
+    if stored is None:
+        return data
+    return {k: v for k, v in data.items() if k not in stored or stored[k] != v}
+
+
 def _strip_derived_file_keys(
     data: dict[str, Any], fields: list[ResolvedField]
 ) -> dict[str, Any]:
@@ -1449,15 +1464,14 @@ class RecordService:
         editing a record never fails over a reference it already held."""
         if shape is None:
             return
+        changed = _changed_values(data, unchanged)
         wanted: list[tuple[str, Any]] = []
         for rf in shape.fields:
             field = rf.field
             if field.dtype not in ("reference", "reference_list"):
                 continue
-            value = data.get(field.name)
-            if value is None or (
-                unchanged is not None and unchanged.get(field.name) == value
-            ):
+            value = changed.get(field.name)
+            if value is None:
                 continue
             for item in value if isinstance(value, list) else [value]:
                 wanted.append((field.name, item))
@@ -1739,12 +1753,7 @@ class RecordService:
         before = head.get("data") or {} if head and not head.get("deleted_at") else None
         named = self._ids_to_names(data, shape)
         before_named = self._ids_to_names(before, shape) if before is not None else None
-        changed = {
-            k: v
-            for k, v in named.items()
-            if before_named is None or before_named.get(k) != v
-        }
-        self._validate_data(changed, shape)
+        self._validate_data(_changed_values(named, before_named), shape)
         self._check_references(named, shape, dataset, unchanged=before_named)
         self._check_unique(
             shape, dataset.id, parent_id, data, exclude_id=record_id, unchanged=before
@@ -2037,7 +2046,10 @@ class RecordService:
             dataset.timezone if dataset else None,
             unchanged=old_data,
         )
-        self._validate_data(data, shape)
+        # Only what this save changes is checked (`_changed_values`): a value
+        # the record already holds may break a rule tightened since, and must
+        # not stop an edit to another field (the data check finds it).
+        self._validate_data(_changed_values(data, old_data), shape)
         if dataset:
             self._check_references(data, shape, dataset, unchanged=old_data)
         id_data = self._names_to_ids(data, shape)

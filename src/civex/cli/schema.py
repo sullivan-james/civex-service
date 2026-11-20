@@ -703,8 +703,8 @@ def schema_update_field(
             if check.breaks_rule:
                 console.print(
                     f"[warning]{check.breaks_rule} record(s) hold a value these "
-                    "rules refuse. They are kept as they are, but can't be saved "
-                    "again until the value is put right, e.g.:[/warning]"
+                    "rules refuse. They are kept as they are; a later edit of that "
+                    "value must put it right, e.g.:[/warning]"
                 )
                 for example in check.examples:
                     console.print(

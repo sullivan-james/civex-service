@@ -95,8 +95,9 @@ leave a newly required field empty), names a few, and links to the
 [data check](collections-and-records.md#checking-the-data) that lists them all;
 `civex schema update-field` says the same and asks before going on
 (`POST /api/schemas/{schema}/fields/{field}/check` with the rules you would
-set). Those records keep their values, but can't be saved again until each is
-put right.
+set). Those records keep their values and can still be edited: a save checks
+only the values it changes, so a broken value is refused only when it is
+changed to another one the rules refuse.
 
 Some rules are set in the app (or over the API, as `restrictions`) only: a
 `date`/`datetime` minimum and maximum, a `datetime` field's own timezone, and a

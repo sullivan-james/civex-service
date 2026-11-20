@@ -205,8 +205,9 @@ counts it per field:
 - **Breaks a rule**: a value its field's rules refuse now. Rules are checked
   when a value is saved, so tightening one later (a lower maximum, fewer
   choices, a finer date precision) leaves the values already stored as they
-  were. Such a record can't be saved again until the value is put right, and
-  an edit of any of its fields says so.
+  were. Such a record can still be edited (a save checks only the values it
+  changes), and its broken values can be put right one at a time, by hand or
+  with a bulk edit.
 - **Required but empty**: a field marked required with no value.
 - **Shares a unique key**: records in one place with the same values for
   fields that should be unique together.

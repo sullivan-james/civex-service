@@ -367,7 +367,7 @@ function FieldCheckWarning({
     >
       <p>
         <span className="font-medium">{parts.join(', and ')}.</span> They are
-        kept as they are, but can't be saved again until put right.
+        kept as they are; an edit that changes one must put it right.
       </p>
       {check.examples.length > 0 && (
         <ul className="space-y-0.5">
