@@ -13,6 +13,8 @@ from pydantic import BaseModel, Field
 from civex.domain.audit_diff import entry_snapshots
 from civex.domain.query import RecordQuery
 from civex.domain.dtos import (
+    POINTS_DEFAULT_LIMIT,
+    RecordPoints,
     ExportDefinitionDTO,
     AuditBatchDTO,
     AuditEventDTO,
@@ -643,6 +645,59 @@ class RecordSummaryRequest(RecordQueryRequest):
         default=1000,
         description="The most groups returned; past it the answer is 'truncated'.",
     )
+
+
+class RecordPointsRequest(RecordQueryRequest):
+    """Where the records a query lists are, for a map. `schema_name` is
+    required (the kind listed); `collection` may be left out for every
+    collection."""
+
+    field: str = Field(description="The location (geo) field to map.")
+    field_schema: str | None = Field(
+        default=None,
+        description="The kind whose field it is, when it is a kind above "
+        "'schema_name' (each record is then placed where the record above it "
+        "is). Left out: the listed kind's own field, else the nearest kind "
+        "above that has one by that name.",
+    )
+    limit: int = Field(
+        default=POINTS_DEFAULT_LIMIT,
+        description="The most records returned (oldest first); past it the "
+        "answer is 'truncated' and 'total' says how many there are.",
+    )
+
+
+class RecordPointResponse(BaseModel):
+    id: str = Field(description="The record's id.")
+    name: str | None = Field(description="The record's name, as lists show it.")
+    geometry: dict[str, Any] = Field(
+        description="The field's value: a GeoJSON geometry in WGS84 ([lon, lat])."
+    )
+
+
+class RecordPointsResponse(BaseModel):
+    schema_name: str = Field(description="The kind whose field was mapped.")
+    field: str = Field(description="The field mapped.")
+    points: list[RecordPointResponse] = Field(
+        description="One per record with a value, oldest first."
+    )
+    total: int = Field(description="How many listed records have a value.")
+    truncated: bool = Field(description="Whether some were left out ('limit').")
+    limit: int = Field(description="The most records returned.")
+
+    @classmethod
+    def from_dto(cls, r: RecordPoints) -> "RecordPointsResponse":
+        return cls(
+            schema_name=r.schema,
+            field=r.field,
+            points=[
+                RecordPointResponse(id=str(p.id), name=p.name, geometry=p.geometry)
+                for p in r.points
+            ],
+            total=r.total,
+            truncated=r.truncated,
+            limit=r.limit,
+        )
 
 
 class SummaryGroupColumnResponse(BaseModel):

@@ -28,6 +28,10 @@ from civex.domain.dtos import (
     RecordDTO,
     RecordMovePlanDTO,
     RecordMoveResultDTO,
+    RecordPoint,
+    RecordPoints,
+    POINTS_DEFAULT_LIMIT,
+    POINTS_MAX_LIMIT,
     ReferrerGroupDTO,
     ResolvedField,
     ResolvedSchema,
@@ -2289,6 +2293,55 @@ class RecordService:
                 )
             )
         return keys
+
+    def points(
+        self,
+        query: RecordQuery,
+        field: str,
+        schema: str | None = None,
+        limit: int = POINTS_DEFAULT_LIMIT,
+    ) -> RecordPoints:
+        """Where the records `query` lists are, for a map: each one's id,
+        name and the geometry in its `geo` field `field` (of the kind listed,
+        or of `schema`, a kind above it, like a filter condition; the record
+        above holds it then). Records with no value are left out; at most
+        `limit`, oldest first, and `total` says how many have one. A fixed
+        number of statements however many records."""
+        self._permissions.require(permissions.READ)
+        if not 1 <= limit <= POINTS_MAX_LIMIT:
+            raise ValidationError(f"The limit must be between 1 and {POINTS_MAX_LIMIT}")
+        if not query.schema:
+            raise ValidationError(
+                "Choose the kind of record to map: a map shows one kind's "
+                "location field"
+            )
+        resolved = self.resolve(query)
+        listed = self._schema_svc.get(query.schema)
+        related = self._relations(listed)
+        f, rel = self._locate(listed, related, field, schema, "map")
+        if rel.direction == "down":
+            raise ValidationError(
+                f"Can't map '{field}' of '{schema}': each record has many of "
+                "those beneath it"
+            )
+        if f.dtype != "geo":
+            raise ValidationError(f"'{f.name}' is not a location field")
+        owner = next(s for s, r in related.values() if r == rel)
+        found, total = self._records.geometries(resolved, str(f.id), rel.hops, limit)
+        shapes = self._schema_svc.resolver()
+        named = self._label_references(
+            [self._with_names(r, shapes) for r, _ in found], shapes
+        )
+        return RecordPoints(
+            schema=owner.name,
+            field=f.name,
+            points=[
+                RecordPoint(r.id, r.natural_name, geometry)
+                for r, (_, geometry) in zip(named, found)
+            ],
+            total=total,
+            limit=limit,
+        )
 
     def summarise(
         self, query: RecordQuery, request: summary.SummaryRequest
