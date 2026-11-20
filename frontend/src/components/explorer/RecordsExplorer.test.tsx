@@ -1693,8 +1693,17 @@ describe('checks', () => {
 
   it('checks exactly what the list shows, and opens the records with an issue', async () => {
     renderExplorer({}, '/collections/hb?schema=recording&q=9')
-    await userEvent.click(await screen.findByRole('radio', { name: 'Checks' }))
+    // Checks is a task beside the ways of showing the records, not one of
+    // them; a small list is counted before it is opened.
+    expect(
+      screen.queryByRole('radio', { name: 'Checks' }),
+    ).not.toBeInTheDocument()
+    const button = await screen.findByRole('button', {
+      name: /Check data.*2 records need a look/,
+    })
+    await userEvent.click(button)
     expect(search().get('show')).toBe('checks')
+    expect(screen.getByRole('radio', { name: 'Records' })).not.toBeChecked()
     await waitFor(() =>
       expect(
         calls.find((c) => c.path === '/api/records/quality')?.body,
@@ -1741,5 +1750,13 @@ describe('checks', () => {
     )
     await waitFor(() => expect(search().get('show')).toBeNull())
     expect(JSON.parse(search().get('filter')!)).toEqual(blankFilter)
+  })
+
+  it('goes back to the records from the checks', async () => {
+    renderExplorer({}, '/collections/hb?schema=recording&show=checks')
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Back to records' }),
+    )
+    await waitFor(() => expect(search().get('show')).toBeNull())
   })
 })

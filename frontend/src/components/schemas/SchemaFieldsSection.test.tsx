@@ -289,7 +289,9 @@ describe('schema fields section', () => {
     expect(
       await screen.findByText(/4 records no longer pass these rules/),
     ).toBeInTheDocument()
-    expect(checks.at(-1)).toMatchObject({ restrictions: { unit: 'm', min: 0 } })
+    expect(checks[checks.length - 1]).toMatchObject({
+      restrictions: { unit: 'm', min: 0 },
+    })
     expect(screen.getByRole('link', { name: 'Deployment 7' })).toHaveAttribute(
       'href',
       '/records/rec1',

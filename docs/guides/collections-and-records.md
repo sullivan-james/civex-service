@@ -119,8 +119,9 @@ A collection's page (and a record's **Contains** tab) is one explorer:
 - **Records | Their files** switches to the files of what's listed. See
   [Files](files.md#working-on-many-files-their-files). **Summary** counts and
   averages them by group, as a table or a chart: see [Summaries](#summaries).
-  **Map** shows them on a map: see [On a map](#on-a-map). **Checks** says
-  what in them needs a look: see [Checking the data](#checking-the-data).
+  **Map** shows them on a map: see [On a map](#on-a-map). **Check data**
+  beside them says what in them needs a look: see
+  [Checking the data](#checking-the-data).
 - Tick rows (shift-click for a range) to **Delete** or **Run workflow on N**.
   Ticking a whole page offers **Select all N matching**.
 
@@ -198,9 +199,12 @@ Drawing a box on the map to filter is not possible yet.
 
 ### Checking the data
 
-**Checks** beside **Summary** looks through exactly the records the list shows
-(the same level, filters, search and saved filter) for what needs a look, and
-counts it per field:
+**Check data**, beside the ways of showing the records, looks through exactly
+the records the list shows (the same level, filters, search and saved filter)
+for what needs a look, and counts it per field. Its badge says how many records
+have something to look at; for a list of more than 5,000 records it is counted
+only once you open the checks, since that reads every record. **Back to
+records** returns to the list.
 
 - **Breaks a rule**: a value its field's rules refuse now. Rules are checked
   when a value is saved, so tightening one later (a lower maximum, fewer
