@@ -78,3 +78,21 @@ def test_no_records_or_no_changes_is_a_422(client: TestClient):
         "/api/records/bulk-edit", json={"collection": "study", "changes": {}}
     )
     assert resp.status_code == 422
+
+
+def test_a_bulk_edit_is_undone_from_its_line_in_history(client: TestClient):
+    trials = _setup(client)
+    ids = [t["id"] for t in trials]
+    _post(client, "/api/records/bulk-edit", {"ids": ids, "changes": {"dose": 5}})
+    events = client.get("/api/audit/events", params={"limit": 1}).json()["items"]
+    batch = events[0]["batch"]
+    assert batch["kind"] == "edit"
+
+    plan = client.get(f"/api/audit/batches/{batch['id']}/revert").json()
+    assert (plan["entries"], plan["applied"], plan["left"]) == (3, 3, 0)
+
+    done = _post(client, f"/api/audit/batches/{batch['id']}/revert", {})
+    assert done["applied"] == 3
+    for record_id in ids:
+        data = client.get(f"/api/records/{record_id}").json()["data"]
+        assert data.get("dose") is None

@@ -84,3 +84,17 @@ def test_set_refuses_a_bad_value_or_an_unknown_field(project_dir: Path) -> None:
     assert result.exit_code == 1 and "no field 'nope'" in result.output
     result = runner.invoke(app, ["record", "set", "dose=1", "-y"])
     assert result.exit_code == 1
+
+
+def test_undo_edit_puts_the_last_bulk_edit_back(project_dir: Path) -> None:
+    a, b = _setup()
+    runner.invoke(app, ["record", "set", "dose=3", "--id", a, "--id", b, "-y"])
+    assert _doses() == [3, 3]
+
+    result = runner.invoke(app, ["history", "undo-edit", "--last", "-y"])
+    assert result.exit_code == 0, result.output
+    assert "2 of 2 changes were undone" in result.output
+    assert _doses() == [None, None]
+
+    result = runner.invoke(app, ["history", "undo-edit"])
+    assert result.exit_code == 1

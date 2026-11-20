@@ -2044,6 +2044,28 @@ class RevertResultResponse(BaseModel):
     )
 
 
+class BatchRevertRequest(BaseModel):
+    force: bool = Field(
+        default=False,
+        description="Also overwrite fields that were edited since the bulk edit.",
+    )
+
+
+class BatchRevertResponse(BaseModel):
+    batch_id: str
+    entries: int = Field(description="Changes in the bulk edit.")
+    applied: int = Field(description="Changes undone (or that would be).")
+    conflicts: int = Field(
+        description="Changes with a field edited since; without `force` those "
+        "fields are left as they are now."
+    )
+    same: int = Field(description="Changes with nothing left to undo.")
+    left: int = Field(description="Changes that can't be undone.")
+    reasons: list[dict[str, str]] = Field(
+        description="The first of those left, as `record_id` and `reason`."
+    )
+
+
 class PaginatedAuditLogResponse(BaseModel):
     items: list[AuditLogResponse]
     total: int

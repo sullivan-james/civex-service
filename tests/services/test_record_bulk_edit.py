@@ -262,3 +262,73 @@ def test_planning_a_bulk_edit_costs_the_same_however_many_records(
     # The save (a read, the write, its file and reference catalogs) and its
     # history entry: five, as for any one edit.
     assert per_record <= 5.5
+
+
+# -- undoing a bulk edit as a whole ------------------------------------------
+
+
+def _last_edit(ctx: AppContext):
+    found, _ = ctx.history_svc.events(
+        where={"field": "how", "op": "eq", "value": "edit"}, limit=1
+    )
+    return found[0].batch.id
+
+
+def test_a_bulk_edit_is_undone_as_one_event(ctx: AppContext, survey):
+    _, samples = survey
+    ctx.record_svc.bulk_edit({"status": "checked", "depth": 5}, ids=_ids(samples))
+    ctx.commit()
+    batch = _last_edit(ctx)
+
+    plan = ctx.history_svc.revert_batch(batch)
+    assert (plan.entries, plan.applied, plan.left) == (4, 4, 0)
+    assert all(_data(ctx, s)["status"] == "checked" for s in samples)  # no writes
+
+    result = ctx.history_svc.revert_batch(batch, dry_run=False)
+    ctx.commit()
+    assert result.applied == 4
+    for sample in samples:
+        data = _data(ctx, sample)
+        assert data["status"] == "new"
+        assert data.get("depth") is None
+    # The undo is one event of its own, which can be undone in turn.
+    undo = _last_edit(ctx)
+    assert undo != batch
+    assert ctx.history_svc.revert_batch(undo).applied == 4
+
+
+def test_undoing_leaves_later_edits_unless_forced(ctx: AppContext, survey):
+    _, samples = survey
+    ctx.record_svc.bulk_edit({"status": "checked"}, ids=_ids(samples))
+    ctx.commit()
+    batch = _last_edit(ctx)
+    ctx.record_svc.patch(str(samples[0].id), {"status": "redone"})
+    ctx.record_svc.delete(str(samples[1].id))
+    ctx.commit()
+
+    plan = ctx.history_svc.revert_batch(batch)
+    assert (plan.applied, plan.conflicts, plan.left) == (2, 1, 2)
+    assert {r["record_id"] for r in plan.reasons} == {
+        str(samples[0].id),
+        str(samples[1].id),
+    }
+
+    ctx.history_svc.revert_batch(batch, dry_run=False)
+    ctx.commit()
+    assert _data(ctx, samples[0])["status"] == "redone"
+    assert _data(ctx, samples[2])["status"] == "new"
+
+    forced = ctx.history_svc.revert_batch(batch, force=True)
+    assert forced.applied == 1  # the redone one; the rest are already back
+
+
+def test_only_a_bulk_edit_is_undone_as_a_whole(ctx: AppContext, survey):
+    _, samples = survey
+    with ctx.history_svc.batch("import", "x.csv"):
+        ctx.record_svc.patch(str(samples[2].id), {"status": "imported"})
+    ctx.commit()
+    found, _ = ctx.history_svc.events(
+        where={"field": "how", "op": "eq", "value": "import"}, limit=1
+    )
+    with pytest.raises(ValidationError, match="Only a bulk edit"):
+        ctx.history_svc.revert_batch(found[0].batch.id)

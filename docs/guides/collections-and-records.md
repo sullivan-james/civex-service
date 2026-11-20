@@ -162,7 +162,8 @@ record already uses, a field its kind doesn't have) is left as it is and named,
 and the others are changed. Only a kind's own fields are offered: a field it
 inherits holds its value on the record above, so edit that kind instead. Files
 are added one record at a time. Each record's history shows the change, and
-the whole edit is one event in Activity.
+the whole edit is one event in Activity, where **Undo** puts it all back
+(see [Undo a mistake](../how-to/undo-mistakes.md#undo-a-bulk-edit)).
 
 ### Moving records to another collection
 

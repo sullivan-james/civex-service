@@ -31,6 +31,20 @@ A field that was edited again after that entry is left alone unless you pass
 **In the app:** the record's **History** tab, click the entry, then
 **Revert…**. It shows each field as it is and as it would become.
 
+## Undo a bulk edit
+
+An edit made to many records at once (**Edit…** in the explorer, or
+`civex record set`) is one line in **Activity**. Click **Undo** on that line
+and every record it changed gets its old values back, as one new event that
+can itself be undone. It says first how many records go back, which were
+edited again since (left as they are unless you tick the box to overwrite
+them), and which can't go back and why, such as a record deleted since.
+
+```bash
+civex history undo-edit --last          # the most recent bulk edit
+civex history undo-edit --last --force  # even fields edited since
+```
+
 ## Bring back a deleted record
 
 ```bash

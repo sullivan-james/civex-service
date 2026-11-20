@@ -1291,6 +1291,35 @@ class RevertPlanDTO:
 
 
 @dataclass
+class BatchRevertDTO:
+    """Undoing every change of one bulk edit, each by the one-entry revert
+    rule (`AuditService.plan_revert`): planned (`applied` is how many would
+    be undone) or done. A change that can't be undone is left and counted in
+    `left`, the first few with why in `reasons`."""
+
+    batch_id: uuid.UUID
+    entries: int = 0
+    applied: int = 0
+    # Undone (or would be) only with `force`: a field was edited since.
+    conflicts: int = 0
+    # Nothing to do: every field already as it was.
+    same: int = 0
+    left: int = 0
+    reasons: list[dict[str, str]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "batch_id": str(self.batch_id),
+            "entries": self.entries,
+            "applied": self.applied,
+            "conflicts": self.conflicts,
+            "same": self.same,
+            "left": self.left,
+            "reasons": self.reasons,
+        }
+
+
+@dataclass
 class RevertResultDTO:
     audit_id: uuid.UUID
     entity_id: uuid.UUID

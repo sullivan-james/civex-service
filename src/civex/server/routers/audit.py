@@ -11,6 +11,8 @@ from civex.domain.audit_filters import AUDIT_FIELDS
 from civex.domain.exceptions import ValidationError
 from civex.server.deps import get_ctx
 from civex.server.models import (
+    BatchRevertRequest,
+    BatchRevertResponse,
     AuditBatchResponse,
     AuditEventResponse,
     AuditLogResponse,
@@ -229,6 +231,38 @@ def list_audit_batch_entries(
 ):
     """The changes in one batch, with their field-level `changes`."""
     return audit_page(ctx, view, offset, limit, batch_id=_audit_id(batch_id))
+
+
+@router.get("/audit/batches/{batch_id}/revert", response_model=BatchRevertResponse)
+def plan_batch_revert(
+    batch_id: str,
+    force: bool = Query(
+        default=False, description="Count fields edited since as undone too."
+    ),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Preview undoing a whole bulk edit without changing anything: how many of
+    its changes would be undone, how many met a later edit, and which can't be
+    undone and why. Each change is judged as a single revert would judge it."""
+    plan = ctx.history_svc.revert_batch(_audit_id(batch_id), force=force)
+    return BatchRevertResponse(**plan.to_dict())
+
+
+@router.post("/audit/batches/{batch_id}/revert", response_model=BatchRevertResponse)
+def revert_audit_batch(
+    batch_id: str,
+    body: BatchRevertRequest | None = None,
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Undo a whole bulk edit: every change in it goes back through the normal
+    record update, as one new event in history (which can itself be undone).
+    Changes that can't be undone are left and reported."""
+    body = body or BatchRevertRequest()
+    result = ctx.history_svc.revert_batch(
+        _audit_id(batch_id), force=body.force, dry_run=False
+    )
+    ctx.commit()
+    return BatchRevertResponse(**result.to_dict())
 
 
 def _audit_id(audit_id: str) -> uuid.UUID:

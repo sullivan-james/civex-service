@@ -43,14 +43,19 @@ from civex.domain.dtos import (
     RestoreAllResultDTO,
     ResolvedSchema,
     RevertFieldDTO,
+    BatchRevertDTO,
     RevertPlanDTO,
     RevertResultDTO,
 )
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.repositories.protocols import AuditRepository, ObjectStore
 from civex.services.dataset_service import DatasetService
-from civex.services.record_service import RecordService
+from civex.services.record_service import MAX_REPORTED, RecordService
 from civex.services.schema_service import SchemaService
+
+# Bulk operations whose changes can be undone together (`revert_batch`).
+REVERTIBLE_BATCHES = ("edit",)
+_BATCH_PAGE = 500
 
 
 # How many things a restore-all will look at, and how many rounds it will make
@@ -588,6 +593,9 @@ class AuditService:
             raise ValidationError(plan.blocked)
         if not plan.can_apply:
             raise ValidationError("Nothing to revert: every field is already as it was")
+        return self._apply_revert(plan, force)
+
+    def _apply_revert(self, plan: RevertPlanDTO, force: bool) -> RevertResultDTO:
         record_id = str(plan.entity_id)
         result = RevertResultDTO(plan.audit_id, plan.entity_id, plan.kind or "")
 
@@ -614,6 +622,65 @@ class AuditService:
                     data[f.field] = f.target
             self._records.update(record_id, data)
             result.applied = [f.field for f in put_back]
+        return result
+
+    def revert_batch(
+        self,
+        batch_id: uuid.UUID | str,
+        force: bool = False,
+        dry_run: bool = True,
+    ) -> BatchRevertDTO:
+        """Undo a whole bulk edit: every change in it, newest first, each by
+        the one-entry rule (`plan_revert`, then the same apply as `revert`),
+        so nothing about undoing is decided twice. Counts only unless
+        `dry_run` is False. A change that can't be undone (record deleted
+        since, value no longer allowed, every field edited since without
+        `force`) is left and reported; the rest are undone as one event."""
+        batch = self._audit.get_batch(_as_uuid(batch_id, "batch"))
+        if batch is None:
+            raise NotFoundError(f"Batch '{batch_id}' not found")
+        if batch.kind not in REVERTIBLE_BATCHES:
+            raise ValidationError(
+                "Only a bulk edit can be undone as a whole. Open its changes "
+                "to undo them one by one."
+            )
+        result = BatchRevertDTO(batch_id=batch.id)
+        entry_ids: list[uuid.UUID] = []
+        while page := self._audit.list_audit(
+            limit=_BATCH_PAGE, offset=len(entry_ids), batch_id=batch.id
+        ):
+            entry_ids.extend(e.id for e in page)
+        result.entries = len(entry_ids)
+
+        def leave(entity_id: uuid.UUID, reason: str) -> None:
+            result.left += 1
+            if len(result.reasons) < MAX_REPORTED:
+                result.reasons.append({"record_id": str(entity_id), "reason": reason})
+
+        label = f"Undo {batch.label}" if batch.label else "Undo a bulk edit"
+        with self.batch("edit", label):
+            for entry_id in entry_ids:
+                plan = self.plan_revert(entry_id)
+                if plan.blocked:
+                    leave(plan.entity_id, plan.blocked)
+                    continue
+                if not plan.can_apply:
+                    result.same += 1
+                    continue
+                if plan.has_conflicts:
+                    result.conflicts += 1
+                    if not force and not any(
+                        f.status == REVERT_APPLY for f in plan.fields
+                    ):
+                        leave(plan.entity_id, "Every field was edited since.")
+                        continue
+                if not dry_run:
+                    try:
+                        self._apply_revert(plan, force)
+                    except ValidationError as e:
+                        leave(plan.entity_id, str(e))
+                        continue
+                result.applied += 1
         return result
 
     def _plan_fields(
