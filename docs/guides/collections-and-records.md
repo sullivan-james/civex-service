@@ -137,16 +137,21 @@ collection, schema and field (`GET /api/records/{id}/referrers`).
 ### Summaries
 
 **Records | Their files | Summary** switches the explorer to a summary of
-exactly what it lists (the same level, filters, search and saved filter):
+exactly what it lists (the same level, filters, search and saved filter). The
+choices read as one sentence, **Work out** [what] **of the Sample records
+listed, grouped by** [field] **then by** [field], each slot a dropdown with a
+tip beside it. With nothing chosen yet it starts grouped by a sensible field
+(a field with choices, else a yes/no field, else a date by month), so the
+screen is never blank; choose **nothing (one total)** for a single row.
 
-- **Group by…** a field of the kind listed, or of a kind above it ("Samples
-  by Site › Region"), up to three at once. A date groups by each value or by
+- **Grouped by** a field of the kind listed, or of a kind above it ("Samples
+  by Site › Region"), up to three at once (**then by…** adds another). A date groups by each value or by
   year, month, week (starting Monday) or day; a date and time does the same
   in its field's time zone, else the collection's, else UTC. A number groups
   by each value or into ranges of a width you choose ("0 to under 5 m"). A
   list (tags, links to records) puts a record in a group for each item, so
   the groups can add up to more than the total.
-- **Show** what to work out: **Records** (how many), and per field what its
+- **Work out** what: **Records** (how many), and per field what its
   type allows: **Filled** (how many have a value), **Different values**,
   **Smallest** and **Largest** (for text, dates and numbers), **Average** and
   **Total** (numbers). A field with a unit gives its results in that unit.
@@ -156,7 +161,11 @@ exactly what it lists (the same level, filters, search and saved filter):
   rather than being guessed into January.
 - The last row is the totals over every record listed, each counted once.
 - Click a group to list its records: its condition is added to the filter.
-- **Download** saves the summary as CSV, Excel, TSV or JSON.
+- To download it, use **Export**: in Summary it offers **This summary as a
+  table** (CSV, Excel, TSV, JSON) and **Export these records…** (their files,
+  a table of them, or both). There is no other download button.
+- **Save analysis…** keeps the summary as a saved analysis: see
+  [Saved analyses](views.md#saved-analyses).
 - **Table | Chart** draws the same summary. The first grouping decides the
   chart: dates by period are a line over time, numbers in ranges a histogram,
   anything else bars. Periods and ranges with no records between the first
@@ -169,7 +178,7 @@ exactly what it lists (the same level, filters, search and saved filter):
   bar or a point to list its records, as with a row of the table.
 
 The choices are in the address (`show=summary&sum.by=site.region,taken:month&sum.m=count,mean:depth`),
-so a summary can be bookmarked or pinned. Scripts get the same from
+so a summary can be bookmarked or pinned, and older links keep working. Scripts get the same from
 `POST /api/records/summary` (the list's selectors plus `group_by` and
 `measures`, written the same way; `?format=csv` for a file) and from
 `civex record summarise --in <collection> -s <kind> --by <field>[:month|:5]

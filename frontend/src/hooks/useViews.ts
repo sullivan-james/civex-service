@@ -12,6 +12,18 @@ import {
 } from '../api/views'
 import { useToast } from '../components/ui/ToastProvider'
 import { errorMessage } from '../lib/errors'
+import { SAVED_KINDS, viewKind } from '../utils/savedKinds'
+
+/** Everything a saved view shows up in: its schema's list, the palette's
+ * every-view list, and the Analytics page (an analysis card names it). */
+function invalidateViews(
+  qc: ReturnType<typeof useQueryClient>,
+  schemaName: string,
+) {
+  qc.invalidateQueries({ queryKey: ['views', schemaName] })
+  qc.invalidateQueries({ queryKey: ['all-views'] })
+  qc.invalidateQueries({ queryKey: ['dashboard'] })
+}
 
 export function useViews(schemaName: string) {
   return useQuery({
@@ -38,14 +50,26 @@ export function useView(schemaName: string, viewName: string) {
   })
 }
 
+/** A saved analysis worked out now, over the records it lists today. Under
+ * `records`, so an edit to any record works it out again. */
+export function useViewSummary(schemaName: string, viewName: string) {
+  return useQuery({
+    queryKey: ['records', 'view-summary', schemaName, viewName],
+    queryFn: () => viewsApi.summary(schemaName, viewName),
+    enabled: !!schemaName && !!viewName,
+  })
+}
+
 export function useCreateView(schemaName: string) {
   const qc = useQueryClient()
   const toast = useToast()
   return useMutation({
     mutationFn: (body: CreateViewBody) => viewsApi.create(schemaName, body),
     onSuccess: (created) => {
-      qc.invalidateQueries({ queryKey: ['views', schemaName] })
-      toast.success(`View "${created.name}" saved`)
+      invalidateViews(qc, schemaName)
+      toast.success(
+        `${SAVED_KINDS[viewKind(created)].word} “${created.name}” saved`,
+      )
     },
   })
 }
@@ -57,8 +81,10 @@ export function useUpdateView(schemaName: string, viewName: string) {
     mutationFn: (body: UpdateViewBody) =>
       viewsApi.update(schemaName, viewName, body),
     onSuccess: (updated) => {
-      qc.invalidateQueries({ queryKey: ['views', schemaName] })
-      toast.success(`View "${updated.name}" saved`)
+      invalidateViews(qc, schemaName)
+      toast.success(
+        `${SAVED_KINDS[viewKind(updated)].word} “${updated.name}” saved`,
+      )
     },
   })
 }
@@ -69,7 +95,7 @@ export function useDeleteView(schemaName: string) {
   return useMutation({
     mutationFn: (viewName: string) => viewsApi.delete(schemaName, viewName),
     onSuccess: (_data, viewName) => {
-      qc.invalidateQueries({ queryKey: ['views', schemaName] })
+      invalidateViews(qc, schemaName)
       toast.success(`View "${viewName}" deleted`)
     },
     onError: (err) => toast.error(errorMessage(err)),

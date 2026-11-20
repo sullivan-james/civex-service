@@ -28,6 +28,20 @@ def test_a_view_saves_and_answers_its_summary(client: TestClient):
         json={"name": "bad", "summary": {"group_by": ["nowhere"]}},
     )
     assert bad.status_code == 422
+    # The analysis worked out now, over the records it lists today.
+    client.post("/api/collections", json={"name": "survey"})
+    for site in ("a", "a", "b"):
+        made = client.post(
+            "/api/collections/survey/records",
+            json={"schema_name": "sample", "data": {"site": site}},
+        )
+        assert made.status_code == 201, made.text
+    worked = client.get("/api/schemas/sample/views/by site/summary")
+    assert worked.status_code == 200, worked.text
+    assert worked.json()["total"][0] == 3
+    assert [r["values"][0] for r in worked.json()["rows"]] == [2, 1]
+    client.post("/api/schemas/sample/views", json={"name": "plain"})
+    assert client.get("/api/schemas/sample/views/plain/summary").status_code == 422
     # Omitted, the summary stays; null clears it.
     kept = client.patch("/api/schemas/sample/views/by site", json={"columns": ["site"]})
     assert kept.json()["summary"] is not None

@@ -32,8 +32,11 @@ export function SummaryChart({
   summary: RecordSummary
   /** The measure on the value axis (null: the first that is a number). */
   measureKey: string | null
-  onMeasure: (key: string) => void
-  onDrill: (where: FilterTreeWire) => void
+  /** Offer a choice of measure (none: the chart is fixed, as on the
+   * Analytics page). */
+  onMeasure?: (key: string) => void
+  /** List a group's records (none: bars and points are not links). */
+  onDrill?: (where: FilterTreeWire) => void
 }) {
   const reason = noChartReason(summary)
   if (reason) return <p className="text-sm text-fg-muted">{reason}</p>
@@ -44,7 +47,7 @@ export function SummaryChart({
   const drill = (index: number, seriesKey: string) => {
     const s = chart.series.findIndex((x) => x.key === seriesKey)
     const where = chart.wheres[index]?.[s]
-    if (where) onDrill(where)
+    if (where && onDrill) onDrill(where)
   }
   const sideways = chart.form === 'bars' && chart.points.length > UPRIGHT_UP_TO
   const height = sideways
@@ -54,7 +57,7 @@ export function SummaryChart({
 
   return (
     <div className="space-y-2">
-      {measures.length > 1 && (
+      {measures.length > 1 && onMeasure && (
         <div className="flex items-center gap-2">
           <span className="text-sm text-fg-muted">Chart</span>
           <Field label="What to chart" hideLabel>
@@ -88,7 +91,7 @@ export function SummaryChart({
             height={height}
             formatValue={formatValue}
             valueLabel={valueLabel}
-            onPointClick={drill}
+            onPointClick={onDrill ? drill : undefined}
             animate={false}
             markers
           />
@@ -104,7 +107,7 @@ export function SummaryChart({
             height={height}
             formatValue={formatValue}
             valueLabel={valueLabel}
-            onBarClick={drill}
+            onBarClick={onDrill ? drill : undefined}
             animate={false}
           />
         )}
@@ -140,7 +143,7 @@ function Aside({
 }: {
   title: string
   items: ChartAside[]
-  onDrill: (where: FilterTreeWire) => void
+  onDrill?: (where: FilterTreeWire) => void
 }) {
   if (items.length === 0) return null
   const shown = items.slice(0, ASIDE_SHOWN)
@@ -148,7 +151,7 @@ function Aside({
     <div className="flex flex-wrap items-center gap-x-2 text-xs text-fg-muted">
       <span>{title}:</span>
       {shown.map((a) =>
-        a.where ? (
+        a.where && onDrill ? (
           <Button
             key={a.label}
             variant="link"

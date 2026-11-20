@@ -509,7 +509,9 @@ describe('RecordsExplorer', () => {
     await screen.findByText('a.txt')
 
     await user.click(
-      await screen.findByRole('button', { name: 'Selections missing a table' }),
+      await screen.findByRole('button', {
+        name: /^Selections missing a table/,
+      }),
     )
 
     await waitFor(() =>
@@ -534,7 +536,9 @@ describe('RecordsExplorer', () => {
     renderExplorer({}, '/collections/hb?schema=selection&within=r1')
     await screen.findByText('a.txt')
     await user.click(
-      await screen.findByRole('button', { name: 'Selections missing a table' }),
+      await screen.findByRole('button', {
+        name: /^Selections missing a table/,
+      }),
     )
     await user.click(
       screen.getByRole('button', {
@@ -1269,10 +1273,11 @@ describe('summary', () => {
         measures: ['count'],
       }),
     )
-    // Group by a field of the kind above: the choice goes in the address.
-    await userEvent.click(screen.getByRole('button', { name: /Group by/ }))
-    await userEvent.click(
-      await screen.findByRole('menuitem', { name: /site/i }),
+    // Group by a field of the kind above: the sentence's "grouped by" slot,
+    // and the choice goes in the address.
+    await userEvent.selectOptions(
+      screen.getByRole('combobox', { name: 'Group by' }),
+      'encounter.site',
     )
     await waitFor(() => expect(search().get('sum.by')).toBe('encounter.site'))
     await waitFor(() =>
@@ -1296,6 +1301,100 @@ describe('summary', () => {
     expect(JSON.parse(search().get('filter')!)).toEqual({
       and: [filter, where],
     })
+  })
+
+  it('hands the summary over from the Export menu, the one way out', async () => {
+    renderExplorer(
+      {},
+      '/collections/hb?schema=recording&show=summary&sum.by=encounter.site',
+    )
+    expect(await screen.findByText('Stellwagen')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /Download/ }),
+    ).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /^Export/ }))
+    expect(
+      await screen.findByRole('menuitem', { name: /^CSV/ }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('menuitem', { name: /Export these records…/ }),
+    ).toBeInTheDocument()
+  })
+
+  it('saves the summary on screen as an analysis', async () => {
+    const prev = override
+    override = (url, method) => {
+      if (url.pathname.endsWith('/views') && method === 'POST')
+        return json({
+          ...EMPTY_TABLES,
+          schema_name: 'recording',
+          name: 'By site',
+          summary: { group_by: ['encounter.site'] },
+        })
+      return prev?.(url, method)
+    }
+    renderExplorer(
+      {},
+      '/collections/hb?schema=recording&show=summary&sum.by=encounter.site&q=96',
+    )
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Save analysis…' }),
+    )
+    await userEvent.type(screen.getByLabelText('Name'), 'By site')
+    await userEvent.click(screen.getByRole('button', { name: 'Save analysis' }))
+    await waitFor(() =>
+      expect(
+        calls.find((c) => c.method === 'POST' && c.path.endsWith('/views'))
+          ?.body,
+      ).toMatchObject({
+        name: 'By site',
+        summary: {
+          group_by: ['encounter.site'],
+          measures: ['count'],
+          show: 'table',
+          collection: 'hb',
+          search: '96',
+        },
+      }),
+    )
+    await waitFor(() => expect(search().get('view')).toBe('By site'))
+  })
+
+  it('opens a saved analysis on its summary, marked as an analysis', async () => {
+    const prev = override
+    override = (url, method) => {
+      if (
+        url.pathname.endsWith('/views') &&
+        url.pathname.includes('/recording/')
+      )
+        return json([
+          {
+            ...EMPTY_TABLES,
+            id: 'v2',
+            schema_name: 'recording',
+            name: 'Rates by site',
+            filter_tree: null,
+            summary: {
+              group_by: ['encounter.site'],
+              measures: ['count'],
+              sort: null,
+              show: 'chart',
+              chart_measure: null,
+              collection: 'hb',
+              within: null,
+              search: null,
+            },
+          },
+        ])
+      return prev?.(url, method)
+    }
+    renderExplorer({}, '/collections/hb?schema=recording&view=Rates+by+site')
+    await waitFor(() => expect(search().get('show')).toBe('summary'))
+    expect(search().get('sum.by')).toBe('encounter.site')
+    expect(search().get('sum.view')).toBe('chart')
+    expect(
+      await screen.findByRole('button', { name: /Rates by site\s*Analysis/ }),
+    ).toBeInTheDocument()
   })
 })
 

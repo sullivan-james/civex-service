@@ -16,6 +16,7 @@ import {
   Subheading,
 } from '../ui'
 import { MoreVertical, Save } from '../ui/icons'
+import { SAVED_KINDS, viewKind } from '../../utils/savedKinds'
 import { viewNameError } from '../../utils/naming'
 import { LAYOUTS, LAYOUT_SHORT } from '../../utils/exportLayouts'
 import { errorMessage } from '../../lib/errors'
@@ -128,16 +129,21 @@ export function SavedViewBar({
   if (views.length === 0 && !hasSelection) return null
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Subheading as="span">Saved filters</Subheading>
+      <Subheading as="span">Saved</Subheading>
       {views.map((v) => {
         const active = activeView?.id === v.id
+        // What it gives you: a List of records or an Analysis of them.
+        const kind = SAVED_KINDS[viewKind(v)]
+        const Icon = kind.icon
         return (
           <Chip
             key={v.id}
             selected={active}
             onClick={() => (active ? onClear() : onApply(v))}
           >
+            <Icon size={12} aria-hidden="true" />
             {v.name}
+            <span className="text-xs font-normal opacity-70">{kind.word}</span>
           </Chip>
         )
       })}

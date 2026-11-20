@@ -8,6 +8,7 @@ from civex.server.deps import get_ctx
 from civex.server.downloads import new_temp_dir, serve, temp_paths
 from civex.server.models import (
     CreateViewRequest,
+    RecordSummaryResponse,
     PreviewViewRequest,
     PreviewViewResponse,
     UpdateViewRequest,
@@ -94,6 +95,23 @@ def get_view(schema_name: str, view_name: str, ctx: AppContext = Depends(get_ctx
         return ViewResponse.from_dto(ctx.view_svc.get(schema_name, view_name))
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
+
+
+@router.get("/{view_name}/summary", response_model=RecordSummaryResponse)
+def summarise_view(
+    schema_name: str, view_name: str, ctx: AppContext = Depends(get_ctx)
+):
+    """Work out a saved analysis now: the summary it saved, over the records
+    its filter, collection, record and search list today. What an analysis
+    card on the Analytics page draws. 422 for a saved view with no summary."""
+    try:
+        return RecordSummaryResponse.from_dto(
+            ctx.view_svc.summarise(schema_name, view_name)
+        )
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except (ValueError, ValidationError) as e:
+        raise HTTPException(422, detail=str(e))
 
 
 @router.patch("/{view_name}", response_model=ViewResponse)

@@ -17,6 +17,26 @@ export function describeAnyAuditEntry(entry: AuditLogEntry): AuditSummary {
       return describeSchemaEntry(entry)
     case 'dataset':
       return describeCollectionEntry(entry)
+    case 'dashboard':
+      return { title: 'Analytics page edited', detail: null }
+    case 'view': {
+      // A saved view with a summary is an analysis; say which when the
+      // entry holds the whole view (an edit keeps only what changed).
+      const snap = (entry.new_data ?? entry.old_data ?? {}) as {
+        name?: string
+        summary?: unknown
+      }
+      const whole = 'summary' in snap
+      const word = snap.summary
+        ? 'Analysis'
+        : whole
+          ? 'Saved list'
+          : 'Saved view'
+      return {
+        title: `${word}${snap.name ? ` “${snap.name}”` : ''} ${PAST[entry.action] ?? entry.action}`,
+        detail: null,
+      }
+    }
     default: {
       const name = (entry.new_data?.name ?? entry.old_data?.name) as
         string | undefined
@@ -46,6 +66,8 @@ export function auditEntryTarget(
     }
     case 'dataset':
       return { to: `/collections/${entry.entity_id}`, label: 'Collection' }
+    case 'dashboard':
+      return { to: '/analytics', label: 'Analytics' }
     default:
       return null
   }
@@ -56,7 +78,8 @@ const NOUNS: Record<string, [string, string]> = {
   schema: ['schema', 'schemas'],
   field: ['field', 'fields'],
   dataset: ['collection', 'collections'],
-  view: ['view', 'views'],
+  view: ['saved view', 'saved views'],
+  dashboard: ['Analytics page', 'Analytics pages'],
 }
 
 const PAST: Record<string, string> = {

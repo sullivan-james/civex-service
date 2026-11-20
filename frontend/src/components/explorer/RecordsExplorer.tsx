@@ -49,6 +49,13 @@ import { BulkEditDialog } from './BulkEditDialog'
 import { bulkEditableFields } from '../../utils/bulkEdit'
 import { FilesView } from '../files/FilesView'
 import { SummaryView } from './SummaryView'
+import { useSummaryChoices } from './useSummaryChoices'
+import type { View } from '../../api/views'
+import { saveBlob } from '../files/fileFlows'
+import { useToast } from '../ui/ToastProvider'
+import { TABLE_FORMATS } from '../../utils/tableFormats'
+import { withSavedSummary } from '../../utils/summary'
+import { SAVED_KINDS } from '../../utils/savedKinds'
 import { ChecksView } from './ChecksView'
 import { MapView, mapFields } from './MapView'
 import { withCondition } from '../../utils/summary'
@@ -67,6 +74,7 @@ import { usePermissions } from '../../hooks/useMe'
 import { EmptyCollectionGuide } from './EmptyCollectionGuide'
 import { recordRecent } from '../../hooks/usePins'
 import { placeTarget, viewTarget } from '../../utils/navTargets'
+import type { NavTarget } from '../../utils/pins'
 import { applyExplorerPatch, viewPatch } from '../../utils/explorerState'
 import { ancestorSchemas } from '../../utils/hierarchy'
 import { HIGH_IMPACT_RECORD_THRESHOLD } from '../../lib/deleteImpact'
@@ -115,16 +123,6 @@ export function RecordsExplorer({
     return () => clearTimeout(t)
   }, [searchInput, state.q, patch])
 
-  // --- `?view=name` in a shared link: apply it once, when nothing else was
-  // chosen. Only ever on arrival -- afterwards the URL is the truth, so
-  // clearing the filter of a view stays cleared.
-  const seededView = useRef(false)
-  useEffect(() => {
-    if (seededView.current || !x.viewsLoaded) return
-    seededView.current = true
-    if (x.activeView && !x.hasSelection) patch(viewPatch(x.activeView))
-  }, [x.viewsLoaded, x.activeView, x.hasSelection, patch])
-
   // --- selection (only where rows can be deleted)
   const picked = useBulkSelection(
     (x.page.data?.items ?? []).map((r) => r.id),
@@ -137,6 +135,42 @@ export function RecordsExplorer({
   const show = params.get('show')
   const showFiles = show === 'files'
   const showSummary = show === 'summary' && !!listed
+  // The Summary's choices, read once: the Summary draws them and the Export
+  // menu hands them over as a table.
+  const summary = useSummaryChoices(x.query, dataset, x.filterFields)
+  const toast = useToast()
+  /** Open a saved view: its filter, sort and columns, and for an analysis
+   * its Summary as saved. One change to the address. */
+  const openView = (v: View) =>
+    setParams((prev) => {
+      const out = applyExplorerPatch(prev, viewPatch(v))
+      return v.summary ? withSavedSummary(out, v.summary) : out
+    })
+  // --- `?view=name` in a shared link: apply it once, when nothing else was
+  // chosen. Only ever on arrival -- afterwards the URL is the truth, so
+  // clearing the filter of a view stays cleared.
+  // A saved analysis opens on its Summary, unless the link already says
+  // what to show.
+  const seededView = useRef(false)
+  useEffect(() => {
+    if (seededView.current || !x.viewsLoaded) return
+    seededView.current = true
+    const v = x.activeView
+    if (!v || x.hasSelection) return
+    if (v.summary && !params.has('show')) openView(v)
+    else patch(viewPatch(v))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [x.viewsLoaded, x.activeView, x.hasSelection, patch])
+
+  async function downloadSummary(format: string) {
+    if (!summary.body) return
+    try {
+      const got = await recordsApi.summaryFile(summary.body, format)
+      saveBlob(got.blob, got.filename ?? `summary.${format}`)
+    } catch (e) {
+      toast.error(errorMessage(e))
+    }
+  }
   // What in the listed records needs a look (`ChecksView`).
   const showChecks = show === 'checks' && !!listed
   const setShow = (v: string | null) =>
@@ -316,9 +350,9 @@ export function RecordsExplorer({
   ]
     .filter(Boolean)
     .join(' ')
-  const pinTarget =
+  const pinTarget: NavTarget | null =
     listed && x.activeView && !x.modified
-      ? viewTarget(listed, x.activeView.name)
+      ? viewTarget(listed, x.activeView.name, x.activeView)
       : listed
         ? placeTarget(
             location.pathname + location.search,
@@ -361,7 +395,7 @@ export function RecordsExplorer({
   // records of every schema.
   const navigate = useNavigate()
   // What this person may do here: the controls stay, off, saying why.
-  const { can, why } = usePermissions()
+  const { can, canSomewhere, why } = usePermissions()
   const mayWrite = can('write_records', collection?.id)
   const mayDelete = can('delete', collection?.id)
   const starters = dataset ? (x.schemas ?? []).filter((s) => !s.parent_id) : []
@@ -505,7 +539,11 @@ export function RecordsExplorer({
             {pinTarget && (
               <PinButton
                 target={pinTarget}
-                noun={pinTarget.kind === 'view' ? 'filter' : 'place'}
+                noun={
+                  pinTarget.saved
+                    ? SAVED_KINDS[pinTarget.saved].word.toLowerCase()
+                    : 'place'
+                }
                 size="md"
               />
             )}
@@ -522,7 +560,7 @@ export function RecordsExplorer({
               activeView={x.activeView}
               modified={x.modified}
               hasSelection={x.hasSelection}
-              onApply={(v) => patch(viewPatch(v))}
+              onApply={openView}
               onClear={() =>
                 patch({ view: null, filter: null, sort: [], cols: null })
               }
@@ -618,6 +656,26 @@ export function RecordsExplorer({
               presets={canExportFiles ? exportPresets : []}
               scopeSchema={listedName ?? undefined}
               builderTo={builderHref}
+              leading={
+                showSummary && summary.body
+                  ? [
+                      { heading: 'This summary as a table' },
+                      ...TABLE_FORMATS.map((f) => ({
+                        label: f.name,
+                        hint: f.hint,
+                        onClick: () => downloadSummary(f.id),
+                      })),
+                    ]
+                  : []
+              }
+              exportItem={
+                showSummary
+                  ? {
+                      label: 'Export these records…',
+                      hint: 'The records summarised: their files, a table of them, or both.',
+                    }
+                  : undefined
+              }
             />
           </div>
         </div>
@@ -745,9 +803,34 @@ export function RecordsExplorer({
           />
         ) : showSummary ? (
           <SummaryView
-            query={x.query}
-            collection={dataset}
-            fields={x.filterFields}
+            summary={summary}
+            kindLabel={listedLabel}
+            analysis={x.activeView}
+            where={{
+              collection: dataset ?? null,
+              within: state.within ?? null,
+              search: state.q || null,
+            }}
+            mayWrite={canSomewhere('write_records')}
+            cannotWrite={why('write_records')}
+            onSaveAnalysis={(name, saved) =>
+              name === null
+                ? updateView.mutateAsync({
+                    summary: saved,
+                    filter_tree: x.filter,
+                    sort: x.sort,
+                    columns: x.columnNames,
+                  })
+                : createView
+                    .mutateAsync({
+                      name,
+                      summary: saved,
+                      filter_tree: x.filter,
+                      sort: x.sort,
+                      columns: x.columnNames,
+                    })
+                    .then((created) => patch({ view: created.name }))
+            }
             // A group's records: its condition added to the filter, listed. One
             // change to the address, so the two can't undo each other.
             onDrill={(where) =>

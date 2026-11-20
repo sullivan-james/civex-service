@@ -1,6 +1,6 @@
 import type { ComponentType } from 'react'
 import type { PinKind } from '../utils/pins'
-import { FileText, Folder, ListFilter, MapPin } from './ui/icons'
+import { FileText, Folder, ListFilter, MapPin, Upload } from './ui/icons'
 
 type IconType = ComponentType<{
   size?: number
@@ -13,4 +13,5 @@ export const PIN_ICONS: Record<PinKind, IconType> = {
   collection: Folder,
   record: FileText,
   place: MapPin,
+  export: Upload,
 }
