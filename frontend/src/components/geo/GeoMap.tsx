@@ -1,32 +1,21 @@
 import { useEffect, useRef } from 'react'
-import 'ol/ol.css'
-import OlMap from 'ol/Map'
-import View from 'ol/View'
+import type OlMap from 'ol/Map'
 import Feature from 'ol/Feature'
 import VectorLayer from 'ol/layer/Vector'
 import VectorSource from 'ol/source/Vector'
-import Graticule from 'ol/layer/Graticule'
-import TileLayer from 'ol/layer/Tile'
-import XYZ from 'ol/source/XYZ'
-import GeoJSON from 'ol/format/GeoJSON'
 import Draw from 'ol/interaction/Draw'
 import Modify from 'ol/interaction/Modify'
 import Snap from 'ol/interaction/Snap'
 import { LineString, Point, Polygon } from 'ol/geom'
 import { circular } from 'ol/geom/Polygon'
 import { Circle as CircleStyle, Fill, Stroke, Style } from 'ol/style'
-import { ScaleLine, Zoom } from 'ol/control'
-import { feature as topoFeature } from 'topojson-client'
-import type { Topology } from 'topojson-specification'
-import landTopology from 'world-atlas/land-50m.json'
+import { createBaseMap, themeColor as css, withAlpha } from './baseMap'
 import type { Draft, Position } from '../../utils/geoDraft'
 import { normalizeLon } from '../../utils/geoCoords'
 
 /**
- * The map behind the location editor, drawn with OpenLayers in plain
- * latitude/longitude. The base is bundled coastlines and a graticule, so it
- * works offline and needs no account; an XYZ tile URL can be set in
- * Settings for street-level detail. It is controlled by the draft: edits on
+ * The map behind the location editor, on the shared base map (`baseMap`:
+ * coastlines, graticule, optional tiles). It is controlled by the draft: edits on
  * the map are reported through `onChange`, and edits made elsewhere
  * (coordinate boxes, the vertex table) redraw it.
  */
@@ -45,25 +34,6 @@ export interface GeoMapProps {
   tileUrl?: string | null
   tileAttribution?: string | null
 }
-
-const css = (name: string, fallback: string) =>
-  getComputedStyle(document.documentElement).getPropertyValue(name).trim() ||
-  fallback
-
-/** `color` (a hex or rgb() from the theme) at `alpha` 0..1. */
-function withAlpha(color: string, alpha: number): string {
-  const hex = /^#([0-9a-f]{6})$/i.exec(color)
-  if (hex) {
-    const n = parseInt(hex[1], 16)
-    return `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`
-  }
-  const rgb = /^rgba?\((\d+)[ ,]+(\d+)[ ,]+(\d+)/.exec(color)
-  return rgb ? `rgba(${rgb[1]}, ${rgb[2]}, ${rgb[3]}, ${alpha})` : color
-}
-
-/** The credit is plain text; OpenLayers renders attributions as HTML. */
-const escapeHtml = (s: string) =>
-  s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 
 // 7 decimal places is about a centimetre: enough, and free of float noise.
 const round = (n: number) => Math.round(n * 1e7) / 1e7
@@ -92,18 +62,7 @@ export default function GeoMap(props: GeoMapProps) {
     if (!host.current) return
     const accent = css('--color-accent', '#0969da')
     const danger = css('--color-danger', '#cf222e')
-    const border = css('--color-border', '#d0d7de')
-    const sea = css('--color-canvas-subtle', '#f6f8fa')
-    const land = css('--color-canvas-inset', '#eaeef2')
 
-    const landSource = new VectorSource({
-      features: new GeoJSON().readFeatures(
-        topoFeature(
-          landTopology as unknown as Topology,
-          (landTopology as unknown as Topology).objects.land,
-        ),
-      ),
-    })
     const draftSource = new VectorSource()
     const areaSource = new VectorSource()
     const drawSource = new VectorSource()
@@ -126,42 +85,11 @@ export default function GeoMap(props: GeoMapProps) {
       })
     }
 
-    const layers = [
-      new VectorLayer({
-        source: landSource,
-        style: new Style({
-          fill: new Fill({ color: land }),
-          stroke: new Stroke({ color: border, width: 0.8 }),
-        }),
-      }),
-      new Graticule({
-        strokeStyle: new Stroke({
-          color: border,
-          width: 0.6,
-          lineDash: [2, 4],
-        }),
-        showLabels: true,
-        wrapX: true,
-      }),
-    ]
     const p = latest.current
-    if (p.tileUrl)
-      layers.unshift(
-        new TileLayer({
-          source: new XYZ({
-            url: p.tileUrl,
-            attributions: p.tileAttribution
-              ? escapeHtml(p.tileAttribution)
-              : undefined,
-            projection: 'EPSG:3857',
-          }),
-        }) as never,
-      )
-
-    const map = new OlMap({
-      target: host.current,
-      layers: [
-        ...layers,
+    const map = createBaseMap(host.current, {
+      tileUrl: p.tileUrl,
+      tileAttribution: p.tileAttribution,
+      overlays: [
         new VectorLayer({
           source: areaSource,
           style: new Style({
@@ -178,18 +106,7 @@ export default function GeoMap(props: GeoMapProps) {
           }),
         }),
       ],
-      controls: [new Zoom(), new ScaleLine({ units: 'metric' })],
-      view: new View({
-        projection: 'EPSG:4326',
-        center: [0, 20],
-        zoom: 1,
-        minZoom: 0,
-        maxZoom: 18,
-        multiWorld: true,
-      }),
     })
-    const target = map.getTargetElement()
-    if (target) target.style.background = sea
     parts.current = {
       map,
       draftSource,

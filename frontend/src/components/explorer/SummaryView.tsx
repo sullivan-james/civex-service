@@ -13,12 +13,14 @@ import {
   InfoTip,
   Input,
   Menu,
+  SegmentedControl,
   Select,
   type DataTableColumn,
   type MenuEntry,
 } from '../ui'
 import { ChevronDown, Download, Plus } from '../ui/icons'
 import { saveBlob } from '../files/fileFlows'
+import { SummaryChart } from './SummaryChart'
 import { TABLE_FORMATS } from '../../utils/tableFormats'
 import { errorMessage } from '../../lib/errors'
 import { displayLabel } from '../../utils/naming'
@@ -33,7 +35,8 @@ import {
   summaryFields,
 } from '../../utils/summary'
 
-/** Address names (beside the explorer's own): `sum.by`, `sum.m`, `sum.sort`. */
+/** Address names (beside the explorer's own): `sum.by`, `sum.m`, `sum.sort`,
+ * `sum.view` (`chart`, else the table) and `sum.y` (the measure charted). */
 const NS = 'sum.'
 const PERIOD_NAMES: Record<string, string> = {
   year: 'By year',
@@ -63,7 +66,8 @@ export function SummaryView({
   /** List the records of a group: its condition, added to the filter. */
   onDrill: (where: FilterTreeWire) => void
 }) {
-  const list = useListParams(NS, ['by', 'm'])
+  const list = useListParams(NS, ['by', 'm', 'view', 'y'])
+  const asChart = list.picks.view === 'chart'
   const by = splitKeys(list.picks.by)
   const chosenMeasures = splitKeys(list.picks.m)
   const measures = chosenMeasures.length ? chosenMeasures : ['count']
@@ -345,6 +349,16 @@ export function SummaryView({
           />
         )}
         <div className="ml-auto flex items-center gap-2">
+          <SegmentedControl
+            size="sm"
+            label="Show the summary as"
+            value={asChart ? 'chart' : 'table'}
+            onChange={(v) => list.set({ view: v === 'chart' ? 'chart' : '' })}
+            options={[
+              { value: 'table', label: 'Table' },
+              { value: 'chart', label: 'Chart' },
+            ]}
+          />
           <InfoTip label="About summaries">
             Worked out over every record the list shows, with its filters and
             search. A date known only to the year keeps a group of its own when
@@ -386,31 +400,46 @@ export function SummaryView({
       )}
 
       <div className={isFetching && data ? 'opacity-70' : undefined}>
-        <DataTable
-          columns={columns}
-          rows={rows}
-          getRowId={(r) => r.id}
-          isLoading={isLoading}
-          error={error ? errorMessage(error) : undefined}
-          emptyTitle="Nothing to summarise"
-          sort={
-            list.sort
-              ? { key: list.sort.field, direction: list.sort.dir }
-              : undefined
-          }
-          onSortChange={list.toggleSort}
-          onRowClick={(r) => {
-            if (r.row?.where) onDrill(r.row.where)
-          }}
-          rowClassName={(r) =>
-            r.row === null
-              ? 'border-t-2 border-border'
-              : r.row.where
-                ? 'cursor-pointer'
-                : ''
-          }
-          dense
-        />
+        {asChart ? (
+          error ? (
+            <ErrorState message={errorMessage(error)} />
+          ) : data ? (
+            <SummaryChart
+              summary={data}
+              measureKey={list.picks.y || null}
+              onMeasure={(y) => list.set({ y })}
+              onDrill={onDrill}
+            />
+          ) : (
+            <p className="text-sm text-fg-muted">Working it out…</p>
+          )
+        ) : (
+          <DataTable
+            columns={columns}
+            rows={rows}
+            getRowId={(r) => r.id}
+            isLoading={isLoading}
+            error={error ? errorMessage(error) : undefined}
+            emptyTitle="Nothing to summarise"
+            sort={
+              list.sort
+                ? { key: list.sort.field, direction: list.sort.dir }
+                : undefined
+            }
+            onSortChange={list.toggleSort}
+            onRowClick={(r) => {
+              if (r.row?.where) onDrill(r.row.where)
+            }}
+            rowClassName={(r) =>
+              r.row === null
+                ? 'border-t-2 border-border'
+                : r.row.where
+                  ? 'cursor-pointer'
+                  : ''
+            }
+            dense
+          />
+        )}
       </div>
       {by.length === 0 && (
         <p className="text-xs text-fg-muted">

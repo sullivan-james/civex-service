@@ -2,6 +2,7 @@ import {
   Area,
   AreaChart,
   CartesianGrid,
+  Legend,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -13,6 +14,8 @@ import {
   chartAxisLineProps,
   chartAxisTickStyle,
   chartGridProps,
+  chartLegendProps,
+  chartValueAxisLabel,
   seriesColor,
 } from './chartTheme'
 import { ChartTooltip } from './ChartTooltip'
@@ -26,7 +29,8 @@ export interface TimeSeriesSeries {
 }
 
 export interface TimeSeriesPoint {
-  [key: string]: number | string
+  /** A missing value (null) is a gap in the line, not a zero. */
+  [key: string]: number | string | null
 }
 
 export interface TimeSeriesChartProps {
@@ -38,6 +42,28 @@ export interface TimeSeriesChartProps {
   height?: number
   formatValue?: (value: number) => string
   formatXAxis?: (value: string) => string
+  /** Title of the value axis (a measure, with its unit). */
+  valueLabel?: string
+  /** Title the tooltip with this key of the point instead of the x value. */
+  tooltipKey?: string
+  /** A point was clicked: its index in `data` and its series' key. Each
+   * point then has a marker and a hit area larger than it. */
+  onPointClick?: (index: number, seriesKey: string) => void
+  /** Mark each point (when there are few enough to tell apart). */
+  markers?: boolean
+  /** Animate the marks in (default); off where the chart is redrawn as
+   * choices change, so it doesn't replay each time. */
+  animate?: boolean
+}
+
+/** Past this many points, a line has no markers (unless they are clickable). */
+const MARKERS_UP_TO = 60
+
+interface DotProps {
+  cx?: number
+  cy?: number
+  index?: number
+  value?: unknown
 }
 
 /** Line/area chart over a date range, plotting one or more series. Data is
@@ -51,14 +77,47 @@ export function TimeSeriesChart({
   height = 240,
   formatValue,
   formatXAxis,
+  valueLabel,
+  tooltipKey,
+  onPointClick,
+  markers: wantMarkers = false,
+  animate = true,
 }: TimeSeriesChartProps) {
   const ChartComponent = variant === 'area' ? AreaChart : LineChart
+  const markers = wantMarkers && data.length <= MARKERS_UP_TO
+  // A marker (8px, ringed by the surface) and, when points can be clicked,
+  // a larger invisible hit area around it.
+  const dot =
+    (key: string, color: string) =>
+    ({ cx, cy, index, value }: DotProps) => {
+      if (cx == null || cy == null || value == null || index == null)
+        return <g key={`${key}-${index}`} />
+      return (
+        <g
+          key={`${key}-${index}`}
+          style={onPointClick ? { cursor: 'pointer' } : undefined}
+          onClick={onPointClick ? () => onPointClick(index, key) : undefined}
+        >
+          {onPointClick && <circle cx={cx} cy={cy} r={10} fill="transparent" />}
+          {markers && (
+            <circle
+              cx={cx}
+              cy={cy}
+              r={4}
+              fill={color}
+              stroke="var(--color-canvas)"
+              strokeWidth={2}
+            />
+          )}
+        </g>
+      )
+    }
 
   return (
     <ResponsiveContainer width="100%" height={height}>
       <ChartComponent
         data={data}
-        margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+        margin={{ top: 8, right: 8, left: valueLabel ? 12 : 0, bottom: 0 }}
       >
         <CartesianGrid {...chartGridProps} />
         <XAxis
@@ -74,12 +133,16 @@ export function TimeSeriesChart({
           tick={chartAxisTickStyle}
           tickLine={false}
           axisLine={false}
-          width={48}
+          width={valueLabel ? 56 : 48}
+          label={chartValueAxisLabel(valueLabel, 'y')}
         />
         <Tooltip
-          content={<ChartTooltip formatValue={formatValue} />}
+          content={
+            <ChartTooltip formatValue={formatValue} labelKey={tooltipKey} />
+          }
           cursor={{ stroke: 'var(--color-border)' }}
         />
+        {series.length > 1 && <Legend {...chartLegendProps} />}
         {series.map((s, index) => {
           const color = seriesColor(index, s.color)
           if (variant === 'area') {
@@ -104,8 +167,9 @@ export function TimeSeriesChart({
               name={s.label}
               stroke={color}
               strokeWidth={2}
-              dot={false}
-              activeDot={{ r: 4 }}
+              dot={markers || onPointClick ? dot(s.key, color) : false}
+              isAnimationActive={animate}
+              activeDot={{ r: 5 }}
             />
           )
         })}

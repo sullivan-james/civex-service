@@ -558,6 +558,39 @@ class LocalRecordRepository:
             self._s, _base_query(self._s, query, self._pg), plan, self._pg
         )
 
+    def geometries(
+        self, query: ResolvedQuery, field_id: str, hops: int, limit: int
+    ) -> tuple[list[tuple[RecordDTO, Any]], int]:
+        """The records `query` lists that have a geometry (a JSON object) in
+        `field_id`, on the record itself (`hops` 0) or on the record that
+        many levels above it: at most `limit`, oldest first, each with the
+        geometry, plus how many there are in all. Two statements."""
+        from civex.repositories.local.summary_sql import _Value
+
+        owner: Any = Record
+        q = _base_query(self._s, query, self._pg)
+        prev: Any = Record
+        for h in range(1, hops + 1):
+            owner = aliased(Record, name=f"geo_above_{h}")
+            q = q.join(owner, owner.id == prev.parent_record_id)
+            prev = owner
+        value = _Value(owner, field_id, self._pg)
+        has = value.kind == "object"
+        total = q.filter(has).with_entities(func.count(Record.id)).scalar() or 0
+        rows = (
+            q.filter(has)
+            .with_entities(Record, value.raw_text)
+            .order_by(Record.created_at, Record.id)
+            .limit(limit)
+            .all()
+        )
+        out: list[tuple[RecordDTO, Any]] = []
+        for row, raw in rows:
+            geometry = json.loads(raw) if isinstance(raw, str) else raw
+            if isinstance(geometry, dict):
+                out.append((_to_dto(row), geometry))
+        return out, int(total)
+
     def growth_by_period(
         self,
         dataset_id: uuid.UUID | None,

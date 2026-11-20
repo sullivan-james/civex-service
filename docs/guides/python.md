@@ -96,6 +96,28 @@ that lists exactly its records (pass it as `filter_tree`). `parse_group_by`
 and `parse_measure` read the CLI's written forms (`site.region`,
 `taken:month`, `mean:depth`).
 
+## Locations
+
+`record_svc.points(query, field, schema=None, limit=10_000)` gives where the
+records a `RecordQuery` lists are: each one with a value in the location
+field `field` (of the kind listed, or of `schema`, a kind above it), with its
+id, its name and the GeoJSON geometry, oldest first. It is what the
+explorer's **Map** draws, and a quick way into a plotting library:
+
+```python
+import civex
+from civex.domain.query import RecordQuery
+
+with civex.open() as project:
+    found = project.record_svc.points(
+        RecordQuery(dataset="survey-2024", schema="sample"), "place", schema="site"
+    )
+    for p in found.points:
+        print(p.name, p.geometry["type"], p.geometry["coordinates"])
+    if found.truncated:
+        print(f"first {len(found.points)} of {found.total}")
+```
+
 ## Writing results back
 
 - `record_svc.add(collection, schema, data, parent_record_id=...)` adds a
@@ -143,7 +165,7 @@ The opened project has one service per area, for example:
 |---|---|
 | `schema_svc` | Schemas and their fields |
 | `dataset_svc` | Collections |
-| `record_svc` | Records: find, summarise, add, patch, update, delete, restore, move |
+| `record_svc` | Records: find, summarise, points, add, patch, update, delete, restore, move |
 | `file_svc` | Storing and reading files |
 | `view_svc` | Saved views |
 | `file_access_svc` | Exports of files and tables |

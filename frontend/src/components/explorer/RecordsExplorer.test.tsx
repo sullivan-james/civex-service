@@ -12,6 +12,35 @@ import type { View } from '../../api/views'
 import { finishExport } from '../files/testSupport'
 import { setFieldTypesForTest } from '../../hooks/useFieldTypes'
 
+// The map itself (OpenLayers) is not drawn here: a stand-in lists what it got.
+vi.mock('../geo/RecordsMap', () => ({
+  default: ({ points }: { points: { name: string | null }[] }) => (
+    <ul aria-label="map">
+      {points.map((p) => (
+        <li key={p.name}>{p.name}</li>
+      ))}
+    </ul>
+  ),
+}))
+
+// A chart's container measures its parent, which has no size here: draw at a
+// fixed size instead.
+vi.mock('recharts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('recharts')>()
+  const { cloneElement } = await import('react')
+  return {
+    ...actual,
+    ResponsiveContainer: ({ children }: { children: React.ReactElement }) =>
+      cloneElement(
+        children as React.ReactElement<{ width: number; height: number }>,
+        {
+          width: 600,
+          height: 300,
+        },
+      ),
+  }
+})
+
 // --- a tiny in-memory API: just enough shape to drive the explorer -------
 
 function schema(name: string, parent: Schema | null, fields: string[]): Schema {
@@ -1267,6 +1296,218 @@ describe('summary', () => {
     expect(JSON.parse(search().get('filter')!)).toEqual({
       and: [filter, where],
     })
+  })
+})
+
+describe('summary as a chart', () => {
+  const where = { field: 'rate', op: 'eq', value: '96' }
+  beforeEach(() => {
+    setFieldTypesForTest({
+      types: [
+        {
+          type: 'string',
+          label: 'Text',
+          description: '',
+          stored_as: '',
+          entry_hint: '',
+          example: '',
+          restrictions: [],
+          supports_default: true,
+          searchable: true,
+          measures: ['filled'],
+          grouping: 'value' as const,
+          buckets: [],
+        },
+      ],
+      kinds: [],
+      summary_measures: [{ key: 'count', label: 'Records', help: '' }],
+    })
+    const group = (value: string | null) => ({
+      value,
+      label: value ?? 'No value',
+      lower: null,
+      upper: null,
+      precision: null,
+    })
+    override = (url: URL, method: string) => {
+      if (url.pathname === '/api/records/summary' && method === 'POST')
+        return json({
+          schema_name: 'recording',
+          group_columns: [
+            {
+              key: 'rate',
+              field: 'rate',
+              schema_name: 'recording',
+              label: 'Rate',
+              type: 'string',
+              bucket: null,
+              bin: null,
+              unit: null,
+            },
+          ],
+          measure_columns: [
+            {
+              key: 'count',
+              measure: 'count',
+              label: 'Records',
+              field: null,
+              schema_name: null,
+              type: null,
+              unit: null,
+            },
+          ],
+          rows: [
+            {
+              groups: [group('48')],
+              values: [1],
+              where: { ...where, value: '48' },
+            },
+            { groups: [group('96')], values: [2], where },
+            {
+              groups: [group(null)],
+              values: [3],
+              where: { field: 'rate', op: 'is_null' },
+            },
+          ],
+          total: [6],
+          truncated: false,
+          limit: 1000,
+          timezone: null,
+        })
+      return undefined
+    }
+  })
+  afterEach(() => setFieldTypesForTest(null))
+
+  it('switches to a chart held in the address, the blanks said beside it', async () => {
+    renderExplorer(
+      {},
+      '/collections/hb?schema=recording&show=summary&sum.by=rate',
+    )
+    expect(await screen.findByText('48')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('radio', { name: 'Chart' }))
+    await waitFor(() => expect(search().get('sum.view')).toBe('chart'))
+    const figure = await screen.findByRole('figure', {
+      name: 'Records by Rate',
+    })
+    expect(figure).toHaveAttribute('data-chart-form', 'bars')
+    // No value is not a bar: it is named below, with its count.
+    expect(screen.getByText(/Not on the axis: no value/)).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'No value (3)' }),
+    ).toBeInTheDocument()
+  })
+
+  it("clicking a bar lists its records, as the table's row does", async () => {
+    const { container } = renderExplorer(
+      {},
+      '/collections/hb?schema=recording&show=summary&sum.by=rate&sum.view=chart',
+    )
+    await screen.findByRole('figure')
+    await waitFor(() =>
+      expect(
+        container.querySelectorAll('.recharts-bar-rectangle path').length,
+      ).toBe(2),
+    )
+    const bars = container.querySelectorAll('.recharts-bar-rectangle path')
+    await userEvent.click(bars[1])
+    await waitFor(() => expect(search().get('show')).toBeNull())
+    expect(JSON.parse(search().get('filter')!)).toEqual(where)
+  })
+
+  it('the no-value group lists its records too', async () => {
+    renderExplorer(
+      {},
+      '/collections/hb?schema=recording&show=summary&sum.by=rate&sum.view=chart',
+    )
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'No value (3)' }),
+    )
+    await waitFor(() => expect(search().get('show')).toBeNull())
+    expect(JSON.parse(search().get('filter')!)).toEqual({
+      field: 'rate',
+      op: 'is_null',
+    })
+  })
+})
+
+describe('map', () => {
+  // The encounter has a location; a recording is placed where its encounter is.
+  const geoEncounter: Schema = {
+    ...encounter,
+    fields: [
+      ...encounter.fields,
+      {
+        ...encounter.fields[0],
+        id: 'encounter-place',
+        name: 'place',
+        type: 'geo',
+      },
+    ],
+  }
+  beforeEach(() => {
+    override = (url: URL, method: string) => {
+      if (url.pathname === '/api/schemas')
+        return json([geoEncounter, recording, selection])
+      if (url.pathname === '/api/settings/map')
+        return json({ tile_url: null, attribution: null })
+      if (url.pathname === '/api/records/points' && method === 'POST')
+        return json({
+          schema_name: 'encounter',
+          field: 'place',
+          points: [
+            {
+              id: 'r1',
+              name: 'R1',
+              geometry: { type: 'Point', coordinates: [-70, 42] },
+            },
+          ],
+          total: 3,
+          truncated: true,
+          limit: 1,
+        })
+      return undefined
+    }
+  })
+
+  it('is offered only where the listed kind, or one above it, has a location', async () => {
+    const first = renderExplorer({}, '/collections/hb?schema=recording')
+    expect(
+      await screen.findByRole('radio', { name: 'Map' }),
+    ).toBeInTheDocument()
+    first.unmount()
+    override = null // the plain schemas: no location anywhere
+    renderExplorer({}, '/collections/hb?schema=selection')
+    await screen.findByRole('radio', { name: 'Summary' })
+    expect(screen.queryByRole('radio', { name: 'Map' })).toBeNull()
+  })
+
+  it('maps exactly what the list shows, by the location above', async () => {
+    const filter = JSON.stringify({ field: 'rate', op: 'eq', value: '96' })
+    renderExplorer(
+      {},
+      `/collections/hb?schema=recording&q=96&filter=${encodeURIComponent(filter)}`,
+    )
+    await userEvent.click(await screen.findByRole('radio', { name: 'Map' }))
+    expect(search().get('show')).toBe('map')
+    await waitFor(() =>
+      expect(
+        calls.find((c) => c.path === '/api/records/points')?.body,
+      ).toMatchObject({
+        collection: 'hb',
+        schema_name: 'recording',
+        search: '96',
+        filter: JSON.parse(filter),
+        field: 'place',
+        field_schema: 'encounter',
+      }),
+    )
+    expect(
+      await within(await screen.findByRole('list', { name: 'map' })).findByText(
+        'R1',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Showing the first 1 of 3/)).toBeInTheDocument()
   })
 })
 

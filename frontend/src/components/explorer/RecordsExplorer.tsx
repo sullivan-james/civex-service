@@ -46,6 +46,7 @@ import { BulkEditDialog } from './BulkEditDialog'
 import { bulkEditableFields } from '../../utils/bulkEdit'
 import { FilesView } from '../files/FilesView'
 import { SummaryView } from './SummaryView'
+import { MapView, mapFields } from './MapView'
 import { withCondition } from '../../utils/summary'
 import { MoveToDriveButton } from '../files/MoveDialog'
 import { useBulkSelection } from '../../hooks/useBulkSelection'
@@ -128,6 +129,9 @@ export function RecordsExplorer({
   const show = params.get('show')
   const showFiles = show === 'files'
   const showSummary = show === 'summary' && !!listed
+  // A map is offered where the listed kind, or one above it, has a location.
+  const canMap = !!listed && mapFields(x.filterFields).length > 0
+  const showMap = show === 'map' && canMap
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [moving, setMoving] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -615,7 +619,15 @@ export function RecordsExplorer({
             <SegmentedControl
               size="sm"
               label="Show"
-              value={showFiles ? 'files' : showSummary ? 'summary' : 'records'}
+              value={
+                showFiles
+                  ? 'files'
+                  : showSummary
+                    ? 'summary'
+                    : showMap
+                      ? 'map'
+                      : 'records'
+              }
               onChange={(v) =>
                 setParams(
                   (prev) => {
@@ -631,6 +643,7 @@ export function RecordsExplorer({
                 { value: 'records', label: 'Records' },
                 { value: 'files', label: 'Their files' },
                 ...(listed ? [{ value: 'summary', label: 'Summary' }] : []),
+                ...(canMap ? [{ value: 'map', label: 'Map' }] : []),
               ]}
             />
           </div>
@@ -652,6 +665,12 @@ export function RecordsExplorer({
                 return out
               })
             }
+          />
+        ) : showMap ? (
+          <MapView
+            query={x.query}
+            collection={dataset}
+            fields={x.filterFields}
           />
         ) : showFiles ? (
           <FilesView

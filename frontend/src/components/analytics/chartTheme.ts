@@ -30,3 +30,40 @@ export const chartAxisTickStyle = {
 export const chartAxisLineProps = {
   stroke: 'var(--color-border)',
 }
+
+/** Legend above the plot, in muted text (identity is the swatch, never the
+ * text colour). */
+export const chartLegendProps = {
+  verticalAlign: 'top' as const,
+  align: 'left' as const,
+  iconType: 'circle' as const,
+  iconSize: 8,
+  wrapperStyle: {
+    fontSize: 12,
+    color: 'var(--color-fg-muted)',
+    paddingBottom: 4,
+  },
+}
+
+/** A value axis' title (a measure and its unit), along the axis. */
+export function chartValueAxisLabel(text: string | undefined, axis: 'x' | 'y') {
+  if (!text) return undefined
+  return axis === 'y'
+    ? {
+        value: text,
+        angle: -90,
+        position: 'insideLeft' as const,
+        offset: -4,
+        style: {
+          textAnchor: 'middle' as const,
+          fill: 'var(--color-fg-muted)',
+          fontSize: 12,
+        },
+      }
+    : {
+        value: text,
+        position: 'insideBottom' as const,
+        offset: -4,
+        style: { fill: 'var(--color-fg-muted)', fontSize: 12 },
+      }
+}

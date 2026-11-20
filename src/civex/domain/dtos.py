@@ -700,6 +700,40 @@ class GCReport:
         }
 
 
+#: The most locations `RecordService.points` answers with at once.
+POINTS_DEFAULT_LIMIT = 10_000
+POINTS_MAX_LIMIT = 50_000
+
+
+@dataclass
+class RecordPoint:
+    """One record's location, for a map: its id, its name as every list shows
+    it, and the geometry (GeoJSON, WGS84) of the field asked for, which may be
+    held by a record above it."""
+
+    id: uuid.UUID
+    name: str | None
+    geometry: dict[str, Any]
+
+
+@dataclass
+class RecordPoints:
+    """The locations of the records a query lists (`RecordService.points`):
+    those with a value in `field` (of `schema`, the kind listed or one above
+    it), oldest first, at most `limit`; `total` counts every record with one
+    and `truncated` says some were left out."""
+
+    schema: str
+    field: str
+    points: list[RecordPoint]
+    total: int
+    limit: int
+
+    @property
+    def truncated(self) -> bool:
+        return self.total > len(self.points)
+
+
 @dataclass
 class RecordDTO:
     id: uuid.UUID

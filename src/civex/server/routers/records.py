@@ -35,6 +35,8 @@ from civex.server.models import (
     RecordRef,
     RecordResponse,
     RecordSelectionRequest,
+    RecordPointsRequest,
+    RecordPointsResponse,
     RecordSummaryRequest,
     RecordSummaryResponse,
     RestorePlanResponse,
@@ -551,6 +553,25 @@ def summarise_records(
         return serve(
             path, media_type(format), f"{result.schema}-summary{extension(format)}"
         )
+
+
+@router.post("/records/points", response_model=RecordPointsResponse)
+def record_points(body: RecordPointsRequest, ctx: AppContext = Depends(get_ctx)):
+    """Where the records a query lists are, for a map (the same selectors as
+    listing them): each record with a value in the location field `field`,
+    with its id, its name and the geometry. The field may be of a kind above
+    the one listed (`field_schema`): each record is then placed where the
+    record above it is. Oldest first, at most `limit`; `total` counts them
+    all. A fixed number of statements, however many records."""
+    try:
+        result = ctx.record_svc.points(
+            body.to_query(), body.field, body.field_schema, body.limit
+        )
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    return RecordPointsResponse.from_dto(result)
 
 
 @router.post("/records/move/plan", response_model=RecordMovePlanResponse)
