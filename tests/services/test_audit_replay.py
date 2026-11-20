@@ -2,7 +2,8 @@
 
 Sync will send these entries and nothing else, so a change that wrote no entry
 (or a stale one) would never reach another device. This does everything a
-person can do to schemas, fields, collections, views and records, then, for
+person can do to schemas, fields, collections, views, the Analytics page and
+records, then, for
 every thing, starts from its create and applies each entry in the order written
 (an edit stores only what changed) and checks the result is what is in the
 database."""
@@ -40,6 +41,8 @@ def _current(ctx: AppContext, kind: str, entity_id: Any) -> dict[str, Any] | Non
         found = ctx.dataset_svc._datasets.get_by_id(entity_id, include_deleted=True)
     elif kind == "view":
         found = ctx.view_svc._views.get_by_id(entity_id)
+    elif kind == "dashboard":
+        found = ctx.dashboard_svc._repo.get()
     elif kind == "record":
         rows = ctx.record_svc._records.list_by_ids([entity_id])
         found = rows[0] if rows else None
@@ -172,6 +175,16 @@ def test_history_describes_everything_a_person_can_do(ctx: AppContext) -> None:
     ctx.view_svc.update("encounter", "v1", columns=["location", "depth"])
     ctx.view_svc.create("encounter", "v2")
     ctx.view_svc.delete("encounter", "v2")
+    # A saved analysis, and the Analytics page it is put on.
+    analysis = ctx.view_svc.create(
+        "encounter", "by place", summary={"group_by": ["location"]}
+    )
+    ctx.view_svc.update(
+        "encounter", "by place", summary={"group_by": ["location"], "show": "chart"}
+    )
+    ctx.dashboard_svc.add(view_id=str(analysis.id), size="wide")
+    ctx.dashboard_svc.remove("widget-storage")
+    ctx.dashboard_svc.resize("widget-ai_tokens", "small")
     ctx.dataset_svc.update("c", description="study", scope="global")
     ctx.commit()
 

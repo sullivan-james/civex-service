@@ -286,6 +286,9 @@ class ViewDTO:
     # How the view's files are arranged when exported: "tree" or "flat"
     # (civex.domain.file_access.LAYOUTS).
     files_layout: str = "tree"
+    # A saved analysis's summary (`civex.domain.summary.SavedSummary` as a
+    # dict), or None for a plain saved filter.
+    summary: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         # schema_name excluded -- denormalized display field, not stored on the entity
@@ -297,6 +300,7 @@ class ViewDTO:
             "filter_tree": self.filter_tree,
             "sort": self.sort,
             "files_layout": self.files_layout,
+            "summary": self.summary,
             "created_at": self.created_at.isoformat(),
         }
 
@@ -312,7 +316,41 @@ class ViewDTO:
             sort=d.get("sort") or [],
             created_at=datetime.fromisoformat(d["created_at"]),
             files_layout=d.get("files_layout") or "tree",
+            summary=d.get("summary"),
         )
+
+
+@dataclass
+class DashboardDTO:
+    """The project's Analytics page as stored: its cards in order, each as
+    `civex.domain.dashboard.Card.to_dict` writes it."""
+
+    id: uuid.UUID
+    cards: list[dict[str, Any]]
+    created_at: datetime
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": str(self.id),
+            "cards": self.cards,
+            "created_at": self.created_at.isoformat(),
+        }
+
+
+@dataclass
+class DashboardCardDTO:
+    """A card as the page shows it: the stored card, and for an analysis the
+    saved view it names (None when that view has been deleted since)."""
+
+    card: Any  # civex.domain.dashboard.Card
+    view: ViewDTO | None = None
+
+
+@dataclass
+class DashboardPageDTO:
+    cards: list[DashboardCardDTO]
+    # Whether anyone has edited the page yet (False: the default cards).
+    edited: bool
 
 
 @dataclass

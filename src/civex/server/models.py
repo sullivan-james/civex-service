@@ -320,6 +320,42 @@ class ReorderFieldsRequest(BaseModel):
 # --- Views ---
 
 
+class SavedSummaryModel(BaseModel):
+    """A saved analysis's summary: what the explorer's Summary shows for it."""
+
+    group_by: list[str] = Field(
+        default_factory=list,
+        description="Up to 3 groupings, as POST /records/summary takes them "
+        "('field', 'schema.field', with ':month' or ':5' and the like).",
+    )
+    measures: list[str] = Field(
+        default_factory=lambda: ["count"],
+        description="What it works out, as POST /records/summary takes them "
+        "('count', 'mean:depth').",
+    )
+    sort: dict[str, str] | None = Field(
+        default=None,
+        description="{column, direction}: the table sorted by one of its "
+        "groupings' or measures' keys, 'asc' or 'desc'. None: the groups' order.",
+    )
+    show: Literal["table", "chart"] = Field(
+        default="table", description="Shown as a table or a chart."
+    )
+    chart_measure: str | None = Field(
+        default=None,
+        description="The measure the chart draws (one of `measures`); None: "
+        "the first that is a number.",
+    )
+    collection: str | None = Field(
+        default=None,
+        description="The id of the collection it was made in; None: every collection.",
+    )
+    within: str | None = Field(
+        default=None, description="The id of the record it was made inside."
+    )
+    search: str | None = Field(default=None, description="The search it was made with.")
+
+
 class ViewResponse(BaseModel):
     id: str
     schema_id: str
@@ -349,6 +385,11 @@ class ViewResponse(BaseModel):
         "one folder named for their kind (Encounter/Recording/Selections/...), "
         "'flat' puts every file in one folder.",
     )
+    summary: SavedSummaryModel | None = Field(
+        default=None,
+        description="Set for a saved analysis: the summary the explorer opens "
+        "on, and the Analytics page draws. None for a plain saved filter.",
+    )
 
     @classmethod
     def from_dto(cls, dto: ViewDTO) -> ViewResponse:
@@ -361,6 +402,9 @@ class ViewResponse(BaseModel):
             filter_tree=dto.filter_tree,
             sort=dto.sort,
             files_layout=dto.files_layout,  # type: ignore[arg-type]
+            summary=(
+                SavedSummaryModel(**dto.summary) if dto.summary is not None else None
+            ),
         )
 
 
@@ -393,6 +437,11 @@ class CreateViewRequest(BaseModel):
         description="How the view's files are arranged when exported: 'tree' "
         "(a folder per record above each file) or 'flat' (all in one folder).",
     )
+    summary: SavedSummaryModel | None = Field(
+        default=None,
+        description="Save it as an analysis: the summary it opens on (its "
+        "groupings and measures must suit the schema's fields).",
+    )
 
 
 class UpdateViewRequest(BaseModel):
@@ -416,6 +465,11 @@ class UpdateViewRequest(BaseModel):
         default=None,
         description="Change how the view's files are arranged when exported; "
         "omit the key to leave it unchanged.",
+    )
+    summary: SavedSummaryModel | None = Field(
+        default=None,
+        description="Replace the saved analysis's summary; send null to make it "
+        "a plain saved filter, omit the key to leave it unchanged.",
     )
 
 

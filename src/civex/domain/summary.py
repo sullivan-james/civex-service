@@ -34,6 +34,7 @@ Choices worth knowing:
 from __future__ import annotations
 
 import calendar
+import uuid
 import re
 from dataclasses import dataclass, field as _field
 from datetime import date, datetime, timedelta
@@ -519,3 +520,121 @@ def measure_label(measure: str, field_label: str | None) -> str:
     if field_label is None:
         return MEASURES[measure]
     return _MEASURE_NAMES[measure].format(field_label)
+
+
+# --- a summary saved with a view (a saved analysis)
+
+#: How a saved analysis is shown.
+SHOWS = ("table", "chart")
+SORT_DIRECTIONS = ("asc", "desc")
+
+
+@dataclass
+class SavedSummary:
+    """A summary kept on a saved view, which makes the view a saved analysis:
+    what it groups by and works out (the keys `parse_group_by` and
+    `parse_measure` read, as the address and the CLI write them), how the
+    table is sorted, whether it is shown as a table or a chart and which
+    measure the chart draws, and where it was made (a collection's id, None
+    for every collection; a record's id it was made inside; the search). The
+    view's own filter is the rest of its query. `from_dict` is the one check
+    of the shape; whether the fields exist is the record service's
+    (`RecordService.check_summary`)."""
+
+    group_by: list[str] = _field(default_factory=list)
+    measures: list[str] = _field(default_factory=lambda: ["count"])
+    sort: dict[str, str] | None = None  # {"column": key, "direction": asc|desc}
+    show: str = "table"
+    chart_measure: str | None = None
+    collection: str | None = None
+    within: str | None = None
+    search: str | None = None
+
+    def request(self) -> SummaryRequest:
+        return SummaryRequest(
+            group_by=[parse_group_by(g) for g in self.group_by],
+            measures=[parse_measure(m) for m in self.measures],
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "group_by": list(self.group_by),
+            "measures": list(self.measures),
+            "sort": dict(self.sort) if self.sort else None,
+            "show": self.show,
+            "chart_measure": self.chart_measure,
+            "collection": self.collection,
+            "within": self.within,
+            "search": self.search,
+        }
+
+    @classmethod
+    def from_dict(cls, d: Any) -> SavedSummary:
+        """Read and check a saved summary: keys written as the server writes
+        them (so `depth:5.0` and `depth:5` are one grouping), a sort on one of
+        its columns, a chart measure among its measures, ids that are ids."""
+        if not isinstance(d, dict):
+            raise ValidationError("A saved summary is an object")
+        unknown = set(d) - set(cls.__dataclass_fields__)
+        if unknown:
+            raise ValidationError(
+                "A saved summary has no " + ", ".join(sorted(unknown))
+            )
+
+        def texts(key: str, default: list[str]) -> list[str]:
+            value = d.get(key, default)
+            if value is None:
+                return list(default)
+            if not isinstance(value, list) or not all(
+                isinstance(v, str) for v in value
+            ):
+                raise ValidationError(f"A saved summary's '{key}' is a list of text")
+            return value
+
+        groups = [parse_group_by(g) for g in texts("group_by", [])]
+        measures = [parse_measure(m) for m in texts("measures", ["count"])]
+        SummaryRequest(group_by=groups, measures=measures).check()
+        keys = [g.key for g in groups] + [m.key for m in measures]
+
+        sort = d.get("sort")
+        if sort is not None:
+            if (
+                not isinstance(sort, dict)
+                or sort.get("column") not in keys
+                or sort.get("direction", "asc") not in SORT_DIRECTIONS
+            ):
+                raise ValidationError(
+                    "A saved summary is sorted by one of its columns, 'asc' or 'desc'"
+                )
+            sort = {"column": sort["column"], "direction": sort.get("direction", "asc")}
+        show = d.get("show") or "table"
+        if show not in SHOWS:
+            raise ValidationError(
+                f"A saved summary is shown as one of: {', '.join(SHOWS)}"
+            )
+        chart = d.get("chart_measure") or None
+        if chart is not None and chart not in [m.key for m in measures]:
+            raise ValidationError("The chart draws one of the summary's measures")
+
+        def an_id(key: str) -> str | None:
+            value = d.get(key) or None
+            if value is None:
+                return None
+            try:
+                return str(uuid.UUID(str(value)))
+            except ValueError:
+                raise ValidationError(f"A saved summary's '{key}' is an id") from None
+
+        search = d.get("search") or None
+        if search is not None and not isinstance(search, str):
+            raise ValidationError("A saved summary's 'search' is text")
+        return cls(
+            group_by=[g.key for g in groups],
+            measures=[m.key for m in measures],
+            sort=sort,
+            show=show,
+            chart_measure=chart,
+            collection=an_id("collection"),
+            within=an_id("within"),
+            search=search,
+        )

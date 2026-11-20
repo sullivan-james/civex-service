@@ -2397,31 +2397,29 @@ class RecordService:
             limit=limit,
         )
 
-    def summarise(
-        self, query: RecordQuery, request: summary.SummaryRequest
-    ) -> summary.SummaryResult:
-        """Group the records `query` lists by field values and work out
-        measures over each group and over them all (see `domain/summary`).
-        The query must name the kind summarised (`schema`); a grouping or a
-        measure names one of its fields, or (`schema`) a field of a kind above
-        it, like a filter condition. In SQL, one statement however many
-        records; a link field's groups are named in one more lookup."""
-        self._permissions.require(permissions.READ)
+    def check_summary(self, schema_name: str, request: summary.SummaryRequest) -> None:
+        """Whether `request` can summarise records of `schema_name`: its shape
+        (`SummaryRequest.check`), and each grouping and measure a field of that
+        kind or of a kind above it that allows it. The rule `summarise` runs
+        first, without reading any record (a saved analysis is checked by it)."""
         request.check()
-        if not query.schema:
-            raise ValidationError(
-                "Choose the kind of record to summarise: a summary groups the "
-                "values of one kind's fields"
-            )
-        resolved = self.resolve(query)
-        schema = self._schema_svc.get(query.schema)
+        self._summary_columns(schema_name, request, "UTC")
+
+    def _summary_columns(
+        self, schema_name: str, request: summary.SummaryRequest, zone_default: str
+    ) -> tuple[
+        list[summary.GroupPlan],
+        list[summary.GroupColumn],
+        list[summary.MeasurePlan],
+        list[summary.MeasureColumn],
+        str | None,
+    ]:
+        """The request's groupings and measures resolved against the kind's
+        fields: what the repository is handed and how the columns read, and
+        the zone dates and times are grouped in, if any."""
+        schema = self._schema_svc.get(schema_name)
         related = self._relations(schema)
         owners = {rel: s for s, rel in related.values()}
-        zone_default = "UTC"
-        if query.dataset:
-            dataset = self._datasets.get_by_name(query.dataset, with_count=False)
-            if dataset and dataset.timezone:
-                zone_default = dataset.timezone
 
         def locate(field: str, schema_name: str | None, what: str):
             f, rel = self._locate(schema, related, field, schema_name, what)
@@ -2507,6 +2505,35 @@ class RecordService:
                 )
             )
 
+        return group_plans, group_columns, measure_plans, measure_columns, zone_used
+
+    def summarise(
+        self, query: RecordQuery, request: summary.SummaryRequest
+    ) -> summary.SummaryResult:
+        """Group the records `query` lists by field values and work out
+        measures over each group and over them all (see `domain/summary`).
+        The query must name the kind summarised (`schema`); a grouping or a
+        measure names one of its fields, or (`schema`) a field of a kind above
+        it, like a filter condition. In SQL, one statement however many
+        records; a link field's groups are named in one more lookup."""
+        self._permissions.require(permissions.READ)
+        request.check()
+        if not query.schema:
+            raise ValidationError(
+                "Choose the kind of record to summarise: a summary groups the "
+                "values of one kind's fields"
+            )
+        resolved = self.resolve(query)
+        zone_default = "UTC"
+        if query.dataset:
+            dataset = self._datasets.get_by_name(query.dataset, with_count=False)
+            if dataset and dataset.timezone:
+                zone_default = dataset.timezone
+
+        group_plans, group_columns, measure_plans, measure_columns, zone_used = (
+            self._summary_columns(query.schema, request, zone_default)
+        )
+
         raw = self._records.summarise(
             resolved,
             summary.SummaryPlan(group_plans, measure_plans, request.limit),
@@ -2570,7 +2597,7 @@ class RecordService:
                 )
             )
         return summary.SummaryResult(
-            schema=schema.name,
+            schema=self._schema_svc.get(query.schema).name,
             group_columns=group_columns,
             measure_columns=measure_columns,
             rows=rows,

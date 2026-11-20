@@ -23,6 +23,7 @@ from civex.db.models import (
     SyncLoginRequest,
     AuditBatch,
     AuditLog,
+    Dashboard,
     Dataset,
     Field,
     FileReference,
@@ -58,6 +59,7 @@ from civex.repositories.local.inventory import stored_files
 from civex.repositories.local.dataset_repo import _to_dtos as _dataset_dtos
 from civex.repositories.local.record_repo import _to_dto as _record_dto
 from civex.repositories.local.schema_repo import _field_to_dto, _schema_to_dto
+from civex.repositories.local.dashboard_repo import _to_dto as _dashboard_dto
 from civex.repositories.local.view_repo import _to_dto as _view_dto
 
 _MODELS: dict[str, Any] = {
@@ -65,6 +67,7 @@ _MODELS: dict[str, Any] = {
     "field": Field,
     "dataset": Dataset,
     "view": View,
+    "dashboard": Dashboard,
     "record": Record,
 }
 # A column PostgreSQL maintains itself (a trigger); never written from a snapshot.
@@ -986,6 +989,8 @@ class LocalSyncRepository:
             dicts = [d.to_dict() for d in dtos]
         elif kind == "view":
             dicts = [_view_dto(r).to_dict() for r in rows]
+        elif kind == "dashboard":
+            dicts = [_dashboard_dto(r).to_dict() for r in rows]
         else:
             dicts = [_record_dto(r).to_dict() for r in rows]
         return [wire_state(kind, d) or {} for d in dicts]
@@ -1074,8 +1079,9 @@ class LocalSyncRepository:
         self._s.flush()
         self._s.expire_all()
 
-    def delete_view(self, id: uuid.UUID) -> None:
-        row = self._s.get(View, id)
+    def delete_view(self, id: uuid.UUID, kind: str = "view") -> None:
+        """Remove a thing that has no deleted state (a view, the page)."""
+        row = self._s.get(_MODELS[kind], id)
         if row is not None:
             self._s.delete(row)
             self._s.flush()
@@ -1096,8 +1102,8 @@ class LocalSyncRepository:
             LocalRecordRepository(
                 self._s, is_postgres=self._s.get_bind().dialect.name == "postgresql"
             ).purge_many([id])
-        elif kind == "view":
-            self.delete_view(id)
+        elif kind in ("view", "dashboard"):
+            self.delete_view(id, kind)
         elif kind == "field":
             row = self._s.get(Field, id)
             if row is not None:

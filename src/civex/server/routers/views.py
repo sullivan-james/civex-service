@@ -43,7 +43,8 @@ def create_view(
     """Create a saved column/filter/sort view against a schema's own fields,
     with columns optionally joining one hop through a reference field.
     `files_layout` says how its files are arranged when it is exported as a
-    folder or zip."""
+    folder or zip. With `summary` it is a saved analysis: the explorer opens it
+    on its Summary, and it can be put on the Analytics page."""
     try:
         dto = ctx.view_svc.create(
             schema_name,
@@ -52,6 +53,7 @@ def create_view(
             filter_tree=body.filter_tree,
             sort=body.sort,
             files_layout=body.files_layout,
+            summary=body.summary.model_dump() if body.summary else None,
         )
         ctx.commit()
     except NotFoundError as e:
@@ -101,13 +103,19 @@ def update_view(
     body: UpdateViewRequest,
     ctx: AppContext = Depends(get_ctx),
 ):
-    """Rename a view and/or replace its columns/filter_tree/sort/files_layout."""
+    """Rename a view and/or replace its columns/filter_tree/sort/files_layout/
+    summary."""
     # Present-but-null vs. absent matters here: an absent key means "leave
     # unchanged", an explicit null clears filter_tree (columns/sort keep
     # their prior value instead, since [] already means "no columns").
     columns = body.columns if "columns" in body.model_fields_set else ...
     filter_tree = body.filter_tree if "filter_tree" in body.model_fields_set else ...
     sort = body.sort if "sort" in body.model_fields_set else ...
+    summary = (
+        (body.summary.model_dump() if body.summary else None)
+        if "summary" in body.model_fields_set
+        else ...
+    )
     try:
         dto = ctx.view_svc.update(
             schema_name,
@@ -117,6 +125,7 @@ def update_view(
             filter_tree=filter_tree,
             sort=sort,
             files_layout=(body.files_layout if body.files_layout is not None else ...),
+            summary=summary,
         )
         ctx.commit()
     except NotFoundError as e:

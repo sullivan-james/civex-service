@@ -45,6 +45,7 @@ from civex.server.routers import (
     updates,
     views,
     workflows,
+    dashboard,
 )
 from civex.server.security import LocalGuardMiddleware
 
@@ -433,6 +434,7 @@ def api_routers(
         (analytics.router, None),
         (views.router, None),
         (views.all_views_router, None),
+        (dashboard.router, None),
     ]
     return [(r, f) for r, f in routers if f is None or f in features]
 

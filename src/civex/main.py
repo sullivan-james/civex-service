@@ -26,6 +26,7 @@ from civex.cli.shell import run_shell
 from civex.cli.demo import demo
 from civex.cli.doctor import doctor
 from civex.cli import bundle as bundle_cli
+from civex.cli import dashboard as dashboard_cli
 from civex.cli.init import init
 from civex.cli.license import license_cmd
 from civex.cli.resolve import resolve
@@ -88,6 +89,7 @@ app.add_typer(retention.app, name="retention", rich_help_panel=_WORK)
 app.add_typer(history.app, name="history", rich_help_panel=_WORK)
 app.add_typer(logs_cli.app, name="logs", rich_help_panel=_WORK)
 app.add_typer(view.app, name="view", rich_help_panel=_WORK)
+app.add_typer(dashboard_cli.app, name="dashboard", rich_help_panel=_WORK)
 app.command("resolve", rich_help_panel=_WORK)(resolve)
 app.command("doctor", rich_help_panel=_WORK)(doctor)
 

@@ -48,6 +48,7 @@ class LocalViewRepository:
         filter_tree: dict[str, Any] | None,
         sort: list[dict[str, Any]],
         files_layout: str = "tree",
+        summary: dict[str, Any] | None = None,
     ) -> ViewDTO:
         row = View(
             schema_id=schema_id,
@@ -56,6 +57,7 @@ class LocalViewRepository:
             filter_tree=filter_tree,
             sort=sort,
             files_layout=files_layout,
+            summary=summary,
         )
         self._s.add(row)
         self._s.flush()
@@ -71,6 +73,7 @@ class LocalViewRepository:
         filter_tree=_SENTINEL,
         sort=_SENTINEL,
         files_layout=_SENTINEL,
+        summary=_SENTINEL,
     ) -> ViewDTO:
         row = self._s.query(View).filter_by(id=id).first()
         if row is None:
@@ -85,6 +88,8 @@ class LocalViewRepository:
             row.sort = sort
         if files_layout is not self._SENTINEL:
             row.files_layout = files_layout
+        if summary is not self._SENTINEL:
+            row.summary = summary
         self._s.flush()
         return _to_dto(row)
 
@@ -107,4 +112,5 @@ def _to_dto(row: View) -> ViewDTO:
         sort=row.sort or [],
         created_at=row.created_at,
         files_layout=row.files_layout or "tree",
+        summary=row.summary,
     )

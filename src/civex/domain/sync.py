@@ -25,7 +25,7 @@ from civex.domain import hlc
 # changed meaning); MIN goes up when an older one is no longer served. An
 # authority is upgraded first and answers a device on any version both speak.
 PROTOCOL_MIN = 3
-PROTOCOL_MAX = 3
+PROTOCOL_MAX = 4
 # The oldest version this civex still serves but its next release will not, so
 # devices still on it are told to update before they are cut off (`Hello.
 # protocol_retiring`). None while nothing is being retired. Raise
@@ -45,7 +45,7 @@ DEVICE_LOGIN = "device_login"
 DIRECT_FILES = features.DIRECT_FILES
 
 # The order a project's things must exist in: each refers to the ones before it.
-ENTITY_ORDER = ("schema", "field", "dataset", "view", "record")
+ENTITY_ORDER = ("schema", "field", "dataset", "view", "dashboard", "record")
 
 # What of each kind travels, and nothing else: a column added for this machine
 # alone (a cache, a search index) stays off the wire, and adding one here is a
@@ -100,9 +100,11 @@ WIRE_FIELDS: dict[str, frozenset[str]] = {
             "columns",
             "sort",
             "files_layout",
+            "summary",
             "created_at",
         }
     ),
+    "dashboard": frozenset({"id", "cards", "created_at"}),
     "record": frozenset(
         {
             "id",
@@ -116,6 +118,53 @@ WIRE_FIELDS: dict[str, frozenset[str]] = {
         }
     ),
 }
+
+# What each protocol version added, so a server still answers a device on an
+# older one with only what it can read (`kinds_for`, `entry_for`,
+# `snapshot_for`; applied in the peer router, never in the core): a kind, or a
+# kind's field, and the version it travels from.
+KINDS_SINCE: dict[str, int] = {"dashboard": 4}
+FIELDS_SINCE: dict[str, dict[str, int]] = {"view": {"summary": 4}}
+
+
+def kinds_for(protocol: int) -> tuple[str, ...]:
+    """The kinds a peer on `protocol` knows, in `ENTITY_ORDER`."""
+    return tuple(k for k in ENTITY_ORDER if KINDS_SINCE.get(k, 0) <= protocol)
+
+
+def snapshot_for(
+    protocol: int, kind: str, snapshot: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """A snapshot without the fields a peer on `protocol` can't read."""
+    newer = {f for f, v in FIELDS_SINCE.get(kind, {}).items() if v > protocol}
+    if snapshot is None or not newer:
+        return snapshot
+    return {k: v for k, v in snapshot.items() if k not in newer}
+
+
+def entry_for(protocol: int, entry: SyncEntry) -> SyncEntry | None:
+    """An entry as a peer on `protocol` can read it: None for a kind it
+    doesn't know, else without the fields it doesn't (an edit of only those
+    leaves an edit of nothing, which applies as no change)."""
+    if entry.entity_type not in kinds_for(protocol):
+        return None
+    kind = entry.entity_type
+    newer = {f for f, v in FIELDS_SINCE.get(kind, {}).items() if v > protocol}
+    if not newer:
+        return entry
+    return dataclasses.replace(
+        entry,
+        old_data=snapshot_for(protocol, kind, entry.old_data),
+        new_data=snapshot_for(protocol, kind, entry.new_data),
+        delta=(
+            None
+            if entry.delta is None
+            else {
+                p: c for p, c in entry.delta.items() if p.split(".", 1)[0] not in newer
+            }
+        ),
+    )
+
 
 # Actions whose snapshots are the thing itself (a purge carries a tombstone).
 _STATE_ACTIONS = frozenset({"create", "update", "delete", "restore"})
