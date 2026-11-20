@@ -17,6 +17,7 @@ import {
   type BulkEditRequest,
   type MoveRecordsRequest,
   type SummaryRequest,
+  type PointsRequest,
 } from '../api/records'
 import type { RecordQueryParams } from '../api/query'
 import { ApiError } from '../api/client'
@@ -130,6 +131,16 @@ export function useRecordCounts(
 
 /** A summary of the records a query lists (`null` waits). Keyed under
  * `records`, so any record edit refreshes it. */
+/** The listed records' locations, for the explorer's map. */
+export function useRecordPoints(body: PointsRequest | null) {
+  return useQuery({
+    queryKey: ['records', 'points', body],
+    queryFn: () => recordsApi.points(body!),
+    enabled: body !== null,
+    placeholderData: keepPreviousData,
+  })
+}
+
 export function useRecordSummary(body: SummaryRequest | null) {
   return useQuery({
     queryKey: ['records', 'summary', body],

@@ -112,6 +112,31 @@ export interface RecordSummary {
   timezone: string | null
 }
 
+/** Where the records a query lists are, for a map: `field` is a location
+ * field of the kind listed, or (`field_schema`) of a kind above it. */
+export interface PointsRequest extends RecordSelectionBody {
+  field: string
+  field_schema?: string
+  limit?: number
+}
+
+export interface RecordPoint {
+  id: string
+  name: string | null
+  /** GeoJSON, WGS84 ([lon, lat]). */
+  geometry: { type: string; coordinates?: unknown; geometries?: unknown }
+}
+
+export interface RecordPoints {
+  schema_name: string
+  field: string
+  points: RecordPoint[]
+  /** How many listed records have a value; more than `points` when truncated. */
+  total: number
+  truncated: boolean
+  limit: number
+}
+
 /** Which records to move and where. */
 export interface MoveRecordsRequest extends RecordSelectionBody {
   to: string
@@ -448,6 +473,10 @@ export const recordsApi = {
   /** Group the records a query lists and work out measures over each group. */
   summary: (body: SummaryRequest) =>
     api.post<RecordSummary>('/records/summary', body),
+
+  /** Where the records a query lists are (id, name, geometry), for a map. */
+  points: (body: PointsRequest) =>
+    api.post<RecordPoints>('/records/points', body),
 
   /** The same summary as a table file (a last row of totals). */
   summaryFile: async (body: SummaryRequest, format: string) => {

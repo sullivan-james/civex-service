@@ -5,6 +5,7 @@ import type {
   SummaryMeasureColumn,
   SummaryRow,
 } from '../api/records'
+import type { FilterTreeWire } from './filterTree'
 import { MAX_SERIES, buildSummaryChart, noChartReason } from './summaryChart'
 
 const col = (over: Partial<SummaryGroupColumn>): SummaryGroupColumn => ({
@@ -58,7 +59,7 @@ const summary = (
   limit: 1000,
   timezone: null,
 })
-const w = (v: unknown) => ({ field: 'f', op: 'eq', value: v })
+const w = (v: unknown): FilterTreeWire => ({ field: 'f', op: 'eq', value: v })
 
 describe('a summary as a chart', () => {
   it('says why there is none', () => {

@@ -12,6 +12,17 @@ import type { View } from '../../api/views'
 import { finishExport } from '../files/testSupport'
 import { setFieldTypesForTest } from '../../hooks/useFieldTypes'
 
+// The map itself (OpenLayers) is not drawn here: a stand-in lists what it got.
+vi.mock('../geo/RecordsMap', () => ({
+  default: ({ points }: { points: { name: string | null }[] }) => (
+    <ul aria-label="map">
+      {points.map((p) => (
+        <li key={p.name}>{p.name}</li>
+      ))}
+    </ul>
+  ),
+}))
+
 // A chart's container measures its parent, which has no size here: draw at a
 // fixed size instead.
 vi.mock('recharts', async (importOriginal) => {
@@ -20,10 +31,13 @@ vi.mock('recharts', async (importOriginal) => {
   return {
     ...actual,
     ResponsiveContainer: ({ children }: { children: React.ReactElement }) =>
-      cloneElement(children as React.ReactElement<object>, {
-        width: 600,
-        height: 300,
-      }),
+      cloneElement(
+        children as React.ReactElement<{ width: number; height: number }>,
+        {
+          width: 600,
+          height: 300,
+        },
+      ),
   }
 })
 
@@ -1414,6 +1428,86 @@ describe('summary as a chart', () => {
       field: 'rate',
       op: 'is_null',
     })
+  })
+})
+
+describe('map', () => {
+  // The encounter has a location; a recording is placed where its encounter is.
+  const geoEncounter: Schema = {
+    ...encounter,
+    fields: [
+      ...encounter.fields,
+      {
+        ...encounter.fields[0],
+        id: 'encounter-place',
+        name: 'place',
+        type: 'geo',
+      },
+    ],
+  }
+  beforeEach(() => {
+    override = (url: URL, method: string) => {
+      if (url.pathname === '/api/schemas')
+        return json([geoEncounter, recording, selection])
+      if (url.pathname === '/api/settings/map')
+        return json({ tile_url: null, attribution: null })
+      if (url.pathname === '/api/records/points' && method === 'POST')
+        return json({
+          schema_name: 'encounter',
+          field: 'place',
+          points: [
+            {
+              id: 'r1',
+              name: 'R1',
+              geometry: { type: 'Point', coordinates: [-70, 42] },
+            },
+          ],
+          total: 3,
+          truncated: true,
+          limit: 1,
+        })
+      return undefined
+    }
+  })
+
+  it('is offered only where the listed kind, or one above it, has a location', async () => {
+    const first = renderExplorer({}, '/collections/hb?schema=recording')
+    expect(
+      await screen.findByRole('radio', { name: 'Map' }),
+    ).toBeInTheDocument()
+    first.unmount()
+    override = null // the plain schemas: no location anywhere
+    renderExplorer({}, '/collections/hb?schema=selection')
+    await screen.findByRole('radio', { name: 'Summary' })
+    expect(screen.queryByRole('radio', { name: 'Map' })).toBeNull()
+  })
+
+  it('maps exactly what the list shows, by the location above', async () => {
+    const filter = JSON.stringify({ field: 'rate', op: 'eq', value: '96' })
+    renderExplorer(
+      {},
+      `/collections/hb?schema=recording&q=96&filter=${encodeURIComponent(filter)}`,
+    )
+    await userEvent.click(await screen.findByRole('radio', { name: 'Map' }))
+    expect(search().get('show')).toBe('map')
+    await waitFor(() =>
+      expect(
+        calls.find((c) => c.path === '/api/records/points')?.body,
+      ).toMatchObject({
+        collection: 'hb',
+        schema_name: 'recording',
+        search: '96',
+        filter: JSON.parse(filter),
+        field: 'place',
+        field_schema: 'encounter',
+      }),
+    )
+    expect(
+      await within(await screen.findByRole('list', { name: 'map' })).findByText(
+        'R1',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Showing the first 1 of 3/)).toBeInTheDocument()
   })
 })
 
