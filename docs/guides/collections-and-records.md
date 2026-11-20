@@ -118,7 +118,8 @@ A collection's page (and a record's **Contains** tab) is one explorer:
   [Get files out](../how-to/export-files.md).
 - **Records | Their files** switches to the files of what's listed. See
   [Files](files.md#working-on-many-files-their-files). **Summary** counts and
-  averages them by group: see [Summaries](#summaries).
+  averages them by group, as a table or a chart: see [Summaries](#summaries).
+  **Map** shows them on a map: see [On a map](#on-a-map).
 - Tick rows (shift-click for a range) to **Delete** or **Run workflow on N**.
   Ticking a whole page offers **Select all N matching**.
 
@@ -154,6 +155,16 @@ exactly what it lists (the same level, filters, search and saved filter):
 - The last row is the totals over every record listed, each counted once.
 - Click a group to list its records: its condition is added to the filter.
 - **Download** saves the summary as CSV, Excel, TSV or JSON.
+- **Table | Chart** draws the same summary. The first grouping decides the
+  chart: dates by period are a line over time, numbers in ranges a histogram,
+  anything else bars. Periods and ranges with no records between the first
+  and the last are drawn as 0 (or as a gap, for an average). A second
+  grouping becomes the series: the five largest are drawn (stacked for
+  counts and totals, side by side otherwise) and the table has the rest.
+  When several things are shown, pick which one the chart plots. Records
+  with no value, and dates less precise than the period, are named under
+  the chart with their numbers instead of being placed on the axis. Click a
+  bar or a point to list its records, as with a row of the table.
 
 The choices are in the address (`show=summary&sum.by=site.region,taken:month&sum.m=count,mean:depth`),
 so a summary can be bookmarked or pinned. Scripts get the same from
@@ -162,6 +173,27 @@ so a summary can be bookmarked or pinned. Scripts get the same from
 `civex record summarise --in <collection> -s <kind> --by <field>[:month|:5]
 -m count -m mean:<field> [--csv]`. Which measures and groupings each type
 allows is in `GET /api/schemas/field-types`.
+
+### On a map
+
+**Map** appears beside **Summary** when the kind listed, or a kind above it,
+has a location field. It shows exactly the records the list shows (the same
+level, filters, search and saved filter); when the location belongs to a kind
+above ("Samples placed by their Site"), each record is drawn where that
+record is. With several location fields, **Place by** picks one.
+
+- Points that crowd together are drawn as one circle with a number. Click it
+  to zoom in, or, when they are all at one place, to see their names.
+- Lines and areas are drawn as they are.
+- Click a record to see its name, a link to its page.
+- The map frames the records each time the list changes. It shows the first
+  10,000 and says so when there are more.
+
+The base map is the same as the location editor's: coastlines that work
+offline, plus street detail when a tile address is set in
+**Settings → Map**. Scripts get the points from `POST /api/records/points`
+(the list's selectors plus `field`, and `field_schema` for a kind above).
+Drawing a box on the map to filter is not possible yet.
 
 ## Changing records
 

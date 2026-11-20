@@ -63,6 +63,9 @@ export interface BarBreakdownProps {
   valueLabel?: string
   /** A bar was clicked: its category's index and series key. */
   onBarClick?: (index: number, seriesKey: string) => void
+  /** Animate the marks in (default); off where the chart is redrawn as
+   * choices change, so it doesn't replay each time. */
+  animate?: boolean
 }
 
 /** Categorical bar chart for counts-by-X breakdowns (schema, plugin,
@@ -81,6 +84,7 @@ export function BarBreakdown({
   tooltipKey,
   valueLabel,
   onBarClick,
+  animate = true,
 }: BarBreakdownProps) {
   const isVertical = layout === 'vertical'
   const end: [number, number, number, number] = isVertical
@@ -166,6 +170,7 @@ export function BarBreakdown({
               strokeWidth={stacked ? 2 : 0}
               cursor={onBarClick ? 'pointer' : undefined}
               onClick={click(s.key)}
+              isAnimationActive={animate}
             />
           ))
         ) : (
@@ -175,6 +180,7 @@ export function BarBreakdown({
             radius={end}
             cursor={onBarClick ? 'pointer' : undefined}
             onClick={click('value')}
+            isAnimationActive={animate}
           >
             {(data as BarBreakdownDatum[]).map((entry, index) => (
               <Cell key={entry.label} fill={seriesColor(index, entry.color)} />

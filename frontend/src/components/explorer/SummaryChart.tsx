@@ -89,6 +89,7 @@ export function SummaryChart({
             formatValue={formatValue}
             valueLabel={valueLabel}
             onPointClick={drill}
+            animate={false}
             markers
           />
         ) : (
@@ -104,6 +105,7 @@ export function SummaryChart({
             formatValue={formatValue}
             valueLabel={valueLabel}
             onBarClick={drill}
+            animate={false}
           />
         )}
       </figure>

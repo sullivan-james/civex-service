@@ -51,6 +51,9 @@ export interface TimeSeriesChartProps {
   onPointClick?: (index: number, seriesKey: string) => void
   /** Mark each point (when there are few enough to tell apart). */
   markers?: boolean
+  /** Animate the marks in (default); off where the chart is redrawn as
+   * choices change, so it doesn't replay each time. */
+  animate?: boolean
 }
 
 /** Past this many points, a line has no markers (unless they are clickable). */
@@ -78,6 +81,7 @@ export function TimeSeriesChart({
   tooltipKey,
   onPointClick,
   markers: wantMarkers = false,
+  animate = true,
 }: TimeSeriesChartProps) {
   const ChartComponent = variant === 'area' ? AreaChart : LineChart
   const markers = wantMarkers && data.length <= MARKERS_UP_TO
@@ -164,6 +168,7 @@ export function TimeSeriesChart({
               stroke={color}
               strokeWidth={2}
               dot={markers || onPointClick ? dot(s.key, color) : false}
+              isAnimationActive={animate}
               activeDot={{ r: 5 }}
             />
           )
