@@ -856,6 +856,13 @@ class SchemaService:
         # A field filled from this file's name has nothing to read any more.
         self._rewrite_filename_rules(rule_holders, None)
 
+    @staticmethod
+    def check_restrictions(dtype: str, restrictions: dict[str, Any]) -> None:
+        """Refuse restrictions a field of `dtype` can't have (unknown keys,
+        values of the wrong shape): what `add_field`/`update_field` check
+        first, for a caller asking about rules before saving them."""
+        _validate_restriction_keys(dtype, restrictions)
+
     @_one_action
     def update_field(
         self,

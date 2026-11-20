@@ -372,6 +372,116 @@ def _summary_cell(value) -> str:
     return str(value)
 
 
+@app.command("check")
+def record_check(
+    collection: Optional[str] = typer.Option(
+        None, "--in", help="The collection (omit for every collection)"
+    ),
+    schema: Optional[str] = typer.Option(
+        None, "--schema", "-s", help="Only this kind of record (omit for every kind)"
+    ),
+    where: Optional[list[str]] = typer.Option(
+        None, "--where", "-w", help="Only records with field=value; repeatable"
+    ),
+    search: Optional[str] = typer.Option(
+        None, "--search", "-q", help="Only records whose values contain this text"
+    ),
+    within: Optional[str] = typer.Option(
+        None, "--within", help="Only records beneath this record (id or prefix)"
+    ),
+    issue: Optional[str] = typer.Option(
+        None,
+        "--issue",
+        "-i",
+        help="List the records with this issue instead: breaks_rule, blank, "
+        "duplicate_key, broken_reference or missing_file.",
+    ),
+    field: Optional[str] = typer.Option(
+        None, "--field", "-f", help="With --issue: only this field's issue"
+    ),
+    limit: int = typer.Option(
+        200, "--limit", "-n", help="With --issue: the most records to list"
+    ),
+) -> None:
+    """Check records for what needs a look: values their field's rules now
+    refuse (a rule tightened after they were entered), required fields left
+    empty, records sharing a unique key, links to records that are gone and
+    files that are nowhere.
+
+    The records are those `record find` would list with the same options.
+    Prints one line per kind, field and issue with a count; with --issue,
+    lists the records that have it (their ids are what `record set --id`
+    takes to put them right). Nothing is changed.
+    """
+    from civex.domain import quality
+    from civex.domain.query import RecordQuery
+
+    ctx = _ctx()
+    query = RecordQuery(
+        dataset=collection,
+        schema=schema,
+        within=within,
+        where=where or [],
+        search=search,
+    )
+    try:
+        if issue is not None:
+            found, total = ctx.quality_svc.records_with(
+                query, issue, field=field, limit=limit
+            )
+        else:
+            report = ctx.quality_svc.check(query)
+    except (NotFoundError, ValidationError, ValueError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+
+    if issue is not None:
+        if not found:
+            console.print("[info]No records have that issue.[/info]")
+            return
+        # One line each, the whole id first: what `record set --id` takes.
+        for f in found:
+            console.print(
+                f"{f.record_id}  {f.record_name or ''}  [dim]{f.message}[/dim]",
+                soft_wrap=True,
+            )
+        if total > len(found):
+            console.print(
+                f"[warning]{len(found)} of {total} shown; use --limit for more."
+                "[/warning]"
+            )
+        return
+
+    if not report.kinds:
+        console.print("[info]No records to check.[/info]")
+        return
+    table = Table("Kind", "Field", "Issue", "Records", "For example")
+    for kind in report.kinds:
+        for line in kind.issues:
+            example = line.examples[0] if line.examples else None
+            table.add_row(
+                kind.schema_label,
+                line.field_label,
+                quality.ISSUES[line.issue].label,
+                f"{line.count:,}",
+                f"{(example.record_name or example.record_id[:8])}: {example.message}"
+                if example
+                else "",
+            )
+    console.print(table)
+    if report.issues == 0:
+        console.print(
+            f"[success]Nothing to look at in {report.records:,} record(s).[/success]"
+        )
+    else:
+        console.print(
+            f"{report.records_with_issues:,} of {report.records:,} record(s) have "
+            "something to look at. List them with --issue (and --field)."
+        )
+
+
 @app.command("delete")
 def record_delete(
     record_id: str = typer.Argument(..., help="Record ID or short prefix"),

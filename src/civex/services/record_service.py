@@ -318,6 +318,24 @@ def _check_restrictions(
                 )
 
 
+def restriction_problem(
+    value: Any, field: FieldDTO, restrictions: dict[str, Any] | None = None
+) -> str | None:
+    """Why `field`'s rules (or `restrictions`, rules it would have) refuse a
+    stored value, or None: `_check_restrictions` asked without raising, for
+    the data check, which reports every value instead of stopping at one."""
+    try:
+        _check_restrictions(
+            value,
+            field.dtype,
+            field.restrictions if restrictions is None else restrictions,
+            field.name,
+        )
+    except ValidationError as e:
+        return str(e)
+    return None
+
+
 # Path separators and characters invalid in filenames on common filesystems —
 # template values come from user-entered field data, so they're untrusted.
 _UNSAFE_FILENAME_CHARS_RE = re.compile(r'[\\/\x00-\x1f:*?"<>|]')
@@ -1452,23 +1470,44 @@ class RecordService:
         the target must be a live record here or in a global collection. All
         the targets are fetched together, and each collection looked up once,
         however many references a record holds."""
+        for problem in self.reference_problems(wanted, dataset.id):
+            if problem:
+                raise ValidationError(problem)
+
+    def reference_problems(
+        self,
+        wanted: list[tuple[str, Any]],
+        dataset_id: uuid.UUID,
+        owners: dict[uuid.UUID, DatasetDTO | None] | None = None,
+    ) -> list[str | None]:
+        """For each (field name, record id) in `wanted`, why a record in
+        collection `dataset_id` can't hold that reference, or None: the target
+        must be a live record there or in a global collection. The one rule
+        behind a save and the data check. All the targets are fetched
+        together, and each collection looked up once (`owners` carries the
+        lookups across calls), however many references there are."""
         if not wanted:
-            return
-        ids: list[uuid.UUID] = []
-        for field_name, raw in wanted:
+            return []
+        ids: list[uuid.UUID | None] = []
+        for _, raw in wanted:
             try:
                 ids.append(uuid.UUID(str(raw)))
             except ValueError:
-                raise ValidationError(
-                    f"Field '{field_name}': '{raw}' is not a record id"
-                ) from None
-        targets = {t.id: t for t in self._records.list_by_ids(ids)}
-        owners: dict[uuid.UUID, DatasetDTO | None] = {}
+                ids.append(None)
+        found = [i for i in ids if i is not None]
+        targets = {t.id: t for t in self._records.list_by_ids(found)} if found else {}
+        owners = {} if owners is None else owners
+        problems: list[str | None] = []
         for (field_name, raw), target_id in zip(wanted, ids):
+            if target_id is None:
+                problems.append(f"Field '{field_name}': '{raw}' is not a record id")
+                continue
             target = targets.get(target_id)
             if target is None or target.deleted_at is not None:
-                raise ValidationError(f"Field '{field_name}': record {raw} not found")
-            if target.dataset_id == dataset.id:
+                problems.append(f"Field '{field_name}': record {raw} not found")
+                continue
+            if target.dataset_id == dataset_id:
+                problems.append(None)
                 continue
             if target.dataset_id not in owners:
                 owners[target.dataset_id] = self._datasets.get_by_id(
@@ -1477,13 +1516,16 @@ class RecordService:
                     with_count=False,
                 )
             owner = owners[target.dataset_id]
-            if owner is None or not can_reference(dataset.id, owner.id, owner.scope):
+            if owner is None or not can_reference(dataset_id, owner.id, owner.scope):
                 where = f"collection '{owner.name}'" if owner else "another collection"
-                raise ValidationError(
+                problems.append(
                     f"Field '{field_name}': record {str(target_id)[:8]} is in "
                     f"{where}, which is local. A record can only reference "
                     f"records in its own collection or in a global collection."
                 )
+                continue
+            problems.append(None)
+        return problems
 
     def referrer_counts(self, record_id: str) -> list[ReferrerGroupDTO]:
         """What points at this record: live records holding a reference to it,
