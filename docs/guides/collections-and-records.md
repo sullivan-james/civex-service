@@ -123,8 +123,8 @@ record. **Filters** say which rows you see. **Charts** count the rows you see.
   names of files. It never matches a file's hash, a reference or a location,
   so a short search like `a3` finds only records that show `a3`. Typing the
   start of a record's id (four characters or more) finds that record too.
-  Beside the box, **In all fields** can be narrowed to one field of the kind
-  listed (`qin` in the address).
+  A link or script can narrow it to one field (`qin` in the address,
+  `search_field` on the API).
 - **+ Filter** builds AND/OR conditions on this level's fields, a parent's, or
   any child's: "Visits that have a Sample whose `depth` is empty" is one
   condition. Reference values are picked by name.

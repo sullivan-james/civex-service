@@ -27,7 +27,6 @@ import {
   TriggerPopover,
   TableSkeleton,
   Field,
-  Select,
   Skeleton,
   SplitPane,
   Subheading,
@@ -688,23 +687,6 @@ export function RecordsExplorer({
               />
             </Field>
           </div>
-          {!quiet && !showFiles && x.searchFields.length > 1 && (
-            // Which field the search looks in: every one, or just one.
-            <Field label="Search in" hideLabel>
-              <Select
-                aria-label="Search in"
-                value={x.searchIn ?? ''}
-                onChange={(e) => patch({ qin: e.target.value || null })}
-              >
-                <option value="">In all fields</option>
-                {x.searchFields.map((f) => (
-                  <option key={f.name} value={f.name}>
-                    In {displayLabel(f.name, f.label)}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          )}
           {inside && listed && !aside && (
             <>
               {/* The list's own tools (filters, saved filters, columns,

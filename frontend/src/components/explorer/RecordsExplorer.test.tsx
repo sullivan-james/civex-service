@@ -2064,26 +2064,15 @@ describe('what this person may do', () => {
     beforeEach(() => setFieldTypesForTest(fieldTypes(['string'])))
     afterEach(() => setFieldTypesForTest(null))
 
-    it('offers every searchable field of the listed kind, and sends the one picked', async () => {
-      const user = userEvent.setup()
-      renderExplorer({}, '/collections/hb?q=stell')
-      const pick = await screen.findByRole('combobox', { name: 'Search in' })
-      const options = within(pick)
-        .getAllByRole('option')
-        .map((o) => o.textContent)
-      expect(options).toEqual(['In all fields', 'In Site', 'In Observer'])
-
-      await user.selectOptions(pick, 'site')
-      expect(search().get('qin')).toBe('site')
+    it('has no dropdown for it; a link that names a field still narrows the search', async () => {
+      renderExplorer({}, '/collections/hb?q=stell&qin=site')
       await waitFor(() =>
         expect(lastRecordCall().params.getAll('search_field')).toEqual([
           'site',
         ]),
       )
       expect(lastRecordCall().params.get('search')).toBe('stell')
-
-      await user.selectOptions(pick, '')
-      expect(search().get('qin')).toBeNull()
+      expect(screen.queryByRole('combobox', { name: 'Search in' })).toBeNull()
     })
   })
 })
