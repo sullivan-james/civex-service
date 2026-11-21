@@ -53,7 +53,6 @@ import { underRecord } from '../utils/auditFilter'
 import { DeletedFieldValues } from '../components/records/DeletedFieldValues'
 import { RecordFieldGrid } from '../components/records/RecordFieldGrid'
 import { usePermissions } from '../hooks/useMe'
-import { AddFieldRow } from '../components/schemas/AddFieldRow'
 import { MergeView } from '../components/sync/MergeView'
 import { ReviewStepper } from '../components/sync/ReviewStepper'
 import { RecordConflicts } from '../components/sync/RecordConflicts'
@@ -306,6 +305,15 @@ export default function RecordDetailPage() {
           ...(showContains
             ? [{ label: 'Files', onClick: () => navigate('?show=files') }]
             : []),
+          // Which fields a kind has is the schema's page, not a record's.
+          ...(schema
+            ? [
+                {
+                  label: 'Edit fields',
+                  onClick: () => navigate(`/schemas/${schema.id}`),
+                },
+              ]
+            : []),
           // Rarely wanted: the values of fields deleted since.
           ...((record.deleted_fields ?? []).length > 0
             ? [
@@ -404,9 +412,6 @@ export default function RecordDetailPage() {
               errors={saveErrors}
               onDismissError={() => updateRecord.reset()}
               marked={conflictLayout.marked}
-              footer={
-                schema && <AddFieldRow schema={schema} allSchemas={schemas} />
-              }
             />
             {canFold && (
               <Button

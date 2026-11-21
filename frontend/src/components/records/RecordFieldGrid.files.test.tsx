@@ -235,7 +235,7 @@ describe('saving the record with each file (a record page)', () => {
     expect(alert).toHaveTextContent('Not added — a.wav')
     expect(alert).toHaveTextContent("'a.wav' isn't an accepted file type")
     expect(onSave).not.toHaveBeenCalled()
-    expect(screen.getByText('empty')).toBeInTheDocument()
+    expect(screen.getByText('Add file')).toBeInTheDocument()
   })
 
   it('appends to a list, each file one request, and stops at the first refused', async () => {

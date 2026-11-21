@@ -8,7 +8,6 @@ import { ApiError } from '../../api/client'
 import { fieldSaveErrors } from './saveErrors'
 import { isPendingFile, pendingFile, type PendingFile } from './pendingFiles'
 import { formatBytes, toInputProps } from '../../utils/restrictions'
-import { fromFilenameRule } from '../../utils/filenameExtract'
 import { displayLabel } from '../../utils/naming'
 import { isGeometry, parseLocation, type Geometry } from '../../utils/geo'
 import { LocatorMap } from '../ui/LocatorMap'
@@ -248,12 +247,8 @@ function FileControl({
           </div>
         ),
       )}
-      {items.length === 0 && (
-        <span className="inline-flex items-center rounded-full bg-attention-subtle px-3 py-1 text-xs font-semibold text-attention-emphasis">
-          empty
-        </span>
-      )}
       <FileDropZone
+        compact
         multiple={multiple}
         accept={accept}
         disabled={uploading || !!cannotAdd}
@@ -261,12 +256,7 @@ function FileControl({
         inputLabel={`Add ${label}`}
         onFiles={pick}
       >
-        {multiple ? undefined : items.length ? (
-          <span>
-            Drop a file here or <span className="text-accent">browse</span> to
-            replace it
-          </span>
-        ) : undefined}
+        {multiple ? 'Add files' : items.length ? 'Replace' : 'Add file'}
       </FileDropZone>
       {current && <UploadProgress state={current} onCancel={cancel} />}
       {stopped && !current && (
@@ -469,18 +459,11 @@ export function EditableValue({
 }
 
 /** What the schema demands of a field, as short phrases: "0–100", "≤ 5 MB".
- * `fields` (the record's) names the file field a value is read from. */
-export function restrictionHints(field: Field, fields?: Field[]): string[] {
+ * (That a value is read from a file's name is not said here: it is the
+ * schema's business, and the value can be edited like any other.) */
+export function restrictionHints(field: Field): string[] {
   const r = (field.restrictions ?? {}) as Record<string, unknown>
   const hints: string[] = []
-  const rule = fromFilenameRule(r)
-  if (rule) {
-    const source = fields?.find((f) => f.name === rule.field)
-    const name = source ? displayLabel(source.name, source.label) : rule.field
-    hints.push(
-      `Filled from ${name}'s name when the file changes; you can still edit it.`,
-    )
-  }
   const range = (lo: unknown, hi: unknown, from = '≥', to = '≤') => {
     if (lo !== undefined && hi !== undefined) hints.push(`${lo} – ${hi}`)
     else if (lo !== undefined) hints.push(`${from} ${lo}`)
@@ -584,7 +567,7 @@ export function RecordFieldGrid({
       <dl className="grid grid-cols-[minmax(8rem,14rem)_1fr] items-start gap-x-6 gap-y-3">
         {fields.map((field) => {
           const numeric = field.type === 'integer' || field.type === 'float'
-          const hints = restrictionHints(field, fields)
+          const hints = restrictionHints(field)
           return (
             <div key={field.name} className="contents">
               <dt
