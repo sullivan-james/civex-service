@@ -121,10 +121,12 @@ def _wrong(ctx: AppContext) -> list[str]:
         if kind == "dataset":
             expected.pop("schemas", None)
             expected.pop("schema_ids", None)
-        if expected != now:
-            differs = sorted(
-                k for k in set(expected) | set(now) if expected.get(k) != now.get(k)
-            )
+        # An attribute added since an entry was written, and still unset, is
+        # absent there and None now: the same to every reader.
+        differs = sorted(
+            k for k in set(expected) | set(now) if expected.get(k) != now.get(k)
+        )
+        if differs:
             problems.append(
                 f"{kind} {entity_id}: replaying its history (last: {last.action}) "
                 f"gives something else on {differs}"

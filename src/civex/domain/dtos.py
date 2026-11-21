@@ -123,7 +123,9 @@ class SchemaDTO:
             "parent_id": str(self.parent_id) if self.parent_id else None,
             "display_template": self.display_template,
             "unique_keys": self.unique_keys,
-            "charts": self.charts,
+            # None when none are set, as before kinds had charts: an entry
+            # written then says the same thing as one written now.
+            "charts": self.charts or None,
             "created_at": self.created_at.isoformat(),
             "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
         }
