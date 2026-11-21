@@ -119,3 +119,28 @@ class ReconcileResult:
     created: list[str] = field(default_factory=list)
     dropped: list[str] = field(default_factory=list)
     seconds: float = 0.0
+    # Builds that stopped to let a save through, and were started again.
+    yielded: int = 0
+    # Stopped before the end (the host is shutting down): not in step yet.
+    stopped: bool = False
+
+
+@dataclass
+class IndexProgress:
+    """How far a reconcile has got, for the status bar and the CLI's bar:
+    building the `done + 1`th of `total` indexes, the one on `field_label` of
+    `schema_label`, or `waiting` for a quiet moment to start it (on SQLite a
+    build holds saves back, so it waits until nobody has saved for a few
+    seconds, and stops to let a save through: `yielded` counts those)."""
+
+    done: int
+    total: int
+    schema_label: str = ""
+    field_label: str = ""
+    waiting: bool = False
+    yielded: int = 0
+
+
+class IndexBuildYielded(Exception):
+    """A build stopped part way to let a save through (SQLite); nothing of it
+    was kept, and it is started again once saving has gone quiet."""

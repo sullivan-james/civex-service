@@ -315,17 +315,22 @@ def format_bytes(b: float | None) -> str:
     return f"{b / 1024:.0f} KB"
 
 
-def reconcile_indexes(ctx: AppContext) -> None:
-    """Bring the field indexes in step in the foreground (the server does it on
-    a thread of its own) and say what changed. Call after `ctx.commit()`."""
-    if ctx.index_svc.in_step():
-        return
-    with console.status("Updating the field indexes…"):
-        result = ctx.index_svc.reconcile()
-        ctx.commit()
-    if result.created:
+def queue_indexes(ctx: AppContext) -> None:
+    """After a command changed which fields are indexed (or which database is
+    used): have the indexes brought in step in the background and say so.
+    Never builds here: a build on a big table takes minutes."""
+    from civex.services import index_jobs as jobs
+
+    try:
+        who = jobs.queue_upkeep(ctx)
+    except Exception as e:  # noqa: BLE001 - the change is saved; say so and go on
         console.print(
-            f"  built {len(result.created)} index(es) in {result.seconds:.1f}s"
+            f"[warning]Couldn't start updating the indexes ({e}); "
+            "`civex db indexes --reconcile` does it now.[/warning]"
         )
-    if result.dropped:
-        console.print(f"  dropped {len(result.dropped)} index(es) nothing needs")
+        return
+    if who != jobs.IN_STEP:
+        console.print(
+            "[dim]Updating the indexes in the background; lists work meanwhile, "
+            "only slower. `civex db indexes` shows when they are built.[/dim]"
+        )

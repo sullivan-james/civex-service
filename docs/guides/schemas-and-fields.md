@@ -336,7 +336,7 @@ million records) and makes saving records of that type slightly slower.
 civex schema index sample depth          # index it
 civex schema index sample depth --off    # stop
 civex db indexes                         # what is indexed, and built yet
-civex db indexes --reconcile             # build what is missing, drop the rest
+civex db indexes --reconcile             # build what is missing now, showing progress
 ```
 
 In the app: the field's settings, **Indexed**.
@@ -347,11 +347,17 @@ In the app: the field's settings, **Indexed**.
   that defines it.
 - An index belongs to **this computer's database**: it is a setting in
   `config.toml` (`[db] indexed_fields`, by field id, so renaming a field
-  keeps it), never synced or in the history. Moving the database
-  (`civex db move`) builds the same indexes in the new one.
-- `civex serve` builds and drops indexes in the background and keeps the
-  database's query statistics fresh; the command line does it at once. On a
-  big table building one takes a while, and on SQLite other saves wait for it.
+  keeps it), never synced or in the history. After moving the database
+  (`civex db move`) the same indexes are built in the new one.
+- Indexes are always built and dropped **in the background**: by a running
+  `civex serve` (the status bar shows "Speeding up sorting on …"), or by a
+  process the command that changed them starts, so the command returns at
+  once. Lists work meanwhile, only slower. `civex db indexes --reconcile` does
+  it in front of you instead.
+- On a big table a build takes a while (a minute or two at a million records).
+  On SQLite a build gives way whenever someone saves a record, and starts
+  again once nobody has saved for a few seconds, so saving never waits for
+  it; under constant saving an index waits for a pause.
 - Indexes help sorting and filtering **inside a collection**. Counting every
   record of a type, and text search, still read every record.
 

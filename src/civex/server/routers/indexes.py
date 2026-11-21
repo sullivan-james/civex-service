@@ -11,20 +11,24 @@ from civex.server.deps import get_ctx
 from civex.server.models import (
     FieldIndexReportResponse,
     FieldIndexResponse,
+    IndexProgressResponse,
     SetFieldIndexRequest,
 )
-from civex.services.index_jobs import index_jobs
+from civex.services.index_jobs import index_jobs, upkeep_running
 
 router = APIRouter(tags=["db"])
 
 
 def _report(ctx: AppContext) -> FieldIndexReportResponse:
     report = ctx.index_svc.status()
+    progress = index_jobs.progress
     return FieldIndexReportResponse(
         fields=[FieldIndexResponse.from_state(s) for s in report.fields],
         stale=report.stale,
         in_step=report.in_step,
-        building=index_jobs.building,
+        building=progress is not None,
+        progress=IndexProgressResponse(**vars(progress)) if progress else None,
+        elsewhere=progress is None and upkeep_running(ctx),
         error=index_jobs.error,
     )
 
@@ -33,7 +37,8 @@ def _report(ctx: AppContext) -> FieldIndexReportResponse:
 def list_field_indexes(ctx: AppContext = Depends(get_ctx)):
     """Every field that has, or should have, an index in this computer's
     database (because it is part of a uniqueness key, or a person asked for
-    it), whether each is built yet, and any managed index nothing wants."""
+    it), whether each is built yet, any managed index nothing wants, and how
+    far a build running in the background has got (the status bar)."""
     return _report(ctx)
 
 
@@ -42,8 +47,9 @@ def list_field_indexes(ctx: AppContext = Depends(get_ctx)):
 )
 def reconcile_field_indexes(ctx: AppContext = Depends(get_ctx)):
     """Build the missing field indexes and drop the unwanted ones, in the
-    background (it can take a while on a big table, and on SQLite holds the
-    database meanwhile). Answers at once with the state before it starts."""
+    background (it can take a while on a big table; on SQLite each build
+    waits for a moment when nobody is saving and gives way to saves). Answers
+    at once with the state before it starts."""
     index_jobs.request()
     return _report(ctx)
 

@@ -113,7 +113,8 @@ def populated(ctx: AppContext, make_schema, make_collection) -> Engine:
     # file_references).
     ctx.release_svc.create("v1", "A release", authors=[{"name": "A. Person"}])
     ctx.commit()
-    # A field index, which no migration makes: a copy must build it too.
+    # A field index, which no migration makes: the copy leaves it out (it is
+    # this computer's choice, built in the background after a switch).
     ctx.index_svc.set_indexed("patient", "name", True)
     ctx.index_svc.reconcile()
     ctx.commit()
@@ -276,7 +277,11 @@ def test_copy_carries_every_row_and_verifies(populated: Engine, tmp_path: Path):
     assert row_counts(target) == row_counts(populated)
     assert not is_empty(target)
     assert _records(target) == _records(populated)
-    assert _field_indexes(target) == _field_indexes(populated) != set()
+    # Field indexes aren't copied: building them on a big table takes minutes,
+    # and the move would wait; the switched-to database gets them built in
+    # the background (tests/services/test_db_move_service.py).
+    assert _field_indexes(populated) != set()
+    assert _field_indexes(target) == set()
     # Rows derived from data come across too, not re-derived or dropped.
     assert (
         result.counts["record_references"]
@@ -489,7 +494,7 @@ def test_round_trip_through_postgres(
     to_sqlite = copy_database(pg, back)
     assert to_sqlite.verified, to_sqlite.problems
     assert _records(back) == _records(populated)
-    assert _field_indexes(pg) == _field_indexes(back) == _field_indexes(populated)
+    assert _field_indexes(pg) == _field_indexes(back) == set()
     _assert_same_data(populated, pg)  # every table, both directions
     _assert_same_data(populated, back)
 

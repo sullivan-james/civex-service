@@ -5,7 +5,7 @@ from typing import Any, Optional
 import typer
 from rich.table import Table
 
-from civex.cli.utils import get_ctx as _ctx, reconcile_indexes
+from civex.cli.utils import get_ctx as _ctx, queue_indexes
 from civex.console import console
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
 from civex.domain.query import RecordQuery
@@ -161,7 +161,7 @@ def schema_add_unique(
     console.print(
         f"[success]'{name}' records must now have a unique ({', '.join(fields)}).[/success]"
     )
-    reconcile_indexes(ctx)
+    queue_indexes(ctx)
 
 
 @app.command("remove-unique")
@@ -185,7 +185,7 @@ def schema_remove_unique(
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
     console.print(f"[success]Removed the unique ({', '.join(fields)}).[/success]")
-    reconcile_indexes(ctx)
+    queue_indexes(ctx)
 
 
 @app.command("index")
@@ -199,8 +199,9 @@ def schema_index(
     Sorting by an indexed field, and filtering it by a value or a range, is
     fast however many records there are; saving records of its kind gets
     slightly slower. The choice is a setting of this computer's database,
-    never synced. The index is built at once (a while on a big table). A
-    field in a uniqueness key is always indexed.
+    never synced. The index is built in the background (a while on a big
+    table; lists work meanwhile, only slower). A field in a uniqueness key is
+    always indexed.
     """
     ctx = _ctx()
     try:
@@ -214,7 +215,7 @@ def schema_index(
         console.print(f"[success]'{state.field_name}' is indexed ({why}).[/success]")
     else:
         console.print(f"[success]'{state.field_name}' is no longer indexed.[/success]")
-    reconcile_indexes(ctx)
+    queue_indexes(ctx)
 
 
 _WHY = {"unique_key": "part of a uniqueness key", "chosen": "chosen"}

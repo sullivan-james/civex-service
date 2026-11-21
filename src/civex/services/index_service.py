@@ -21,20 +21,24 @@ also copies the indexes themselves.
 `reconcile` builds what is wanted and missing and drops managed indexes nothing
 wants (field or schema deleted, key removed, choice taken back), then refreshes
 the planner's statistics, without which SQLite ignores a new index. It can be
-slow on a big table, so the server runs it on its own thread (`index_jobs`) and
-the CLI in the foreground.
+slow on a big table, so it always runs in the background (`index_jobs`: the
+server's thread, or a process of its own started by the CLI), never in a
+request; until an index exists, lists are just as right, only slower.
 """
 
 from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Callable
 
 from civex.config import ConfigStore
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.field_index import (
     BULK_WRITE,
     INDEX_BUILT,
+    IndexBuildYielded,
+    IndexProgress,
     PERIODIC,
     CHOSEN,
     UNIQUE_KEY,
@@ -48,6 +52,9 @@ from civex.domain.field_index import (
 from civex.domain.dtos import FieldDTO, SchemaDTO
 from civex.domain.permissions import EVERYTHING, Permissions
 from civex.repositories.protocols import FieldIndexRepository
+
+# On SQLite a build starts only after nobody has saved for this long.
+QUIET_SECONDS = 5.0
 
 
 class IndexService:
@@ -162,26 +169,90 @@ class IndexService:
 
     # -- keeping the database in step ---------------------------------------------
 
-    def reconcile(self) -> ReconcileResult:
+    def reconcile(
+        self,
+        progress: Callable[[IndexProgress], None] | None = None,
+        should_stop: Callable[[], bool] | None = None,
+    ) -> ReconcileResult:
         """Build every wanted index that is missing and drop every managed
         index nothing wants, then refresh the planner's statistics if anything
-        was built. Call with nothing pending in the context (see
-        `LocalFieldIndexRepository`); on SQLite commit afterwards."""
+        was built. Each step is committed by itself (call with nothing
+        pending). Slow on a big table, so it is always run in the background
+        (`index_jobs`) or when a person asks in the foreground
+        (`civex db indexes --reconcile`), never inside a request.
+
+        On SQLite a build holds saves back, so each one waits for a moment
+        when nobody has saved for `QUIET_SECONDS`, and gives way when a save
+        comes along (`IndexBuildYielded`), to be started again once it is
+        quiet. `should_stop` is asked while waiting: the result then says
+        `stopped`."""
         started = time.monotonic()
+        report = progress or (lambda p: None)
+        stop = should_stop or (lambda: False)
         have = self._repo.existing()
-        specs = {s.name: s for s in self.specs()}
+        wanted = self._wanted()
+        todo = sorted(
+            (
+                (schema, f)
+                for schema, f, _ in wanted.values()
+                if FieldIndexSpec(f.id, f.schema_id, "text").name not in have
+            ),
+            key=lambda sf: (sf[0].name, sf[1].name),
+        )
+        stale = sorted(n for n in have if field_of(n) not in wanted)
         result = ReconcileResult()
-        for name in sorted(have - specs.keys()):
-            self._repo.drop(name)
-            result.dropped.append(name)
-        for name, spec in sorted(specs.items()):
-            if name not in have:
-                self._repo.create(spec)
-                result.created.append(name)
-        if result.created:
-            self._repo.refresh_statistics(INDEX_BUILT)
+        with self._repo.upkeep():
+            for name in stale:
+                if not self._wait_turn(lambda: None, stop):
+                    result.stopped = True
+                    break
+                self._repo.drop(name)
+                result.dropped.append(name)
+            for done, (schema, f) in enumerate(todo):
+                if result.stopped:
+                    break
+                spec = FieldIndexSpec(f.id, f.schema_id, kind_of(f.dtype) or "text")
+
+                def state(waiting: bool, _s=schema, _f=f, _d=done) -> IndexProgress:
+                    return IndexProgress(
+                        done=_d,
+                        total=len(todo),
+                        schema_label=_s.display_name,
+                        field_label=_f.display_name,
+                        waiting=waiting,
+                        yielded=result.yielded,
+                    )
+
+                while True:
+                    if not self._wait_turn(lambda: report(state(True)), stop):
+                        result.stopped = True
+                        break
+                    report(state(False))
+                    try:
+                        self._repo.create(spec)
+                    except IndexBuildYielded:
+                        result.yielded += 1
+                        continue
+                    result.created.append(spec.name)
+                    break
+            if result.created:
+                self._repo.refresh_statistics(INDEX_BUILT)
+        if todo and not result.stopped:
+            report(IndexProgress(done=len(todo), total=len(todo)))
         result.seconds = time.monotonic() - started
         return result
+
+    def _wait_turn(self, waiting: Callable[[], None], stop: Callable[[], bool]) -> bool:
+        """Wait until nobody has saved for `QUIET_SECONDS`; False if told to
+        stop meanwhile."""
+        while True:
+            if stop():
+                return False
+            quiet = self._repo.quiet_for()
+            if quiet >= QUIET_SECONDS:
+                return True
+            waiting()
+            time.sleep(min(1.0, QUIET_SECONDS - quiet))
 
     def in_step(self) -> bool:
         """Whether the database has exactly the indexes wanted (cheap: the

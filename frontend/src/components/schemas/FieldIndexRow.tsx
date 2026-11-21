@@ -7,7 +7,8 @@ import { CheckRow } from '../ui'
 const EXPLAIN =
   'Makes sorting and filtering by this field faster on this computer, and ' +
   'saving records of this kind slightly slower. A setting of this ' +
-  "computer's database: it isn't shared with other devices."
+  "computer's database: it isn't shared with other devices. Built in the " +
+  'background; lists work meanwhile, only slower.'
 
 /** The field's "Indexed" switch. Takes effect at once (it is not part of the
  * form's Save): the server builds or drops the index in the background. A

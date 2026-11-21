@@ -115,8 +115,8 @@ def _order_by(sort: list[SortKey] | None) -> list[Any]:
 def _after_key(terms: list[tuple[Any, bool, bool]], key: list[Any]) -> Any:
     """WHERE: the row sorts strictly after the row whose term values are
     `key`, under the ordering of `terms` (nulls last, whatever the direction).
-    `terms` ends in the ascending, non-null (created_at, id) pair that makes
-    the ordering total; that pair is one row comparison, which PostgreSQL
+    `terms` ends in the non-null (created_at, id) pair, both in the last sort
+    key's direction, that makes the ordering total; that pair is one row comparison, which PostgreSQL
     turns into an index range, where the equivalent OR of two branches reads
     from the start of the index and filters."""
     clauses: list[Any] = []
@@ -132,8 +132,9 @@ def _after_key(terms: list[tuple[Any, bool, bool]], key: list[Any]) -> Any:
             same = value == last
         clauses.append(and_(*equal, after))
         equal.append(same)
-    (when, _, _), (ident, _, _) = terms[-2:]
-    clauses.append(and_(*equal, tuple_(when, ident) > tuple_(key[-2], key[-1])))
+    (when, tail_desc, _), (ident, _, _) = terms[-2:]
+    here, there = tuple_(when, ident), tuple_(key[-2], key[-1])
+    clauses.append(and_(*equal, here < there if tail_desc else here > there))
     return or_(*clauses)
 
 
@@ -421,9 +422,12 @@ class LocalRecordRepository:
         that row, so cost doesn't grow with depth and rows added or removed
         meanwhile neither repeat nor skip. created_at and id close the
         ordering, so it is total."""
+        # The closing pair follows the last sort key's direction, as
+        # `_tie_breakers` does for every other path.
+        tail = bool(query.sort and query.sort[-1].descending)
         terms = _sort_terms(query.sort) + [
-            (Record.created_at, False, False),
-            (Record.id, False, False),
+            (Record.created_at, tail, False),
+            (Record.id, tail, False),
         ]
         directions = "".join("d" if d else "a" for _, d, _ in terms)
         q = _base_query(self._s, query, self._pg)
@@ -432,7 +436,7 @@ class LocalRecordRepository:
                 raise ValidationError("The cursor does not belong to this query")
             q = q.filter(_after_key(terms, after_key))
         q = q.add_columns(*[t[0].label(f"_k{i}") for i, t in enumerate(terms)])
-        q = q.order_by(*_order_by(query.sort), Record.created_at, Record.id)
+        q = q.order_by(*_order_by(query.sort), *_tie_breakers(query.sort))
         rows = q.limit(limit + 1).all()
         more = len(rows) > limit
         rows = rows[:limit]

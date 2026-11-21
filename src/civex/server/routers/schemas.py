@@ -400,6 +400,10 @@ def set_unique_keys(
         raise HTTPException(404, detail=str(e))
     except ValidationError as e:
         raise HTTPException(422, detail=str(e))
+    # A key's fields are indexed (each save looks the key up): in the background.
+    from civex.services.index_jobs import index_jobs
+
+    index_jobs.request()
     return SchemaResponse.from_dto(dto)
 
 

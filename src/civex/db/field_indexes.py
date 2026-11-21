@@ -24,15 +24,14 @@ drift check ignore them.
 
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
 from sqlalchemy import column, text
 from sqlalchemy.engine import Connection
 
 from civex.db.field_values import FieldValue
-from civex.db.models import Field, Record
-from civex.domain.field_index import PREFIX, FieldIndexSpec, field_of, kind_of
+from civex.db.models import Record
+from civex.domain.field_index import PREFIX, FieldIndexSpec, field_of
 
 _LIKE = PREFIX.replace("_", "\\_") + "%"
 
@@ -114,33 +113,3 @@ def drop(conn: Connection, name: str) -> None:
     conn.exec_driver_sql(f"DROP INDEX{concurrently} IF EXISTS {name}")
     if conn.dialect.name == "postgresql":
         conn.exec_driver_sql(f"DROP STATISTICS IF EXISTS {stats_name(name)}")
-
-
-def specs_for(conn: Connection, field_ids: list[uuid.UUID]) -> list[FieldIndexSpec]:
-    """What each of these fields' index is, read from the fields table (for
-    copying the managed indexes a database has to another, e.g. a move).
-    Deleted and unindexable fields are left out."""
-    if not field_ids:
-        return []
-    rows = conn.execute(
-        Field.__table__.select().where(
-            Field.__table__.c.id.in_(field_ids), Field.__table__.c.deleted_at.is_(None)
-        )
-    ).mappings()
-    specs = []
-    for row in rows:
-        kind = kind_of(row["dtype"])
-        if kind is not None:
-            specs.append(FieldIndexSpec(row["id"], row["schema_id"], kind))
-    return specs
-
-
-def copy_indexes(source: Connection, target: Connection) -> list[str]:
-    """Build on `target` the managed indexes `source` has: a moved database
-    answers as fast as the one it came from. Returns the names built."""
-    fields = [f for f in (field_of(n) for n in sorted(existing(source))) if f]
-    built = []
-    for spec in specs_for(source, fields):
-        create(target, spec)
-        built.append(spec.name)
-    return built

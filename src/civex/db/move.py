@@ -26,7 +26,6 @@ from typing import Any, Callable
 from sqlalchemy import Table, func, inspect, select, text
 from sqlalchemy.engine import Connection, Engine
 
-from civex.db import field_indexes
 from civex.db.models import Base
 
 # Columns that are derived rather than stored: `records.search_vector` exists
@@ -264,18 +263,6 @@ def _analyze(engine: Engine) -> None:
         conn.execute(text("ANALYZE"))
 
 
-def _copy_field_indexes(source: Engine, target: Engine) -> None:
-    """Build on the new database the field indexes this computer chose for the
-    old one (`db/field_indexes.py`): they are not in the migrations, so a
-    copy would otherwise answer slower than the database it replaced."""
-    with source.connect() as src, target.connect() as dst:
-        if target.dialect.name == "postgresql":
-            dst = dst.execution_options(isolation_level="AUTOCOMMIT")
-        field_indexes.copy_indexes(src, dst)
-        if target.dialect.name != "postgresql":
-            dst.commit()
-
-
 def copy_database(
     source: Engine,
     target: Engine,
@@ -335,7 +322,6 @@ def copy_database(
 
     state.phase, state.message = "finalize", "Optimising the new database"
     report(state)
-    _copy_field_indexes(source, target)
     _analyze(target)
 
     return CopyResult(

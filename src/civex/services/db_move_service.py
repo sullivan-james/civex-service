@@ -399,6 +399,16 @@ def run_move(
         _active.release()
 
 
+def _indexes_soon() -> None:
+    """The field indexes are this computer's choice, not data, and aren't
+    copied: the database just switched to gets them built in the background
+    by the server's `index_jobs` (the CLI queues them itself)."""
+    from civex.services.index_jobs import index_jobs
+
+    if index_jobs.running:
+        index_jobs.request()
+
+
 def _run_move(
     config: Config,
     spec: TargetSpec,
@@ -456,6 +466,7 @@ def _run_move(
             )
             save_config(config)
             record.status = "done"
+            _indexes_soon()
     except engine_move.MoveCancelled:
         record.status, record.error = "cancelled", "Cancelled. Nothing was changed."
     except Exception as exc:
@@ -500,6 +511,7 @@ def revert(config: Config, move_id: str) -> MoveRecord:
         config.db, url=record.from_url, docker_managed=record.from_docker_managed
     )
     save_config(config)
+    _indexes_soon()
     record.reverted_at = _now()
     _save(config, record)
     return record

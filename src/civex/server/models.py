@@ -3734,6 +3734,22 @@ class SetFieldIndexRequest(BaseModel):
     )
 
 
+class IndexProgressResponse(BaseModel):
+    done: int = Field(description="Indexes built so far in this round.")
+    total: int = Field(description="Indexes this round builds.")
+    schema_label: str = Field(
+        description="The kind of record the one being built is on."
+    )
+    field_label: str = Field(description="The field the one being built is on.")
+    waiting: bool = Field(
+        description="Waiting for a moment when nobody is saving (SQLite: a build "
+        "holds saves back, so it waits for them and gives way to them)."
+    )
+    yielded: int = Field(
+        description="Times a build gave way to a save and started again."
+    )
+
+
 class FieldIndexReportResponse(BaseModel):
     fields: list[FieldIndexResponse] = Field(
         description="Every field that should have an index, built or not."
@@ -3746,6 +3762,13 @@ class FieldIndexReportResponse(BaseModel):
     )
     building: bool = Field(
         description="Whether the server is building or dropping indexes now."
+    )
+    progress: IndexProgressResponse | None = Field(
+        default=None, description="How far the server's build has got, while it runs."
+    )
+    elsewhere: bool = Field(
+        default=False,
+        description="Another civex process (the CLI's) is updating the indexes now.",
     )
     error: str | None = Field(
         default=None, description="Why the last attempt to keep them in step failed."
