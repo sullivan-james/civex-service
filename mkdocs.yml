@@ -134,6 +134,7 @@ nav:
           - civex automation: reference/cli/automation.md
           - civex bundle: reference/cli/bundle.md
           - civex collection: reference/cli/collection.md
+          - civex dashboard: reference/cli/dashboard.md
           - civex db: reference/cli/db.md
           - civex files: reference/cli/files.md
           - civex history: reference/cli/history.md
