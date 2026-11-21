@@ -34,6 +34,8 @@ import {
 } from '../ui'
 import {
   AlertTriangle,
+  BarChart3,
+  ListFilter,
   PanelRightOpen,
   ChevronDown,
   Columns3,
@@ -647,8 +649,14 @@ export function RecordsExplorer({
           <ScopeTrail items={trail} heading={listedLabel} />
         )}
         {inside && kindsInside.length > 0 && (
-          // What is inside, a kind at a time: one click each.
-          <div className="flex flex-wrap gap-2" aria-label="Kinds inside">
+          // What it contains, a kind at a time: the section's own heading.
+          <div
+            className="flex flex-wrap items-center gap-2"
+            aria-label="Kinds inside"
+          >
+            <Subheading as="h2" className="mr-1">
+              Contains
+            </Subheading>
             {kindsInside.map((l) => (
               <Chip
                 key={l.schema.id}
@@ -696,6 +704,27 @@ export function RecordsExplorer({
                 ))}
               </Select>
             </Field>
+          )}
+          {inside && listed && !aside && (
+            <>
+              {/* The list's own tools (filters, saved filters, columns,
+                  export, ticking rows), opened here. */}
+              <Button
+                size="sm"
+                aria-pressed={tools || !!x.filter}
+                disabled={!!x.filter}
+                onClick={() => setTools((on) => !on)}
+              >
+                <ListFilter size={14} /> Filter
+              </Button>
+              <Button
+                size="sm"
+                aria-pressed={!chartsHidden}
+                onClick={() => setLayout(chartsHidden ? 'both' : 'records')}
+              >
+                <BarChart3 size={14} /> Charts
+              </Button>
+            </>
           )}
           <div className="ml-auto flex flex-wrap items-center gap-2">
             {toolbarActions}
@@ -810,6 +839,8 @@ export function RecordsExplorer({
             fields={x.filterFields}
             listedSchema={listed?.name ?? ''}
             records={listed ? records : undefined}
+            // Beside a Filter button that opened this, it adds a condition.
+            addLabel={inside ? 'Add filter' : undefined}
             onChange={(filter) => patch({ filter })}
           />
         )}
@@ -937,22 +968,11 @@ export function RecordsExplorer({
                         </Button>
                       )}
                       <div className="ml-auto flex items-center gap-2">
-                        {chartsHidden && listed && !aside && (
+                        {chartsHidden && listed && !aside && !inside && (
                           // Folded away: the way back says what it opens, at
                           // the right-hand edge of the table.
                           <Button size="sm" onClick={() => setLayout('both')}>
                             <PanelRightOpen size={14} /> Charts
-                          </Button>
-                        )}
-                        {inside && listed && !aside && !x.filter && (
-                          // The list's own tools, opened here.
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            aria-expanded={tools}
-                            onClick={() => setTools((on) => !on)}
-                          >
-                            {tools ? 'Fewer tools' : 'Filter and chart'}
                           </Button>
                         )}
                       </div>
@@ -1188,9 +1208,7 @@ export function RecordsExplorer({
                             showAddedColumn={!allKinds}
                             sort={sort}
                             onSortChange={toggleSort}
-                            selection={
-                              dataset && !quiet ? picked.table : undefined
-                            }
+                            selection={dataset ? picked.table : undefined}
                             totals={
                               !quiet && totalsAsk.length > 0 && totals.data
                                 ? {

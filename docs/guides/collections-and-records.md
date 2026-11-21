@@ -95,12 +95,14 @@ any unique prefix of it works wherever an id is asked for.
 
 ### The explorer
 
-A collection's page is its records, in one explorer. A record's page shows
-its fields (the first few, with **Show all**, when it has records inside it)
-and then **Inside this …**: a chip for each kind inside with its count, a
-search, and the rows, each a link to that record. **Charts** opens the
-charts beside them, and **Filter and chart** opens the list's other tools
-(filters, saved filters, columns, export, ticking rows) right there. Files, Exports, Activity and
+A collection's page is its records, in one explorer. A record's page says
+what kind of thing it is above its name, shows its fields (the first few,
+with **Show all**, when it has records inside it) and then what it
+**Contains**: a chip for each kind inside with its count, a search, and the
+rows, each a link to that record. It is the same explorer with some of it
+folded: **Filter** beside the search opens the filters, saved filters,
+columns and export, and **Charts** opens the charts. Rows are ticked there
+as anywhere, to edit, run a workflow on, move or delete. Files, Exports, Activity and
 the collection's details are in the **⋯** menu at the top of the page.
 
 The explorer has three ideas. **Records** are the rows: each row is one

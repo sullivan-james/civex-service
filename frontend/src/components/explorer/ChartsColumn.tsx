@@ -3,7 +3,7 @@ import type { Schema } from '../../api/schemas'
 import { useAddToAnalytics } from '../../hooks/useDashboard'
 import { usePermissions } from '../../hooks/useMe'
 import { Button, IconButton, Subheading } from '../ui'
-import { BarChart3, Maximize2, PanelRightClose } from '../ui/icons'
+import { BarChart3, Maximize2, Minimize2, PanelRightClose } from '../ui/icons'
 import { ChartBoard } from '../charts/ChartBoard'
 import type { FilterTreeWire } from '../../utils/filterTree'
 import type { ExplorerCharts } from './useExplorerCharts'
@@ -53,14 +53,18 @@ export function ChartsColumn({
       <div className="flex min-h-9 flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-3">
           <Subheading as="h2">Charts</Subheading>
-          {onBack && (
-            <Button size="sm" variant="link" onClick={onBack}>
-              Back to records
-            </Button>
-          )}
         </div>
         {/* The panel's own controls, as the navigation's on the left. */}
         <div className="flex items-center">
+          {/* The same place, the opposite arrow: back beside the records. */}
+          {onBack && (
+            <IconButton
+              icon={Minimize2}
+              size="sm"
+              aria-label="Charts beside the records"
+              onClick={onBack}
+            />
+          )}
           {onExpand && (
             <IconButton
               icon={Maximize2}

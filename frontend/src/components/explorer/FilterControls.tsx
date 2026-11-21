@@ -107,11 +107,14 @@ export function FilterControls({
   fields,
   listedSchema,
   records,
+  addLabel = 'Filter',
   onChange,
 }: {
   wire: FilterTreeWire | null
   fields: FilterableField[]
   listedSchema: string
+  /** What the button that opens the builder says. */
+  addLabel?: string
   /** The records listed: with it, a condition on a field of choices shows
    * how many of them hold each value. */
   records?: RecordSelectionBody
@@ -152,7 +155,7 @@ export function FilterControls({
             'Done'
           ) : (
             <>
-              <Plus size={12} /> Filter
+              <Plus size={12} /> {addLabel}
             </>
           )}
         </Button>

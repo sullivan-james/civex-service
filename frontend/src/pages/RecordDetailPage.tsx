@@ -19,14 +19,12 @@ import { schemaTreeHasFiles } from '../utils/hierarchy'
 import { useAvailableExports } from '../hooks/useExportDefinitions'
 import { describeDefinition } from '../utils/exportBuilder'
 import {
-  Badge,
   Button,
   DetailSkeleton,
   ErrorState,
   Page,
   ConfirmDialog,
   PinButton,
-  Subheading,
   TabNav,
   TabPanel,
   useTabParam,
@@ -241,17 +239,22 @@ export default function RecordDetailPage() {
         current={record.natural_name ?? record.id.slice(0, 8)}
         currentSchema={record.schema_name}
         title={
-          <span className="inline-flex items-center gap-2">
-            {record.natural_name ?? (
-              <span className="font-mono">{record.id.slice(0, 8)}</span>
-            )}
-            {schema ? (
-              <Link to={`/schemas/${schema.id}`}>
-                <Badge variant="accent">{record.schema_name}</Badge>
-              </Link>
-            ) : (
-              <Badge variant="accent">{record.schema_name}</Badge>
-            )}
+          // What kind of thing this is comes first, then which one.
+          <span className="flex flex-col gap-1">
+            <span className="text-sm font-medium text-fg-muted">
+              {schema ? (
+                <Link className="hover:underline" to={`/schemas/${schema.id}`}>
+                  {displayLabel(schema.name, schema.label)}
+                </Link>
+              ) : (
+                displayLabel(record.schema_name)
+              )}
+            </span>
+            <span>
+              {record.natural_name ?? (
+                <span className="font-mono">{record.id.slice(0, 8)}</span>
+              )}
+            </span>
           </span>
         }
         action={
@@ -435,10 +438,6 @@ export default function RecordDetailPage() {
               aria-label="Inside this record"
               className="mt-8 space-y-3 border-t border-border pt-6"
             >
-              <Subheading as="h2">
-                Inside this{' '}
-                {schema ? displayLabel(schema.name, schema.label) : 'record'}
-              </Subheading>
               <RecordsExplorer
                 dataset={collection.name}
                 root={{ id: record.id }}

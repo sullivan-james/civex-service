@@ -916,23 +916,36 @@ describe('RecordsExplorer', () => {
     ).toBeInTheDocument()
     // The page's own heading says where we are: no trail repeating it.
     expect(screen.queryByRole('heading', { name: 'Recording' })).toBeNull()
-    // Charts are a button away, as on any list.
+    // What it contains is the heading; Filter and Charts sit by the search.
+    expect(
+      within(kinds).getByRole('heading', { name: 'Contains' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Filter' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    )
     expect(screen.getByRole('button', { name: 'Charts' })).toBeInTheDocument()
     // No tools until asked for; and no second place to go for them.
     expect(screen.getByRole('searchbox')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Filter$/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Clear filters' })).toBeNull()
     expect(screen.queryByRole('button', { name: /^Export/ })).toBeNull()
     expect(screen.queryByRole('button', { name: /Columns/ })).toBeNull()
-    expect(screen.queryByRole('checkbox')).toBeNull()
-    expect(screen.queryByRole('link', { name: /Filter and chart/ })).toBeNull()
-    await user.click(screen.getByRole('button', { name: 'Filter and chart' }))
-    expect(screen.getByRole('button', { name: /Filter$/ })).toBeInTheDocument()
+    // Rows can be ticked here as on any list (to edit, run or delete).
+    expect(screen.getAllByRole('checkbox').length).toBeGreaterThan(0)
+    expect(screen.queryByRole('link', { name: /Filter/ })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Filter' }))
+    expect(screen.getByRole('button', { name: 'Filter' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
     expect(screen.getByRole('button', { name: /^Export/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Columns/ })).toBeInTheDocument()
-    expect(screen.getAllByRole('checkbox').length).toBeGreaterThan(0)
+    expect(
+      screen.getByRole('button', { name: 'Add filter' }),
+    ).toBeInTheDocument()
     // Still the same list, inside the same record.
     expect(lastRecordCall().params.get('within')).toBe('e1')
-    await user.click(screen.getByRole('button', { name: 'Fewer tools' }))
+    await user.click(screen.getByRole('button', { name: 'Filter' }))
     expect(screen.queryByRole('button', { name: /^Export/ })).toBeNull()
   })
 
@@ -1769,7 +1782,10 @@ describe('charts beside the records', () => {
     renderExplorer({}, '/collections/hb?schema=recording')
     expect(await bar(/Georges/)).toBeInTheDocument()
     expect(screen.queryByRole('table')).toBeNull()
-    await user.click(screen.getByRole('button', { name: 'Back to records' }))
+    // The same place, the opposite arrow, puts them back beside the records.
+    await user.click(
+      screen.getByRole('button', { name: 'Charts beside the records' }),
+    )
     expect(await screen.findByRole('table')).toBeInTheDocument()
     expect(await charts()).toBeInTheDocument()
   })

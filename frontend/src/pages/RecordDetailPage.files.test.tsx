@@ -205,7 +205,9 @@ describe('what a record contains', () => {
     const inside = await screen.findByRole('region', {
       name: 'Inside this record',
     })
-    expect(inside).toHaveTextContent('Inside this Encounter')
+    // The page says what kind of thing this is, above its name.
+    expect(screen.getByRole('link', { name: 'Encounter' })).toBeInTheDocument()
+    expect(inside).toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: /Contains/ })).toBeNull()
     // The fields are on the same screen, above it.
     expect(screen.getByText('Stellwagen')).toBeInTheDocument()

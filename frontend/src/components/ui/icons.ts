@@ -62,6 +62,7 @@ export {
   PanelRightClose,
   PanelRightOpen,
   Maximize2,
+  Minimize2,
   FileText,
   MapPin,
   HardDrive,
