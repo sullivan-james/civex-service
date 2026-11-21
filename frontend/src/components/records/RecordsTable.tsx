@@ -7,6 +7,8 @@ import { ReferenceLink } from './ReferenceLink'
 import { FileCell } from './FileCell'
 import { fileRefsIn } from '../../utils/fileRefs'
 import type { Schema } from '../../api/schemas'
+import type { ReviewValue } from '../../api/review'
+import { ReviewBadge } from '../review/ReviewStatusMenu'
 
 export interface RecordsTableColumn {
   name: string
@@ -27,6 +29,7 @@ export interface RecordsTableRow {
   reference_labels?: Record<string, string | null> | null
   reference_collections?: Record<string, string> | null
   child_counts?: Record<string, number> | null
+  review?: ReviewValue | null
 }
 
 export interface RecordsTableSort {
@@ -75,6 +78,8 @@ function CellValue({
   col: RecordsTableColumn
   row: RecordsTableRow
 }) {
+  // The record's review status, not one of its values.
+  if (col.type === 'review') return <ReviewBadge review={row.review} />
   const value = row.data[col.name]
   if (value === undefined || value === null) return <Dash />
   if (col.type === 'reference' && typeof value === 'string')

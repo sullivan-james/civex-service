@@ -235,7 +235,15 @@ export interface RestoreAllResult {
  * workflow run. */
 export interface AuditBatch {
   id: string
-  kind: 'import' | 'delete' | 'restore' | 'purge' | 'workflow' | 'move' | 'edit'
+  kind:
+    | 'import'
+    | 'delete'
+    | 'restore'
+    | 'purge'
+    | 'workflow'
+    | 'move'
+    | 'edit'
+    | 'review'
   /** A workflow's name, or the file imported. */
   label: string | null
   /** What started it: a workflow run's id. */

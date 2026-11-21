@@ -62,11 +62,14 @@ import {
   useResolveConflict,
 } from '../hooks/useRemote'
 import { Slot } from '../components/host/Slot'
+import { NotesPanel } from '../components/review/NotesPanel'
+import { ReviewStatusMenu } from '../components/review/ReviewStatusMenu'
 
 const RECORD_TABS = [
   { id: 'fields' },
   { id: 'resolve' },
   { id: 'contains' },
+  { id: 'notes' },
   { id: 'referenced' },
   { id: 'runs' },
   { id: 'history' },
@@ -226,6 +229,11 @@ export default function RecordDetailPage() {
         action={
           <>
             <Slot name="record.header" props={{ recordId: record.id }} />
+            <ReviewStatusMenu
+              recordId={record.id}
+              collectionId={record.dataset_id}
+              review={record.review}
+            />
             {/* Every file under this record, by name and folder: an Encounter
                 holds none itself, but its Recordings and Selections do. */}
             {schema && schemas && schemaTreeHasFiles(schema, schemas) && (
@@ -287,6 +295,12 @@ export default function RecordDetailPage() {
                     },
                   ]
                 : []),
+              {
+                id: 'notes' as const,
+                label: record.open_notes
+                  ? `Notes (${record.open_notes})`
+                  : 'Notes',
+              },
               { id: 'referenced' as const, label: 'Referenced by' },
               { id: 'runs' as const, label: 'Runs' },
               { id: 'history' as const, label: 'History' },
@@ -379,6 +393,10 @@ export default function RecordDetailPage() {
               pollMs={hasActiveJobs ? 2000 : 5000}
             />
           )}
+        </TabPanel>
+
+        <TabPanel id="notes" value={shownTab}>
+          <NotesPanel recordId={record.id} collectionId={record.dataset_id} />
         </TabPanel>
 
         <TabPanel id="referenced" value={shownTab}>

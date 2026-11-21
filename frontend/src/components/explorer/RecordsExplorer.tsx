@@ -39,6 +39,8 @@ import {
   type RecordsTableSort,
 } from '../records/RecordsTable'
 import { ColumnPicker, columnLabel } from '../views/ColumnPicker'
+import { REVIEW_FILTER } from '../../utils/review'
+import { ReviewSelectionMenu } from '../review/ReviewSelectionMenu'
 import { FilterControls } from './FilterControls'
 import { DrillLinks } from './DrillLinks'
 import { SavedViewBar } from './SavedViewBar'
@@ -246,6 +248,8 @@ export function RecordsExplorer({
   const total = x.page.data?.total ?? 0
   const rows = toTableRows(items)
   const columns = x.columnNames.map((name) => {
+    if (name === REVIEW_FILTER)
+      return { name, label: 'Review', type: 'review', sortable: false }
     const field = x.baseFields.find((f) => f.name === name)
     return {
       name,
@@ -327,7 +331,8 @@ export function RecordsExplorer({
     tables: [
       {
         format: 'csv' as const,
-        columns: x.columnNames,
+        // The review status is shown, not written in a table.
+        columns: x.columnNames.filter((c) => c !== REVIEW_FILTER),
         kind: x.listed?.name ?? null,
       },
     ],
@@ -644,6 +649,7 @@ export function RecordsExplorer({
                 onChange={(cols) => patch({ cols })}
                 baseFields={x.baseFields}
                 joinable={x.joinable}
+                extra={[{ name: REVIEW_FILTER, label: 'Review' }]}
                 allowHideAll={false}
               />
               {x.cols && (
@@ -929,6 +935,16 @@ export function RecordsExplorer({
                         onStarted={picked.clear}
                       />
                     )}
+                    <ReviewSelectionMenu
+                      selection={
+                        allMatching
+                          ? { query: x.query, collection: dataset }
+                          : { ids: [...selected] }
+                      }
+                      count={bulkCount}
+                      collectionId={collection?.id}
+                      onDone={picked.clear}
+                    />
                     {listed && bulkEditableFields(listed).length > 0 && (
                       <Button
                         size="sm"

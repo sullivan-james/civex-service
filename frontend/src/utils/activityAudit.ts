@@ -19,6 +19,8 @@ export function describeAnyAuditEntry(entry: AuditLogEntry): AuditSummary {
       return describeCollectionEntry(entry)
     case 'dashboard':
       return { title: 'Analytics page edited', detail: null }
+    case 'note':
+      return describeNoteEntry(entry)
     case 'view': {
       // A saved view with a summary is an analysis; say which when the
       // entry holds the whole view (an edit keeps only what changed).
@@ -68,6 +70,13 @@ export function auditEntryTarget(
       return { to: `/collections/${entry.entity_id}`, label: 'Collection' }
     case 'dashboard':
       return { to: '/analytics', label: 'Analytics' }
+    case 'note': {
+      const recordId = (entry.new_data?.record_id ??
+        entry.old_data?.record_id) as string | undefined
+      return recordId
+        ? { to: `/records/${recordId}?tab=notes`, label: 'Record' }
+        : null
+    }
     default:
       return null
   }
@@ -80,6 +89,7 @@ const NOUNS: Record<string, [string, string]> = {
   dataset: ['collection', 'collections'],
   view: ['saved view', 'saved views'],
   dashboard: ['Analytics page', 'Analytics pages'],
+  note: ['note', 'notes'],
 }
 
 const PAST: Record<string, string> = {
@@ -148,10 +158,47 @@ export function describeAuditEvent(event: AuditEvent): AuditSummary {
         title: `Edited ${describeParts(event.parts).replace(/ updated/g, '')}`,
         detail: batch.label ? `Changed ${batch.label}` : null,
       }
+    case 'review':
+      return {
+        title: `Marked ${count(total, 'record')} as ${(batch.label ?? 'reviewed').toLowerCase()}`,
+        detail: null,
+      }
     default:
       return {
         title: `${batch.kind} (${items(total)})`,
         detail: describeParts(event.parts),
       }
+  }
+}
+
+/** A note's entry in words: added, edited, resolved, reopened, deleted or
+ * brought back, with what it says. */
+function describeNoteEntry(entry: AuditLogEntry): AuditSummary {
+  const changed = (field: string) =>
+    entry.changes.find((c) => c.field === field)
+  const said = (entry.new_data?.body ??
+    entry.old_data?.body ??
+    changed('body')?.after) as string | undefined
+  const detail = said
+    ? `“${said.length > 140 ? `${said.slice(0, 140)}…` : said}”`
+    : null
+  switch (entry.action) {
+    case 'create':
+      return { title: 'Note added', detail }
+    case 'delete':
+      return { title: 'Note deleted', detail }
+    case 'restore':
+      return { title: 'Note brought back', detail: null }
+    case 'purge':
+      return { title: 'Note permanently deleted', detail: null }
+    default: {
+      const resolved = changed('resolved_at')
+      if (resolved)
+        return {
+          title: resolved.after ? 'Note resolved' : 'Note reopened',
+          detail,
+        }
+      return { title: 'Note edited', detail }
+    }
   }
 }
