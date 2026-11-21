@@ -2,9 +2,9 @@
  * Charts: the one definition (`api/schemas.Chart`, civex/domain/charts.py)
  * as the app writes, names and suggests it. A chart is bars (one bar for
  * each value of a field, each bar showing a count or a number worked out) or
- * a map. Pure: titles in plain words, what the "New chart" panel offers and
- * the address form of a list's unsaved charts. There are no charts by
- * default: a person adds the ones they want.
+ * a map. Pure: titles in plain words and what the "New chart" panel offers.
+ * There are no charts by default: a person adds the ones they want, and
+ * each is saved for the kind at once.
  */
 
 import type { Chart, FieldTypeDescriptor, Schema } from '../api/schemas'
@@ -102,25 +102,6 @@ export function chartTitle(
   return `${shown} per ${chart.group_by.map((g) => groupWords(g, usable)).join(' and ')}`
 }
 
-/** What makes two charts the same chart, whatever their ids. */
-function drawn(chart: Chart): string {
-  return JSON.stringify(
-    chart.map
-      ? [chart.title ?? null, chart.map]
-      : [
-          chart.title ?? null,
-          chart.group_by,
-          chart.measures,
-          chart.chart_measure ?? null,
-          chart.show ?? 'chart',
-        ],
-  )
-}
-
-export function sameCharts(a: Chart[], b: Chart[]): boolean {
-  return a.length === b.length && a.every((c, i) => drawn(c) === drawn(b[i]))
-}
-
 /** A chart as it is saved: only what it says. */
 export function storedChart(chart: Chart): Chart {
   const out: Chart = { id: chart.id, group_by: [], measures: [] }
@@ -134,47 +115,11 @@ export function storedChart(chart: Chart): Chart {
   return out
 }
 
-// --- the address: a list's own charts, while they differ from the kind's
+// --- the address
 
-export const CHARTS_PARAM = 'charts'
 /** The chart opened large, or `NEW_CHART` while one is being built. */
 export const OPEN_CHART_PARAM = 'chart'
 export const NEW_CHART = 'new'
-
-export function chartsToParam(charts: Chart[]): string {
-  return JSON.stringify(
-    charts.map((c) => {
-      const s = storedChart(c)
-      return s.map
-        ? { i: s.id, t: s.title, map: s.map }
-        : {
-            i: s.id,
-            t: s.title,
-            by: s.group_by,
-            m: s.measures,
-            y: s.chart_measure,
-          }
-    }),
-  )
-}
-
-export function chartsFromParam(raw: string | null): Chart[] | null {
-  if (raw === null) return null
-  try {
-    const list = JSON.parse(raw)
-    if (!Array.isArray(list)) return null
-    return list.map((c) => ({
-      id: String(c.i),
-      title: c.t ?? null,
-      map: c.map ?? null,
-      group_by: Array.isArray(c.by) ? c.by.map(String) : [],
-      measures: Array.isArray(c.m) ? c.m.map(String) : ['count'],
-      chart_measure: c.y ?? null,
-    }))
-  } catch {
-    return null
-  }
-}
 
 // --- what the "New chart" panel offers
 

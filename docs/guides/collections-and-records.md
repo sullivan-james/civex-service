@@ -173,7 +173,7 @@ are no charts until someone adds one.
   another field, or "is not"), the chart counts the filtered records with
   nothing lit.
 - **Which charts.** A kind of record says which charts its lists open with
-  (its **Charts** tab on the schema page). A kind starts with none.
+  (also on its **Charts** tab on the schema page). A kind starts with none.
 - **Add chart** opens the builder at full width: the choices on the left and
   the chart they make on the right, drawn live. **One bar for each** is a
   field (a date by year, month, week or day; a number in steps you choose).
@@ -182,9 +182,8 @@ are no charts until someone adds one.
   of a kind beneath are inside them. **A map** is a chart too. **Quick
   picks** fill the choices in for the kind's fields of choices and its first
   date. Give it a title of your own if you like, then **Add chart**.
-- When the charts on screen differ from the kind's, **Use for every … list**
-  saves them for the kind (it needs the right to change the structure) and
-  **Put back** returns to the kind's. Until then they are in the address.
+- A chart you add, remove or move is saved for the kind at once, for
+  everyone, like a saved filter (it takes the right to write records).
 - **Open** shows a chart large, above the records, with its table of numbers
   and **Download numbers** (CSV, Excel, TSV, JSON). It is in the address, so
   it is a link and Back closes it.

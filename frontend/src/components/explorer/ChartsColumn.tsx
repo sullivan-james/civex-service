@@ -8,10 +8,9 @@ import { ChartBoard } from '../charts/ChartBoard'
 import type { FilterTreeWire } from '../../utils/filterTree'
 import type { ExplorerCharts } from './useExplorerCharts'
 
-/** The charts beside a list: the chart cards, and
- * while they differ from the kind's own, **Use for every Sample list** and
- * **Put back**. Every chart counts exactly the records listed and a click on
- * a bar filters them. */
+/** The charts beside a list: the kind's chart cards. Every chart counts
+ * exactly the records listed and a click on a bar filters them. A change is
+ * saved for the kind at once. */
 export function ChartsColumn({
   model,
   listed,
@@ -45,7 +44,7 @@ export function ChartsColumn({
   /** At full width: the way back to the records. */
   onBack?: () => void
 }) {
-  const { can, canSomewhere, why } = usePermissions()
+  const { canSomewhere } = usePermissions()
   const addToAnalytics = useAddToAnalytics()
   const mayAdd = canSomewhere('write_records')
   return (
@@ -80,23 +79,6 @@ export function ChartsColumn({
           )}
         </div>
       </div>
-      {model.changed && (
-        <div className="flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            disabled={!can('change_structure') || model.saving}
-            title={
-              can('change_structure') ? undefined : why('change_structure')
-            }
-            onClick={model.saveForKind}
-          >
-            Use for every {kind} list
-          </Button>
-          <Button size="sm" variant="ghost" onClick={model.putBack}>
-            Put back
-          </Button>
-        </div>
-      )}
       {!enabled ? (
         <Button size="sm" onClick={onShow}>
           <BarChart3 size={14} /> Show charts
@@ -109,8 +91,9 @@ export function ChartsColumn({
           kind={kind}
           schemas={schemas}
           // One way to add at a time: not while the builder is open.
-          onBuild={model.building ? undefined : model.build}
-          onChange={model.set}
+          onBuild={model.building || !mayAdd ? undefined : model.build}
+          // Shared like a saved filter: whoever may write records may.
+          onChange={mayAdd ? model.set : undefined}
           onFilter={onFilter}
           onOpen={model.setOpen}
           more={(chart, title) => [

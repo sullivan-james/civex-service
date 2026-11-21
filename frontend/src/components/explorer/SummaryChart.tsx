@@ -49,7 +49,10 @@ export function SummaryChart({
   if (reason) return <p className="text-sm text-fg-muted">{reason}</p>
   const chart = buildSummaryChart(summary, measureKey)
   if (!chart) return null
-  if (compact && chart.series.length === 1)
+  // In a card, categories are a row per bar (each a button that says
+  // whether it is chosen); a line over time and a histogram keep their own
+  // form, smaller, so a card looks like the chart it opens as.
+  if (compact && chart.series.length === 1 && chart.form === 'bars')
     return <BarRows chart={chart} onDrill={onDrill} lit={lit ?? null} />
   const measures = chartMeasures(summary.measure_columns)
   const valueLabel = measureAxisLabel(chart.measure)
@@ -59,9 +62,11 @@ export function SummaryChart({
     if (where && onDrill) onDrill(where)
   }
   const sideways = chart.form === 'bars' && chart.points.length > UPRIGHT_UP_TO
-  const height = sideways
-    ? Math.min(Math.max(240, chart.points.length * 24 + 40), 900)
-    : 300
+  const height = compact
+    ? 180
+    : sideways
+      ? Math.min(Math.max(240, chart.points.length * 24 + 40), 900)
+      : 300
   const what = summary.group_columns.map((c) => c.label).join(' and ')
 
   return (

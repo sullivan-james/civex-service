@@ -307,9 +307,9 @@ In the app: the record type's **Uniqueness** tab.
 A kind of record says which charts its lists open with, on its **Charts** tab:
 the same chart cards as beside any list of records (see
 [Charts](collections-and-records.md#charts)), drawn here over every record of
-the kind. Add, reorder or remove them; each change is saved for everyone, is
-in the kind's history and syncs. A kind starts with no charts. From a list, **Use for every … list** saves the charts
-on screen for the kind.
+the kind. Add, reorder or remove them, here or beside any list of the kind;
+each change is saved for everyone, is in the kind's history and syncs. A kind
+starts with no charts.
 
 A chart follows a field that is renamed, and goes when a field it uses is
 deleted.

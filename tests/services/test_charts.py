@@ -295,9 +295,8 @@ def test_a_reader_sees_the_page_but_may_not_change_it(as_reader):
     writer = as_(Permissions.of(p.READ, p.WRITE_RECORDS))
     try:
         writer.dashboard_svc.add(chart=view, schema="sample")
-        # A kind's charts are part of the structure: writing records is not enough.
-        with pytest.raises(NotAllowedError):
-            writer.schema_svc.set_charts("sample", [{"id": "a", **view}])
+        # A kind's charts are shared like a saved filter: a writer may set them.
+        writer.schema_svc.set_charts("sample", [{"id": "a", **view}])
         writer.commit()
     finally:
         writer.close()

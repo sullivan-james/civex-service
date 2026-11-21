@@ -19,7 +19,7 @@ import { displayLabel } from '../../utils/naming'
 
 /** A kind's charts (`schemas.charts`): the ones every list of the kind
  * opens with, on the one board, drawn over every record of the kind. Each
- * change is saved at once, for everyone (it needs `change_structure`). */
+ * change is saved at once, for everyone (like a saved filter). */
 export function KindCharts({
   schema,
   schemas,
@@ -27,7 +27,7 @@ export function KindCharts({
   schema: Schema
   schemas: Schema[]
 }) {
-  const { can } = usePermissions()
+  const { canSomewhere } = usePermissions()
   const save = useSetCharts(schema.name)
   const [sp, setSp] = useSearchParams()
   const fields = useMemo(
@@ -42,7 +42,7 @@ export function KindCharts({
   )
   const charts = schema.charts ?? []
   const kind = displayLabel(schema.name, schema.label)
-  const mayChange = can('change_structure')
+  const mayChange = canSomewhere('write_records')
   const setOpen = (id: string | null) =>
     setSp((prev) => {
       const out = new URLSearchParams(prev)

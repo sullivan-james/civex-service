@@ -1363,6 +1363,7 @@ describe('charts beside the records', () => {
         method === 'PUT'
       ) {
         put = calls[calls.length - 1].body!.charts as unknown[]
+        kindCharts = put
         return json({ ...recording, charts: put })
       }
       if (url.pathname === '/api/me')
@@ -1528,12 +1529,11 @@ describe('charts beside the records', () => {
     expect(last(asked('rate')).body!.filter).toEqual(complex)
   })
 
-  it('adds a chart in two choices, shows its title first, and offers it to the kind', async () => {
+  it('adds a chart in two choices with a live preview, saved for the kind at once', async () => {
     const user = userEvent.setup()
     kindCharts = [bySite]
     renderExplorer({}, '/collections/hb?schema=recording')
     await bar(/Georges/)
-    expect(screen.queryByRole('button', { name: /Use for every/ })).toBeNull()
     await user.click(screen.getByRole('button', { name: /Add chart/ }))
     // The builder is at full width, in the address, with a live preview.
     await waitFor(() => expect(search().get('chart')).toBe('new'))
@@ -1547,18 +1547,16 @@ describe('charts beside the records', () => {
     expect(await within(preview).findAllByText('96')).not.toHaveLength(0)
     await user.click(screen.getByRole('button', { name: 'Add chart' }))
     await waitFor(() => expect(search().get('chart')).toBeNull())
-    // The change is in the address until it is saved or put back.
-    await waitFor(() => expect(search().get('charts')).toContain('rate'))
-    await bar(/96/)
-    await user.click(
-      screen.getByRole('button', { name: 'Use for every Recording list' }),
-    )
+    // No second step: it is the kind's chart now, for every list of it.
     await waitFor(() => expect(put).toHaveLength(2))
     expect(put![1]).toMatchObject({ group_by: ['rate'], measures: ['count'] })
-    await waitFor(() => expect(search().get('charts')).toBeNull())
+    expect(search().get('charts')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Use for every/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Put back' })).toBeNull()
+    expect(await bar(/96/)).toBeInTheDocument()
   })
 
-  it('puts back the kind’s charts', async () => {
+  it('removing a chart takes it off the kind', async () => {
     const user = userEvent.setup()
     renderExplorer({}, '/collections/hb?schema=recording')
     await bar(/Georges/)
@@ -1567,30 +1565,23 @@ describe('charts beside the records', () => {
         name: 'Remove How many recordings per rate',
       }),
     )
-    await waitFor(() => expect(search().get('charts')).not.toBeNull())
-    await user.click(screen.getByRole('button', { name: 'Put back' }))
-    await waitFor(() => expect(search().get('charts')).toBeNull())
-    expect(await bar(/96/)).toBeInTheDocument()
+    await waitFor(() => expect(put).toHaveLength(1))
+    expect(put![0]).toMatchObject({ group_by: ['encounter.site'] })
   })
 
-  it('keeps Use for every … off for someone who may not change the structure', async () => {
+  it('shows the charts to someone who may only read, with no way to change them', async () => {
     me = {
-      account: { name: 'writer', kind: 'user', manage_url: null },
-      permissions: {
-        actions: { read: ['project'], write_records: ['project'] },
-        all: {},
-      },
+      account: { name: 'reader', kind: 'user', manage_url: null },
+      permissions: { actions: { read: ['project'] }, all: {} },
     }
-    renderExplorer(
-      {},
-      `/collections/hb?schema=recording&charts=${encodeURIComponent('[{"i":"x","by":["rate"],"m":["count"]}]')}`,
-    )
+    renderExplorer({}, '/collections/hb?schema=recording')
+    expect(await bar(/Georges/)).toBeInTheDocument()
     await waitFor(() =>
-      expect(
-        screen.getByRole('button', { name: 'Use for every Recording list' }),
-      ).toBeDisabled(),
+      expect(screen.queryByRole('button', { name: /Add chart/ })).toBeNull(),
     )
-    expect(screen.getByRole('button', { name: 'Put back' })).toBeEnabled()
+    expect(
+      screen.queryByRole('button', { name: /^Remove How many/ }),
+    ).toBeNull()
   })
 
   it('shows no charts for a kind with none set: only a way to add one', async () => {
@@ -1607,7 +1598,7 @@ describe('charts beside the records', () => {
     await user.selectOptions(screen.getByLabelText('One bar for each'), 'rate')
     await user.click(screen.getByRole('button', { name: 'Add chart' }))
     expect(await bar(/96/)).toBeInTheDocument()
-    expect(put).toBeNull()
+    expect(put).toHaveLength(1)
   })
 
   it('opens a chart large from the address, with its numbers, and Back closes it', async () => {
@@ -1758,7 +1749,9 @@ describe('a map as a chart', () => {
       },
     ],
   }
+  let saved: unknown[]
   beforeEach(() => {
+    saved = []
     setFieldTypesForTest({
       types: [
         {
@@ -1780,8 +1773,17 @@ describe('a map as a chart', () => {
       summary_measures: [],
     })
     override = (url: URL, method: string) => {
-      if (url.pathname === '/api/schemas')
-        return json([geoEncounter, recording, selection])
+      if (url.pathname === '/api/schemas/recording/charts' && method === 'PUT')
+        saved = calls[calls.length - 1].body!.charts as unknown[]
+      if (
+        url.pathname === '/api/schemas' ||
+        url.pathname === '/api/schemas/recording/charts'
+      )
+        return json(
+          url.pathname === '/api/schemas'
+            ? [geoEncounter, { ...recording, charts: saved }, selection]
+            : { ...recording, charts: saved },
+        )
       if (url.pathname === '/api/settings/map')
         return json({ tile_url: null, attribution: null })
       if (url.pathname === '/api/records/points' && method === 'POST')

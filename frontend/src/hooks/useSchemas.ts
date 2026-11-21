@@ -107,7 +107,6 @@ export function useSetCharts(name: string) {
   const toast = useToast()
   return useMutation({
     mutationFn: (charts: Chart[]) => schemasApi.setCharts(name, charts),
-    onSuccess: () => toast.success('Charts saved'),
     onError: (e) => toast.error(errorMessage(e)),
     onSettled: () => qc.invalidateQueries({ queryKey: ['schemas'] }),
   })

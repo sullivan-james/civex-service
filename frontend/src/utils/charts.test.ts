@@ -4,9 +4,6 @@ import type { FilterableField } from './hierarchy'
 import {
   buildChart,
   chartTitle,
-  chartsFromParam,
-  chartsToParam,
-  sameCharts,
   recommendedCharts,
   type Usable,
 } from './charts'
@@ -108,21 +105,6 @@ describe('the two choices of a new chart', () => {
     expect(
       buildChart({ by: 'site', how: '', show: 'mean', of: 'depth' }),
     ).toMatchObject({ group_by: ['site'], measures: ['mean:depth'] })
-  })
-})
-
-describe('a list’s own charts in the address', () => {
-  it('round trip, and compare without their ids', () => {
-    const charts = [
-      { id: 'a', group_by: ['site'], measures: ['count'] },
-      { id: 'b', map: 'spot', group_by: [], measures: [] },
-    ]
-    const back = chartsFromParam(chartsToParam(charts))!
-    expect(sameCharts(back, charts)).toBe(true)
-    expect(sameCharts(back, [{ ...charts[0], id: 'z' }, charts[1]])).toBe(true)
-    expect(sameCharts(back, [charts[1], charts[0]])).toBe(false)
-    expect(chartsFromParam(null)).toBeNull()
-    expect(chartsFromParam('not json')).toBeNull()
   })
 })
 
