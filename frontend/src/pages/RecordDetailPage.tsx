@@ -275,6 +275,10 @@ export default function RecordDetailPage() {
           </>
         }
         secondaryActions={[
+          // The files of this record and of what is inside it.
+          ...(showContains
+            ? [{ label: 'Files', onClick: () => navigate('?show=files') }]
+            : []),
           {
             label: 'Delete record…',
             variant: 'danger' as const,

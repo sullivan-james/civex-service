@@ -24,11 +24,11 @@ import {
   type MenuItem,
   TriggerPopover,
   TableSkeleton,
-  SegmentedControl,
   Field,
   Select,
   Skeleton,
   SplitPane,
+  Subheading,
 } from '../ui'
 import {
   AlertTriangle,
@@ -203,6 +203,9 @@ export function RecordsExplorer({
     typeof window !== 'undefined' && window.innerWidth < 1024,
   )
   const [chartsAsked, setChartsAsked] = useState(false)
+  // Problems and files are screens of their own over the same records:
+  // the charts, which count records, step aside.
+  const aside = showChecks || showFiles
   const rowsIn = x.page.data !== undefined && !x.page.error
   const chartsOn = rowsIn && (listedTotal <= CHARTS_AUTO_UP_TO || chartsAsked)
   const charts = useExplorerCharts(
@@ -737,16 +740,23 @@ export function RecordsExplorer({
           // to see them or their files. A rule sets them apart from the
           // filters.
           <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
-            <p className="text-base" aria-live="polite">
-              <span className="font-semibold text-fg">
-                {total.toLocaleString()}
-              </span>{' '}
-              {inScope !== null && inScope !== total && (
-                <>of {inScope.toLocaleString()} </>
-              )}
-              {total === 1 ? listedLabel.toLowerCase() : plural(listedLabel)}
-            </p>
-            {listed && !!issuesFound && !showChecks && (
+            {showFiles ? (
+              // The files of what is listed: an occasional job (moving,
+              // downloading), reached from the page's menu, not a peer of
+              // the records.
+              <Subheading as="h2">Files</Subheading>
+            ) : (
+              <p className="text-base" aria-live="polite">
+                <span className="font-semibold text-fg">
+                  {total.toLocaleString()}
+                </span>{' '}
+                {inScope !== null && inScope !== total && (
+                  <>of {inScope.toLocaleString()} </>
+                )}
+                {total === 1 ? listedLabel.toLowerCase() : plural(listedLabel)}
+              </p>
+            )}
+            {listed && !!issuesFound && !showChecks && !showFiles && (
               // A fact beside the count: nothing is shown when all is well.
               <Button
                 size="sm"
@@ -758,25 +768,13 @@ export function RecordsExplorer({
                 {issuesFound === 1 ? 'problem' : 'problems'}
               </Button>
             )}
-            {showChecks && (
+            {(showChecks || showFiles) && (
               <Button size="sm" variant="link" onClick={() => setShow(null)}>
                 Back to records
               </Button>
             )}
             <div className="ml-auto flex items-center gap-2">
-              {!showChecks && (
-                <SegmentedControl
-                  size="sm"
-                  label="Show"
-                  value={showFiles ? 'files' : 'records'}
-                  onChange={(v) => setShow(v === 'files' ? 'files' : null)}
-                  options={[
-                    { value: 'records', label: 'Records' },
-                    { value: 'files', label: 'Their files' },
-                  ]}
-                />
-              )}
-              {chartsHidden && !showChecks && (listed || allKinds) && (
+              {chartsHidden && !aside && (listed || allKinds) && (
                 <Button size="sm" onClick={() => setChartsHidden(false)}>
                   <BarChart3 size={14} /> Charts
                 </Button>
@@ -785,7 +783,7 @@ export function RecordsExplorer({
           </div>
         )}
 
-        {charts.open && listed && !showChecks && (
+        {charts.open && listed && !aside && (
           <OpenChart
             chart={charts.open}
             title={chartTitle(
@@ -805,7 +803,7 @@ export function RecordsExplorer({
           storageKey="explorer.charts.width"
           label="Charts"
           side={
-            chartsHidden || showChecks || x.page.error ? undefined : listed ? (
+            chartsHidden || aside || x.page.error ? undefined : listed ? (
               <ChartsColumn
                 model={charts}
                 listed={listed}

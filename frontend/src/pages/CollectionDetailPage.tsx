@@ -189,6 +189,16 @@ export default function CollectionDetailPage() {
           secondaryActions={[
             // The page is its records; the rest is a step away in this menu
             // (and still in the address, so old `?tab=` links work).
+            {
+              label: 'Files',
+              onClick: () =>
+                setParams((prev) => {
+                  const out = new URLSearchParams(prev)
+                  out.delete('tab')
+                  out.set('show', 'files')
+                  return out
+                }),
+            },
             { label: 'Exports', onClick: () => setTab('exports') },
             { label: 'Activity', onClick: () => setTab('activity') },
             {

@@ -80,12 +80,12 @@ Over HTTP, every file value in a record response carries `location`, and
 downloads the file (`?filename=` names it). It answers 503, naming the drive,
 when the file is on one that isn't connected.
 
-## Working on many files: Their files
+## Working on many files
 
-Above a collection's or record's list of records, **Records | Their files**
-switches to the files of exactly the records listed and everything beneath them,
-under the same filters. Filter Visits to `site = North Ridge`, switch, and
-you see their photos and readings.
+**Files**, in the **⋯** menu at the top of a collection's or a record's page,
+lists the files of exactly the records listed and everything beneath them,
+under the same filters. Filter Visits to `site = North Ridge`, open Files, and
+you see their photos and readings. **Back to records** returns to the list.
 
 - Each row is a file as stored. A file three records use is one row, and **Used
   by N records** lists them.

@@ -1238,13 +1238,13 @@ describe('RecordsExplorer', () => {
         },
       ],
     })
+    // Reached from the page's menu (`show=files`), not a switch beside the
+    // records.
     renderExplorer(
       {},
-      `/collections/hb?schema=recording&filter=${encodeURIComponent(filter)}`,
+      `/collections/hb?schema=recording&show=files&filter=${encodeURIComponent(filter)}`,
     )
-    await userEvent.click(
-      await screen.findByRole('radio', { name: 'Their files' }),
-    )
+    expect(screen.queryByRole('radio', { name: /files/i })).toBeNull()
     await waitFor(() =>
       expect(
         calls.find((c) => c.path === '/api/file-access/files')?.body,
@@ -1255,8 +1255,14 @@ describe('RecordsExplorer', () => {
         below: true,
       }),
     )
-    expect(search().get('show')).toBe('files')
     expect(search().get('filter')).toBe(filter) // one filter for both
+    // The charts count records, so they step aside; one click goes back.
+    expect(screen.queryByRole('region', { name: 'Charts' })).toBeNull()
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Back to records' }),
+    )
+    await waitFor(() => expect(search().get('show')).toBeNull())
+    expect(search().get('filter')).toBe(filter)
   })
 })
 
