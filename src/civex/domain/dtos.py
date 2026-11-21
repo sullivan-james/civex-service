@@ -825,10 +825,15 @@ class RecordDTO:
     # deleted from its schema, each with when it was deleted and the schema to
     # restore it on. Nothing in `data` is lost; a restore brings them back.
     deleted_fields: list[dict[str, Any]] | None = None
+    # Whether someone has looked at it (`civex.domain.review`): {status, by,
+    # at} or None. Stored, synced and in history, like the record's place.
+    review: dict[str, Any] | None = None
+    # Response-only: how many of its notes are not yet resolved.
+    open_notes: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         # schema_name excluded — denormalized display field, not stored on the entity
-        return {
+        snapshot = {
             "id": str(self.id),
             "dataset_id": str(self.dataset_id),
             "schema_id": str(self.schema_id),
@@ -840,6 +845,12 @@ class RecordDTO:
             "updated_at": self.updated_at.isoformat(),
             "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
         }
+        # Only when there is one: a record never reviewed reads exactly as it
+        # did before reviews existed, so history written then still compares
+        # equal (and a snapshot without it means "not reviewed").
+        if self.review is not None:
+            snapshot["review"] = self.review
+        return snapshot
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> RecordDTO:
@@ -855,7 +866,39 @@ class RecordDTO:
             created_at=datetime.fromisoformat(d["created_at"]),
             updated_at=datetime.fromisoformat(d["updated_at"]),
             deleted_at=_parse_dt(d.get("deleted_at")),
+            review=d.get("review"),
         )
+
+
+@dataclass
+class NoteDTO:
+    """A note left on a record (`civex.domain.review`)."""
+
+    id: uuid.UUID
+    record_id: uuid.UUID
+    body: str
+    author: str | None
+    created_at: datetime
+    edited_at: datetime | None = None
+    resolved_at: datetime | None = None
+    resolved_by: str | None = None
+    deleted_at: datetime | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        def iso(v: datetime | None) -> str | None:
+            return v.isoformat() if v else None
+
+        return {
+            "id": str(self.id),
+            "record_id": str(self.record_id),
+            "body": self.body,
+            "author": self.author,
+            "created_at": self.created_at.isoformat(),
+            "edited_at": iso(self.edited_at),
+            "resolved_at": iso(self.resolved_at),
+            "resolved_by": self.resolved_by,
+            "deleted_at": iso(self.deleted_at),
+        }
 
 
 @dataclass
@@ -1255,6 +1298,26 @@ class RecordBulkEditResultDTO:
             "skipped": self.skipped,
             "skipped_records": [s.to_dict() for s in self.skipped_records],
             "runs": self.runs,
+        }
+
+
+@dataclass
+class ReviewResultDTO:
+    """What setting a review status on chosen records did (or, planned, would
+    do): how many records were chosen, how many changed, and how many already
+    had that status."""
+
+    status: str
+    records: int
+    changed: int
+    unchanged: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "records": self.records,
+            "changed": self.changed,
+            "unchanged": self.unchanged,
         }
 
 

@@ -20,11 +20,13 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
+from civex.domain import review as review_rules
 from civex.domain.audit_filter import AuditFilter
 from civex.domain.audit_filters import parse_audit_filter
 from civex.domain.filters import FilterCondition, FilterGroup, FilterNode
 from civex.domain.audit_diff import (
     PLACEMENT_KEYS,
+    REVIEW_KEY,
     Change,
     diff_entry,
     entry_snapshots,
@@ -350,6 +352,12 @@ class AuditService:
             if change.field in PLACEMENT_KEYS:
                 self._name_place(change)
                 order[change.field] = -1
+                continue
+            if change.field == REVIEW_KEY:
+                change.label, change.dtype = "Review", "string"
+                change.before = review_rules.LABELS[change.before or review_rules.NONE]
+                change.after = review_rules.LABELS[change.after or review_rules.NONE]
+                order[change.field] = -2
                 continue
             field = shape.by_name.get(change.field)
             if field is not None:

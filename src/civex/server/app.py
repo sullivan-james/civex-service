@@ -32,6 +32,7 @@ from civex.server.routers import (
     legal,
     plugins,
     record_files,
+    notes,
     records,
     remote,
     retention,
@@ -135,6 +136,13 @@ _OPENAPI_TAGS = [
             "Create, read, update, delete, and bulk-import the individual rows "
             "of data that live inside a dataset. Record data is validated "
             "against its schema's field types and restrictions on every write."
+        ),
+    },
+    {
+        "name": "review",
+        "description": (
+            "Curate records as a team: mark records as needing a check or "
+            "checked, and leave notes on them. Both are in history and sync."
         ),
     },
     {
@@ -409,6 +417,7 @@ def api_routers(
         (datasets.router, None),
         (bundle.router, None),
         (plugins.router, features_.PLUGIN_EDITOR),
+        (notes.router, None),
         (records.router, None),
         (record_files.router, None),
         (export_definitions.router, None),

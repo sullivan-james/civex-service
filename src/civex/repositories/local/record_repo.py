@@ -23,7 +23,15 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
 from sqlalchemy.orm import Session, aliased
 
-from civex.db.models import Dataset, Record, RecordReference, Schema, WorkflowJob
+from civex.db.models import (
+    Dataset,
+    Record,
+    RecordNote,
+    RecordReference,
+    Schema,
+    WorkflowJob,
+)
+from civex.domain import review as review_rules
 from civex.domain.dtos import RecordDTO
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.filters import FilterCondition, FilterGroup, FilterNode, SortKey
@@ -294,6 +302,24 @@ class LocalRecordRepository:
 
     def count(self, query: ResolvedQuery) -> int:
         return _base_query(self._s, query, self._pg).count()
+
+    def count_open_notes(self, query: ResolvedQuery) -> tuple[int, int]:
+        """(notes not yet resolved, records holding them) among the records
+        `query` lists. One statement."""
+        listed = _base_query(self._s, query, self._pg).with_entities(Record.id)
+        notes, records = (
+            self._s.query(
+                func.count(RecordNote.id),
+                func.count(func.distinct(RecordNote.record_id)),
+            )
+            .filter(
+                RecordNote.record_id.in_(listed.scalar_subquery()),
+                RecordNote.resolved_at.is_(None),
+                RecordNote.deleted_at.is_(None),
+            )
+            .one()
+        )
+        return int(notes or 0), int(records or 0)
 
     def list_ids(self, query: ResolvedQuery) -> list[uuid.UUID]:
         """Ids of every record the query matches -- no rows hydrated, for
@@ -666,6 +692,35 @@ class LocalRecordRepository:
         row.data = data
         self._s.flush()
         return _to_dto(row)
+
+    def set_review(self, ids: list[uuid.UUID], review: dict[str, Any] | None) -> None:
+        """Give every record in `ids` this review (None clears it), one
+        statement per chunk. Not an edit: each keeps its `updated_at`."""
+        for chunk in _chunks(ids):
+            self._s.execute(
+                update(Record)
+                .where(Record.id.in_(chunk))
+                .values(review=review, updated_at=Record.updated_at)
+                .execution_options(synchronize_session=False)
+            )
+        self._s.expire_all()
+
+    def open_note_counts(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, int]:
+        """How many notes each of these records has that are not yet resolved
+        (records with none are left out). One grouped query per chunk."""
+        out: dict[uuid.UUID, int] = {}
+        for chunk in _chunks(ids):
+            for rid, n in (
+                self._s.query(RecordNote.record_id, func.count(RecordNote.id))
+                .filter(
+                    RecordNote.record_id.in_(chunk),
+                    RecordNote.resolved_at.is_(None),
+                    RecordNote.deleted_at.is_(None),
+                )
+                .group_by(RecordNote.record_id)
+            ):
+                out[rid] = n
+        return out
 
     def find_key_match(
         self,
@@ -1075,7 +1130,37 @@ def _build_filter_condition(node: FilterNode):
     return _build_leaf_condition(node, Record)
 
 
+def _review_condition(node: FilterCondition, entity: Any):
+    """A condition on what `civex.domain.review` adds to a record: its review
+    status (`none` is no review) or whether it has notes not yet resolved."""
+    if node.field == review_rules.OPEN_NOTES_FILTER:
+        open_note = (
+            select(literal(1))
+            .where(
+                RecordNote.record_id == entity.id,
+                RecordNote.resolved_at.is_(None),
+                RecordNote.deleted_at.is_(None),
+            )
+            .exists()
+        )
+        return open_note if node.value else not_(open_note)
+    status = entity.review["status"].as_string()
+
+    def is_(value: Any):
+        return status.is_(None) if value == review_rules.NONE else status == value
+
+    if node.op == "in":
+        return or_(*[is_(v) for v in node.value]) if node.value else false()
+    if node.op == "ne":
+        if node.value == review_rules.NONE:
+            return status.isnot(None)
+        return or_(status.is_(None), status != node.value)
+    return is_(node.value)
+
+
 def _build_leaf_condition(node: FilterCondition, entity: Any):
+    if node.field in review_rules.FILTERS:
+        return _review_condition(node, entity)
     col = entity.data[node.field]
     if node.op == "is_null":
         # `.as_string()` (->>` on PG, plain json_extract on SQLite) collapses
@@ -1129,6 +1214,7 @@ def _to_dto(row: Record) -> RecordDTO:
         created_at=row.created_at,
         updated_at=row.updated_at,
         deleted_at=row.deleted_at,
+        review=row.review,
     )
 
 

@@ -15,7 +15,7 @@ from civex.domain.exceptions import ValidationError
 from civex.domain.filters import FilterNode, leaves, parse_filter_tree
 from civex.domain.run_filters import RunField as AuditField
 
-KINDS = ["record", "schema", "field", "dataset", "view", "dashboard"]
+KINDS = ["record", "schema", "field", "dataset", "view", "dashboard", "note"]
 CHANGES = ["create", "update", "delete", "restore", "purge"]
 # How a change came about: on its own, or as part of a batch of this kind.
 HOWS = [
@@ -26,6 +26,7 @@ HOWS = [
     "purge",
     "move",
     "edit",
+    "review",
     "workflow",
 ]
 # Where the record a change is about is now.

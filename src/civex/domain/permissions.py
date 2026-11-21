@@ -147,7 +147,8 @@ def action_for(entry: Any) -> tuple[str, Any]:
     """Which action a sync entry is, and the collection it is in (None when it
     is about the project's structure): a record made, changed or restored is
     `WRITE_RECORDS` in its collection; a record deleted or purged is `DELETE`
-    there; a saved filter or the Analytics page is `WRITE_RECORDS` `ANYWHERE`; a collection or kind
+    there; a saved filter, the Analytics page or a note is `WRITE_RECORDS`
+    `ANYWHERE` (a note's collection is asked about once its record is found); a collection or kind
     of record deleted or purged is `DELETE`; every other change to a schema,
     field or collection is `CHANGE_STRUCTURE`."""
     kind = getattr(entry, "entity_type", None)
@@ -159,6 +160,11 @@ def action_for(entry: Any) -> tuple[str, Any]:
         )
         return (DELETE if removing else WRITE_RECORDS), snapshot.get("dataset_id")
     if kind in ("view", "dashboard"):
+        return WRITE_RECORDS, ANYWHERE
+    if kind == "note":
+        # A note names its record, not the collection: the authority asks
+        # about that collection once it has looked the record up
+        # (`SyncAuthorityService._check_note`).
         return WRITE_RECORDS, ANYWHERE
     if kind in ("dataset", "schema") and removing:
         return DELETE, None

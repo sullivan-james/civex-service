@@ -428,11 +428,45 @@ class Record(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(
         _UTCDateTime(), nullable=True, default=None
     )
+    # Whether someone has looked at it: {status: needs_check | checked, by, at}
+    # (`civex.domain.review`), or None. Part of the record, its history and
+    # sync, but not one of its values: setting it leaves `updated_at` alone.
+    review: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
 
     dataset: Mapped[Dataset] = relationship("Dataset", back_populates="records")
     # Every record read names its schema (RecordDTO.schema_name); joined, that
     # arrives with the record's own row instead of a lazy load per record.
     schema: Mapped[Schema] = relationship("Schema", lazy="joined")
+
+
+class RecordNote(Base):
+    """
+    A note a person left on a record ("value looks off, re-check the
+    calibration"): plain text, who wrote it, and whether it has been resolved
+    (`civex.domain.review`). Synced and audited as kind `note`. Soft-deleted
+    like a record; a record deleted for good takes its notes with it (the
+    foreign key cascades), and `NoteService` keeps them hidden while their
+    record is deleted.
+    """
+
+    __tablename__ = "record_notes"
+    __table_args__ = (Index("ix_record_notes_record", "record_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    record_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("records.id", ondelete="CASCADE"), nullable=False
+    )
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    # Who wrote it, as history names people (`identity.local_actor`, or the
+    # label a device gave): a name, not an account.
+    author: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
+    edited_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+    resolved_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        _UTCDateTime(), nullable=True, default=None
+    )
 
 
 class AuditBatch(Base):

@@ -64,6 +64,7 @@ if TYPE_CHECKING:
     from civex.services.sync_service import SyncService
     from civex.services.view_service import ViewService
     from civex.services.dashboard_service import DashboardService
+    from civex.services.note_service import NoteService
     from civex.services.workflow_job_service import WorkflowJobService
     from civex.services.workflow_service import WorkflowService
 
@@ -114,6 +115,8 @@ class AppContext:
     policy_svc: PolicyService
     view_svc: ViewService
     dashboard_svc: DashboardService
+    # Notes people leave on records (`domain/review`).
+    note_svc: NoteService
     export_def_svc: ExportDefinitionService
     bundle_svc: BundleService
     sync_repo: LocalSyncRepository
@@ -382,7 +385,9 @@ def build_context(
     )
     from civex.repositories.local.view_repo import LocalViewRepository
     from civex.repositories.local.dashboard_repo import LocalDashboardRepository
+    from civex.repositories.local.note_repo import LocalNoteRepository
     from civex.services.dashboard_service import DashboardService
+    from civex.services.note_service import NoteService
     from civex.services.ai.service import AiService
     from civex.services.ai_usage_service import AiUsageService
     from civex.services.analytics_service import AnalyticsService
@@ -452,6 +457,15 @@ def build_context(
         job_svc,
         audit_repo,
         permissions=may,
+    )
+    record_svc.actor = project.actor
+    note_svc = NoteService(
+        LocalNoteRepository(session),
+        record_repo,
+        record_svc.resolve,
+        audit_repo,
+        permissions=may,
+        actor=project.actor,
     )
     dataset_svc = DatasetService(
         dataset_repo,
@@ -577,6 +591,7 @@ def build_context(
         # The same answer a person at a browser gets, asked of each change a
         # device pushes (the local user's refuses nothing).
         policy=may,
+        notes=note_svc,
         capabilities=CAPABILITIES
         + ((DIRECT_FILES,) if features.DIRECT_FILES in project.features else ()),
     )
@@ -654,6 +669,7 @@ def build_context(
             audit_repo,
             permissions=may,
         ),
+        note_svc=note_svc,
         export_def_svc=export_def_svc,
         bundle_svc=BundleService(
             schema_svc,

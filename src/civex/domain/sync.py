@@ -45,7 +45,7 @@ DEVICE_LOGIN = "device_login"
 DIRECT_FILES = features.DIRECT_FILES
 
 # The order a project's things must exist in: each refers to the ones before it.
-ENTITY_ORDER = ("schema", "field", "dataset", "view", "dashboard", "record")
+ENTITY_ORDER = ("schema", "field", "dataset", "view", "dashboard", "record", "note")
 
 # What of each kind travels, and nothing else: a column added for this machine
 # alone (a cache, a search index) stays off the wire, and adding one here is a
@@ -115,6 +115,20 @@ WIRE_FIELDS: dict[str, frozenset[str]] = {
             "created_at",
             "updated_at",
             "deleted_at",
+            "review",
+        }
+    ),
+    "note": frozenset(
+        {
+            "id",
+            "record_id",
+            "body",
+            "author",
+            "created_at",
+            "edited_at",
+            "resolved_at",
+            "resolved_by",
+            "deleted_at",
         }
     ),
 }
@@ -123,8 +137,11 @@ WIRE_FIELDS: dict[str, frozenset[str]] = {
 # older one with only what it can read (`kinds_for`, `entry_for`,
 # `snapshot_for`; applied in the peer router, never in the core): a kind, or a
 # kind's field, and the version it travels from.
-KINDS_SINCE: dict[str, int] = {"dashboard": 4}
-FIELDS_SINCE: dict[str, dict[str, int]] = {"view": {"summary": 4}}
+KINDS_SINCE: dict[str, int] = {"dashboard": 4, "note": 4}
+FIELDS_SINCE: dict[str, dict[str, int]] = {
+    "view": {"summary": 4},
+    "record": {"review": 4},
+}
 
 
 def kinds_for(protocol: int) -> tuple[str, ...]:

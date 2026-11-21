@@ -11,6 +11,7 @@ from typing import Any, Callable, Iterable, Iterator
 from zoneinfo import ZoneInfo
 
 from civex.domain import permissions
+from civex.domain import review as review_rules
 from civex.domain.permissions import EVERYTHING, Permissions
 from civex.domain.file_refs import without_file_locations
 from civex.domain.sync import not_on_server_yet
@@ -25,6 +26,7 @@ from civex.domain.dtos import (
     BulkEditSkipDTO,
     RecordBulkEditPlanDTO,
     RecordBulkEditResultDTO,
+    ReviewResultDTO,
     RecordDTO,
     RecordMovePlanDTO,
     RecordMoveResultDTO,
@@ -378,6 +380,25 @@ def resolve_filename(
     return templating.with_extension(stem, ref.filename)
 
 
+def _check_review_leaf(leaf: FilterCondition) -> None:
+    """A filter condition on a record's review status or open notes
+    (`civex.domain.review.FILTERS`): about the listed record itself, with an
+    operator and value it takes."""
+    if leaf.schema:
+        raise ValidationError(f"'{leaf.field}' is about the listed records only")
+    ops = review_rules.FILTER_OPERATORS[leaf.field]
+    if leaf.op not in ops:
+        raise ValidationError(
+            f"'{leaf.field}' can't be filtered with '{leaf.op}' (use {', '.join(ops)})"
+        )
+    if leaf.field == review_rules.OPEN_NOTES_FILTER:
+        if not isinstance(leaf.value, bool):
+            raise ValidationError(f"'{leaf.field}' is true or false")
+        return
+    for value in leaf.value if leaf.op == "in" else [leaf.value]:
+        review_rules.check_status(value)
+
+
 def _audit_batch(audit: AuditRepository | None, kind: str, many: bool):
     """One batch for an operation that touches several records, so history
     shows it as one event. A single record is just its own entry."""
@@ -678,6 +699,9 @@ class RecordService:
         )
         self._job_svc = job_svc
         self._audit = audit_repo
+        # Who is at work, as history names them (set by `context.py`): what a
+        # review records as `by`.
+        self.actor: str | None = None
 
     def _require_each(self, action: str, records: Iterable[Any]) -> None:
         """`action` in every collection these records are in, before any of
@@ -797,6 +821,14 @@ class RecordService:
             ),
             shapes,
         )
+
+    def _attach_open_notes(self, records: list[RecordDTO]) -> list[RecordDTO]:
+        """How many notes not yet resolved each record has, in one query: on
+        a record read (`get`) and a list (`query_records`), not on a write."""
+        if not records:
+            return records
+        counts = self._records.open_note_counts([r.id for r in records])
+        return [dataclasses.replace(r, open_notes=counts.get(r.id, 0)) for r in records]
 
     def _attach_formulas(
         self, records: list[RecordDTO], shapes: SchemaResolver
@@ -1831,6 +1863,7 @@ class RecordService:
         data = state.get("data") or {}
         if not isinstance(data, dict):
             raise ValidationError("The record's values are not an object")
+        review_rules.check_review(state.get("review"))
         shape = self._schema_svc.resolver()(schema_id)
         if shape is None:
             raise ValidationError("The record's schema does not exist here")
@@ -2039,7 +2072,9 @@ class RecordService:
         record = self._records.get_by_prefix(record_id)
         if not record:
             raise NotFoundError(f"Record '{record_id}' not found")
-        return self._attach_reference_labels([self._with_names(record)])[0]
+        return self._attach_open_notes(
+            self._attach_reference_labels([self._with_names(record)])
+        )[0]
 
     def files_for_zip(
         self,
@@ -2442,6 +2477,9 @@ class RecordService:
         if tree is None:
             return None
         node = parse_filter_tree(tree)
+        for leaf in leaves(node):
+            if leaf.field in review_rules.FILTERS:
+                _check_review_leaf(leaf)
         if schema is None:
             # No schema to resolve names against (a mixed-schema list):
             # conditions pass through by stored key, as they always have.
@@ -2453,6 +2491,8 @@ class RecordService:
         related = self._relations(schema)
 
         def resolve_leaf(leaf: FilterCondition) -> FilterCondition:
+            if leaf.field in review_rules.FILTERS:
+                return leaf  # about the record itself, not one of its fields
             f, rel = self._locate(schema, related, leaf.field, leaf.schema, "filter")
             return dataclasses.replace(leaf, field=str(f.id), rel=rel)
 
@@ -2837,7 +2877,9 @@ class RecordService:
         records = self._records.list_filtered(
             self.resolve(query), offset, limit, after=after
         )
-        named = self._attach_reference_labels(self._with_names_many(records))
+        named = self._attach_open_notes(
+            self._attach_reference_labels(self._with_names_many(records))
+        )
         if columns and query.schema:
             named = self._attach_derived(query.schema, named, columns)
         if child_counts:
@@ -3047,13 +3089,16 @@ class RecordService:
     # ------------------------------------------------------------------
 
     def validate_columns(self, schema: SchemaDTO, columns: list[str]) -> None:
-        """Every column must be a field of `schema` (own or inherited) or a
-        single-hop `ref_field.target_field` join through a reference field."""
+        """Every column must be a field of `schema` (own or inherited), a
+        single-hop `ref_field.target_field` join through a reference field, or
+        `@review` (the record's review status, a column of the explorer)."""
         fields_by_name = {
             rf.field.name: rf.field for rf in self._schema_svc.collect_fields(schema)
         }
         unknown = []
         for col in columns:
+            if col == review_rules.REVIEW_FILTER:
+                continue  # the record's review, shown from `review` itself
             if "." in col:
                 self._validate_join_column(col, fields_by_name)
             elif col not in fields_by_name:
@@ -3691,6 +3736,70 @@ class RecordService:
         if query is not None:
             return self._records.list_ids(self.resolve(query))
         raise ValidationError(f"Choose the records to {verb}: ids, or a query")
+
+    # ------------------------------------------------------------------
+    # Review status
+    # ------------------------------------------------------------------
+
+    def set_review(
+        self,
+        status: str,
+        *,
+        ids: list[str] | None = None,
+        query: RecordQuery | None = None,
+        dry_run: bool = False,
+    ) -> ReviewResultDTO:
+        """Mark the chosen records (`ids`, or every record `query` lists) as
+        needing a check, checked, or (`none`) not reviewed, as this person,
+        now. A review is not an edit of a record's values: `updated_at` stays,
+        no workflow is started, and a record that already has the status is
+        left as it is (its who and when kept). Each record changed gets a
+        history entry, the lot one `review` event in Activity, and it syncs.
+        `write_records` is asked for every collection involved first.
+        `dry_run` only counts."""
+        review_rules.check_status(status)
+        chosen = self._chosen_ids(ids, query, "review")
+        for dataset_id in self._records.collections_of(chosen):
+            self._permissions.require(permissions.WRITE_RECORDS, dataset_id)
+        value = review_rules.review_value(status, self.actor, _dt.now(timezone.utc))
+        records = changed = 0
+        batch = (
+            self._audit.batch("review", review_rules.LABELS[status])
+            if not dry_run and self._audit is not None and len(chosen) > 1
+            else nullcontext()
+        )
+        with batch:
+            for start in range(0, len(chosen), BULK_EDIT_PAGE):
+                page = [
+                    r
+                    for r in self._records.list_by_ids(
+                        chosen[start : start + BULK_EDIT_PAGE]
+                    )
+                    if r.deleted_at is None
+                ]
+                records += len(page)
+                going = [r for r in page if review_rules.status_of(r.review) != status]
+                changed += len(going)
+                if dry_run or not going:
+                    continue
+                self._records.set_review([r.id for r in going], value)
+                if self._audit is not None:
+                    for r in going:
+                        self._audit.log_change(
+                            "update",
+                            "record",
+                            r.id,
+                            self._snapshot(r),
+                            self._snapshot(dataclasses.replace(r, review=value)),
+                        )
+        return ReviewResultDTO(
+            status=status, records=records, changed=changed, unchanged=records - changed
+        )
+
+    def open_note_counts(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, int]:
+        """How many notes not yet resolved each of these records has (those
+        with none left out), in one query."""
+        return self._records.open_note_counts(ids)
 
     # ------------------------------------------------------------------
     # Editing many records at once

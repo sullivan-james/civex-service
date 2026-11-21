@@ -139,6 +139,17 @@
    "restrictions",
    "schema_id"
   ],
+  "note": [
+   "author",
+   "body",
+   "created_at",
+   "deleted_at",
+   "edited_at",
+   "id",
+   "record_id",
+   "resolved_at",
+   "resolved_by"
+  ],
   "record": [
    "created_at",
    "data",
@@ -146,6 +157,7 @@
    "deleted_at",
    "id",
    "parent_record_id",
+   "review",
    "schema_id",
    "updated_at"
   ],

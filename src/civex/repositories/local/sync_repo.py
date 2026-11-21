@@ -25,6 +25,7 @@ from civex.db.models import (
     AuditLog,
     Dashboard,
     Dataset,
+    RecordNote,
     Field,
     FileReference,
     Record,
@@ -60,6 +61,7 @@ from civex.repositories.local.dataset_repo import _to_dtos as _dataset_dtos
 from civex.repositories.local.record_repo import _to_dto as _record_dto
 from civex.repositories.local.schema_repo import _field_to_dto, _schema_to_dto
 from civex.repositories.local.dashboard_repo import _to_dto as _dashboard_dto
+from civex.repositories.local.note_repo import _to_dto as _note_dto
 from civex.repositories.local.view_repo import _to_dto as _view_dto
 
 _MODELS: dict[str, Any] = {
@@ -69,6 +71,7 @@ _MODELS: dict[str, Any] = {
     "view": View,
     "dashboard": Dashboard,
     "record": Record,
+    "note": RecordNote,
 }
 # A column PostgreSQL maintains itself (a trigger); never written from a snapshot.
 _NOT_WRITTEN = frozenset({"search_vector"})
@@ -991,6 +994,8 @@ class LocalSyncRepository:
             dicts = [_view_dto(r).to_dict() for r in rows]
         elif kind == "dashboard":
             dicts = [_dashboard_dto(r).to_dict() for r in rows]
+        elif kind == "note":
+            dicts = [_note_dto(r).to_dict() for r in rows]
         else:
             dicts = [_record_dto(r).to_dict() for r in rows]
         return [wire_state(kind, d) or {} for d in dicts]
@@ -1006,6 +1011,10 @@ class LocalSyncRepository:
             for name, value in snap.items()
             if name in columns
         }
+        if kind == "record":
+            # A record snapshot leaves out a review it hasn't got
+            # (`RecordDTO.to_dict`): absent is "not reviewed".
+            values.setdefault("review", None)
         row = self._s.get(model, values["id"])
         if row is None:
             row = model(**values)
@@ -1104,8 +1113,8 @@ class LocalSyncRepository:
             ).purge_many([id])
         elif kind in ("view", "dashboard"):
             self.delete_view(id, kind)
-        elif kind == "field":
-            row = self._s.get(Field, id)
+        elif kind in ("field", "note"):
+            row = self._s.get(_MODELS[kind], id)
             if row is not None:
                 self._s.delete(row)
         self._s.flush()

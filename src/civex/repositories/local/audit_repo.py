@@ -29,6 +29,7 @@ from civex.db.models import (
     Dataset,
     Field,
     Record,
+    RecordNote,
     Schema,
     SyncMeta,
 )
@@ -479,7 +480,21 @@ class LocalAuditRepository:
 
     def _forget(self, *conditions) -> int:
         """Delete every record entry matching `conditions` that is not a
-        tombstone, then any batch left with nothing in it."""
+        tombstone, then any batch left with nothing in it. The notes left on
+        those records go with them, and so does every entry about the notes."""
+        records = select(AuditLog.entity_id).where(
+            AuditLog.entity_type == "record", *conditions
+        )
+        self._s.execute(
+            delete(AuditLog)
+            .where(
+                AuditLog.entity_type == "note",
+                AuditLog.entity_id.in_(
+                    select(RecordNote.id).where(RecordNote.record_id.in_(records))
+                ),
+            )
+            .execution_options(synchronize_session=False)
+        )
         entries = self._s.execute(
             delete(AuditLog)
             .where(AuditLog.entity_type == "record", *self._holds_values(), *conditions)

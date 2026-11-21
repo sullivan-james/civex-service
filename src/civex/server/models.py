@@ -730,6 +730,81 @@ class RecordSelectionRequest(RecordQueryRequest):
     )
 
 
+class ReviewRequest(RecordSelectionRequest):
+    """Set the review status of the chosen records."""
+
+    status: str = Field(
+        description="'needs_check', 'checked', or 'none' to clear the review."
+    )
+    dry_run: bool = Field(
+        default=False, description="Only count what would change; change nothing."
+    )
+
+
+class ReviewResponse(BaseModel):
+    """What setting a review status did (or, with `dry_run`, would do)."""
+
+    status: str = Field(description="The status set.")
+    records: int = Field(description="Live records chosen.")
+    changed: int = Field(description="Records whose status changed.")
+    unchanged: int = Field(description="Records that already had that status.")
+
+
+class NoteResponse(BaseModel):
+    """A note left on a record."""
+
+    id: str
+    record_id: str = Field(description="The record the note is on.")
+    body: str = Field(description="The note's text (plain).")
+    author: str | None = Field(default=None, description="Who wrote it.")
+    created_at: datetime
+    edited_at: datetime | None = Field(
+        default=None, description="When its words were last changed, if ever."
+    )
+    resolved_at: datetime | None = Field(
+        default=None, description="When it was marked resolved; null while open."
+    )
+    resolved_by: str | None = Field(default=None, description="Who resolved it.")
+    deleted_at: datetime | None = Field(
+        default=None, description="When it was deleted; null while it is there."
+    )
+
+    @classmethod
+    def from_dto(cls, dto: Any) -> NoteResponse:
+        return cls(
+            id=str(dto.id),
+            record_id=str(dto.record_id),
+            body=dto.body,
+            author=dto.author,
+            created_at=dto.created_at,
+            edited_at=dto.edited_at,
+            resolved_at=dto.resolved_at,
+            resolved_by=dto.resolved_by,
+            deleted_at=dto.deleted_at,
+        )
+
+
+class NoteRequest(BaseModel):
+    """A note's text."""
+
+    body: str = Field(description="Plain text, at most 4000 characters.")
+
+
+class NoteResolveRequest(BaseModel):
+    """Resolve a note, or open it again."""
+
+    resolved: bool = Field(
+        default=True, description="True to mark it resolved, false to reopen it."
+    )
+
+
+class OpenNotesResponse(BaseModel):
+    """Notes not yet resolved among the records a query lists."""
+
+    notes: int = Field(description="Open notes.")
+    records: int = Field(description="Records with at least one open note.")
+
+
 class RecordSummaryRequest(RecordQueryRequest):
     """Summarise the records a query lists: group them by field values and
     work out measures over each group. `schema_name` is required (the kind
@@ -1286,6 +1361,15 @@ class DeletedFieldValue(BaseModel):
     )
 
 
+class ReviewValue(BaseModel):
+    """A record's review: whether it needs a check or has been checked, by
+    whom and when."""
+
+    status: str = Field(description="'needs_check' or 'checked'.")
+    by: str | None = Field(default=None, description="Who set it.")
+    at: datetime = Field(description="When it was set.")
+
+
 class RecordResponse(BaseModel):
     id: str
     dataset_id: str
@@ -1358,6 +1442,17 @@ class RecordResponse(BaseModel):
         "(`POST /schemas/{schema_name}/fields/{id}/restore`) puts each back in "
         "`data`. Null when there are none.",
     )
+    review: ReviewValue | None = Field(
+        default=None,
+        description="Whether someone has looked at this record: its review "
+        "status, who set it and when. Null when it has not been reviewed. Set "
+        "with POST /records/review.",
+    )
+    open_notes: int | None = Field(
+        default=None,
+        description="How many notes on this record are not yet resolved "
+        "(GET /records/{record_id}/notes lists them).",
+    )
 
     @classmethod
     def from_dto(cls, dto: RecordDTO) -> RecordResponse:
@@ -1382,6 +1477,8 @@ class RecordResponse(BaseModel):
             deleted_fields=[DeletedFieldValue(**d) for d in dto.deleted_fields]
             if dto.deleted_fields
             else None,
+            review=ReviewValue(**dto.review) if dto.review else None,
+            open_notes=dto.open_notes,
         )
 
 

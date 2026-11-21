@@ -51,6 +51,7 @@ from civex.domain.dtos import (
     StoredObjectInfo,
     ViewDTO,
     DashboardDTO,
+    NoteDTO,
     ExportDefinitionDTO,
     VolumeStatus,
     WorkflowJobDTO,
@@ -214,6 +215,24 @@ class DashboardRepository(Protocol):
 
     def get(self) -> DashboardDTO | None: ...
     def save(self, cards: list[dict[str, Any]]) -> DashboardDTO: ...
+
+
+class NoteRepository(Protocol):
+    """Notes left on records (`civex.domain.review`)."""
+
+    def get(self, id: uuid.UUID) -> NoteDTO | None: ...
+    def get_by_prefix(self, prefix: str) -> NoteDTO | None: ...
+    def for_record(
+        self, record_id: uuid.UUID, include_resolved: bool = True
+    ) -> list[NoteDTO]: ...
+    def create(
+        self,
+        record_id: uuid.UUID,
+        body: str,
+        author: str | None,
+        id: uuid.UUID | None = None,
+    ) -> NoteDTO: ...
+    def update(self, id: uuid.UUID, **values: Any) -> NoteDTO: ...
 
 
 class ExportDefinitionRepository(Protocol):
@@ -388,6 +407,11 @@ class RecordRepository(Protocol):
     def purgeable_deleted(
         self, cutoff: datetime
     ) -> list[tuple[uuid.UUID, uuid.UUID, uuid.UUID]]: ...
+    def set_review(
+        self, ids: list[uuid.UUID], review: dict[str, Any] | None
+    ) -> None: ...
+    def open_note_counts(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, int]: ...
+    def count_open_notes(self, query: ResolvedQuery) -> tuple[int, int]: ...
     def delete_many(
         self, ids: list[uuid.UUID], stamp: datetime | None = None
     ) -> None: ...

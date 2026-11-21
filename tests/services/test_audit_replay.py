@@ -2,8 +2,8 @@
 
 Sync will send these entries and nothing else, so a change that wrote no entry
 (or a stale one) would never reach another device. This does everything a
-person can do to schemas, fields, collections, views, the Analytics page and
-records, then, for
+person can do to schemas, fields, collections, views, the Analytics page,
+records and their notes, then, for
 every thing, starts from its create and applies each entry in the order written
 (an edit stores only what changed) and checks the result is what is in the
 database."""
@@ -43,6 +43,8 @@ def _current(ctx: AppContext, kind: str, entity_id: Any) -> dict[str, Any] | Non
         found = ctx.view_svc._views.get_by_id(entity_id)
     elif kind == "dashboard":
         found = ctx.dashboard_svc._repo.get()
+    elif kind == "note":
+        found = ctx.note_svc._repo.get(entity_id)
     elif kind == "record":
         rows = ctx.record_svc._records.list_by_ids([entity_id])
         found = rows[0] if rows else None
@@ -188,6 +190,20 @@ def test_history_describes_everything_a_person_can_do(ctx: AppContext) -> None:
     ctx.dataset_svc.update("c", description="study", scope="global")
     ctx.commit()
 
+    # Curating: review statuses and notes.
+    ctx.record_svc.set_review("needs_check", ids=[str(enc.id), str(rec.id)])
+    ctx.record_svc.set_review("checked", ids=[str(rec.id)])
+    ctx.record_svc.set_review("none", ids=[str(enc.id)])
+    note = ctx.note_svc.add(str(rec.id), "re-check the rate")
+    ctx.note_svc.edit(str(note.id), "re-check the sample rate")
+    ctx.note_svc.resolve(str(note.id))
+    dropped = ctx.note_svc.add(str(enc.id), "typo")
+    ctx.note_svc.delete(str(dropped.id))
+    restored = ctx.note_svc.add(str(enc.id), "kept")
+    ctx.note_svc.delete(str(restored.id))
+    ctx.note_svc.restore(str(restored.id))
+    ctx.commit()
+
     # Deleting and bringing back.
     ctx.record_svc.delete(str(rec.id))
     ctx.record_svc.restore(str(rec.id))
@@ -205,6 +221,7 @@ def test_history_describes_everything_a_person_can_do(ctx: AppContext) -> None:
 
     # Permanent deletion leaves a tombstone, and for a schema takes its fields.
     gone = ctx.record_svc.add("c", "encounter", {"site": "y"})
+    ctx.note_svc.add(str(gone.id), "goes with it")
     ctx.record_svc.delete(str(gone.id))
     ctx.record_svc.purge(str(gone.id))
     svc.create("scratch")
