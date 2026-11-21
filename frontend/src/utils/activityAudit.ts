@@ -158,11 +158,6 @@ export function describeAuditEvent(event: AuditEvent): AuditSummary {
         title: `Edited ${describeParts(event.parts).replace(/ updated/g, '')}`,
         detail: batch.label ? `Changed ${batch.label}` : null,
       }
-    case 'review':
-      return {
-        title: `Marked ${count(total, 'record')} as ${(batch.label ?? 'reviewed').toLowerCase()}`,
-        detail: null,
-      }
     default:
       return {
         title: `${batch.kind} (${items(total)})`,
@@ -171,9 +166,12 @@ export function describeAuditEvent(event: AuditEvent): AuditSummary {
   }
 }
 
-/** A note's entry in words: added, edited, resolved, reopened, deleted or
- * brought back, with what it says. */
+/** A note's entry in words: added, replied, edited, resolved, reopened,
+ * deleted or brought back, with what it says. A thread is resolved on the
+ * note that starts it, so resolving and reopening are said of the thread. */
 function describeNoteEntry(entry: AuditLogEntry): AuditSummary {
+  const isReply = !!(entry.new_data?.thread_id ?? entry.old_data?.thread_id)
+  const noun = isReply ? 'Reply' : 'Note'
   const changed = (field: string) =>
     entry.changes.find((c) => c.field === field)
   const said = (entry.new_data?.body ??
@@ -184,21 +182,21 @@ function describeNoteEntry(entry: AuditLogEntry): AuditSummary {
     : null
   switch (entry.action) {
     case 'create':
-      return { title: 'Note added', detail }
+      return { title: isReply ? 'Replied to a note' : 'Note added', detail }
     case 'delete':
-      return { title: 'Note deleted', detail }
+      return { title: `${noun} deleted`, detail }
     case 'restore':
-      return { title: 'Note brought back', detail: null }
+      return { title: `${noun} brought back`, detail: null }
     case 'purge':
-      return { title: 'Note permanently deleted', detail: null }
+      return { title: `${noun} permanently deleted`, detail: null }
     default: {
       const resolved = changed('resolved_at')
       if (resolved)
         return {
-          title: resolved.after ? 'Note resolved' : 'Note reopened',
+          title: resolved.after ? 'Thread resolved' : 'Thread reopened',
           detail,
         }
-      return { title: 'Note edited', detail }
+      return { title: `${noun} edited`, detail }
     }
   }
 }

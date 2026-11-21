@@ -1,5 +1,6 @@
 export {
   Star,
+  MessageSquare,
   Plus,
   Search,
   Columns3,

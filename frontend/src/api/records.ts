@@ -10,7 +10,6 @@ import {
   type RecordQueryParams,
 } from './query'
 import type { FilterTreeWire } from '../utils/filterTree'
-import type { ReviewValue } from './review'
 
 /** Which records: exactly `ids`, or every record the query (`collection`
  * with the list's selectors) shows. */
@@ -312,10 +311,10 @@ export interface CivexRecord {
   /** Values this record still holds for fields deleted from its schema. They
    * come back in `data` when the field is restored. */
   deleted_fields?: DeletedFieldValue[] | null
-  /** Whether someone has looked at it; null when it hasn't been reviewed. */
-  review?: ReviewValue | null
-  /** How many of its notes are not yet resolved. */
+  /** How many of its threads of notes are not yet resolved. */
   open_notes?: number | null
+  /** The first line of the latest thread not yet resolved. */
+  latest_note?: string | null
 }
 
 export interface RestoreSelectedResult {

@@ -27,7 +27,7 @@ import {
   schemasById,
 } from '../../utils/hierarchy'
 import { collectFields, joinableColumns } from '../../utils/viewFields'
-import { reviewFilterFields } from '../../utils/review'
+import { noteFilterFields } from '../../utils/notes'
 import type { RailLevel } from './HierarchyRail'
 import { railLevels } from './railLevels'
 
@@ -154,7 +154,7 @@ export function useExplorer(scope: ExplorerScope) {
             // A condition naming a schema must name one related to this
             // level; a bare one must be a field this level has (a filter
             // made on a selection, unqualified, means nothing on a recording).
-            // The record's review and open notes mean the same on every level.
+            // Whether a record has open notes means the same on every level.
             (c) =>
               c.schema
                 ? related.has(c.schema)
@@ -169,10 +169,10 @@ export function useExplorer(scope: ExplorerScope) {
     (filter ? wireConditions(filter).length : 0)
 
   const filterFields = useMemo(
-    // The record's review status and open notes, beside its fields.
+    // Whether a record has open notes, beside its fields.
     () =>
       listed
-        ? [...filterableFields(listed, schemas), ...reviewFilterFields()]
+        ? [...filterableFields(listed, schemas), ...noteFilterFields()]
         : [],
     [listed, schemas],
   )

@@ -20,6 +20,7 @@ import { useAvailableExports } from '../hooks/useExportDefinitions'
 import { describeDefinition } from '../utils/exportBuilder'
 import {
   Badge,
+  Button,
   DetailSkeleton,
   ErrorState,
   Page,
@@ -62,8 +63,7 @@ import {
   useResolveConflict,
 } from '../hooks/useRemote'
 import { Slot } from '../components/host/Slot'
-import { NotesPanel } from '../components/review/NotesPanel'
-import { ReviewStatusMenu } from '../components/review/ReviewStatusMenu'
+import { NotesPanel } from '../components/notes/NotesPanel'
 
 const RECORD_TABS = [
   { id: 'fields' },
@@ -229,11 +229,18 @@ export default function RecordDetailPage() {
         action={
           <>
             <Slot name="record.header" props={{ recordId: record.id }} />
-            <ReviewStatusMenu
-              recordId={record.id}
-              collectionId={record.dataset_id}
-              review={record.review}
-            />
+            {!!record.open_notes && (
+              <Button
+                size="sm"
+                variant="ghost"
+                to={`/records/${record.id}?tab=notes`}
+                title="Threads of notes not yet resolved"
+              >
+                {record.open_notes === 1
+                  ? '1 open note'
+                  : `${record.open_notes} open notes`}
+              </Button>
+            )}
             {/* Every file under this record, by name and folder: an Encounter
                 holds none itself, but its Recordings and Selections do. */}
             {schema && schemas && schemaTreeHasFiles(schema, schemas) && (

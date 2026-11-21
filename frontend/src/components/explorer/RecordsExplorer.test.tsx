@@ -579,6 +579,31 @@ describe('RecordsExplorer', () => {
     await waitFor(() => expect(search().get('view')).toBeNull())
   })
 
+  it('lists records with open notes with what is open, each opening on its notes', async () => {
+    const filter = JSON.stringify({
+      field: '@open_notes',
+      op: 'eq',
+      value: true,
+    })
+    override = (url) =>
+      url.pathname.endsWith('/records') && url.searchParams.get('filter')
+        ? json(page([{ ...E1, open_notes: 2, latest_note: 'depth looks off' }]))
+        : undefined
+    renderExplorer(
+      {},
+      `/collections/hb?schema=encounter&filter=${encodeURIComponent(filter)}`,
+    )
+    expect(
+      await screen.findByText('2 open · depth looks off'),
+    ).toBeInTheDocument()
+    expect(lastRecordCall().params.get('filter')).toBe(filter)
+    expect(
+      screen
+        .getAllByRole('link')
+        .some((a) => a.getAttribute('href') === '/records/e1?tab=notes'),
+    ).toBe(true)
+  })
+
   it('keeps the filter as you drill, so the question stays the same', async () => {
     const user = userEvent.setup()
     // "encounters that have a selection with an empty table", then drill in

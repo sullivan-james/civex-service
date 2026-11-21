@@ -1,55 +1,44 @@
 import { api } from './client'
 import type { RecordSelectionBody } from './records'
 
-/** Whether a record needs a check or has been checked; `none` clears it. */
-export type ReviewStatus = 'none' | 'needs_check' | 'checked'
-
-/** A record's review: its status, who set it and when. */
-export interface ReviewValue {
-  status: Exclude<ReviewStatus, 'none'>
-  by: string | null
-  at: string
-}
-
-export interface ReviewResult {
-  status: ReviewStatus
-  records: number
-  changed: number
-  unchanged: number
-}
-
-/** A note left on a record. */
+/** A note left on a record, or a reply in a note's thread. */
 export interface Note {
   id: string
   record_id: string
+  /** For a reply, the note that starts its thread; null for one that does. */
+  thread_id: string | null
   body: string
   author: string | null
   created_at: string
   edited_at: string | null
+  /** A thread is resolved as a whole, on the note that starts it. */
   resolved_at: string | null
   resolved_by: string | null
   deleted_at: string | null
+  /** A thread's replies, oldest first (on the note that starts it). */
+  replies: Note[]
 }
 
 export interface OpenNotes {
+  /** Open threads (a note and its replies count once). */
   notes: number
   records: number
 }
 
-export const reviewApi = {
-  /** Mark the chosen records; `dry_run` only counts. */
-  setReview: (
-    body: RecordSelectionBody & { status: ReviewStatus; dry_run?: boolean },
-  ) => api.post<ReviewResult>('/records/review', body),
-
+export const notesApi = {
   openNotes: (body: RecordSelectionBody) =>
     api.post<OpenNotes>('/records/open-notes', body),
 
+  /** A record's threads, oldest first, each with its replies. */
   notes: (recordId: string) =>
     api.get<Note[]>(`/records/${encodeURIComponent(recordId)}/notes`),
 
   addNote: (recordId: string, body: string) =>
     api.post<Note>(`/records/${encodeURIComponent(recordId)}/notes`, { body }),
+
+  /** Reply in the thread `id` is in; a resolved thread opens again. */
+  reply: (id: string, body: string) =>
+    api.post<Note>(`/notes/${encodeURIComponent(id)}/replies`, { body }),
 
   editNote: (id: string, body: string) =>
     api.patch<Note>(`/notes/${encodeURIComponent(id)}`, { body }),

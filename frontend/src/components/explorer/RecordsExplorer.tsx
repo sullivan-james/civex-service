@@ -39,8 +39,7 @@ import {
   type RecordsTableSort,
 } from '../records/RecordsTable'
 import { ColumnPicker, columnLabel } from '../views/ColumnPicker'
-import { REVIEW_FILTER } from '../../utils/review'
-import { ReviewSelectionMenu } from '../review/ReviewSelectionMenu'
+import { OPEN_NOTES_FILTER, asksForOpenNotes } from '../../utils/notes'
 import { FilterControls } from './FilterControls'
 import { DrillLinks } from './DrillLinks'
 import { SavedViewBar } from './SavedViewBar'
@@ -247,9 +246,16 @@ export function RecordsExplorer({
   const items = x.page.data?.items ?? []
   const total = x.page.data?.total ?? 0
   const rows = toTableRows(items)
-  const columns = x.columnNames.map((name) => {
-    if (name === REVIEW_FILTER)
-      return { name, label: 'Review', type: 'review', sortable: false }
+  // Listing records with open notes (the "Open notes" view): the column says
+  // what is open, and a record opens on its Notes tab.
+  const openNotesView = asksForOpenNotes(x.filter)
+  const columnNames =
+    openNotesView && !x.columnNames.includes(OPEN_NOTES_FILTER)
+      ? [...x.columnNames, OPEN_NOTES_FILTER]
+      : x.columnNames
+  const columns = columnNames.map((name) => {
+    if (name === OPEN_NOTES_FILTER)
+      return { name, label: 'Open notes', type: 'notes', sortable: false }
     const field = x.baseFields.find((f) => f.name === name)
     return {
       name,
@@ -331,8 +337,8 @@ export function RecordsExplorer({
     tables: [
       {
         format: 'csv' as const,
-        // The review status is shown, not written in a table.
-        columns: x.columnNames.filter((c) => c !== REVIEW_FILTER),
+        // Open notes are shown, not written in a table.
+        columns: x.columnNames.filter((c) => c !== OPEN_NOTES_FILTER),
         kind: x.listed?.name ?? null,
       },
     ],
@@ -649,7 +655,7 @@ export function RecordsExplorer({
                 onChange={(cols) => patch({ cols })}
                 baseFields={x.baseFields}
                 joinable={x.joinable}
-                extra={[{ name: REVIEW_FILTER, label: 'Review' }]}
+                extra={[{ name: OPEN_NOTES_FILTER, label: 'Open notes' }]}
                 allowHideAll={false}
               />
               {x.cols && (
@@ -935,16 +941,6 @@ export function RecordsExplorer({
                         onStarted={picked.clear}
                       />
                     )}
-                    <ReviewSelectionMenu
-                      selection={
-                        allMatching
-                          ? { query: x.query, collection: dataset }
-                          : { ids: [...selected] }
-                      }
-                      count={bulkCount}
-                      collectionId={collection?.id}
-                      onDone={picked.clear}
-                    />
                     {listed && bulkEditableFields(listed).length > 0 && (
                       <Button
                         size="sm"
@@ -1014,7 +1010,11 @@ export function RecordsExplorer({
                   columns={columns}
                   rows={rows}
                   schemas={x.schemas}
-                  recordLink={(r) => `/records/${r.id}`}
+                  recordLink={(r) =>
+                    openNotesView
+                      ? `/records/${r.id}?tab=notes`
+                      : `/records/${r.id}`
+                  }
                   sort={sort}
                   onSortChange={toggleSort}
                   selection={dataset ? picked.table : undefined}

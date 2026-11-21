@@ -4,11 +4,9 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router'
 import type { ReactNode } from 'react'
-import type { Note } from '../../api/review'
+import type { Note } from '../../api/notes'
 import { ToastProvider } from '../ui/ToastProvider'
 import { NotesPanel } from './NotesPanel'
-import { ReviewStatusMenu } from './ReviewStatusMenu'
-import { ReviewSelectionMenu } from './ReviewSelectionMenu'
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -19,6 +17,7 @@ const json = (body: unknown, status = 200) =>
 const note = (over: Partial<Note>): Note => ({
   id: 'n1',
   record_id: 'r1',
+  thread_id: null,
   body: 'depth looks off',
   author: 'ana',
   created_at: '2026-11-20T10:00:00Z',
@@ -26,6 +25,7 @@ const note = (over: Partial<Note>): Note => ({
   resolved_at: null,
   resolved_by: null,
   deleted_at: null,
+  replies: [],
   ...over,
 })
 
@@ -47,7 +47,16 @@ function wrap(ui: ReactNode) {
 beforeEach(() => {
   writer = true
   notes = [
-    note({}),
+    note({
+      replies: [
+        note({
+          id: 'n3',
+          thread_id: 'n1',
+          author: 'ben',
+          body: 'it was the sensor',
+        }),
+      ],
+    }),
     note({ id: 'n2', author: 'ben', body: 'calibrated on the 3rd' }),
   ]
   calls = []
@@ -73,8 +82,6 @@ beforeEach(() => {
         })
       if (url.pathname === '/api/records/r1/notes' && method === 'GET')
         return json(notes)
-      if (url.pathname === '/api/records/review')
-        return json({ status: 'checked', records: 2, changed: 2, unchanged: 0 })
       return json(note({}))
     }),
   )
@@ -83,15 +90,38 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('NotesPanel', () => {
-  it('lists the notes with who wrote them, and lets only the author edit', async () => {
+  it('lists threads with their replies, and lets only the author edit', async () => {
     wrap(<NotesPanel recordId="r1" collectionId="c1" />)
     expect(await screen.findByText('depth looks off')).toBeInTheDocument()
+    expect(screen.getByText('it was the sensor')).toBeInTheDocument()
     expect(screen.getByText('calibrated on the 3rd')).toBeInTheDocument()
-    expect(screen.getByText('ben')).toBeInTheDocument()
     await waitFor(() =>
       expect(screen.getAllByRole('button', { name: 'Edit' })).toHaveLength(1),
     )
+    // Resolve is on each thread, not on a reply; each thread has a Reply box.
     expect(screen.getAllByRole('button', { name: 'Resolve' })).toHaveLength(2)
+    expect(screen.getAllByRole('textbox', { name: 'Reply' })).toHaveLength(2)
+    expect(
+      screen.getByRole('link', { name: 'All open notes' }),
+    ).toHaveAttribute('href', expect.stringContaining('tab=records'))
+  })
+
+  it('replies in a thread', async () => {
+    const user = userEvent.setup()
+    wrap(<NotesPanel recordId="r1" collectionId="c1" />)
+    await screen.findByText('depth looks off')
+    await user.type(
+      screen.getAllByRole('textbox', { name: 'Reply' })[0],
+      'thanks',
+    )
+    await user.click(screen.getAllByRole('button', { name: 'Reply' })[0])
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        method: 'POST',
+        path: '/api/notes/n1/replies',
+        body: { body: 'thanks' },
+      }),
+    )
   })
 
   it('adds a note and resolves one', async () => {
@@ -127,61 +157,6 @@ describe('NotesPanel', () => {
     await waitFor(() =>
       expect(screen.getByRole('textbox', { name: 'New note' })).toBeDisabled(),
     )
-  })
-})
-
-describe('ReviewStatusMenu', () => {
-  it('shows the status and marks the record from its menu', async () => {
-    const user = userEvent.setup()
-    wrap(
-      <ReviewStatusMenu
-        recordId="r1"
-        collectionId="c1"
-        review={{
-          status: 'needs_check',
-          by: 'ana',
-          at: '2026-11-20T10:00:00Z',
-        }}
-      />,
-    )
-    await user.click(
-      screen.getByRole('button', { name: 'Review: Needs a check' }),
-    )
-    await user.click(screen.getByText('Mark as checked'))
-    await waitFor(() =>
-      expect(calls).toContainEqual({
-        method: 'POST',
-        path: '/api/records/review',
-        body: { ids: ['r1'], status: 'checked' },
-      }),
-    )
-  })
-})
-
-describe('ReviewSelectionMenu', () => {
-  it('marks everything a list matches with one request', async () => {
-    const user = userEvent.setup()
-    const onDone = vi.fn()
-    wrap(
-      <ReviewSelectionMenu
-        selection={{
-          query: { schema: 'sample', search: 'x' },
-          collection: 'survey',
-        }}
-        count={40}
-        collectionId="c1"
-        onDone={onDone}
-      />,
-    )
-    await user.click(screen.getByRole('button', { name: /Review/ }))
-    await user.click(screen.getByText('Mark as checked'))
-    await waitFor(() => expect(onDone).toHaveBeenCalled())
-    const sent = calls.find((c) => c.path === '/api/records/review')
-    expect(sent?.body).toMatchObject({
-      collection: 'survey',
-      schema_name: 'sample',
-      search: 'x',
-      status: 'checked',
-    })
+    expect(screen.queryByRole('textbox', { name: 'Reply' })).toBeNull()
   })
 })

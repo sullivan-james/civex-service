@@ -1,16 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import type { AuditEvent, AuditLogEntry } from '../api/audit'
-import {
-  auditEntryTarget,
-  describeAnyAuditEntry,
-  describeAuditEvent,
-} from './activityAudit'
+import type { AuditLogEntry } from '../api/audit'
+import { auditEntryTarget, describeAnyAuditEntry } from './activityAudit'
 import {
   OPEN_NOTES_FILTER,
-  REVIEW_FILTER,
-  reviewFilterFields,
-  reviewStatus,
-} from './review'
+  asksForOpenNotes,
+  noteFilterFields,
+  openNotesHref,
+  openNotesText,
+} from './notes'
 
 const entry = (over: Partial<AuditLogEntry>): AuditLogEntry =>
   ({
@@ -24,28 +21,37 @@ const entry = (over: Partial<AuditLogEntry>): AuditLogEntry =>
     ...over,
   }) as AuditLogEntry
 
-describe('review in the filter', () => {
-  it('offers the status and open notes as fields of the record itself', () => {
-    const fields = reviewFilterFields()
-    expect(fields.map((f) => f.name)).toEqual([
-      REVIEW_FILTER,
-      OPEN_NOTES_FILTER,
-    ])
-    expect(fields.every((f) => f.ownerless)).toBe(true)
-    expect(fields[0].restrictions).toEqual({
-      choices: ['none', 'needs_check', 'checked'],
-    })
+describe('open notes in the explorer', () => {
+  it('offers Has open notes as a field of the record itself', () => {
+    const fields = noteFilterFields()
+    expect(fields.map((f) => f.name)).toEqual([OPEN_NOTES_FILTER])
+    expect(fields[0].ownerless).toBe(true)
   })
 
-  it('reads a record without a review as not reviewed', () => {
-    expect(reviewStatus(null)).toBe('none')
-    expect(reviewStatus({ status: 'checked', by: 'ana', at: '' })).toBe(
-      'checked',
+  it('links to All records filtered to open notes, and knows it there', () => {
+    const href = openNotesHref()
+    expect(href.startsWith('/collections?tab=records&filter=')).toBe(true)
+    const filter = JSON.parse(
+      new URLSearchParams(href.split('?')[1]).get('filter')!,
     )
+    expect(asksForOpenNotes(filter)).toBe(true)
+    expect(
+      asksForOpenNotes({
+        and: [{ field: 'site', op: 'eq', value: 'a' }, filter],
+      }),
+    ).toBe(true)
+    expect(asksForOpenNotes({ or: [filter] })).toBe(false)
+    expect(asksForOpenNotes({ ...filter, value: false })).toBe(false)
+    expect(asksForOpenNotes(null)).toBe(false)
+  })
+
+  it('shows how many threads are open and the latest one', () => {
+    expect(openNotesText(2, 'depth looks off')).toBe('2 open · depth looks off')
+    expect(openNotesText(0, null)).toBeNull()
   })
 })
 
-describe('Activity on notes and reviews', () => {
+describe('Activity on notes', () => {
   it('says what happened to a note, with what it says, and links to its record', () => {
     const added = entry({
       new_data: { body: 'depth looks off', record_id: 'r1' },
@@ -71,33 +77,18 @@ describe('Activity on notes and reviews', () => {
         },
       ],
     })
-    expect(describeAnyAuditEntry(resolved).title).toBe('Note resolved')
+    expect(describeAnyAuditEntry(resolved).title).toBe('Thread resolved')
   })
 
-  it('titles a record’s review in words', () => {
-    const marked = entry({
-      entity_type: 'record',
-      action: 'update',
-      changes: [
-        {
-          field: '@review',
-          label: 'Review',
-          dtype: 'string',
-          before: 'Not reviewed',
-          after: 'Needs a check',
-        },
-      ],
+  it('says a reply is a reply, and resolving is of the thread', () => {
+    const replied = entry({
+      new_data: { body: 'fixed', record_id: 'r1', thread_id: 'n0' },
     })
-    expect(describeAnyAuditEntry(marked).title).toBe('Marked as needs a check')
-  })
-
-  it('says how many records a review marked', () => {
-    const event = {
-      kind: 'batch',
-      entry: null,
-      batch: { id: 'b', kind: 'review', label: 'Checked' },
-      parts: [{ entity_type: 'record', action: 'update', count: 12 }],
-    } as unknown as AuditEvent
-    expect(describeAuditEvent(event).title).toBe('Marked 12 records as checked')
+    expect(describeAnyAuditEntry(replied).title).toBe('Replied to a note')
+    const deleted = entry({
+      action: 'delete',
+      old_data: { body: 'fixed', record_id: 'r1', thread_id: 'n0' },
+    })
+    expect(describeAnyAuditEntry(deleted).title).toBe('Reply deleted')
   })
 })
