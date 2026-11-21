@@ -204,7 +204,9 @@ def test_verify_finds_a_tampered_bundle(ctx, study):
     path.write_bytes(rebuilt.getvalue())
     bad = ctx.release_svc.verify("v1")
     assert not bad.matches and not bad.bundle_intact
-    assert bad.actual != made.content_hash and bad.problems
+    # The content hash is over records.hashes, which the edit didn't touch;
+    # the lines no longer match it, and the zip isn't what was kept.
+    assert any("records.hashes does not match" in p for p in bad.problems)
 
 
 def test_a_deep_verify_reads_every_file_back(ctx, study):
@@ -447,26 +449,132 @@ def test_the_files_are_laid_out_as_frozen_even_after_edits(ctx, study):
     assert [i.path for i in ctx.release_svc.file_plan("v1").items] == ["A/p.jpg"]
 
 
-def test_changes_since_a_release(ctx, study):
+def _counts(c) -> tuple[int, int, int]:
+    return c.added, c.changed, c.removed
+
+
+def test_a_release_made_a_moment_ago_is_the_same_as_the_data(ctx, study):
     _make(ctx)
-    assert ctx.release_svc.changes_since("v1").added == 0
+    now = ctx.release_svc.compare("v1")
+    assert (now.records, now.unchanged) == (4, 4)
+    assert _counts(now) == (0, 0, 0) and now.structure == []
+
+
+def test_added_changed_and_removed_are_disjoint(ctx, study):
+    _make(ctx)
     a = study["a"]
-    ctx.record_svc.update(str(a.id), {"name": "A2"})
-    ctx.record_svc.add("south", "site", {"name": "C"})
+    ctx.record_svc.patch(str(a.id), {"name": "A2"})  # changed
+    ctx.record_svc.add("south", "site", {"name": "C"})  # added
     b = ctx.record_svc.find("south", "site", filters=["name=B"])[0]
-    ctx.record_svc.delete(str(b.id))
+    ctx.record_svc.delete(str(b.id))  # removed (deleted)
+    sample = ctx.record_svc.find("north", "sample", filters=["depth=1.0"])[0]
+    ctx.record_svc.delete(str(sample.id))
+    ctx.record_svc.purge(str(sample.id))  # removed (purged)
     temp = ctx.record_svc.add("south", "site", {"name": "T"})
     ctx.record_svc.delete(str(temp.id))  # made and deleted since: nothing
+    ctx.commit()
+    now = ctx.release_svc.compare("v1")
+    assert _counts(now) == (1, 1, 2) and now.unchanged == 1
+    by = {c.collection: _counts(c) for c in now.collections}
+    assert by == {"north": (0, 1, 1), "south": (1, 0, 1)}
+    total, items = ctx.release_svc.compared_records("v1", "removed")
+    assert total == 2 and {i["name"] for i in items} == {"B", "1.0"}
+    assert all(not i["live"] for i in items)
+    _, (changed,) = ctx.release_svc.compared_records("v1", "changed")
+    assert changed["id"] == str(a.id) and changed["name"] == "A2"
+    (diff,) = ctx.release_svc.record_differences("v1", str(a.id))
+    assert (diff.label, diff.before, diff.after) == ("name", "A", "A2")
+
+
+def test_an_edit_undone_is_unchanged(ctx, study):
+    _make(ctx)
+    a = study["a"]
+    ctx.record_svc.patch(str(a.id), {"name": "A2"})
+    ctx.commit()
+    assert ctx.release_svc.compare("v1").changed == 1
+    ctx.record_svc.patch(str(a.id), {"name": "A"})
+    ctx.commit()
+    assert _counts(ctx.release_svc.compare("v1")) == (0, 0, 0)
+
+
+def test_renaming_a_field_changes_no_record_but_is_a_structure_change(ctx, study):
+    _make(ctx)
+    ctx.schema_svc.update_field("site", "name", new_name="site_name", label="Site")
     ctx.schema_svc.add_field("site", "notes", "string")
     ctx.commit()
+    now = ctx.release_svc.compare("v1")
+    assert _counts(now) == (0, 0, 0)
+    changes = {(c["kind"], c["name"], c["change"]) for c in now.structure}
+    assert ("field", "site_name", "changed") in changes
+    assert ("field", "notes", "added") in changes
 
-    since = ctx.release_svc.changes_since("v1")
-    assert since.comparable and since.by == "local"
-    assert (since.added, since.changed, since.deleted) == (1, 1, 1)
-    by_name = {c.collection: c for c in since.collections}
-    assert (by_name["north"].changed, by_name["south"].added) == (1, 1)
-    assert by_name["south"].deleted == 1
-    assert since.structure.get("field") == 1 and "release" not in since.structure
+
+def test_moving_a_record_out_of_scope_is_a_change(ctx, study):
+    _make(ctx, scope=ReleaseScope(collections=["south"]))
+    b = ctx.record_svc.find("south", "site", filters=["name=B"])[0]
+    ctx.record_svc.move("north", ids=[str(b.id)])
+    ctx.commit()
+    now = ctx.release_svc.compare("v1")
+    assert _counts(now) == (0, 1, 0)
+    (moved,) = ctx.release_svc.record_differences("v1", str(b.id))
+    assert (moved.label, moved.before, moved.after) == ("Collection", "south", "north")
+    north = next(c.collection_id for c in now.collections)
+    assert ctx.release_svc.compared_records("v1", "changed", collection=north)[0] == 1
+    assert ctx.release_svc.compared_records("v1", "added", collection=north)[0] == 0
+
+
+def test_a_picked_release_compares_only_what_its_pick_takes(ctx, study):
+    a = study["a"]
+    _make(ctx, scope=ReleaseScope(records=[str(a.id)]))
+    ctx.record_svc.add("south", "site", {"name": "C"})  # outside the pick
+    ctx.commit()
+    now = ctx.release_svc.compare("v1")
+    assert now.records >= 1 and _counts(now) == (0, 0, 0)
+
+
+def test_history_does_not_change_the_answer(ctx, study):
+    from civex.services import release_service
+
+    _make(ctx)
+    ctx.record_svc.update(str(study["a"].id), {"name": "A2"})
+    ctx.record_svc.add("south", "site", {"name": "C"})
+    ctx.commit()
+    before = ctx.release_svc.compare("v1").to_dict()
+    ctx._session.query(AuditLog).filter(AuditLog.entity_type == "record").delete()
+    ctx.commit()
+    release_service._COMPARED.clear()
+    after = ctx.release_svc.compare("v1").to_dict()
+    assert before | {"at": 0} == after | {"at": 0}
+
+
+def test_a_comparison_is_kept_until_the_data_changes(ctx, study, monkeypatch):
+    _make(ctx)
+    first = ctx.release_svc.compare("v1")
+    assert ctx.release_svc.compare("v1") is first
+    ctx.record_svc.add("south", "site", {"name": "C"})
+    ctx.commit()
+    assert ctx.release_svc.compare("v1").added == 1
+
+
+def test_a_large_release_is_compared_as_a_job(ctx, study, monkeypatch):
+    from civex.services import release_service
+
+    made = _make(ctx)
+    assert not ctx.release_svc.in_background(made)
+    monkeypatch.setattr(release_service, "COMPARE_INLINE_MAX", 2)
+    assert ctx.release_svc.in_background(made)
+    seen: list[tuple] = []
+
+    class Watch:
+        def phase(self, label, total=0, total_bytes=0):
+            seen.append(("phase", label, total))
+
+        def advance(self, done, total=None):
+            seen.append(("advance", done))
+
+    ctx.release_svc.compare("v1", Watch())  # type: ignore[arg-type]
+    assert seen[0] == ("phase", "Comparing 4 records", 4)
+    assert seen[-1] == ("advance", 4)
 
 
 @contextmanager
@@ -484,13 +592,17 @@ def _statements(ctx: AppContext):
         event.remove(engine, "before_cursor_execute", record)
 
 
-def test_changes_since_costs_the_same_however_much_changed(ctx, study):
+def test_comparing_costs_the_same_however_much_changed(ctx, study):
+    from civex.services import release_service
+
     _make(ctx)
 
     def cost() -> int:
-        ctx.release_svc.changes_since("v1")  # warm
+        release_service._COMPARED.clear()
+        ctx.release_svc.compare("v1")  # warm
+        release_service._COMPARED.clear()
         with _statements(ctx) as seen:
-            ctx.release_svc.changes_since("v1")
+            ctx.release_svc.compare("v1")
         return len(seen)
 
     few = cost()
@@ -498,6 +610,7 @@ def test_changes_since_costs_the_same_however_much_changed(ctx, study):
         ctx.record_svc.add("north" if i % 2 else "south", "site", {"name": f"s{i}"})
     ctx.commit()
     assert cost() == few
+    assert ctx.release_svc.compare("v1").added == 60
 
 
 def test_owning_the_files_costs_the_same_however_many_there_are(ctx, study):
@@ -525,32 +638,6 @@ def test_a_synced_copy_with_unsent_changes_must_sync_first(ctx, study):
     ctx.release_svc.position = lambda: (7, 0)
     made = _make(ctx)
     assert made.feed_seq == 7
-    assert ctx.release_svc.changes_since("v1").by == "feed"
-
-
-def test_entries_from_before_the_release_never_count_as_since(ctx, study):
-    """A synced copy holds entries from before the release that the server
-    never numbered: some refused, some sent but not numbered back. None of
-    them is a change since; one real edit afterwards is exactly one."""
-    entries = ctx._session.query(AuditLog).order_by(AuditLog.local_seq).all()
-    for i, entry in enumerate(entries):
-        entry.hub_seq = None
-        entry.sync_state = "rejected" if i % 2 else "synced"
-    ctx.commit()
-    ctx.release_svc.position = lambda: (7, 0)
-    made = _make(ctx)
-    assert made.feed_seq == 7
-    since = ctx.release_svc.changes_since("v1")
-    assert since.by == "feed"
-    assert (since.added, since.changed, since.deleted) == (0, 0, 0)
-    assert since.structure == {}
-
-    ctx.release_svc.correct("v1", title="Renamed")  # not a change to the data
-    ctx.record_svc.update(str(study["a"].id), {"name": "A2"})
-    ctx.commit()
-    since = ctx.release_svc.changes_since("v1")
-    assert (since.added, since.changed, since.deleted) == (0, 1, 0)
-    assert since.structure == {}
 
 
 def test_who_may_make_withdraw_and_yank_releases(tmp_path: Path):

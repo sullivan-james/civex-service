@@ -1,3 +1,4 @@
+import type { AuditChange } from './audit'
 import { ApiError, api } from './client'
 import {
   filenameOf,
@@ -52,6 +53,8 @@ export interface Release {
   yanked_by: string | null
   yanked_reason: string | null
   file_name: string
+  /** Comparing it with the data now is long: run it as a job. */
+  compare_in_background: boolean
 }
 
 export interface ReleaseScopeBody {
@@ -130,25 +133,44 @@ export interface ReleaseVerify {
   notes: string[]
 }
 
-export interface CollectionChanges {
-  collection_id: string | null
+export interface CollectionComparison {
+  collection_id: string
   collection: string | null
   added: number
   changed: number
-  deleted: number
+  removed: number
   in_scope: boolean
 }
 
-export interface ReleaseChanges {
+export interface StructureChange {
+  kind: 'schema' | 'field'
+  change: 'added' | 'removed' | 'changed'
+  name: string | null
+  schema: string | null
+  what: string[]
+}
+
+/** A release compared with the data now, record by record. */
+export interface ReleaseComparison {
   name: string
-  comparable: boolean
-  by: 'feed' | 'local' | null
-  reason: string | null
+  records: number
+  unchanged: number
   added: number
   changed: number
-  deleted: number
-  collections: CollectionChanges[]
-  structure: Record<string, number>
+  removed: number
+  collections: CollectionComparison[]
+  structure: StructureChange[]
+  at: number
+}
+
+export type ComparedKind = 'added' | 'changed' | 'removed'
+
+export interface ComparedRecord {
+  id: string
+  name: string | null
+  collection: string | null
+  schema: string | null
+  live: boolean
 }
 
 const at = (name: string) => `/releases/${encodeURIComponent(name)}`
@@ -211,7 +233,33 @@ export const releasesApi = {
   },
   gatherFiles: (name: string, volume: string) =>
     api.post<GatherResult>(`${at(name)}/files/gather`, { volume }),
-  changes: (name: string) => api.get<ReleaseChanges>(`${at(name)}/changes`),
+  compare: (name: string, progressId?: string) =>
+    api.post<ReleaseComparison>(
+      `${at(name)}/compare`,
+      {},
+      progressHeaders(progressId),
+    ),
+  comparedRecords: (
+    name: string,
+    kind: ComparedKind,
+    offset: number,
+    limit: number,
+    collection?: string,
+  ) => {
+    const q = new URLSearchParams({
+      kind,
+      offset: String(offset),
+      limit: String(limit),
+    })
+    if (collection) q.set('collection', collection)
+    return api.get<{ total: number; items: ComparedRecord[] }>(
+      `${at(name)}/compare/records?${q}`,
+    )
+  },
+  recordDifferences: (name: string, id: string) =>
+    api.get<AuditChange[]>(
+      `${at(name)}/compare/records/${encodeURIComponent(id)}`,
+    ),
   /** Where the bundle downloads from (fetched from the server first on a
    * copy that hasn't got it). */
   bundleUrl: (name: string) => apiUrl(`${at(name)}/bundle`),

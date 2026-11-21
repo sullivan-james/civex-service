@@ -102,7 +102,7 @@ def test_the_files_come_out_as_a_folder_or_a_small_zip(client: TestClient):
     assert folder.json()["copied"] == 1
 
 
-def test_correct_withdraw_yank_and_changes_since(client: TestClient):
+def test_correct_withdraw_yank_and_compare(client: TestClient):
     _study(client)
     client.post("/api/releases", json={"name": "v1", "title": "Survey"})
     fixed = client.patch("/api/releases/v1", json={"title": "The survey"})
@@ -113,9 +113,13 @@ def test_correct_withdraw_yank_and_changes_since(client: TestClient):
         "/api/collections/south/records",
         json={"schema_name": "sample", "data": {"site": "more"}},
     )
-    since = client.get("/api/releases/v1/changes").json()
-    assert since["comparable"] and since["added"] == 1
+    since = client.post("/api/releases/v1/compare").json()
+    assert (since["added"], since["changed"], since["removed"]) == (1, 0, 0)
     assert since["collections"][0]["collection"] == "south"
+    listed = client.get("/api/releases/v1/compare/records?kind=added").json()
+    assert listed["total"] == 1 and listed["items"][0]["live"]
+    assert client.get("/api/releases/v1/compare/records?kind=x").status_code == 422
+    assert client.get("/api/releases/v1").json()["compare_in_background"] is False
 
     gone = client.post("/api/releases/v1/withdraw", json={"reason": "wrong units"})
     assert gone.status_code == 200 and gone.json()["withdrawn_reason"] == "wrong units"

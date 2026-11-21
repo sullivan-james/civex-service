@@ -3,7 +3,8 @@
 One rule for `civex release ...`, `/releases` and the app.
 
 **Files are referenced, never copied.** Making a release writes a small
-bundle of its records with `BundleService.export` (no files), hashes it (the
+bundle of its records with `BundleService.export` (no files), adds its
+structure and each record's hash, hashes it (the
 hash covers every cited file by its sha256, so no file is read), adds
 `release.json` and `CITATION.cff`, and keeps it in the object store. The
 release then *owns* every file its records cite, and its bundle, through
@@ -25,6 +26,12 @@ release's frozen records (`release_records.FrozenRecords`): the same path
 rule, plan (what is out of reach, by drive), folder of links or copies on a
 drive, move onto one drive and (under the zip limit) zip as a live selection.
 A folder gets a BagIt-style `manifest-sha256.txt`.
+
+**What changed since** is the data compared, never history (`compare`):
+the bundle's `records.hashes` (each record's hash by field id, written at
+creation with `structure.json`) walked beside the live records a page at a
+time, each hashed by the same rule, so an undone edit is unchanged, a rename
+changes no record and every copy gives the same answer.
 
 Restoring a release is reading its bundle into a new project with
 `civex bundle import` (or `POST /bundle/import`): there is no other path.
@@ -210,13 +217,23 @@ class YankPlan:
         return dataclasses.asdict(self)
 
 
+#: Above this many records a comparison is a job with its progress in the
+#: status bar (`ReleaseResponse.compare_in_background`); below it, inline.
+COMPARE_INLINE_MAX = 20_000
+#: Records compared per query.
+COMPARE_PAGE = 1000
+#: Kinds of difference a comparison names records for.
+COMPARE_KINDS = ("added", "changed", "removed")
+
+
 @dataclass
-class CollectionChanges:
-    collection_id: str | None
-    collection: str | None  # None: deleted for good, or a deleted collection
+class CollectionComparison:
+    collection_id: str
+    # Its name now (or as it was, when it is gone).
+    collection: str | None
     added: int = 0
     changed: int = 0
-    deleted: int = 0
+    removed: int = 0
     in_scope: bool = True
 
     def to_dict(self) -> dict[str, Any]:
@@ -224,26 +241,35 @@ class CollectionChanges:
 
 
 @dataclass
-class ChangesSince:
-    """What changed in the project after a release was made."""
+class Comparison:
+    """A release compared with the data now, record by record: three
+    disjoint counts (added: in its scope now and not in it; changed: in both,
+    its values or place differ; removed: in it, not live now, deleted or
+    purged), per collection, and the schemas and fields added, removed or
+    changed since. Worked out from the data, never history, so every copy
+    gives the same answer."""
 
     name: str
-    comparable: bool
-    # How the position was compared: "feed" (the authority's numbers) or
-    # "local" (this copy's own order); None when it can't be.
-    by: str | None
-    reason: str | None = None
+    records: int = 0
+    unchanged: int = 0
     added: int = 0
     changed: int = 0
-    deleted: int = 0
-    collections: list[CollectionChanges] = field(default_factory=list)
-    # Entries about other kinds (schema, field, dataset, view...) since.
-    structure: dict[str, int] = field(default_factory=dict)
+    removed: int = 0
+    collections: list[CollectionComparison] = field(default_factory=list)
+    structure: list[dict[str, Any]] = field(default_factory=list)
+    # The history position it was worked out at: reused while nothing changed.
+    at: int = 0
+    # The records each kind means, (id, collection id) in id order.
+    ids: dict[str, list[tuple[str, str]]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        out = dataclasses.asdict(self)
+        out = {k: v for k, v in dataclasses.asdict(self).items() if k != "ids"}
         out["collections"] = [c.to_dict() for c in self.collections]
         return out
+
+
+#: Comparisons worked out, per (database, release id): (position, result).
+_COMPARED: dict[tuple[str, str], Comparison] = {}
 
 
 class _Undo(Exception):
@@ -293,6 +319,13 @@ class ReleaseService:
         self.savepoint: Callable[[], Any] | None = None
         # Read back exactly these files' copies (`ObjectStore.verify`).
         self.read_back: Callable[..., list[str]] | None = None
+        # The project's schemas and collections now, as `rules.structure_of`.
+        self.structure: Callable[[], dict[str, Any]] = lambda: {
+            "schemas": [],
+            "collections": [],
+        }
+        # The records the explorer's list is about, by id (for names).
+        self.records_by_id: Callable[[list[str]], list[Any]] | None = None
 
     # -- reading ---------------------------------------------------------------
 
@@ -432,6 +465,15 @@ class ReleaseService:
                 path, scope.options(include_workflows), progress
             )
             written = self._bundles.written_ids
+            structure = self.structure()
+            with zipfile.ZipFile(path, "a") as zf:
+                zf.writestr(rules.STRUCTURE_JSON, json.dumps(structure, indent=1))
+            with zipfile.ZipFile(path) as zf:
+                lines, _, unread = rules.line_hashes(zf, structure)
+            if unread:
+                raise ValidationError(unread[0])
+            with zipfile.ZipFile(path, "a") as zf:
+                zf.writestr(rules.RECORD_HASHES, rules.hashes_text(lines))
             with zipfile.ZipFile(path) as zf:
                 hashed = rules.hash_bundle(zf)
             counts = {
@@ -743,6 +785,17 @@ class ReleaseService:
             records = FrozenRecords(f, where)
         yield self.files.with_records(records), FileSelection(record_ids=records.ids)
 
+    @contextmanager
+    def frozen(self, name: str) -> Iterator[Any]:
+        """The release's records as it holds them (`FrozenRecords`), without
+        asking where any file is."""
+        from civex.services.release_records import FrozenRecords
+
+        release = self.get(name)
+        self._not_yanked(release)
+        with self._bundle(release) as f:
+            yield FrozenRecords(f, lambda cited: lambda sha: {})
+
     def file_plan(self, name: str, progress: Progress | None = None) -> FilePlan:
         """Every file the release cites, each at its path in the record
         hierarchy, and whether it can be reached now (grouped by drive)."""
@@ -793,52 +846,214 @@ class ReleaseService:
             freeze_sources=False,
         )
 
-    def changes_since(self, name: str) -> ChangesSince:
-        """How many records were added, changed and deleted (per collection)
-        after the release was made, from history: by the authority's numbers
-        on a synced project, else this copy's own order. Two queries."""
+    def in_background(self, release: ReleaseDTO) -> bool:
+        """Whether comparing it is long enough to run as a job."""
+        return int(release.counts.get("records") or 0) > COMPARE_INLINE_MAX
+
+    def compare(self, name: str, progress: Progress | None = None) -> Comparison:
+        """The release compared with the data now (`Comparison`). Its records'
+        hashes (`records.hashes`, sorted by id) are walked beside the live
+        records, a page at a time (one query a page, whatever changed), and
+        each live record hashed by the same rule (`rules.record_hash`). The
+        answer is kept while the project's history position stays the same."""
         release = self.get(name)
-        feed, _ = self.position()
-        if release.feed_seq is not None and feed is not None:
-            by = "feed"
-        elif release.local_seq is not None:
-            by = "local"
-        else:
-            return ChangesSince(
-                release.name,
-                False,
-                None,
-                "It was made on another computer before the project synced, so "
-                "its place in history isn't known here",
-            )
-        rows, others = self._repo.changes_since(
-            release.local_seq if by == "local" else None,
-            release.feed_seq if by == "feed" else None,
-            release.id,
-        )
-        names = self._collections()
+        self._not_yanked(release)
+        at = self._repo.history_position()
+        key = (self._repo.database_key(), str(release.id))
+        kept = _COMPARED.get(key)
+        if kept is not None and kept.at == at:
+            return kept
+        with self._bundle(release) as f, zipfile.ZipFile(f) as zf:
+            then = rules.read_structure(zf) or {"schemas": [], "collections": []}
+            frozen = rules.read_hashes(zf) or []
+        now = self.structure()
+        fields = {k: set(v.values()) for k, v in rules.stored_fields(now).items()}
+        out = Comparison(release.name, records=len(frozen), at=at)
+        out.ids = {k: [] for k in COMPARE_KINDS}
+        if progress:
+            progress.phase(f"Comparing {len(frozen):,} records", len(frozen))
+
+        def hashed(row: tuple[str, str, str, str | None, dict[str, Any]]) -> str:
+            rid, cid, sid, pid, data = row
+            return rules.record_hash(rid, cid, sid, pid, data, fields.get(sid, ()))
+
+        # What the release holds: still there and the same, changed, or gone.
+        for at_ in range(0, len(frozen), COMPARE_PAGE):
+            page = frozen[at_ : at_ + COMPARE_PAGE]
+            found = {r[0]: r for r in self._repo.stored_rows([i for i, _, _ in page])}
+            for rid, digest, cid in page:
+                row = found.get(rid)
+                if row is None:
+                    out.ids["removed"].append((rid, cid))
+                elif hashed(row) != digest:
+                    out.ids["changed"].append((rid, row[1]))
+                else:
+                    out.unchanged += 1
+            if progress:
+                progress.advance(min(at_ + COMPARE_PAGE, len(frozen)))
+        # What is in its scope now and not in it: a merge of two id orders.
+        held = iter(i for i, _, _ in frozen)
+        mine = next(held, None)
+        for current in self._scope_now(release, then):
+            for live in current:
+                while mine is not None and mine < live[0]:
+                    mine = next(held, None)
+                if mine != live[0]:
+                    out.ids["added"].append((live[0], live[1]))
+        out.added, out.changed, out.removed = (len(out.ids[k]) for k in COMPARE_KINDS)
+        names = {str(k): v for k, v in self._collections().items()}
+        names_then = {c["id"]: c["name"] for c in then.get("collections") or []}
         in_scope = set(release.scope.get("collections") or [])
-        out = ChangesSince(release.name, True, by)
-        for cid, added, changed, deleted in rows:
-            if not (added or changed or deleted):
-                continue
-            label = names.get(cid) if cid else None
-            out.collections.append(
-                CollectionChanges(
-                    str(cid) if cid else None,
-                    label,
-                    added,
-                    changed,
-                    deleted,
-                    in_scope=not in_scope or label in in_scope,
-                )
-            )
-            out.added += added
-            out.changed += changed
-            out.deleted += deleted
-        out.collections.sort(key=lambda c: (c.collection is None, c.collection or ""))
-        out.structure = {k: v for k, v in others.items() if k != "release"}
+        per: dict[str, CollectionComparison] = {}
+        for kind in COMPARE_KINDS:
+            for _, cid in out.ids[kind]:
+                line = per.get(cid)
+                if line is None:
+                    label = names.get(cid) or names_then.get(cid)
+                    line = per[cid] = CollectionComparison(
+                        cid, label, in_scope=not in_scope or label in in_scope
+                    )
+                setattr(line, kind, getattr(line, kind) + 1)
+        out.collections = sorted(
+            per.values(), key=lambda c: (c.collection is None, c.collection or "")
+        )
+        out.structure = rules.structure_changes(then, now)
+        _COMPARED[key] = out
         return out
+
+    def _scope_now(
+        self, release: ReleaseDTO, then: dict[str, Any]
+    ) -> Iterator[list[tuple[str, str, str, str | None, dict[str, Any]]]]:
+        """The live records in the release's scope now, a page at a time in
+        id order: in its collections (by the ids they had, so a renamed one
+        is still the one), the whole project, or what its query or pick takes
+        now (with the records above them)."""
+        scope = release.scope
+        if scope.get("query") is not None or scope.get("records") is not None:
+            _, ids = self._owners(ReleaseScope.from_dict(scope), walk=True)
+            ordered = sorted(str(i) for i in ids or [])
+            for at in range(0, len(ordered), COMPARE_PAGE):
+                rows = self._repo.stored_rows(ordered[at : at + COMPARE_PAGE])
+                yield sorted(rows)
+            return
+        collections = None
+        if scope.get("collections"):
+            by_name = {c["name"]: c["id"] for c in then.get("collections") or []}
+            collections = [
+                uuid.UUID(by_name[n]) for n in scope["collections"] if n in by_name
+            ]
+        after = None
+        while True:
+            rows = self._repo.live_rows(collections, after, COMPARE_PAGE)
+            if not rows:
+                return
+            yield rows
+            after = rows[-1][0]
+
+    def compared_records(
+        self,
+        name: str,
+        kind: str,
+        offset: int = 0,
+        limit: int = 50,
+        collection: str | None = None,
+    ) -> tuple[int, list[dict[str, Any]]]:
+        """A page of the records one kind of difference means (in one
+        collection, by id, when given): how many there are, and `{id, name,
+        collection, schema, live}` for each. Added and changed records are
+        read as they are now; removed ones from the release's own frozen copy,
+        since they may be gone."""
+        if kind not in COMPARE_KINDS:
+            raise ValidationError(f"Unknown kind '{kind}': {', '.join(COMPARE_KINDS)}")
+        compared = self.compare(name)
+        chosen = [
+            i
+            for i, cid in compared.ids[kind]
+            if collection is None or cid == collection
+        ]
+        ids = chosen[offset : offset + limit]
+        if kind == "removed":
+            with self.frozen(name) as frozen:
+                found = frozen.get_many(ids)
+        else:
+            found = self.records_by_id(ids) if self.records_by_id else []
+        return len(chosen), [
+            {
+                "id": str(r.id),
+                "name": r.natural_name,
+                "collection": r.dataset_name,
+                "schema": r.schema_name,
+                "live": kind != "removed",
+            }
+            for r in found
+        ]
+
+    def record_differences(self, name: str, record_id: str) -> list[Any]:
+        """How one record differs from the release's copy of it, field by
+        field (`audit_diff.Change`, labelled with the field's name now), and
+        where it is when that moved. A field renamed since is still the same
+        field."""
+        from civex.domain import audit_diff
+
+        release = self.get(name)
+        self._not_yanked(release)
+        with self._bundle(release) as f, zipfile.ZipFile(f) as zf:
+            then = rules.read_structure(zf) or {"schemas": [], "collections": []}
+        now = self.structure()
+        with self.frozen(name) as frozen:
+            old = frozen.get(record_id)
+        rows = self._repo.stored_rows([str(old.id)])
+        if not rows:
+            raise NotFoundError(f"Record '{record_id}' is no longer here")
+        rid, cid, sid, pid, data = rows[0]
+        names_then = rules.stored_fields(then)
+        schema_then = {s["name"]: s["id"] for s in then["schemas"]}
+        old_ids = names_then.get(schema_then.get(old.schema_name, ""), {})
+        cols_then = {c["name"]: c["id"] for c in then.get("collections") or []}
+        before = {
+            "data": {old_ids[k]: v for k, v in old.data.items() if k in old_ids},
+            "dataset_id": cols_then.get(old.dataset_name or ""),
+            "parent_record_id": (
+                str(old.parent_record_id) if old.parent_record_id else None
+            ),
+        }
+        live = set(rules.stored_fields(now).get(sid, {}).values())
+        after = {
+            "data": {k: v for k, v in data.items() if k in live},
+            "dataset_id": cid,
+            "parent_record_id": pid,
+        }
+        labels = {
+            f["id"]: (f.get("label") or f["name"])
+            for s in now["schemas"] + then["schemas"]
+            for f in s.get("fields") or []
+        }
+        changes = audit_diff.diff_entry("record", "update", before, after)
+        collection_names = {
+            c["id"]: c["name"]
+            for c in then.get("collections", []) + now.get("collections", [])
+        }
+        for c in changes:
+            if c.field == "dataset_id":
+                c.label = "Collection"
+                c.before = collection_names.get(str(c.before), c.before)
+                c.after = collection_names.get(str(c.after), c.after)
+                continue
+            if c.field == "parent_record_id":
+                c.label = "Inside"
+                continue
+            c.label = labels.get(c.field, c.field)
+            if c.field in labels:
+                c.dtype = next(
+                    (
+                        f["type"]
+                        for s in now["schemas"] + then["schemas"]
+                        for f in s.get("fields") or []
+                        if f["id"] == c.field
+                    ),
+                    None,
+                )
+        return changes
 
     def kept_for(self, record_ids: list[uuid.UUID]) -> dict[str, int]:
         """Of the files these records cite, how many each release keeps (by

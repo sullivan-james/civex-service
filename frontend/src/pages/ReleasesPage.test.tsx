@@ -38,6 +38,7 @@ const RELEASE: Release = {
   yanked_by: null,
   yanked_reason: null,
   file_name: 'release-v1.civex.zip',
+  compare_in_background: false,
 }
 
 const PLAN = {
@@ -192,5 +193,78 @@ describe('a release page', () => {
     expect(
       screen.queryByRole('link', { name: 'Download' }),
     ).not.toBeInTheDocument()
+  })
+
+  it('compares the release with the data now and opens what each count means', async () => {
+    renderAt('/releases/v1?tab=changes', {
+      '/api/releases/v1/citation': CITATION,
+      '/api/releases/v1/compare': {
+        name: 'v1',
+        records: 12,
+        unchanged: 10,
+        added: 1,
+        changed: 1,
+        removed: 1,
+        collections: [
+          {
+            collection_id: 'c1',
+            collection: 'north',
+            added: 1,
+            changed: 1,
+            removed: 1,
+            in_scope: true,
+          },
+        ],
+        structure: [
+          {
+            kind: 'field',
+            change: 'changed',
+            name: 'site_name',
+            schema: 'site',
+            what: ['name'],
+          },
+        ],
+        at: 41,
+      },
+      '/api/releases/v1/compare/records/r9': [
+        { field: 'f1', label: 'Depth', dtype: 'float', before: 1, after: 2 },
+      ],
+      '/api/releases/v1/compare/records': {
+        total: 1,
+        items: [
+          {
+            id: 'r9',
+            name: 'Seal 9',
+            collection: 'north',
+            schema: 'seal',
+            live: true,
+          },
+        ],
+      },
+      '/api/releases/v1': RELEASE,
+    })
+    expect(
+      await screen.findByText(/10 of its 12 records are as they were/),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/Field site_name of site changed/),
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getAllByTitle('Show the 1 record changed')[0])
+    fireEvent.click(await screen.findByText('Seal 9'))
+    expect(await screen.findByText('Depth')).toBeInTheDocument()
+    expect(
+      screen.getByRole('link', { name: 'Open the record' }),
+    ).toHaveAttribute('href', '/records/r9')
+  })
+
+  it('compares a large release only when asked, as a job', async () => {
+    const calls = renderAt('/releases/v1?tab=changes', {
+      '/api/releases/v1/citation': CITATION,
+      '/api/releases/v1': { ...RELEASE, compare_in_background: true },
+    })
+    expect(
+      await screen.findByRole('button', { name: 'Compare with the data now' }),
+    ).toBeInTheDocument()
+    expect(calls.some((c) => c.path === '/api/releases/v1/compare')).toBe(false)
   })
 })

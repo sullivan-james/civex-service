@@ -2,7 +2,8 @@
 
 `travels` makes a release on one device and checks the authority and another
 device get it with its bundle of records (sent as a file, fetched when
-verified), at the authority's feed number; that the authority, which keeps
+verified), at the authority's feed number, and that both compare it with the data the
+same way after a change; that the authority, which keeps
 everyone's files, owns the files the release cites once its bundle is there,
 while the other device owns only the bundle (the authority keeps the files);
 and that a withdrawal made on the second device reaches the first. `yanks`
@@ -80,8 +81,23 @@ def travels(project, authority) -> list[str]:
         problems.append("the phone fetched the bundle before anyone asked for it")
     if not phone.release_svc.verify("v1").matches:
         problems.append("the phone could not verify the release")
-    if phone.release_svc.changes_since("v1").by != "feed":
-        problems.append("the phone did not compare by the server's numbers")
+    if (c := phone.release_svc.compare("v1")).added or c.changed or c.removed:
+        problems.append("the phone sees changes in a release made a moment ago")
+    # The laptop adds a record and edits one (then puts it back): both copies
+    # compare the release with the data the same way, whatever their history.
+    laptop.record_svc.add("study", "encounter", {"site": "new"})
+    (one,) = laptop.record_svc.find("study", "encounter", filters=["site=z"])
+    laptop.record_svc.patch(str(one.id), {"site": "y"})
+    laptop.record_svc.patch(str(one.id), {"site": "z"})
+    laptop.commit()
+    laptop.sync_svc.sync()
+    phone.sync_svc.sync()
+    theirs = phone.release_svc.compare("v1")
+    mine = laptop.release_svc.compare("v1")
+    if (mine.added, mine.changed, mine.removed) != (1, 0, 0):
+        problems.append("the laptop's comparison is not one record added")
+    if theirs.to_dict() | {"at": 0} != mine.to_dict() | {"at": 0}:
+        problems.append("the phone and the laptop compare the release differently")
 
     phone.release_svc.withdraw("v1", "calibration error")
     phone.commit()

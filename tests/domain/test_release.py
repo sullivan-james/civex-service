@@ -1,5 +1,7 @@
-"""The release content hash is over what a bundle holds, never its zip bytes:
-its records and the hashes of the files they cite (no file is read)."""
+"""A release's hashes: each record's comparison hash (by field id, so a rename
+changes nothing), and the content hash over the structure, the records'
+hashes (`records.hashes`, checked against the lines) and the files they cite
+(no file is read), never the zip's bytes."""
 
 from __future__ import annotations
 
@@ -23,58 +25,107 @@ def _zip(
 
 FILE = b"some bytes"
 SHA = hashlib.sha256(FILE).hexdigest()
-MANIFEST = json.dumps(
-    {
-        "format": 1,
-        "exported_at": "2026-01-01",
-        "schemas": [{"name": "b"}, {"name": "a"}],
-        "collections": [{"name": "c"}],
-    }
-).encode()
-R1 = b'{"id":"1","data":{"x":1,"f":{"sha256":"' + SHA.encode() + b'","size":10}}}\n'
-R2 = b'{"id":"2","data":{"x":2}}\n'
+SID, CID, X, F, CALC = "s-1", "c-1", "f-x", "f-f", "f-calc"
+STRUCTURE = {
+    "schemas": [
+        {
+            "id": SID,
+            "name": "site",
+            "parent_id": None,
+            "fields": [
+                {"id": X, "name": "x", "type": "integer"},
+                {"id": F, "name": "f", "type": "file"},
+                {"id": CALC, "name": "calc", "type": "formula"},
+            ],
+        }
+    ],
+    "collections": [{"id": CID, "name": "c"}],
+}
+
+
+def _line(rid: str, **data) -> bytes:
+    line = {"id": rid, "collection": "c", "schema": "site", "parent": None}
+    return json.dumps(line | {"data": data}).encode() + b"\n"
+
+
+R1 = _line("1", x=1, f={"sha256": SHA, "size": 10}, calc=99)
+R2 = _line("2", x=2)
+
+
+def _bundle(
+    lines: bytes, structure=STRUCTURE, date=(2026, 1, 1, 0, 0, 0), sidecar=None
+):
+    """A bundle with its records.hashes worked out from `lines` (or given)."""
+    members = [
+        (rules.STRUCTURE_JSON, json.dumps(structure).encode()),
+        ("records.jsonl", lines),
+    ]
+    if sidecar is None:
+        hashes, _, problems = rules.line_hashes(_zip(members), structure)
+        assert not problems
+        sidecar = rules.hashes_text(hashes).encode()
+    return _zip(members + [(rules.RECORD_HASHES, sidecar)], date)
+
+
+def test_a_record_hash_is_by_field_id_and_ignores_what_is_not_stored():
+    one = rules.record_hash("1", CID, SID, None, {X: 1, "other": 5}, {X})
+    assert one == rules.record_hash("1", CID, SID, None, {X: 1, F: None}, {X, F})
+    located = {"sha256": SHA, "size": 1, "location": {"volume": "a"}}
+    plain = {"sha256": SHA, "size": 1}
+    assert rules.record_hash("1", CID, SID, None, {F: located}, {F}) == (
+        rules.record_hash("1", CID, SID, None, {F: plain}, {F})
+    )
+    assert one != rules.record_hash("1", CID, SID, None, {X: 2}, {X})
+    assert one != rules.record_hash("1", "c-2", SID, None, {X: 1}, {X})
+    assert one != rules.record_hash("1", CID, SID, "p", {X: 1}, {X})
+
+
+def test_renaming_a_field_changes_no_line_hash():
+    renamed = json.loads(json.dumps(STRUCTURE))
+    renamed["schemas"][0]["fields"][0].update(name="count", label="Count")
+    a, _, _ = rules.line_hashes(_bundle(R1), STRUCTURE)
+    b, _, _ = rules.line_hashes(
+        _bundle(R1.replace(b'"x"', b'"count"'), renamed), renamed
+    )
+    assert a == b
+    assert rules.structure_changes(STRUCTURE, renamed) == [
+        {
+            "kind": "field",
+            "change": "changed",
+            "name": "count",
+            "schema": "site",
+            "what": ["name", "label"],
+        }
+    ]
 
 
 def test_the_hash_ignores_times_order_and_what_a_read_adds():
-    one = _zip([("bundle.json", MANIFEST), ("records.jsonl", R1 + R2)])
-    other_manifest = json.loads(MANIFEST)
-    other_manifest["exported_at"] = "2027-05-05"
-    other_manifest["schemas"].reverse()
-    located = R1.replace(b'"size":10}', b'"size":10,"location":{"volume":"x"}}')
-    two = _zip(
-        [
-            ("records.jsonl", R2 + located),
-            ("bundle.json", json.dumps(other_manifest).encode()),
-            (rules.CITATION_CFF, b"cff-version: 1.2.0\n"),
-        ],
-        date=(2030, 6, 6, 6, 6, 6),
-    )
+    one = _bundle(R1 + R2)
+    located = R1.replace(b'"size": 10}', b'"size": 10, "location": {"volume": "x"}}')
+    assert located != R1
+    two = _bundle(R2 + located, date=(2030, 6, 6, 6, 6, 6))
     a, b = rules.hash_bundle(one), rules.hash_bundle(two)
     assert a.content_hash == b.content_hash and not a.problems
     assert a.records == 2 and a.cited == [SHA]
 
 
 def test_the_hash_changes_with_the_data_and_with_a_cited_file():
-    base = rules.hash_bundle(_zip([("bundle.json", MANIFEST), ("records.jsonl", R1)]))
-    edited = rules.hash_bundle(
-        _zip(
-            [
-                ("bundle.json", MANIFEST),
-                ("records.jsonl", R1.replace(b'"x":1', b'"x":3')),
-            ]
-        )
-    )
+    base = rules.hash_bundle(_bundle(R1))
+    edited = rules.hash_bundle(_bundle(_line("1", x=3)))
     assert base.content_hash != edited.content_hash
     other = hashlib.sha256(b"other bytes").hexdigest()
-    swapped = rules.hash_bundle(
-        _zip(
-            [
-                ("bundle.json", MANIFEST),
-                ("records.jsonl", R1.replace(SHA.encode(), other.encode())),
-            ]
-        )
-    )
+    swapped = rules.hash_bundle(_bundle(R1.replace(SHA.encode(), other.encode())))
     assert swapped.content_hash != base.content_hash and swapped.cited == [other]
+
+
+def test_a_sidecar_that_does_not_match_the_lines_is_a_problem():
+    good = _bundle(R1 + R2)
+    sidecar = good.read(rules.RECORD_HASHES)
+    edited = _bundle(R1 + _line("2", x=7), sidecar=sidecar)
+    result = rules.hash_bundle(edited)
+    assert result.content_hash == rules.hash_bundle(good).content_hash
+    assert result.problems == ["records.hashes does not match the records (1 differ)"]
+    assert rules.hash_bundle(_zip([("records.jsonl", R1)])).problems
 
 
 def test_citation_forms():

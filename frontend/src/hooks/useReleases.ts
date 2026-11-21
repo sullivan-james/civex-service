@@ -6,6 +6,7 @@ import {
 } from '@tanstack/react-query'
 import {
   releasesApi,
+  type ComparedKind,
   type ReleaseCreateBody,
   type ReleaseMetadata,
   type ReleaseScopeBody,
@@ -73,11 +74,52 @@ export function useReleaseCitation(name: string) {
   })
 }
 
-export function useReleaseChanges(name: string) {
+/** The release compared with the data now. Inline for a typical release; a
+ * large one (`compare_in_background`) waits for `compareRelease`, whose job
+ * puts its answer here. Any record edit refreshes it (keyed under records). */
+export function useReleaseComparison(name: string, enabled: boolean) {
   return useQuery({
-    queryKey: ['releases', name, 'changes'],
-    queryFn: () => releasesApi.changes(name),
-    enabled: !!name,
+    queryKey: ['records', 'release-compare', name],
+    queryFn: () => releasesApi.compare(name),
+    enabled: !!name && enabled,
+  })
+}
+
+export function useComparedRecords(
+  name: string,
+  kind: ComparedKind | null,
+  page: number,
+  pageSize: number,
+  collection?: string,
+) {
+  return useQuery({
+    queryKey: [
+      'records',
+      'release-compare',
+      name,
+      kind,
+      collection ?? null,
+      page,
+      pageSize,
+    ],
+    queryFn: () =>
+      releasesApi.comparedRecords(
+        name,
+        kind as ComparedKind,
+        page * pageSize,
+        pageSize,
+        collection,
+      ),
+    enabled: !!name && !!kind,
+    placeholderData: keepPreviousData,
+  })
+}
+
+export function useRecordDifferences(name: string, id: string | null) {
+  return useQuery({
+    queryKey: ['records', 'release-compare', name, 'record', id],
+    queryFn: () => releasesApi.recordDifferences(name, id as string),
+    enabled: !!name && !!id,
   })
 }
 

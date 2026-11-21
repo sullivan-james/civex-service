@@ -503,41 +503,69 @@ def cite(
 
 
 @app.command("diff")
-def diff(name: str = typer.Argument(..., help="The release's name or id")) -> None:
-    """Say what changed in the project since a release: records added,
-    changed and deleted, per collection, from history."""
+def diff(
+    name: str = typer.Argument(..., help="The release's name or id"),
+    show: Optional[str] = typer.Option(
+        None,
+        "--show",
+        help="List the records one kind of difference means: added, changed or removed",
+    ),
+) -> None:
+    """Compare a release with the data now, record by record: records added
+    to its scope, changed and removed, per collection, and the schemas and
+    fields changed since. Worked out from the data, not from history, so
+    every computer gives the same answer."""
+    from rich.progress import BarColumn, Progress, TextColumn
+
     ctx = get_ctx()
     try:
-        since = ctx.release_svc.changes_since(name)
+        release = ctx.release_svc.get(name)
+        if ctx.release_svc.in_background(release):
+            with Progress(
+                TextColumn("{task.description}"), BarColumn(), console=console
+            ) as bar:
+                shim = _Bar(bar, bar.add_task("Comparing", total=None))
+                result = ctx.release_svc.compare(name, shim)  # type: ignore[arg-type]
+        else:
+            result = ctx.release_svc.compare(name)
+        listed = ctx.release_svc.compared_records(name, show, 0, 500) if show else None
     except CivexError as e:
         _fail(e)
     finally:
         ctx.close()
-    if not since.comparable:
-        console.print(since.reason or "Can't compare here")
+    if listed is not None:
+        total, items = listed
+        for item in items:
+            console.print(
+                f"{item['id']}  {item['collection'] or ''}  {item['schema'] or ''}  "
+                f"{item['name'] or ''}"
+            )
+        if total > len(items):
+            console.print(f"… and {total - len(items)} more")
         return
-    if not (since.added or since.changed or since.deleted or since.structure):
-        console.print(f"Nothing has changed since release {since.name}.")
+    if not (result.added or result.changed or result.removed or result.structure):
+        console.print(
+            f"Nothing has changed since release {result.name} "
+            f"({result.records} records)."
+        )
         return
     table = Table(
-        "Collection", "Added", "Changed", "Deleted", title=f"Since {since.name}"
+        "Collection", "Added", "Changed", "Removed", title=f"Since {result.name}"
     )
-    for c in since.collections:
+    for c in result.collections:
         table.add_row(
-            (c.collection or "(deleted)")
+            (c.collection or "(gone)")
             + ("" if c.in_scope else " (not in the release)"),
             str(c.added),
             str(c.changed),
-            str(c.deleted),
+            str(c.removed),
         )
     console.print(table)
-    if since.structure:
-        console.print(
-            "Other changes: "
-            + ", ".join(
-                f"{n} to {kind}s" for kind, n in sorted(since.structure.items())
-            )
-        )
+    console.print(f"{result.unchanged} of its {result.records} records are unchanged.")
+    for s in result.structure:
+        where = f" of {s['schema']}" if s.get("schema") else ""
+        what = f" ({', '.join(s['what'])})" if s.get("what") else ""
+        console.print(f"  {s['kind']} {s['name']}{where} {s['change']}{what}")
 
 
 @app.command("download")

@@ -1,7 +1,14 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useParams } from 'react-router'
-import type { Release, ReleaseChanges, ReleaseVerify } from '../api/releases'
+import type {
+  CollectionComparison,
+  ComparedKind,
+  ComparedRecord,
+  Release,
+  ReleaseVerify,
+} from '../api/releases'
+import { AuditChangeList } from '../components/audit/AuditChanges'
 import { releasesApi } from '../api/releases'
 import type { FlowContext } from '../components/files/fileFlows'
 import { DrivePicker } from '../components/files/DrivePicker'
@@ -11,6 +18,7 @@ import {
   YankReleaseDialog,
 } from '../components/releases/ReleaseDialogs'
 import {
+  compareRelease,
   deepVerify,
   exportRelease,
   gatherRelease,
@@ -25,9 +33,11 @@ import {
   Button,
   Card,
   DataTable,
+  DEFAULT_PAGE_SIZES,
   DetailSkeleton,
   ErrorState,
   Page,
+  Pagination,
   SegmentedControl,
   Spinner,
   TabNav,
@@ -40,7 +50,9 @@ import { useFeatures } from '../hooks/useFeatures'
 import { usePermissions } from '../hooks/useMe'
 import {
   useRelease,
-  useReleaseChanges,
+  useComparedRecords,
+  useRecordDifferences,
+  useReleaseComparison,
   useReleaseCitation,
   useReleaseFilePlan,
   useVerifyRelease,
@@ -147,7 +159,7 @@ export default function ReleasePage() {
             </div>
           </TabPanel>
           <TabPanel id="changes" value={tab}>
-            <Changes name={release.name} />
+            <Changes release={release} />
           </TabPanel>
           {editing && (
             <EditReleaseDialog
@@ -572,62 +584,259 @@ function DriveDialog({
   )
 }
 
-function Changes({ name }: { name: string }) {
-  const { data, isLoading, error } = useReleaseChanges(name)
+const KIND_WORDS: Record<ComparedKind, string> = {
+  added: 'added',
+  changed: 'changed',
+  removed: 'removed',
+}
+
+/** The release compared with the data now, record by record (never from
+ * history, so every copy says the same): counts per collection, each opening
+ * the records it means, and the schemas and fields changed since. A large
+ * release is compared as a job in the status bar. */
+function Changes({ release }: { release: Release }) {
+  const name = release.name
+  const background = release.compare_in_background
+  const flow = useFlow()
+  const { data, isLoading, error } = useReleaseComparison(name, !background)
+  const [picked, setPicked] = useState<{
+    kind: ComparedKind
+    collection?: string
+  } | null>(null)
   if (isLoading) return <Spinner />
   if (error) return <ErrorState message={errorMessage(error)} />
-  if (!data) return null
-  if (!data.comparable)
-    return <p className="text-sm text-fg-muted">{data.reason}</p>
-  const columns: DataTableColumn<ReleaseChanges['collections'][number]>[] = [
+  if (!data)
+    return (
+      <div className="space-y-2">
+        <p className="text-sm text-fg-muted">
+          It holds {pluralise(Number(release.counts.records ?? 0), 'record')}:
+          comparing them with the data now takes a while.
+        </p>
+        <Button onClick={() => void compareRelease(flow, name)}>
+          Compare with the data now
+        </Button>
+      </div>
+    )
+  const count = (
+    n: number,
+    kind: ComparedKind,
+    collection?: string,
+  ): ReactNode =>
+    n ? (
+      <Button
+        size="sm"
+        variant="ghost"
+        title={`Show the ${pluralise(n, 'record')} ${KIND_WORDS[kind]}`}
+        onClick={() => setPicked({ kind, collection })}
+      >
+        {n.toLocaleString()}
+      </Button>
+    ) : (
+      <span className="text-fg-muted">0</span>
+    )
+  const columns: DataTableColumn<CollectionComparison>[] = [
     {
       key: 'collection',
       header: 'Collection',
       render: (c) =>
-        (c.collection ?? 'Deleted for good') +
-        (c.in_scope ? '' : ' (not in the release)'),
+        (c.collection ?? 'Gone') + (c.in_scope ? '' : ' (not in the release)'),
     },
-    { key: 'added', header: 'Added', align: 'right', render: (c) => c.added },
+    {
+      key: 'added',
+      header: 'Added',
+      align: 'right',
+      rawCell: true,
+      render: (c) => count(c.added, 'added', c.collection_id),
+    },
     {
       key: 'changed',
       header: 'Changed',
       align: 'right',
-      render: (c) => c.changed,
+      rawCell: true,
+      render: (c) => count(c.changed, 'changed', c.collection_id),
     },
     {
-      key: 'deleted',
-      header: 'Deleted',
+      key: 'removed',
+      header: 'Removed',
       align: 'right',
-      render: (c) => c.deleted,
+      rawCell: true,
+      render: (c) => count(c.removed, 'removed', c.collection_id),
     },
   ]
-  const structure = Object.entries(data.structure)
   const nothing =
-    !data.added && !data.changed && !data.deleted && !structure.length
+    !data.added && !data.changed && !data.removed && !data.structure.length
   return (
     <div className="space-y-3">
       <p className="text-sm">
         {nothing
-          ? 'Nothing has changed since this release.'
-          : `Since this release: ${pluralise(data.added, 'record')} added, ${data.changed} changed, ${data.deleted} deleted.`}
+          ? `Nothing has changed since this release: its ${pluralise(data.records, 'record')} are as they were.`
+          : `${data.unchanged.toLocaleString()} of its ${pluralise(data.records, 'record')} are as they were.`}
       </p>
       {!nothing && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          {(['added', 'changed', 'removed'] as const).map((k) => (
+            <span key={k} className="flex items-center gap-1">
+              {count(data[k], k)} {KIND_WORDS[k]}
+            </span>
+          ))}
+        </div>
+      )}
+      {data.collections.length > 0 && (
         <DataTable
           dense
           layout="auto"
           columns={columns}
           rows={data.collections}
-          getRowId={(c) => c.collection_id ?? 'gone'}
-          emptyTitle="No records changed"
-          emptyMessage="Only the structure changed."
+          getRowId={(c) => c.collection_id}
         />
       )}
-      {structure.length > 0 && (
-        <p className="text-sm text-fg-muted">
-          Other changes: {structure.map(([k, v]) => `${v} to ${k}s`).join(', ')}
-          .
-        </p>
+      {picked && (
+        <ComparedRecords
+          name={name}
+          kind={picked.kind}
+          collection={picked.collection}
+          collectionName={
+            data.collections.find((c) => c.collection_id === picked.collection)
+              ?.collection ?? undefined
+          }
+          onClose={() => setPicked(null)}
+        />
+      )}
+      {data.structure.length > 0 && (
+        <Card title="Schemas and fields since">
+          <ul className="space-y-1 text-sm">
+            {data.structure.map((c, i) => (
+              <li key={i}>
+                {c.kind === 'field'
+                  ? `Field ${c.name} of ${c.schema}`
+                  : `Schema ${c.name}`}{' '}
+                {c.change}
+                {c.what.length ? ` (${c.what.join(', ')})` : ''}
+              </li>
+            ))}
+          </ul>
+        </Card>
       )}
     </div>
+  )
+}
+
+/** The records one count means, a page at a time: an added or changed one
+ * opens as it is now (a changed one first says which fields differ), a
+ * removed one is read from the release. */
+function ComparedRecords({
+  name,
+  kind,
+  collection,
+  collectionName,
+  onClose,
+}: {
+  name: string
+  kind: ComparedKind
+  collection?: string
+  collectionName?: string
+  onClose: () => void
+}) {
+  const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZES[0])
+  const [open, setOpen] = useState<ComparedRecord | null>(null)
+  const { data, isLoading, error } = useComparedRecords(
+    name,
+    kind,
+    page,
+    pageSize,
+    collection,
+  )
+  const columns: DataTableColumn<ComparedRecord>[] = [
+    { key: 'name', header: 'Record', render: (r) => r.name ?? r.id },
+    { key: 'schema', header: 'Kind', render: (r) => r.schema ?? '' },
+    {
+      key: 'collection',
+      header: 'Collection',
+      render: (r) => r.collection ?? '',
+    },
+  ]
+  return (
+    <Card
+      title={`Records ${KIND_WORDS[kind]}${collectionName ? ` in ${collectionName}` : ''}`}
+      action={
+        <Button size="sm" onClick={onClose}>
+          Close
+        </Button>
+      }
+    >
+      <DataTable
+        dense
+        layout="auto"
+        columns={columns}
+        rows={data?.items ?? []}
+        isLoading={isLoading}
+        error={error ? errorMessage(error) : undefined}
+        getRowId={(r) => r.id}
+        rowHref={kind === 'added' ? (r) => `/records/${r.id}` : undefined}
+        onRowClick={kind === 'changed' ? (r) => setOpen(r) : undefined}
+        emptyTitle="None"
+        emptyMessage={
+          kind === 'removed'
+            ? 'Every record it holds is still here.'
+            : 'Nothing here.'
+        }
+        footer={
+          data && data.total > pageSize ? (
+            <Pagination
+              page={page}
+              pageSize={pageSize}
+              total={data.total}
+              onPage={setPage}
+              onPageSize={(n) => {
+                setPageSize(n)
+                setPage(0)
+              }}
+            />
+          ) : undefined
+        }
+      />
+      {open && (
+        <RecordDifferences
+          name={name}
+          record={open}
+          onClose={() => setOpen(null)}
+        />
+      )}
+    </Card>
+  )
+}
+
+function RecordDifferences({
+  name,
+  record,
+  onClose,
+}: {
+  name: string
+  record: ComparedRecord
+  onClose: () => void
+}) {
+  const { data, isLoading, error } = useRecordDifferences(name, record.id)
+  return (
+    <Modal onClose={onClose} size="lg">
+      <ModalHeader onClose={onClose}>
+        {record.name ?? record.id}: in the release and now
+      </ModalHeader>
+      <ModalBody>
+        {isLoading ? (
+          <Spinner />
+        ) : error ? (
+          <ErrorState message={errorMessage(error)} />
+        ) : (
+          <AuditChangeList changes={data ?? []} action="update" />
+        )}
+      </ModalBody>
+      <ModalFooter>
+        <Button onClick={onClose}>Close</Button>
+        <Button variant="primary" to={`/records/${record.id}`}>
+          Open the record
+        </Button>
+      </ModalFooter>
+    </Modal>
   )
 }

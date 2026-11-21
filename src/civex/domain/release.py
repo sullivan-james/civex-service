@@ -9,17 +9,28 @@ store like any file, and records a manifest: the content hash, counts, the
 history position it was taken at and the civex that made it. The files the
 records cite are not copied: the release owns them where they already are.
 
-The **content hash** is over what the bundle holds, never the zip's bytes (a
-zip carries the time it was written, so two exports of the same data differ):
-`sha256:` + the sha256 of, in order, a header line, the schemas and
-collections (canonical JSON, collections by name), each record line's own
-sha256 in record-id order, then the sha256 of every file the records cite,
-sorted (a file's hash is its content, so the files are covered without
-reading one), then the workflows and plugins (name and sha256 of their
-bytes), sorted. Canonical JSON is `sort_keys`, no spaces, UTF-8. The
-release's own members (`release.json`, `CITATION.cff`, written after the
-hash) are not part of it. Identical data gives the identical hash however
-many times it is exported.
+Beside the records the bundle holds `structure.json` (the schemas, with
+their fields, and the collections, each with its id, as they were) and
+`records.hashes`: one line per record, sorted by id, `<id> <record hash>
+<collection id>`. A **record hash** (`record_hash`) is the sha256 of the
+canonical JSON of the record's id, collection id, schema id, parent id and
+its stored values keyed by **field id**: only the live, stored fields of its
+kind (a formula's value is worked out, never stored), blank values left out,
+and what a read adds to a file value (`location`, `resolved_filename`)
+stripped. Renaming a field or changing a label changes no record hash; the
+same definition hashes a live record (`ReleaseService.compare`) and a line of
+the bundle (`line_hashes`), so a record whose values are as they were (an
+edit undone included) hashes the same.
+
+The **content hash** is over what the release holds, never the zip's bytes:
+`sha256:` + the sha256 of, in order, a header line, `structure.json`
+(canonical JSON), the sorted `(id, record hash)` pairs of `records.hashes`,
+the sha256 of every file the records cite, sorted (a file's hash is its
+content, so the files are covered without reading one), then the workflows
+and plugins (name and sha256 of their bytes), sorted. Canonical JSON is
+`sort_keys`, no spaces, UTF-8. `release.json` and `CITATION.cff` (written
+after the hash) are not part of it. `hash_bundle` recomputes it from the
+sidecar and checks the sidecar against the record lines.
 
 This module is pure: the rules for a release's words, the hash, and the
 citation forms. `services/release_service.py` makes and keeps releases.
@@ -35,12 +46,14 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from civex.domain import bundle as spec
+from civex.domain.audit_diff import strip_derived
+from civex.domain.field_descriptors import COMPUTED_DTYPES
 from civex.domain.exceptions import ValidationError
 
 HASH_PREFIX = "sha256:"
 # Bumped only if what the hash covers changes; written into the header line, so
 # an old hash can never be mistaken for one over different contents.
-HASH_VERSION = 1
+HASH_VERSION = 2
 
 # Members the release adds to its bundle after hashing it.
 RELEASE_JSON = "release.json"
@@ -175,16 +188,282 @@ def check_author(raw: Any) -> dict[str, str] | None:
 # -- the content hash ----------------------------------------------------------
 
 
+STRUCTURE_JSON = "structure.json"
+RECORD_HASHES = "records.hashes"
+
+
 def canonical(value: Any) -> bytes:
     return json.dumps(
         value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
     ).encode("utf-8")
 
 
+# -- per-record hashes ---------------------------------------------------------
+
+
+def structure_of(schemas: list[Any], collections: list[Any]) -> dict[str, Any]:
+    """`structure.json`: the live schemas (`SchemaDTO`, with their live
+    fields) and collections (`DatasetDTO`), each with its id, sorted by id.
+    What a release's record lines are read back by, and what the structural
+    side of a comparison compares."""
+    return {
+        "schemas": sorted(
+            (
+                {
+                    "id": str(s.id),
+                    "name": s.name,
+                    "label": s.label,
+                    "description": s.description,
+                    "parent_id": str(s.parent_id) if s.parent_id else None,
+                    "display_template": s.display_template,
+                    "unique_keys": [list(k) for k in s.unique_keys],
+                    "fields": sorted(
+                        (
+                            {
+                                "id": str(f.id),
+                                "name": f.name,
+                                "label": f.label,
+                                "type": f.dtype,
+                                "required": f.required,
+                                "restrictions": f.restrictions or {},
+                                "default_value": f.default_value,
+                            }
+                            for f in s.fields
+                        ),
+                        key=lambda f: f["id"],
+                    ),
+                }
+                for s in schemas
+                if getattr(s, "deleted_at", None) is None
+            ),
+            key=lambda s: s["id"],
+        ),
+        "collections": sorted(
+            (
+                {
+                    "id": str(c.id),
+                    "name": c.name,
+                    "scope": c.scope,
+                    "timezone": c.timezone,
+                }
+                for c in collections
+                if getattr(c, "deleted_at", None) is None
+            ),
+            key=lambda c: c["id"],
+        ),
+    }
+
+
+#: What a schema or field is compared by (`structure_changes`).
+_SCHEMA_KEYS = (
+    "name",
+    "label",
+    "description",
+    "parent_id",
+    "display_template",
+    "unique_keys",
+)
+_FIELD_KEYS = ("name", "label", "type", "required", "restrictions", "default_value")
+
+
+def structure_changes(
+    then: dict[str, Any], now: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Schemas and fields added, removed or changed between two
+    `structure_of`s, by id (a rename is a change, never a remove and an
+    add): `{kind, change, name, schema, what}`, `what` naming the attributes
+    that differ."""
+    out: list[dict[str, Any]] = []
+    a = {s["id"]: s for s in then.get("schemas") or []}
+    b = {s["id"]: s for s in now.get("schemas") or []}
+
+    def compare(kind: str, x: dict, y: dict, keys: tuple, schema: str | None):
+        for i in sorted(set(x) | set(y)):
+            was, cur = x.get(i), y.get(i)
+            name = (cur or was or {}).get("name")
+            if was is None:
+                out.append(
+                    dict(kind=kind, change="added", name=name, schema=schema, what=[])
+                )
+            elif cur is None:
+                out.append(
+                    dict(kind=kind, change="removed", name=name, schema=schema, what=[])
+                )
+            else:
+                what = [k for k in keys if was.get(k) != cur.get(k)]
+                if what:
+                    out.append(
+                        dict(
+                            kind=kind,
+                            change="changed",
+                            name=name,
+                            schema=schema,
+                            what=what,
+                        )
+                    )
+
+    compare("schema", a, b, _SCHEMA_KEYS, None)
+    for sid in sorted(set(a) & set(b)):  # a schema added or removed is one line
+        owner = b[sid].get("name")
+        compare(
+            "field",
+            {f["id"]: f for f in a[sid].get("fields") or []},
+            {f["id"]: f for f in b[sid].get("fields") or []},
+            _FIELD_KEYS,
+            owner,
+        )
+    return out
+
+
+def stored_fields(structure: dict[str, Any]) -> dict[str, dict[str, str]]:
+    """Per schema id, the fields a record of it stores, `{name: field id}`:
+    its own then those above it (the first of a name wins, as a record reads
+    them), leaving out fields worked out when read (`computed`)."""
+    schemas = {str(s["id"]): s for s in structure.get("schemas") or []}
+    out: dict[str, dict[str, str]] = {}
+    for sid in schemas:
+        names: dict[str, str] = {}
+        seen: set[str] = set()
+        at: str | None = sid
+        while at and at in schemas and at not in seen:
+            seen.add(at)
+            for f in schemas[at].get("fields") or []:
+                if f.get("computed") or f.get("type") in COMPUTED_DTYPES:
+                    continue
+                names.setdefault(str(f["name"]), str(f["id"]))
+            parent = schemas[at].get("parent_id")
+            at = str(parent) if parent else None
+        out[sid] = names
+    return out
+
+
+def record_hash(
+    record_id: Any,
+    collection_id: Any,
+    schema_id: Any,
+    parent_id: Any,
+    data: dict[str, Any],
+    fields: Any,
+) -> str:
+    """A record's comparison hash (see the module docstring). `data` is keyed
+    by field id, as stored; only the ids in `fields` (the stored fields of its
+    kind) count, blank values are left out and derived file keys stripped."""
+    values = {
+        fid: strip_derived(value)
+        for fid, value in data.items()
+        if fid in fields and value is not None and value != [] and value != ""
+    }
+    return hashlib.sha256(
+        canonical(
+            [
+                str(record_id),
+                str(collection_id) if collection_id else None,
+                str(schema_id) if schema_id else None,
+                str(parent_id) if parent_id else None,
+                values,
+            ]
+        )
+    ).hexdigest()
+
+
+def read_structure(zf: zipfile.ZipFile) -> dict[str, Any] | None:
+    try:
+        value = json.loads(zf.read(STRUCTURE_JSON))
+    except (KeyError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def line_hashes(
+    zf: zipfile.ZipFile, structure: dict[str, Any]
+) -> tuple[list[tuple[str, str, str]], set[str], list[str]]:
+    """Each record line's `(id, record hash, collection id)`, sorted by id,
+    the files the lines cite, and what could not be read. Names in a line
+    are turned back into the ids they had (`structure.json`)."""
+    fields = stored_fields(structure)
+    schema_ids = {str(s["name"]): str(s["id"]) for s in structure["schemas"]}
+    collection_ids = {
+        str(c["name"]): str(c["id"]) for c in structure.get("collections") or []
+    }
+    out: list[tuple[str, str, str]] = []
+    cited: set[str] = set()
+    problems: list[str] = []
+    if spec.RECORDS not in zf.namelist():
+        return out, cited, problems
+    with zf.open(spec.RECORDS) as f:
+        for raw in f:
+            text = raw.decode("utf-8").strip()
+            if not text:
+                continue
+            try:
+                line = json.loads(text)
+                data = spec.plain_data(line.get("data") or {})
+                sid = schema_ids[str(line["schema"])]
+                cid = collection_ids[str(line["collection"])]
+                names = fields[sid]
+                unknown = set(data) - set(names)
+                if unknown - _computed_names(structure, sid):
+                    raise KeyError(sorted(unknown)[0])
+                by_id = {names[k]: v for k, v in data.items() if k in names}
+            except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as e:
+                problems.append(f"A line of records.jsonl can't be read ({e})")
+                continue
+            cited.update(r["sha256"] for r in spec.file_refs(data))
+            out.append(
+                (
+                    str(line["id"]),
+                    record_hash(
+                        line["id"], cid, sid, line.get("parent"), by_id, set(by_id)
+                    ),
+                    cid,
+                )
+            )
+    out.sort()
+    return out, cited, problems
+
+
+def _computed_names(structure: dict[str, Any], sid: str) -> set[str]:
+    """Names of worked-out fields of a schema and those above it: a line may
+    carry their values, which are not stored and so not hashed."""
+    schemas = {str(s["id"]): s for s in structure.get("schemas") or []}
+    out: set[str] = set()
+    seen: set[str] = set()
+    at: str | None = sid
+    while at and at in schemas and at not in seen:
+        seen.add(at)
+        out |= {
+            str(f["name"])
+            for f in schemas[at].get("fields") or []
+            if f.get("computed") or f.get("type") in COMPUTED_DTYPES
+        }
+        parent = schemas[at].get("parent_id")
+        at = str(parent) if parent else None
+    return out
+
+
+def hashes_text(hashes: list[tuple[str, str, str]]) -> str:
+    """`records.hashes`: one `<id> <hash> <collection id>` line per record."""
+    return "".join(f"{i} {h} {c}\n" for i, h, c in sorted(hashes))
+
+
+def read_hashes(zf: zipfile.ZipFile) -> list[tuple[str, str, str]] | None:
+    """`records.hashes`, as written (None when the bundle has none)."""
+    try:
+        text = zf.read(RECORD_HASHES).decode("utf-8")
+    except KeyError:
+        return None
+    out = []
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) == 3:
+            out.append((parts[0], parts[1], parts[2]))
+    return out
+
+
 @dataclass
 class HashResult:
     """A bundle's content hash, and what was wrong with its contents (a line
-    that can't be read)."""
+    that can't be read, a sidecar that doesn't match the lines)."""
 
     content_hash: str
     problems: list[str] = field(default_factory=list)
@@ -194,40 +473,24 @@ class HashResult:
 
 
 def hash_bundle(zf: zipfile.ZipFile) -> HashResult:
-    """The content hash of an open bundle (see the module docstring). One pass
-    over the records (a page in memory is one line); no file is read."""
-    problems: list[str] = []
+    """The content hash of an open bundle (see the module docstring),
+    recomputed from `records.hashes`, which is checked against the record
+    lines (each line hashed again). One pass over the records; no file is
+    read."""
+    structure = read_structure(zf)
+    if structure is None:
+        return HashResult("", ["The bundle has no readable structure.json"])
+    lines, cited, problems = line_hashes(zf, structure)
+    sidecar = read_hashes(zf)
+    if sidecar is None:
+        problems.append("The bundle has no records.hashes")
+        sidecar = lines
+    elif sorted(sidecar) != lines:
+        known = {i: h for i, h, _ in lines}
+        differ = sum(1 for i, h, _ in sidecar if known.get(i) != h)
+        differ += len(set(known) - {i for i, _, _ in sidecar})
+        problems.append(f"records.hashes does not match the records ({differ} differ)")
     names = zf.namelist()
-    try:
-        manifest = json.loads(zf.read(spec.MANIFEST))
-    except (KeyError, json.JSONDecodeError):
-        return HashResult("", ["The bundle has no readable bundle.json"])
-    schemas = sorted(manifest.get("schemas") or [], key=lambda s: str(s.get("name")))
-    collections = sorted(
-        manifest.get("collections") or [], key=lambda c: str(c.get("name"))
-    )
-    lines: list[tuple[str, bytes]] = []
-    cited: set[str] = set()
-    if spec.RECORDS in names:
-        with zf.open(spec.RECORDS) as f:
-            for raw in f:
-                text = raw.decode("utf-8").strip()
-                if not text:
-                    continue
-                try:
-                    line = json.loads(text)
-                except json.JSONDecodeError:
-                    problems.append("A line of records.jsonl is not JSON")
-                    continue
-                if isinstance(line, dict) and isinstance(line.get("data"), dict):
-                    line["data"] = spec.plain_data(line["data"])
-                    cited.update(r["sha256"] for r in spec.file_refs(line["data"]))
-                lines.append(
-                    (
-                        str(line.get("id") if isinstance(line, dict) else ""),
-                        hashlib.sha256(canonical(line)).digest(),
-                    )
-                )
     members = sorted(
         (n, _sha_of(zf, n))
         for n in names
@@ -235,17 +498,17 @@ def hash_bundle(zf: zipfile.ZipFile) -> HashResult:
     )
     files = sorted(cited)
     h = hashlib.sha256(f"civex-release-content/{HASH_VERSION}\n".encode())
-    h.update(canonical({"schemas": schemas, "collections": collections}))
+    h.update(canonical(structure))
     h.update(b"\nrecords\n")
-    for _, digest in sorted(lines):
-        h.update(digest)
-    h.update(b"\nfiles\n")
+    for rid, digest, _ in sorted(sidecar):
+        h.update(f"{rid} {digest}\n".encode())
+    h.update(b"files\n")
     for sha in files:
         h.update(sha.encode() + b"\n")
     h.update(b"members\n")
     for name, sha in members:
         h.update(canonical([name, sha]) + b"\n")
-    return HashResult(HASH_PREFIX + h.hexdigest(), problems, len(lines), files)
+    return HashResult(HASH_PREFIX + h.hexdigest(), problems, len(sidecar), files)
 
 
 def _sha_of(zf: zipfile.ZipFile, name: str) -> str:

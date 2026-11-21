@@ -132,3 +132,15 @@ export function deepVerify(
     else ctx.toast.error(`${name} does not match: ${result.problems[0] ?? ''}`)
   })
 }
+
+/** Compare a large release with the data now as a job in the status bar,
+ * with the server's progress; the answer goes where the inline comparison
+ * keeps it (`useReleaseComparison`). */
+export function compareRelease(ctx: FlowContext, name: string) {
+  return job(ctx, `Comparing ${name} with the data now…`, async (j) => {
+    const result = await tracked(ctx, j, (progressId) =>
+      releasesApi.compare(name, progressId),
+    )
+    ctx.qc.setQueryData(['records', 'release-compare', name], result)
+  })
+}

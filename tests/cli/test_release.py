@@ -69,6 +69,13 @@ def test_releases_from_the_cli(
 
     unchanged = runner.invoke(app, ["release", "diff", "v1"])
     assert "Nothing has changed" in unchanged.output
+    added = make_record("survey", "sample", {"site": "b"})
+    ctx.commit()
+    since = runner.invoke(app, ["release", "diff", "v1"])
+    assert since.exit_code == 0 and "survey" in since.output, since.output
+    assert "1 of its 1 records are unchanged" in since.output
+    shown = runner.invoke(app, ["release", "diff", "v1", "--show", "added"])
+    assert str(added.id) in shown.output
 
     fixed = runner.invoke(app, ["release", "correct", "v1", "-t", "The survey"])
     assert fixed.exit_code == 0 and "The survey" in fixed.output

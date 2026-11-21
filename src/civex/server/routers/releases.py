@@ -9,6 +9,7 @@ records (read into a new project with `POST /bundle/import`)."""
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -35,7 +36,7 @@ from civex.server.routers.file_access import (
 from civex.services.archive import build_download
 from civex.services.progress import Progress
 from civex.services.record_service import MAX_ZIP_FILE_COUNT, MAX_ZIP_TOTAL_SIZE
-from civex.services.release_service import ReleaseScope
+from civex.services.release_service import COMPARE_INLINE_MAX, ReleaseScope
 from civex.services.transfer_jobs import jobs
 
 router = APIRouter(tags=["releases"])
@@ -147,12 +148,21 @@ class ReleaseResponse(BaseModel):
     yanked_by: str | None
     yanked_reason: str | None
     file_name: str = Field(description="The name the bundle is saved under.")
+    compare_in_background: bool = Field(
+        default=False,
+        description="Comparing it with the data now is long: run it as a job.",
+    )
 
     @classmethod
     def from_dto(cls, r: ReleaseDTO) -> "ReleaseResponse":
         d = r.to_dict()
         d.setdefault("local_seq", None)
-        return cls(**d, file_name=f"release-{r.name}.civex.zip")
+        return cls(
+            **d,
+            file_name=f"release-{r.name}.civex.zip",
+            compare_in_background=int(r.counts.get("records") or 0)
+            > COMPARE_INLINE_MAX,
+        )
 
 
 class CitationResponse(BaseModel):
@@ -226,31 +236,60 @@ class ReleaseGatherRequest(BaseModel):
     volume: str = Field(description="The drive to put the release's files on.")
 
 
-class CollectionChangesResponse(BaseModel):
-    collection_id: str | None
+class CollectionComparisonResponse(BaseModel):
+    collection_id: str
     collection: str | None = Field(
-        description="The collection's name now; None for records deleted for good."
+        description="The collection's name now (or as it was, when it is gone)."
     )
-    added: int
-    changed: int = Field(description="Edited, moved, or deleted and brought back.")
-    deleted: int = Field(description="Deleted since, and still deleted (or gone).")
+    added: int = Field(description="In the release's scope now, not in it.")
+    changed: int = Field(description="In both; its values or place differ.")
+    removed: int = Field(description="In it, and not live now (deleted or purged).")
     in_scope: bool = Field(description="The collection is one the release covers.")
 
 
-class ChangesSinceResponse(BaseModel):
+class StructureChangeResponse(BaseModel):
+    kind: str = Field(description="schema or field.")
+    change: str = Field(description="added, removed or changed.")
+    name: str | None = Field(description="Its name now (or as it was, if removed).")
+    schema_name: str | None = Field(
+        default=None, alias="schema", description="For a field: its schema."
+    )
+    what: list[str] = Field(description="For a change: the attributes that differ.")
+
+
+class ComparisonResponse(BaseModel):
     name: str
-    comparable: bool = Field(description="Whether its place in history is known here.")
-    by: str | None = Field(
-        description="'feed' (the server's numbers) or 'local' (this copy's order)."
+    records: int = Field(description="Records the release holds.")
+    unchanged: int = Field(description="Of those, the same now.")
+    added: int = Field(description="Records in its scope now that it doesn't hold.")
+    changed: int = Field(description="Records it holds whose values or place differ.")
+    removed: int = Field(description="Records it holds that are not live now.")
+    collections: list[CollectionComparisonResponse]
+    structure: list[StructureChangeResponse] = Field(
+        description="Schemas and fields added, removed or changed since (a rename is a change)."
     )
-    reason: str | None = Field(description="Why it can't be compared, when it can't.")
-    added: int
-    changed: int
-    deleted: int
-    collections: list[CollectionChangesResponse]
-    structure: dict[str, int] = Field(
-        description="History entries since about other kinds (schema, field, dataset, view...)."
-    )
+    at: int = Field(description="The history position it was worked out at.")
+
+
+class ComparedRecordResponse(BaseModel):
+    id: str
+    name: str | None = Field(description="The record's name (as it was, if removed).")
+    collection: str | None
+    schema_name: str | None = Field(alias="schema")
+    live: bool = Field(description="False for a removed record, read from the release.")
+
+
+class ComparedRecordsResponse(BaseModel):
+    total: int = Field(description="How many records this kind of difference means.")
+    items: list[ComparedRecordResponse]
+
+
+class RecordDifferenceResponse(BaseModel):
+    field: str = Field(description="The field's id, or dataset_id / parent_record_id.")
+    label: str | None = Field(description="The field's name now.")
+    dtype: str | None
+    before: Any = Field(description="The value in the release.")
+    after: Any = Field(description="The value now.")
 
 
 @router.get("/releases", response_model=list[ReleaseResponse])
@@ -512,12 +551,51 @@ def _zip_allowed(plan: Any) -> bool:
     )
 
 
-@router.get("/releases/{name}/changes", response_model=ChangesSinceResponse)
-def release_changes(name: str, ctx: AppContext = Depends(get_ctx)):
-    """What changed in the project after the release was made: records added,
-    changed and deleted per collection, and other kinds' changes, from
-    history."""
-    return ChangesSinceResponse(**ctx.release_svc.changes_since(name).to_dict())
+@router.post("/releases/{name}/compare", response_model=ComparisonResponse)
+def compare_release(
+    name: str,
+    progress: Progress | None = Depends(report_progress),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """The release compared with the data now, record by record (never from
+    history, so every copy answers the same): records added to its scope,
+    changed and removed, per collection, and the schemas and fields added,
+    removed or changed since. A large release reports its progress
+    (`X-Civex-Progress`); the answer is kept until the data changes."""
+    return ComparisonResponse(**ctx.release_svc.compare(name, progress).to_dict())
+
+
+@router.get("/releases/{name}/compare/records", response_model=ComparedRecordsResponse)
+def compared_records(
+    name: str,
+    kind: str,
+    offset: int = 0,
+    limit: int = 50,
+    collection: str | None = None,
+    ctx: AppContext = Depends(get_ctx),
+):
+    """A page of the records one kind of difference (`added`, `changed`,
+    `removed`) means, in one collection (by id) when given. Removed records
+    are read from the release itself."""
+    total, items = ctx.release_svc.compared_records(
+        name, kind, offset, min(limit, 500), collection
+    )
+    return ComparedRecordsResponse(
+        total=total, items=[ComparedRecordResponse(**i) for i in items]
+    )
+
+
+@router.get(
+    "/releases/{name}/compare/records/{record_id}",
+    response_model=list[RecordDifferenceResponse],
+)
+def record_differences(name: str, record_id: str, ctx: AppContext = Depends(get_ctx)):
+    """How one record differs from the release's copy of it, field by field
+    (value in the release, value now), and its place when it moved."""
+    return [
+        RecordDifferenceResponse(**dataclasses.asdict(c))
+        for c in ctx.release_svc.record_differences(name, record_id)
+    ]
 
 
 @router.get(

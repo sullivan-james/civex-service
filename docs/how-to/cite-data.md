@@ -32,6 +32,6 @@ used, and a way to get that data back later.
    `civex release correct v1 --doi 10.5281/zenodo.123456`.
 
 Later, `civex release verify v1` checks the release still holds exactly that
-data (`--deep` reads every file back too), and `civex release diff v1` says what has changed since. To work
+data (`--deep` reads every file back too), and `civex release diff v1` compares it with the data now (records added, changed and removed). To work
 with the data as it was, import the bundle into a new project
 (`civex bundle import release-v1.civex.zip`). See [Releases](../guides/releases.md).

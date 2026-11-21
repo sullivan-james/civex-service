@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from civex.domain.dtos import RecordUse
+from civex.domain import release as release_rules
 from civex.config import Config, ConfigStore
 from civex.domain import features
 from civex.domain.exceptions import FeatureUnavailableError
@@ -663,6 +664,10 @@ def build_context(
     release_svc.files = file_access_svc
     release_svc.locate = record_svc.locate_pointed
     release_svc.savepoint = lambda: ctx.all_or_nothing()
+    release_svc.structure = lambda: release_rules.structure_of(
+        schema_svc.list_all(), dataset_svc.list_all(with_count=False)
+    )
+    release_svc.records_by_id = lambda ids: record_svc.get_many(ids)
     release_svc.read_back = lambda shas, progress=None: file_store.verify(
         shas, progress
     )

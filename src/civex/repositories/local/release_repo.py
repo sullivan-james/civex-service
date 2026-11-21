@@ -4,13 +4,10 @@ import uuid
 from typing import Any
 
 from sqlalchemy import (
-    and_,
-    case,
     delete,
     func,
     insert,
     literal,
-    or_,
     select,
     update,
 )
@@ -351,91 +348,51 @@ class LocalReleaseRepository:
         """The newest history entry's write order here (0 when there is none)."""
         return int(self._s.scalar(select(func.max(AuditLog.local_seq))) or 0)
 
-    def changes_since(
-        self,
-        local_seq: int | None,
-        feed_seq: int | None,
-        release_id: uuid.UUID | None = None,
-    ) -> tuple[list[tuple[uuid.UUID | None, int, int, int]], dict[str, int]]:
-        """What happened after a history position: per collection a record is
-        in now (None: deleted for good), how many records were added, changed
-        (edited, moved, deleted and brought back) and deleted (and still are);
-        and how many entries were about each other kind. After `feed_seq`: the
-        authority's numbers above it, plus changes not numbered (still to
-        send, or refused) that were written here after the release: after
-        `local_seq`, or, on a copy the release was not made on, after the
-        entry that brought it here. Else after `local_seq` in this copy's own
-        order. Entries about releases are never changes to the data. Two
-        queries however much changed."""
-        floor: Any = local_seq
-        if floor is None and release_id is not None:
-            floor = (
-                select(func.coalesce(func.min(AuditLog.local_seq), 0))
-                .where(
-                    AuditLog.entity_type == "release",
-                    AuditLog.entity_id == release_id,
-                )
-                .scalar_subquery()
-            )
-        if feed_seq is not None:
-            since = or_(
-                AuditLog.hub_seq > feed_seq,
-                and_(
-                    AuditLog.hub_seq.is_(None),
-                    AuditLog.local_seq > (0 if floor is None else floor),
-                ),
-            )
-        else:
-            since = AuditLog.local_seq > (local_seq or 0)
+    # -- the records a release is compared with -------------------------------
 
-        def flag(*actions: str):
-            return func.max(case((AuditLog.action.in_(actions), 1), else_=0))
+    def database_key(self) -> str:
+        """Which database this is (a comparison is remembered per database)."""
+        bind = self._s.get_bind()
+        return str(getattr(bind, "url", id(bind)))
 
-        per = (
-            select(
-                AuditLog.entity_id.label("id"),
-                flag("create").label("made"),
-                flag("delete", "purge").label("gone"),
-                flag("update", "restore").label("edited"),
+    def stored_rows(self, ids: list[str]) -> list[StoredRow]:
+        """The live records among `ids`, as stored: (id, collection id, schema
+        id, parent id, data keyed by field id). One query."""
+        if not ids:
+            return []
+        wanted = [uuid.UUID(i) for i in ids]
+        return [
+            (str(r[0]), str(r[1]), str(r[2]), str(r[3]) if r[3] else None, r[4] or {})
+            for r in self._s.execute(
+                select(*_ROW).where(Record.id.in_(wanted), Record.deleted_at.is_(None))
             )
-            .where(AuditLog.entity_type == "record", since)
-            .group_by(AuditLog.entity_id)
-            .subquery()
-        )
-        live = Record.deleted_at.is_(None)
-        old = per.c.made == 0
-        rows = self._s.execute(
-            select(
-                Record.dataset_id,
-                func.sum(case(((per.c.made == 1) & live, 1), else_=0)),
-                func.sum(
-                    case(
-                        (old & live & ((per.c.edited == 1) | (per.c.gone == 1)), 1),
-                        else_=0,
-                    )
-                ),
-                func.sum(
-                    case(
-                        (old & (per.c.gone == 1) & (Record.id.is_(None) | ~live), 1),
-                        else_=0,
-                    )
-                ),
-            )
-            .select_from(per)
-            .outerjoin(Record, Record.id == per.c.id)
-            .group_by(Record.dataset_id)
-        ).all()
-        others = dict(
-            self._s.execute(
-                select(AuditLog.entity_type, func.count())
-                .where(AuditLog.entity_type.notin_(("record", "release")), since)
-                .group_by(AuditLog.entity_type)
-            ).all()
-        )
-        return (
-            [(cid, int(a or 0), int(c or 0), int(d or 0)) for cid, a, c, d in rows],
-            {str(k): int(v) for k, v in others.items()},
-        )
+        ]
+
+    def live_rows(
+        self, collections: list[uuid.UUID] | None, after: str | None, limit: int
+    ) -> list[StoredRow]:
+        """A page of the live records (in `collections`, else all) in id
+        order, after `after`, as stored. One query."""
+        q = select(*_ROW).where(Record.deleted_at.is_(None))
+        if collections is not None:
+            q = q.where(Record.dataset_id.in_(collections))
+        if after is not None:
+            q = q.where(Record.id > uuid.UUID(after))
+        return [
+            (str(r[0]), str(r[1]), str(r[2]), str(r[3]) if r[3] else None, r[4] or {})
+            for r in self._s.execute(q.order_by(Record.id).limit(limit))
+        ]
+
+
+#: A record as stored: id, collection id, schema id, parent id, data by field id.
+StoredRow = tuple[str, str, str, str | None, dict[str, Any]]
+_ROW = (
+    Record.id,
+    Record.dataset_id,
+    Record.schema_id,
+    Record.parent_record_id,
+    Record.data,
+)
 
 
 def _to_dto(row: Release) -> ReleaseDTO:

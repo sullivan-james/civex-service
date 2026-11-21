@@ -63,13 +63,20 @@ project shares (the server's feed number is recorded with it).
 
 ## The content hash
 
+Each record in a release has a hash of its own: of its id, its collection,
+its kind, the record it sits inside and its values, with each value keyed by
+the field's id rather than its name. Renaming a field or changing its name
+on screen changes no record's hash. The release keeps these, sorted by
+record id, in `records.hashes`, beside `structure.json` (its schemas, fields
+and collections with their ids).
+
 The content hash is a sha256 over what the release **holds**, not over the
 zip's bytes (a zip records the time it was written). It covers, in a fixed
-order: the schemas and collections, every record line (by record id), the
-sha256 of every file the records cite (sorted), and the workflows and
-plugins. A file is covered by its own hash, so no file is read to make or
-check it. Making a release of the same data again gives the same hash;
-changing one value, or the file a record cites, gives a different one.
+order: the structure, every record's hash (by record id), the sha256 of
+every file the records cite (sorted), and the workflows and plugins. A file
+is covered by its own hash, so no file is read to make or check it. Making a
+release of the same data again gives the same hash; changing one value, or
+the file a record cites, gives a different one.
 
 ## Its files
 
@@ -106,10 +113,15 @@ civex release gather v1 --to archive
 
 ## Checking a release
 
-**Verify** (on the release's page, or `civex release verify v1`) reads its
-records back, recomputes the content hash and checks that every file it
-cites is recorded on a drive here. It reads no file, so it is quick however
-large the release.
+**Verify** (on the release's page, or `civex release verify v1`) checks that:
+
+- the bundle's bytes still match the sha256 it is kept under;
+- every record's hash in `records.hashes` matches its record, hashed again;
+- the content hash, recomputed, is the one it was made with;
+- every file it cites is recorded on a drive here (on a computer that leaves
+  files to the server, missing files are only noted).
+
+It reads no file, so it is quick however large the release.
 
 **Read every file back** (`civex release verify v1 --deep`) also reads every
 file against its hash, with its progress in the status bar. A copy whose
@@ -128,9 +140,29 @@ civex release cite v1 -f cff > CITATION.cff
 
 ## What changed since
 
-**Changed since** (or `civex release diff v1`) counts the records added,
-changed and deleted per collection after the release was made, and any changes
-to schemas, fields or collections, from the project's history.
+**Changed since** (or `civex release diff v1`) compares the release with the
+data now, record by record: each record it holds is hashed again as it is
+now and compared with its hash in the release. For each collection it counts
+the records:
+
+- **added**: in what the release covers now, and not in the release;
+- **changed**: in both, with a different value or in a different place;
+- **removed**: in the release, and deleted or permanently deleted since.
+
+A record is in only one of these. An edit that was undone counts as
+unchanged, and every computer gives the same answer, since history is not
+read. Schemas and fields added, removed or changed since (a rename among
+them) are listed separately. Deleting a field since makes the records that
+held a value for it count as changed.
+
+Each number opens the records it means; a changed record shows which fields
+differ, with the value in the release and the value now. A large release is
+compared in the background, with its progress in the status bar.
+
+```bash
+civex release diff v1
+civex release diff v1 --show removed
+```
 
 ## Correcting, withdrawing and yanking
 
