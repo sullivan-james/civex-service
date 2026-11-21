@@ -528,6 +528,31 @@ def test_a_synced_copy_with_unsent_changes_must_sync_first(ctx, study):
     assert ctx.release_svc.changes_since("v1").by == "feed"
 
 
+def test_entries_from_before_the_release_never_count_as_since(ctx, study):
+    """A synced copy holds entries from before the release that the server
+    never numbered: some refused, some sent but not numbered back. None of
+    them is a change since; one real edit afterwards is exactly one."""
+    entries = ctx._session.query(AuditLog).order_by(AuditLog.local_seq).all()
+    for i, entry in enumerate(entries):
+        entry.hub_seq = None
+        entry.sync_state = "rejected" if i % 2 else "synced"
+    ctx.commit()
+    ctx.release_svc.position = lambda: (7, 0)
+    made = _make(ctx)
+    assert made.feed_seq == 7
+    since = ctx.release_svc.changes_since("v1")
+    assert since.by == "feed"
+    assert (since.added, since.changed, since.deleted) == (0, 0, 0)
+    assert since.structure == {}
+
+    ctx.release_svc.correct("v1", title="Renamed")  # not a change to the data
+    ctx.record_svc.update(str(study["a"].id), {"name": "A2"})
+    ctx.commit()
+    since = ctx.release_svc.changes_since("v1")
+    assert (since.added, since.changed, since.deleted) == (0, 1, 0)
+    assert since.structure == {}
+
+
 def test_who_may_make_withdraw_and_yank_releases(tmp_path: Path):
     root = tmp_path / "study"
     scaffold_project(root)

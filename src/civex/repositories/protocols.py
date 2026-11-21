@@ -275,7 +275,10 @@ class ReleaseRepository(Protocol):
     def inventory_state(self, shas: list[str]) -> tuple[set[str], set[str]]: ...
     def history_position(self) -> int: ...
     def changes_since(
-        self, local_seq: int | None, feed_seq: int | None
+        self,
+        local_seq: int | None,
+        feed_seq: int | None,
+        release_id: uuid.UUID | None = None,
     ) -> tuple[list[tuple[uuid.UUID | None, int, int, int]], dict[str, int]]: ...
 
 

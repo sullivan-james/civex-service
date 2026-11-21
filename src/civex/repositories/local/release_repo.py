@@ -3,7 +3,17 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import case, delete, func, insert, literal, or_, select, update
+from sqlalchemy import (
+    and_,
+    case,
+    delete,
+    func,
+    insert,
+    literal,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.orm import Session, aliased
 
 from civex.db.models import AuditLog, FileReference, Record, Release, StoredObject
@@ -342,16 +352,39 @@ class LocalReleaseRepository:
         return int(self._s.scalar(select(func.max(AuditLog.local_seq))) or 0)
 
     def changes_since(
-        self, local_seq: int | None, feed_seq: int | None
+        self,
+        local_seq: int | None,
+        feed_seq: int | None,
+        release_id: uuid.UUID | None = None,
     ) -> tuple[list[tuple[uuid.UUID | None, int, int, int]], dict[str, int]]:
         """What happened after a history position: per collection a record is
         in now (None: deleted for good), how many records were added, changed
         (edited, moved, deleted and brought back) and deleted (and still are);
         and how many entries were about each other kind. After `feed_seq`: the
-        authority's numbers above it, plus changes not numbered yet; else after
-        `local_seq` in this copy's own order. Two queries however much changed."""
+        authority's numbers above it, plus changes not numbered (still to
+        send, or refused) that were written here after the release: after
+        `local_seq`, or, on a copy the release was not made on, after the
+        entry that brought it here. Else after `local_seq` in this copy's own
+        order. Entries about releases are never changes to the data. Two
+        queries however much changed."""
+        floor: Any = local_seq
+        if floor is None and release_id is not None:
+            floor = (
+                select(func.coalesce(func.min(AuditLog.local_seq), 0))
+                .where(
+                    AuditLog.entity_type == "release",
+                    AuditLog.entity_id == release_id,
+                )
+                .scalar_subquery()
+            )
         if feed_seq is not None:
-            since = or_(AuditLog.hub_seq > feed_seq, AuditLog.hub_seq.is_(None))
+            since = or_(
+                AuditLog.hub_seq > feed_seq,
+                and_(
+                    AuditLog.hub_seq.is_(None),
+                    AuditLog.local_seq > (0 if floor is None else floor),
+                ),
+            )
         else:
             since = AuditLog.local_seq > (local_seq or 0)
 
@@ -395,7 +428,7 @@ class LocalReleaseRepository:
         others = dict(
             self._s.execute(
                 select(AuditLog.entity_type, func.count())
-                .where(AuditLog.entity_type != "record", since)
+                .where(AuditLog.entity_type.notin_(("record", "release")), since)
                 .group_by(AuditLog.entity_type)
             ).all()
         )

@@ -814,6 +814,7 @@ class ReleaseService:
         rows, others = self._repo.changes_since(
             release.local_seq if by == "local" else None,
             release.feed_seq if by == "feed" else None,
+            release.id,
         )
         names = self._collections()
         in_scope = set(release.scope.get("collections") or [])
