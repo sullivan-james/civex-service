@@ -1,12 +1,12 @@
 """The project's Analytics page: one shared, ordered list of cards.
 
-A card is a saved analysis (a saved view with a summary, by the view's id) or
-one of the built-in widgets (`WIDGETS`), with a size and an optional title of
-its own. The page is one thing per project (`DASHBOARD_ID`, the same on every
-copy, so two devices that both edit it edit the same thing); until someone
-edits it, it is `default_cards()`. Pure: the shape and its one check
-(`parse_cards`); `DashboardService` stores it, asks permission and writes
-history.
+A card is a chart (`civex.domain.charts.Chart`: the one chart definition,
+with the records it was made for, `Scope`) or one of the built-in widgets
+(`WIDGETS`), with a size and an optional title of its own. The page is one
+thing per project (`DASHBOARD_ID`, the same on every copy, so two devices
+that both edit it edit the same thing); until someone edits it, it is
+`default_cards()`. Pure: the shape and its one check (`parse_cards`);
+`DashboardService` stores it, asks permission and writes history.
 """
 
 from __future__ import annotations
@@ -15,14 +15,15 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from civex.domain.charts import Chart, Scope, parse_chart
 from civex.domain.exceptions import ValidationError
 
 #: The page's id, on every copy of every project.
 DASHBOARD_ID = uuid.UUID("5d1e9a7c-3b2f-4c6e-8a0d-7f4b2e1c9a35")
 
-ANALYSIS = "analysis"
+CHART = "chart"
 WIDGET = "widget"
-KINDS = (ANALYSIS, WIDGET)
+KINDS = (CHART, WIDGET)
 #: How wide a card is: half the page, or all of it.
 SIZES = ("small", "wide")
 MAX_CARDS = 60
@@ -48,18 +49,20 @@ WIDGETS: dict[str, tuple[str, str]] = {
 @dataclass(frozen=True)
 class Card:
     id: str  # the card's own id, unique on the page
-    kind: str  # ANALYSIS or WIDGET
+    kind: str  # CHART or WIDGET
     size: str = "small"
-    title: str | None = None  # None: the analysis's or widget's own name
-    view: str | None = None  # a saved view's id (an analysis)
+    title: str | None = None  # None: the chart's or widget's own name
+    chart: Chart | None = None  # what a chart card draws
+    records: Scope | None = None  # ... and the records it counts
     widget: str | None = None  # a key of WIDGETS
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"id": self.id, "kind": self.kind, "size": self.size}
         if self.title:
             out["title"] = self.title
-        if self.view:
-            out["view"] = self.view
+        if self.chart is not None and self.records is not None:
+            out["chart"] = self.chart.to_dict()
+            out["records"] = self.records.to_dict()
         if self.widget:
             out["widget"] = self.widget
         return out
@@ -74,9 +77,10 @@ def default_cards() -> list[Card]:
 
 
 def parse_cards(raw: Any) -> list[Card]:
-    """Read and check a list of cards: each a known kind, naming a view (by
-    id) or a known widget, a known size, a short title, and ids unique on
-    the page. Whether a view exists is the service's to ask."""
+    """Read and check a list of cards: each a known kind, holding a chart
+    and its records or naming a known widget, a known size, a short title,
+    and ids unique on the page. Whether the kind and fields exist is the
+    service's to ask."""
     if not isinstance(raw, list):
         raise ValidationError("The page's cards are a list")
     if len(raw) > MAX_CARDS:
@@ -86,7 +90,15 @@ def parse_cards(raw: Any) -> list[Card]:
     for item in raw:
         if not isinstance(item, dict):
             raise ValidationError("A card is an object")
-        unknown = set(item) - {"id", "kind", "size", "title", "view", "widget"}
+        unknown = set(item) - {
+            "id",
+            "kind",
+            "size",
+            "title",
+            "chart",
+            "records",
+            "widget",
+        }
         if unknown:
             raise ValidationError("A card has no " + ", ".join(sorted(unknown)))
         card_id = item.get("id")
@@ -104,19 +116,15 @@ def parse_cards(raw: Any) -> list[Card]:
         title = item.get("title") or None
         if title is not None and (not isinstance(title, str) or len(title) > MAX_TITLE):
             raise ValidationError(f"A card's title is text of up to {MAX_TITLE}")
-        view = widget = None
-        if kind == ANALYSIS:
-            try:
-                view = str(uuid.UUID(str(item.get("view"))))
-            except ValueError:
-                raise ValidationError(
-                    "An analysis card names a saved view by id"
-                ) from None
+        chart = records = widget = None
+        if kind == CHART:
+            chart = parse_chart({"id": card_id, **(item.get("chart") or {})})
+            records = Scope.from_dict(item.get("records"))
         else:
             widget = item.get("widget")
             if widget not in WIDGETS:
                 raise ValidationError(
                     f"Unknown widget '{widget}'. Use one of: " + ", ".join(WIDGETS)
                 )
-        cards.append(Card(card_id, kind, size, title, view, widget))
+        cards.append(Card(card_id, kind, size, title, chart, records, widget))
     return cards

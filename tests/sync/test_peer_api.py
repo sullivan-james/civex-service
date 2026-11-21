@@ -161,15 +161,18 @@ def test_a_device_asks_to_join_over_http_and_is_let_in_by_the_admin(serving, ctx
 
 
 def test_a_device_on_the_previous_protocol_is_served_what_it_can_read(serving, ctx):
-    """Protocol 4 added the Analytics page and a view's summary; a device on 3
+    """Protocol 4 added the Analytics page and a kind's charts; a device on 3
     still syncs: it is never sent a page entry (a run of them is read past)
-    nor a summary, and can't ask for the page's snapshot."""
+    nor a kind's charts, and can't ask for the page's snapshot."""
     client, headers = serving
     ctx.schema_svc.create("sample")
     ctx.schema_svc.add_field("sample", "site", "string")
-    view = ctx.view_svc.create("sample", "by site", summary={"group_by": ["site"]})
+    ctx.view_svc.create("sample", "by site")
+    ctx.schema_svc.set_charts("sample", [{"id": "a", "group_by": ["site"]}])
+    ctx.commit()
+    ctx.view_svc.update("sample", "by site", columns=["site"])
     for size in ("wide", "small", "wide"):
-        ctx.dashboard_svc.add(view_id=str(view.id), size=size)
+        ctx.dashboard_svc.add(chart={"group_by": ["site"]}, schema="sample", size=size)
     ctx.commit()
     old = {**headers, "X-Civex-Protocol": "3"}
 
@@ -179,7 +182,9 @@ def test_a_device_on_the_previous_protocol_is_served_what_it_can_read(serving, c
     every = client.get("/api/sync/v1/feed", params={"limit": 500}, headers=old).json()
     assert {e["entity_type"] for e in every["entries"]} == {"schema", "field", "view"}
     for e in every["entries"]:
-        assert "summary" not in (e.get("new_data") or {})
+        assert "charts" not in (e.get("new_data") or {})
+        assert "charts" not in (e.get("old_data") or {})
+        assert not any(k.startswith("charts") for k in e.get("delta") or {})
     # Past the view, only page entries are left: read past, nothing sent.
     view_seq = max(e["hub_seq"] for e in every["entries"])
     rest = client.get(
@@ -187,8 +192,8 @@ def test_a_device_on_the_previous_protocol_is_served_what_it_can_read(serving, c
     ).json()
     assert rest["entries"] == [] and rest["more"] is False
 
-    views = client.get("/api/sync/v1/snapshot/view", headers=old).json()
-    assert "summary" not in views["items"][0]
+    schemas = client.get("/api/sync/v1/snapshot/schema", headers=old).json()
+    assert "charts" not in schemas["items"][0]
     page = client.get("/api/sync/v1/snapshot/dashboard", headers=old)
     assert page.status_code == 422
 

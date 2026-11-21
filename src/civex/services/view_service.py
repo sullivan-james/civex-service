@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
 from civex.domain.dtos import RecordDTO, SchemaDTO, ViewDTO
@@ -10,13 +9,8 @@ from civex.domain import permissions
 from civex.domain.naming import validate_free_name
 from civex.domain.permissions import EVERYTHING, Permissions
 from civex.domain.query import RecordQuery
-from civex.domain.summary import SavedSummary, SummaryResult
 from civex.domain.tables import DEFAULT_FORMAT, TableSpec
-from civex.repositories.protocols import (
-    AuditRepository,
-    DatasetRepository,
-    ViewRepository,
-)
+from civex.repositories.protocols import AuditRepository, ViewRepository
 from civex.services.record_service import RecordService
 from civex.services.schema_service import SchemaService
 
@@ -31,7 +25,6 @@ class ViewService:
         record_svc: RecordService,
         audit_repo: AuditRepository | None = None,
         permissions: Permissions = EVERYTHING,
-        datasets: DatasetRepository | None = None,
     ) -> None:
         # A saved filter is shared by everyone, so saving one takes the right
         # to write records, not just to read them.
@@ -40,20 +33,6 @@ class ViewService:
         self._schemas = schema_svc
         self._record_svc = record_svc
         self._audit = audit_repo
-        self._datasets = datasets
-
-    def _check_summary(
-        self, schema: SchemaDTO, raw: dict[str, Any] | None
-    ) -> dict[str, Any] | None:
-        """A saved analysis's summary, read and checked (`SavedSummary`), its
-        groupings and measures held to the kind's fields by the rule the
-        summary itself runs (`RecordService.check_summary`). None: a plain
-        saved filter."""
-        if raw is None:
-            return None
-        saved = SavedSummary.from_dict(raw)
-        self._record_svc.check_summary(schema.name, saved.request())
-        return saved.to_dict()
 
     def _validate(
         self,
@@ -86,10 +65,9 @@ class ViewService:
         filter_tree: dict[str, Any] | None = None,
         sort: list[dict[str, Any]] | None = None,
         files_layout: str = "tree",
-        summary: dict[str, Any] | None = None,
     ) -> ViewDTO:
-        """Save a view: a filter, sort and columns, and with `summary` a saved
-        analysis (`SavedSummary`), which opens the explorer's Summary."""
+        """Save a filter: which records (filter, sort), and the columns and
+        files layout a list of them opens with."""
         self._permissions.require_somewhere(permissions.WRITE_RECORDS)
         schema = self._schemas.get(schema_name)
         name = validate_free_name(name, "view name")
@@ -103,7 +81,6 @@ class ViewService:
             name,
             *self._validate(schema, columns, filter_tree, sort),
             files_layout=files_layout,
-            summary=self._check_summary(schema, summary),
         )
         if self._audit:
             self._audit.log_change("create", "view", dto.id, None, dto.to_dict())
@@ -136,10 +113,8 @@ class ViewService:
         filter_tree=...,
         sort=...,
         files_layout=...,
-        summary=...,
     ) -> ViewDTO:
-        """Change what is given (`...` leaves a part as it is; `summary=None`
-        makes an analysis a plain saved filter again)."""
+        """Change what is given (`...` leaves a part as it is)."""
         self._permissions.require_somewhere(permissions.WRITE_RECORDS)
         schema = self._schemas.get(schema_name)
         view = self._views.get_by_name(schema.id, view_name)
@@ -164,8 +139,6 @@ class ViewService:
         if files_layout is not ...:
             _check_layout(files_layout)
             extra["files_layout"] = files_layout
-        if summary is not ...:
-            extra["summary"] = self._check_summary(schema, summary)
         old_dict = view.to_dict()
         updated = self._views.update(view.id, name=new_name, **extra)
         if self._audit:
@@ -200,40 +173,6 @@ class ViewService:
         view = self.get(schema_name, view_name)
         return RecordQuery(
             schema=schema_name, filter_tree=view.filter_tree, sort=view.sort or None
-        )
-
-    def summary_query(self, view: ViewDTO) -> RecordQuery:
-        """A saved analysis as the query it summarises: its kind and filter,
-        and where it was made (its collection, the record it was made inside,
-        its search). Raises when the view saved no summary."""
-        if view.summary is None:
-            raise ValidationError(f"View '{view.name}' is not a saved analysis")
-        saved = SavedSummary.from_dict(view.summary)
-        dataset = None
-        if saved.collection and self._datasets is not None:
-            found = self._datasets.get_by_id(
-                uuid.UUID(saved.collection), with_count=False
-            )
-            if found is None:
-                raise NotFoundError(
-                    f"The collection analysis '{view.name}' was made in is gone"
-                )
-            dataset = found.name
-        return RecordQuery(
-            dataset=dataset,
-            schema=view.schema_name,
-            within=saved.within,
-            search=saved.search,
-            filter_tree=view.filter_tree,
-        )
-
-    def summarise(self, schema_name: str, view_name: str) -> SummaryResult:
-        """Work out a saved analysis now: the summary it saved, over the
-        records its query lists today."""
-        view = self.get(schema_name, view_name)
-        query = self.summary_query(view)
-        return self._record_svc.summarise(
-            query, SavedSummary.from_dict(view.summary).request()
         )
 
     def preview(

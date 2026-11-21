@@ -179,14 +179,17 @@ def test_history_describes_everything_a_person_can_do(ctx: AppContext) -> None:
     ctx.view_svc.update("encounter", "v1", columns=["location", "depth"])
     ctx.view_svc.create("encounter", "v2")
     ctx.view_svc.delete("encounter", "v2")
-    # A saved analysis, and the Analytics page it is put on.
-    analysis = ctx.view_svc.create(
-        "encounter", "by place", summary={"group_by": ["location"]}
+    # A kind's charts, and a chart on the Analytics page.
+    ctx.schema_svc.set_charts(
+        "encounter", [{"id": "a", "group_by": ["location"], "measures": ["count"]}]
     )
-    ctx.view_svc.update(
-        "encounter", "by place", summary={"group_by": ["location"], "show": "chart"}
+    ctx.schema_svc.set_charts(
+        "encounter",
+        [{"id": "a", "group_by": ["location"], "measures": ["mean:depth"]}],
     )
-    ctx.dashboard_svc.add(view_id=str(analysis.id), size="wide")
+    ctx.dashboard_svc.add(
+        chart={"group_by": ["location"]}, schema="encounter", size="wide"
+    )
     ctx.dashboard_svc.remove("widget-storage")
     ctx.dashboard_svc.resize("widget-ai_tokens", "small")
     ctx.dataset_svc.update("c", description="study", scope="global")

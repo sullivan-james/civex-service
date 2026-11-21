@@ -188,6 +188,7 @@
    "yanked_reason"
   ],
   "schema": [
+   "charts",
    "created_at",
    "deleted_at",
    "description",
@@ -206,8 +207,7 @@
    "id",
    "name",
    "schema_id",
-   "sort",
-   "summary"
+   "sort"
   ]
  }
 }

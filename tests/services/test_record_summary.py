@@ -343,3 +343,101 @@ def test_one_statement_however_many_records(
         )
     assert statements() == few
     assert few[1] == 1  # the summary itself is one statement
+
+
+# --- how many records of a kind beneath sit inside them
+
+
+def test_counting_the_records_inside_each_group(
+    ctx: AppContext, survey, make_schema, make_record
+) -> None:
+    make_schema("reading", parent="sample", fields=[("value", "float")])
+    ctx.commit()
+    samples = ctx.record_svc.query_records(
+        RecordQuery(dataset="survey", schema="sample"), limit=10
+    )
+    by_label = {s.data["label"]: str(s.id) for s in samples}
+    for label, n in (("a", 2), ("d", 3)):
+        for i in range(n):
+            make_record(
+                "survey", "reading", {"value": i}, parent_record_id=by_label[label]
+            )
+    gone = make_record(
+        "survey", "reading", {"value": 9}, parent_record_id=by_label["a"]
+    )
+    ctx.record_svc.delete(str(gone.id))
+    ctx.commit()
+
+    result = ctx.record_svc.summarise(
+        RecordQuery(dataset="survey", schema="site"),
+        SummaryRequest(
+            [GroupBy("region")],
+            [
+                Measure("count"),
+                Measure("inside", "sample"),
+                Measure("inside", "reading"),
+            ],
+        ),
+    )
+    assert [c.label for c in result.measure_columns] == [
+        "Records",
+        "Sample inside",
+        "Reading inside",
+    ]
+    assert [(r.groups[0].value, r.values) for r in result.rows] == [
+        ("north", [1, 3, 2]),
+        ("south", [1, 2, 3]),
+    ]
+    assert result.total == [2, 5, 5]
+    # The list's own filter still decides which records are counted inside.
+    one = ctx.record_svc.summarise(
+        RecordQuery(
+            dataset="survey",
+            schema="site",
+            filter_tree={"field": "region", "op": "eq", "value": "south"},
+        ),
+        SummaryRequest([], [Measure("inside", "reading")]),
+    )
+    assert one.total == [3]
+
+
+def test_inside_names_a_kind_beneath(ctx: AppContext, survey) -> None:
+    for measure in (Measure("inside", "site"), Measure("inside", "nothing")):
+        with pytest.raises(ValidationError, match="beneath"):
+            ctx.record_svc.summarise(
+                RecordQuery(dataset="survey", schema="sample"),
+                SummaryRequest([], [measure]),
+            )
+    with pytest.raises(ValidationError, match="beneath"):
+        SummaryRequest([], [Measure("inside")]).check()
+
+
+def test_counting_inside_is_one_statement_however_many_records(
+    ctx: AppContext, survey, make_record
+) -> None:
+    request = SummaryRequest(
+        [GroupBy("region")], [Measure("count"), Measure("inside", "sample")]
+    )
+    query = RecordQuery(dataset="survey", schema="site")
+
+    def statements() -> int:
+        seen: list[str] = []
+
+        def count(conn, cursor, statement, *args) -> None:
+            seen.append(statement)
+
+        engine = ctx._session.get_bind()
+        event.listen(engine, "before_cursor_execute", count)
+        try:
+            ctx.record_svc.summarise(query, request)
+        finally:
+            event.remove(engine, "before_cursor_execute", count)
+        return len(seen)
+
+    few = statements()
+    for i in range(20):
+        site = make_record("survey", "site", {"region": f"r{i}"})
+        for _ in range(3):
+            make_record("survey", "sample", {}, parent_record_id=str(site.id))
+    ctx.commit()
+    assert statements() == few

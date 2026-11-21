@@ -186,6 +186,128 @@ def schema_remove_unique(
     console.print(f"[success]Removed the unique ({', '.join(fields)}).[/success]")
 
 
+charts_app = typer.Typer(help="The charts a list of a kind of record opens with")
+app.add_typer(charts_app, name="charts")
+
+
+def _chart_line(chart: dict) -> str:
+    if "map" in chart:
+        what = f"a map of {chart['map']}"
+    else:
+        what = ", ".join(chart.get("measures", ["count"]))
+        if chart.get("group_by"):
+            what += " by " + ", ".join(chart["group_by"])
+    title = f'"{chart["title"]}": ' if chart.get("title") else ""
+    return f"  {chart['id']}  {title}{what}"
+
+
+@charts_app.command("list")
+def schema_charts_list(name: str = typer.Argument(..., help="Schema name")) -> None:
+    """List the charts a list of this kind opens with, in order, with the id
+    each is removed by."""
+    ctx = _ctx()
+    try:
+        charts = ctx.schema_svc.get(name).charts
+    except NotFoundError as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+    if not charts:
+        console.print(f"'{name}' has no charts set: suggested ones are shown.")
+        return
+    for chart in charts:
+        console.print(_chart_line(chart))
+
+
+@charts_app.command("add")
+def schema_charts_add(
+    name: str = typer.Argument(..., help="Schema name"),
+    by: Optional[list[str]] = typer.Option(
+        None,
+        "--by",
+        "-b",
+        help="One bar for each value of a field (repeatable, up to 3), as "
+        "'civex record summarise --by' takes it: site, taken:month, depth:5",
+    ),
+    measure: Optional[list[str]] = typer.Option(
+        None,
+        "--measure",
+        "-m",
+        help="What each bar shows (repeatable), as 'civex record summarise "
+        "--measure' takes it; 'count' when none is given. 'inside:KIND' counts "
+        "the records of a kind beneath.",
+    ),
+    map_field: Optional[str] = typer.Option(
+        None, "--map", help="A map of this location field instead of bars"
+    ),
+    title: Optional[str] = typer.Option(None, "--title", help="The chart's title"),
+) -> None:
+    """Add a chart to the ones a list of this kind opens with: bars (--by and
+    --measure) or a map (--map). Everyone sees it; it is in the schema's
+    history and syncs."""
+    import uuid
+
+    ctx = _ctx()
+    try:
+        chart: dict = {"id": uuid.uuid4().hex[:12]}
+        if title:
+            chart["title"] = title
+        if map_field:
+            chart["map"] = map_field
+        else:
+            chart["group_by"] = list(by or [])
+            chart["measures"] = list(measure or ["count"])
+        current = ctx.schema_svc.get(name).charts
+        ctx.schema_svc.set_charts(name, [*current, chart])
+        ctx.commit()
+    except (NotFoundError, ValidationError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+    console.print(f"[success]Added chart {chart['id']} to '{name}'.[/success]")
+
+
+@charts_app.command("remove")
+def schema_charts_remove(
+    name: str = typer.Argument(..., help="Schema name"),
+    chart: str = typer.Argument(..., help="The chart's id, as 'list' shows it"),
+) -> None:
+    """Remove one chart from the ones a list of this kind opens with."""
+    ctx = _ctx()
+    try:
+        current = ctx.schema_svc.get(name).charts
+        kept = [c for c in current if c["id"] != chart]
+        if len(kept) == len(current):
+            console.print(f"[error]'{name}' has no chart '{chart}'.[/error]")
+            raise typer.Exit(1)
+        ctx.schema_svc.set_charts(name, kept)
+        ctx.commit()
+    except (NotFoundError, ValidationError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+    console.print(f"[success]Removed chart {chart}.[/success]")
+
+
+@charts_app.command("clear")
+def schema_charts_clear(name: str = typer.Argument(..., help="Schema name")) -> None:
+    """Remove every chart set for this kind, so its lists show the suggested
+    ones again."""
+    ctx = _ctx()
+    try:
+        ctx.schema_svc.set_charts(name, [])
+        ctx.commit()
+    except (NotFoundError, ValidationError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+    console.print(f"[success]'{name}' shows the suggested charts again.[/success]")
+
+
 def _parse_bbox(text: str) -> list[float]:
     try:
         parts = [float(x) for x in text.split(",")]

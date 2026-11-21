@@ -5,8 +5,9 @@ from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 
 import uuid
-from typing import Any
+from typing import Any, Callable
 
+from civex.domain.charts import Chart, parse_charts
 from civex.domain.dtos import (
     BlockerDTO,
     DeletedField,
@@ -330,6 +331,7 @@ class SchemaService:
         self._records = record_repo
         # What the caller may do; asked before any change to the structure.
         self._permissions = permissions
+        self._check_chart: Callable[[str, Chart], None] | None = None
 
     def create(
         self,
@@ -592,6 +594,106 @@ class SchemaService:
                 "update", "schema", updated.id, old_dict, updated.to_dict()
             )
         return updated
+
+    def use_chart_check(self, check: Callable[[str, Chart], None]) -> None:
+        """How a chart is held to a kind's fields: the record service's
+        `check_chart` (the rule a chart is drawn by), handed over where the
+        services are wired since it sits above this one."""
+        self._check_chart = check
+
+    def set_charts(self, name: str, charts: list[dict[str, Any]]) -> SchemaDTO:
+        """Replace the charts a list of this kind opens with (in order; an
+        empty list puts back the suggested ones). Each is checked as it would
+        be drawn: its fields are the kind's own or those of a kind above."""
+        self._permissions.require(permissions.CHANGE_STRUCTURE)
+        schema = self.get(name)
+        parsed = parse_charts(charts)
+        for chart in parsed:
+            if self._check_chart is not None:
+                self._check_chart(schema.name, chart)
+        stored = [c.to_dict() for c in parsed]
+        if stored == schema.charts:
+            return schema
+        updated = self._repo.update(
+            schema.id, name=None, description=None, charts=stored
+        )
+        if self._audit:
+            self._audit.log_change(
+                "update", "schema", updated.id, schema.to_dict(), updated.to_dict()
+            )
+        return updated
+
+    def _rewrite_charts(self, owner: SchemaDTO, old: str, new: str | None) -> None:
+        """Keep charts in step with a field of `owner` renamed (`new`) or
+        deleted (None): on `owner` and every kind beneath it, a chart naming
+        the field is rewritten, or dropped when the field is gone. Each kind
+        changed is an entry in history, like a rewritten template."""
+        for schema in [owner] + [s for s, _ in self.descendants(owner)]:
+            current = self._repo.get_by_id(schema.id)
+            if current is None or not current.charts:
+                continue
+            shadowed = schema.id != owner.id and any(
+                f.name == old for f in current.fields
+            )
+
+            def names(key: str) -> tuple[str, str, str]:
+                name, sep, how = key.partition(":")
+                above, _, field = name.rpartition(".")
+                hit = field == old and (
+                    above == owner.name or (not above and not shadowed)
+                )
+                if not hit or new is None:
+                    return key, key if not hit else "", ""
+                return key, ((above + ".") if above else "") + new + sep + how, ""
+
+            kept: list[dict[str, Any]] = []
+            for chart in current.charts:
+                out = dict(chart)
+                gone = False
+                swaps: dict[str, str] = {}
+                if "map" in chart:
+                    _, to, _ = names(chart["map"])
+                    gone = not to
+                    out["map"] = to
+                else:
+                    groups = []
+                    for g in chart.get("group_by", []):
+                        _, to, _ = names(g)
+                        gone = gone or not to
+                        swaps[g] = to
+                        groups.append(to)
+                    measures = []
+                    for m in chart.get("measures", []):
+                        kind, sep, name = m.partition(":")
+                        to = m
+                        if sep and kind != "inside":
+                            _, renamed, _ = names(name)
+                            gone = gone or not renamed
+                            to = kind + sep + renamed
+                        swaps[m] = to
+                        measures.append(to)
+                    out["group_by"], out["measures"] = groups, measures
+                    if out.get("chart_measure"):
+                        out["chart_measure"] = swaps.get(
+                            out["chart_measure"], out["chart_measure"]
+                        )
+                    if out.get("sort"):
+                        column = out["sort"]["column"]
+                        out["sort"] = {
+                            **out["sort"],
+                            "column": swaps.get(column, column),
+                        }
+                if not gone:
+                    kept.append(out)
+            if kept == current.charts:
+                continue
+            updated = self._repo.update(
+                current.id, name=None, description=None, charts=kept
+            )
+            if self._audit:
+                self._audit.log_change(
+                    "update", "schema", current.id, current.to_dict(), updated.to_dict()
+                )
 
     def _reference_targets(self, schema: SchemaDTO) -> dict[str, set[str]]:
         """For each single-record reference field on `schema` (own or inherited)
@@ -1098,6 +1200,7 @@ class SchemaService:
         self._rewrite_templates(
             holders, lambda tpl, via: templating.remove_field(tpl, field_name, via)
         )
+        self._rewrite_charts(schema, field_name, None)
         # A field filled from this file's name has nothing to read any more.
         self._rewrite_filename_rules(rule_holders, None)
 
@@ -1173,6 +1276,7 @@ class SchemaService:
             )
             self._rewrite_filename_rules(rule_holders, new_name)
             self._rewrite_formulas(formula_holders, field_name, new_name)
+            self._rewrite_charts(schema, field_name, new_name)
         if self._audit:
             self._audit.log_change(
                 "update", "field", updated.id, old_dict, updated.to_dict()

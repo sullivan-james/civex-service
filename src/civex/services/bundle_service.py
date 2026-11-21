@@ -383,6 +383,7 @@ class BundleService:
                     "parent": names.get(s.parent_id) if s.parent_id else None,
                     "display_template": s.display_template,
                     "unique_keys": s.unique_key_names,
+                    "charts": s.charts,
                     "fields": [
                         {
                             "name": f.name,
@@ -575,6 +576,13 @@ class BundleService:
         for s in schemas:
             if s["name"] in created and s.get("unique_keys"):
                 self._schemas.set_unique_keys(s["name"], s["unique_keys"])
+                self._commit()
+        for s in schemas:
+            if s["name"] in created and s.get("charts"):
+                try:
+                    self._schemas.set_charts(s["name"], s["charts"])
+                except (NotFoundError, ValidationError):
+                    continue  # a chart of a field this project lacks: left out
                 self._commit()
         result.schemas_new = len(created)
 

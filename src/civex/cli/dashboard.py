@@ -19,10 +19,16 @@ def _print(page) -> None:
         card = c.card
         if card.widget:
             what = f"widget: {WIDGETS[card.widget][0]}"
-        elif c.view is not None:
-            what = f"analysis: {c.view.schema_name}/{c.view.name}"
         else:
-            what = "analysis: (deleted)"
+            chart = card.chart.to_dict()
+            drawn = (
+                f"a map of {chart['map']}"
+                if "map" in chart
+                else ", ".join(chart["measures"])
+                + (" by " + ", ".join(chart["group_by"]) if chart["group_by"] else "")
+            )
+            where = c.collection_name or "every collection"
+            what = f"chart: {c.schema_name or '(gone)'} in {where}: {drawn}"
         if card.title:
             what += f' as "{card.title}"'
         table.add_row(card.id, what, card.size)
@@ -44,14 +50,37 @@ def dashboard_show() -> None:
 
 @app.command("add")
 def dashboard_add(
-    analysis: Optional[str] = typer.Option(
+    schema: Optional[str] = typer.Option(
+        None, "--schema", "-s", help="A chart of this kind of record"
+    ),
+    by: Optional[list[str]] = typer.Option(
         None,
-        "--analysis",
-        "-a",
-        help="A saved analysis, as 'schema/view name'",
+        "--by",
+        "-b",
+        help="One bar for each value of a field (repeatable, up to 3), as "
+        "'civex record summarise --by' takes it",
+    ),
+    measure: Optional[list[str]] = typer.Option(
+        None,
+        "--measure",
+        "-m",
+        help="What each bar shows (repeatable), as 'civex record summarise "
+        "--measure' takes it; 'count' when none is given",
+    ),
+    map_field: Optional[str] = typer.Option(
+        None, "--map", help="A map of this location field instead of bars"
+    ),
+    collection: Optional[str] = typer.Option(
+        None, "--in", help="Only records in this collection (omit for every one)"
+    ),
+    where: Optional[list[str]] = typer.Option(
+        None, "--where", "-w", help="Only records matching field=value (repeatable)"
+    ),
+    search: Optional[str] = typer.Option(
+        None, "--search", "-q", help="Only records whose values contain this text"
     ),
     widget: Optional[str] = typer.Option(
-        None, "--widget", "-w", help=f"A built-in widget: {', '.join(WIDGETS)}"
+        None, "--widget", help=f"A built-in widget: {', '.join(WIDGETS)}"
     ),
     size: str = typer.Option("small", "--size", help=f"How wide: {' or '.join(SIZES)}"),
     title: Optional[str] = typer.Option(
@@ -61,18 +90,37 @@ def dashboard_add(
         None, "--at", help="Where to put it, from 1 (default: at the end)"
     ),
 ) -> None:
-    """Put a saved analysis or a built-in widget on the Analytics page. The
-    page is shared: everyone sees the change, and it shows in Activity."""
+    """Put a chart or a built-in widget on the Analytics page. A chart is of
+    one kind of record (--schema): bars (--by, --measure) or a map (--map),
+    over the records --in, --where and --search choose. The page is shared:
+    everyone sees the change, and it shows in Activity."""
     ctx = _ctx()
     try:
-        view_id = None
-        if analysis:
-            schema, _, name = analysis.partition("/")
-            if not name:
-                raise ValidationError("Name the analysis as 'schema/view name'")
-            view_id = str(ctx.view_svc.get(schema, name).id)
+        chart = None
+        if schema:
+            chart = (
+                {"map": map_field}
+                if map_field
+                else {
+                    "group_by": list(by or []),
+                    "measures": list(measure or ["count"]),
+                }
+            )
+        tree = None
+        if where:
+            leaves = []
+            for item in where:
+                field, sep, value = item.partition("=")
+                if not sep:
+                    raise ValidationError("Write --where as field=value")
+                leaves.append({"field": field, "op": "eq", "value": value})
+            tree = leaves[0] if len(leaves) == 1 else {"and": leaves}
         page = ctx.dashboard_svc.add(
-            view_id=view_id,
+            chart=chart,
+            schema=schema,
+            collection=collection,
+            search=search,
+            filter_tree=tree,
             widget=widget,
             size=size,
             title=title,
@@ -91,7 +139,7 @@ def dashboard_add(
 def dashboard_remove(
     card: str = typer.Argument(..., help="The card's id, as 'show' lists it"),
 ) -> None:
-    """Take a card off the Analytics page (the saved analysis itself stays)."""
+    """Take a card off the Analytics page."""
     ctx = _ctx()
     try:
         page = ctx.dashboard_svc.remove(card)

@@ -102,6 +102,7 @@ class SchemaRepository(Protocol):
         display_template: str | None = ...,
         label: str | None = ...,
         unique_keys: list[list[str]] | None = ...,
+        charts: list[dict[str, Any]] | None = ...,
     ) -> SchemaDTO: ...
     def delete(self, id: uuid.UUID, stamp: datetime | None = None) -> None: ...
     def restore(self, id: uuid.UUID) -> SchemaDTO: ...
@@ -196,7 +197,6 @@ class ViewRepository(Protocol):
         filter_tree: dict[str, Any] | None,
         sort: list[dict[str, Any]],
         files_layout: str = ...,
-        summary: dict[str, Any] | None = ...,
     ) -> ViewDTO: ...
     def update(
         self,
@@ -206,7 +206,6 @@ class ViewRepository(Protocol):
         filter_tree: dict[str, Any] | None = ...,
         sort: list[dict[str, Any]] = ...,
         files_layout: str = ...,
-        summary: dict[str, Any] | None = ...,
     ) -> ViewDTO: ...
     def delete(self, id: uuid.UUID) -> None: ...
 

@@ -14,7 +14,7 @@ from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.tables import FORMATS
 from civex.services.archive import build_download
 
-app = typer.Typer(help="Saved views and saved analyses: show, save, export")
+app = typer.Typer(help="Saved filters: show, export")
 
 
 @app.command("export")
@@ -79,12 +79,8 @@ def view_show(
     schema_name: str = typer.Argument(..., help="Schema the view belongs to"),
     view_name: str = typer.Argument(..., help="View name"),
 ) -> None:
-    """Show a saved view: its filter, columns and sort, and for a saved
-    analysis what it groups by and works out, with the summary worked out over
-    the records it lists now."""
+    """Show a saved filter: its filter, columns and sort."""
     import json
-
-    from civex.cli.record import print_summary
 
     ctx = _ctx()
     try:
@@ -102,79 +98,6 @@ def view_show(
                     f"{s['field']} {s.get('direction', 'asc')}" for s in view.sort
                 )
             )
-        if view.summary is None:
-            console.print("A saved filter (no summary).")
-            return
-        s = view.summary
-        console.print("A saved analysis.")
-        console.print("Group by: " + (", ".join(s["group_by"]) or "nothing (a total)"))
-        console.print("Work out: " + ", ".join(s["measures"]))
-        console.print(f"Shown as: {s['show']}")
-        print_summary(ctx.view_svc.summarise(schema_name, view_name))
-    except (NotFoundError, ValidationError) as e:
-        console.print(f"[error]{e}[/error]")
-        raise typer.Exit(1)
-    finally:
-        ctx.close()
-
-
-@app.command("save-analysis")
-def view_save_analysis(
-    schema_name: str = typer.Argument(..., help="The kind of record summarised"),
-    view_name: str = typer.Argument(
-        ..., help="The analysis's name: a saved view of that kind"
-    ),
-    by: Optional[list[str]] = typer.Option(
-        None,
-        "--summary-by",
-        "--by",
-        "-b",
-        help="Group by a field (repeatable, up to 3), as 'civex record summarise "
-        "--by' takes it.",
-    ),
-    measure: Optional[list[str]] = typer.Option(
-        None,
-        "--summary-measure",
-        "--measure",
-        "-m",
-        help="What to work out (repeatable), as 'civex record summarise "
-        "--measure' takes it; 'count' when none is given.",
-    ),
-    collection: Optional[str] = typer.Option(
-        None, "--in", help="The collection it is about (omit for every collection)"
-    ),
-    search: Optional[str] = typer.Option(
-        None, "--search", "-q", help="Only records whose values contain this text"
-    ),
-    chart: bool = typer.Option(
-        False, "--chart", help="Show it as a chart rather than a table"
-    ),
-) -> None:
-    """Save a summary as an analysis: a saved view that opens the explorer's
-    Summary and can be put on the Analytics page. An existing view of that
-    name keeps its filter and becomes (or stays) an analysis with these
-    choices; otherwise a new view is made with no filter."""
-    ctx = _ctx()
-    try:
-        collection_id = None
-        if collection:
-            collection_id = str(ctx.dataset_svc.get(collection).id)
-        summary = {
-            "group_by": list(by or []),
-            "measures": list(measure or ["count"]),
-            "show": "chart" if chart else "table",
-            "collection": collection_id,
-            "search": search,
-        }
-        try:
-            ctx.view_svc.get(schema_name, view_name)
-            ctx.view_svc.update(schema_name, view_name, summary=summary)
-            done = "Updated"
-        except NotFoundError:
-            ctx.view_svc.create(schema_name, view_name, summary=summary)
-            done = "Saved"
-        ctx.commit()
-        console.print(f"[success]{done} the analysis '{view_name}'.[/success]")
     except (NotFoundError, ValidationError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)

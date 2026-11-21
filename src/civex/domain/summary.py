@@ -52,6 +52,7 @@ MEASURES: dict[str, str] = {
     "max": "Largest",
     "mean": "Average",
     "sum": "Total",
+    "inside": "Records inside",
 }
 #: What each measure is, in a sentence (the UI's tooltip, the CLI's help).
 MEASURE_HELP: dict[str, str] = {
@@ -62,7 +63,11 @@ MEASURE_HELP: dict[str, str] = {
     "max": "The largest value (the latest date, the last text A to Z).",
     "mean": "The average of the values.",
     "sum": "The values added up.",
+    "inside": "How many records of a kind beneath sit inside them.",
 }
+#: The measure that counts records of a kind beneath: its `field` names that
+#: kind, not a field (`inside:recording`).
+INSIDE = "inside"
 #: Measures whose answer is a value of the field (so carries its unit).
 VALUE_MEASURES = frozenset({"min", "max", "mean", "sum"})
 #: Periods a date or date and time can be grouped by.
@@ -136,6 +141,10 @@ class SummaryRequest:
             if m.measure == "count" and m.field is not None:
                 raise ValidationError(
                     "'count' counts records; to count values, use 'filled'"
+                )
+            if m.measure == INSIDE and (m.field is None or m.schema):
+                raise ValidationError(
+                    "'inside' names a kind of record beneath: inside:recording"
                 )
             if m.measure != "count" and m.field is None:
                 raise ValidationError(f"'{m.measure}' needs a field")
@@ -241,6 +250,9 @@ class GroupPlan:
 class MeasurePlan:
     measure: str
     field: FieldPlan | None = None
+    # `inside`: the kind beneath counted (its schema id) and how many levels
+    # down its records sit.
+    child: tuple[uuid.UUID, int] | None = None
 
 
 @dataclass
@@ -494,6 +506,8 @@ def group_value(
 def measure_value(column: MeasureColumn, v: Any) -> Any:
     """A raw measure as the result carries it: counts as ints, a whole
     number field's smallest, largest and total as ints, averages as floats."""
+    if column.measure == INSIDE:
+        return int(v or 0)
     if v is None:
         return None
     if column.measure in ("count", "filled", "distinct"):
@@ -522,33 +536,28 @@ def measure_label(measure: str, field_label: str | None) -> str:
     return _MEASURE_NAMES[measure].format(field_label)
 
 
-# --- a summary saved with a view (a saved analysis)
+# --- a chart's summary (`civex.domain.charts.Chart`)
 
-#: How a saved analysis is shown.
+#: How a chart opens: its bars, or its table of numbers.
 SHOWS = ("table", "chart")
 SORT_DIRECTIONS = ("asc", "desc")
 
 
 @dataclass
 class SavedSummary:
-    """A summary kept on a saved view, which makes the view a saved analysis:
-    what it groups by and works out (the keys `parse_group_by` and
-    `parse_measure` read, as the address and the CLI write them), how the
-    table is sorted, whether it is shown as a table or a chart and which
-    measure the chart draws, and where it was made (a collection's id, None
-    for every collection; a record's id it was made inside; the search). The
-    view's own filter is the rest of its query. `from_dict` is the one check
-    of the shape; whether the fields exist is the record service's
+    """The bars of a chart: what the records are grouped by and what is
+    worked out (the keys `parse_group_by` and `parse_measure` read, as the
+    address and the CLI write them), how its table is sorted, whether it
+    opens as a table or a chart and which measure the chart draws. Which
+    records it counts is not part of it. `from_dict` is the one check of the
+    shape; whether the fields exist is the record service's
     (`RecordService.check_summary`)."""
 
     group_by: list[str] = _field(default_factory=list)
     measures: list[str] = _field(default_factory=lambda: ["count"])
     sort: dict[str, str] | None = None  # {"column": key, "direction": asc|desc}
-    show: str = "table"
+    show: str = "chart"
     chart_measure: str | None = None
-    collection: str | None = None
-    within: str | None = None
-    search: str | None = None
 
     def request(self) -> SummaryRequest:
         return SummaryRequest(
@@ -557,29 +566,28 @@ class SavedSummary:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "group_by": list(self.group_by),
             "measures": list(self.measures),
-            "sort": dict(self.sort) if self.sort else None,
-            "show": self.show,
-            "chart_measure": self.chart_measure,
-            "collection": self.collection,
-            "within": self.within,
-            "search": self.search,
         }
+        if self.sort:
+            out["sort"] = dict(self.sort)
+        if self.show != "chart":
+            out["show"] = self.show
+        if self.chart_measure:
+            out["chart_measure"] = self.chart_measure
+        return out
 
     @classmethod
     def from_dict(cls, d: Any) -> SavedSummary:
-        """Read and check a saved summary: keys written as the server writes
-        them (so `depth:5.0` and `depth:5` are one grouping), a sort on one of
-        its columns, a chart measure among its measures, ids that are ids."""
+        """Read and check: keys written as the server writes them (so
+        `depth:5.0` and `depth:5` are one grouping), a sort on one of its
+        columns, a chart measure among its measures."""
         if not isinstance(d, dict):
-            raise ValidationError("A saved summary is an object")
+            raise ValidationError("A chart is an object")
         unknown = set(d) - set(cls.__dataclass_fields__)
         if unknown:
-            raise ValidationError(
-                "A saved summary has no " + ", ".join(sorted(unknown))
-            )
+            raise ValidationError("A chart has no " + ", ".join(sorted(unknown)))
 
         def texts(key: str, default: list[str]) -> list[str]:
             value = d.get(key, default)
@@ -588,7 +596,7 @@ class SavedSummary:
             if not isinstance(value, list) or not all(
                 isinstance(v, str) for v in value
             ):
-                raise ValidationError(f"A saved summary's '{key}' is a list of text")
+                raise ValidationError(f"A chart's '{key}' is a list of text")
             return value
 
         groups = [parse_group_by(g) for g in texts("group_by", [])]
@@ -604,37 +612,19 @@ class SavedSummary:
                 or sort.get("direction", "asc") not in SORT_DIRECTIONS
             ):
                 raise ValidationError(
-                    "A saved summary is sorted by one of its columns, 'asc' or 'desc'"
+                    "A chart is sorted by one of its columns, 'asc' or 'desc'"
                 )
             sort = {"column": sort["column"], "direction": sort.get("direction", "asc")}
-        show = d.get("show") or "table"
+        show = d.get("show") or "chart"
         if show not in SHOWS:
-            raise ValidationError(
-                f"A saved summary is shown as one of: {', '.join(SHOWS)}"
-            )
+            raise ValidationError(f"A chart opens as one of: {', '.join(SHOWS)}")
         chart = d.get("chart_measure") or None
         if chart is not None and chart not in [m.key for m in measures]:
-            raise ValidationError("The chart draws one of the summary's measures")
-
-        def an_id(key: str) -> str | None:
-            value = d.get(key) or None
-            if value is None:
-                return None
-            try:
-                return str(uuid.UUID(str(value)))
-            except ValueError:
-                raise ValidationError(f"A saved summary's '{key}' is an id") from None
-
-        search = d.get("search") or None
-        if search is not None and not isinstance(search, str):
-            raise ValidationError("A saved summary's 'search' is text")
+            raise ValidationError("The chart draws one of its measures")
         return cls(
             group_by=[g.key for g in groups],
             measures=[m.key for m in measures],
             sort=sort,
             show=show,
             chart_measure=chart,
-            collection=an_id("collection"),
-            within=an_id("within"),
-            search=search,
         )

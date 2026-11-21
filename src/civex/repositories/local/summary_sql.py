@@ -124,6 +124,24 @@ def _floor(x: Any, pg: bool) -> Any:
     return t - case((x < t, 1), else_=0)
 
 
+def _inside(schema_id: Any, depth: int) -> Any:
+    """How many live records of a kind `depth` levels beneath sit inside the
+    record summarised: a correlated count up the parent chain, so a group's
+    total is one SUM in the same statement."""
+    lowest = aliased(Record, name="inside_0")
+    q = select(func.count(lowest.id)).where(
+        lowest.schema_id == schema_id, lowest.deleted_at.is_(None)
+    )
+    top = lowest
+    for level in range(1, depth):
+        above = aliased(Record, name=f"inside_{level}")
+        q = q.join(above, above.id == top.parent_record_id)
+        top = above
+    return (
+        q.where(top.parent_record_id == Record.id).correlate(Record).scalar_subquery()
+    )
+
+
 class _Compiler:
     def __init__(self, pg: bool) -> None:
         self.pg = pg
@@ -297,6 +315,9 @@ class _Compiler:
             if distinct_records:
                 return func.count(func.distinct(Record.id))
             return func.count(Record.id)
+        if m.measure == "inside":
+            assert m.child is not None
+            return func.coalesce(func.sum(_inside(*m.child)), 0)
         assert m.field is not None
         v = self.value(m.field)
         if m.measure == "filled":

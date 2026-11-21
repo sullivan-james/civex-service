@@ -1,13 +1,13 @@
-"""Saved analyses and the Analytics page travel between devices (scenarios).
+"""A kind's charts and the Analytics page travel between devices (scenarios).
 
-A saved analysis is a view with a summary, and the Analytics page is one
-synced thing (`dashboard`) holding its cards. `travels` makes an analysis and
-edits the page on one device, edits it again on another, and checks every copy
-ends with the same page; `two_first_edits` has two devices edit a page nobody
-had edited, which both make as the same thing (`DASHBOARD_ID`), and checks the
-authority's stays with the other kept for review. Each returns what is wrong
-(nothing is a pass), so a host embedding civex can run them with its own app
-as the authority."""
+A kind's charts are part of its schema, and the Analytics page is one synced
+thing (`dashboard`) holding its cards, each chart with the records it counts.
+`travels` sets a kind's charts and edits the page on one device, edits it
+again on another, and checks every copy ends with the same charts and page;
+`two_first_edits` has two devices edit a page nobody had edited, which both
+make as the same thing (`DASHBOARD_ID`), and checks the authority's stays with
+the other kept for review. Each returns what is wrong (nothing is a pass), so
+a host embedding civex can run them with its own app as the authority."""
 
 from __future__ import annotations
 
@@ -25,20 +25,22 @@ def travels(project, authority) -> list[str]:
     problems: list[str] = []
     laptop = device(project, authority, "laptop")
     build_study(laptop)
-    view = laptop.view_svc.create(
-        "encounter",
-        "depth by site",
-        summary={"group_by": ["site"], "measures": ["count", "mean:depth"]},
+    charts = [{"id": "a", "group_by": ["site"], "measures": ["count", "mean:depth"]}]
+    laptop.schema_svc.set_charts("encounter", charts)
+    laptop.dashboard_svc.add(
+        chart={"group_by": ["site"]},
+        schema="encounter",
+        collection="study",
+        size="wide",
     )
-    laptop.dashboard_svc.add(view_id=str(view.id), size="wide")
     laptop.commit()
     connect(laptop)
 
     phone = device(project, authority, "phone")
     connect(phone)
-    got = phone.view_svc.get("encounter", "depth by site")
-    if got.summary != view.summary:
-        problems.append(f"the phone's analysis is {got.summary}, not {view.summary}")
+    got = phone.schema_svc.get("encounter").charts
+    if got != charts:
+        problems.append(f"the phone's charts are {got}, not {charts}")
     if _page(phone) != _page(laptop):
         problems.append("the phone did not get the page as the laptop made it")
 
@@ -48,9 +50,16 @@ def travels(project, authority) -> list[str]:
     phone.commit()
     phone.sync_svc.sync()
     laptop.sync_svc.sync()
+    # ... and changes the kind's charts; the laptop gets those too.
+    phone.schema_svc.set_charts("encounter", [])
+    phone.commit()
+    phone.sync_svc.sync()
+    laptop.sync_svc.sync()
     for name, ctx in (("authority", authority), ("laptop", laptop)):
         if _page(ctx) != _page(phone):
             problems.append(f"the {name}'s page differs from the phone's")
+        if ctx.schema_svc.get("encounter").charts:
+            problems.append(f"the {name} kept charts the phone cleared")
     entries = authority.history_svc.page(limit=50, entity_type="dashboard")
     if len(entries) < 2:
         problems.append(f"the authority's history has {len(entries)} page edits")

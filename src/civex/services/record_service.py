@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
 from zoneinfo import ZoneInfo
 
+from civex.domain.charts import Chart
 from civex.domain import permissions
 from civex.domain import notes as note_rules
 from civex.domain.permissions import EVERYTHING, Permissions
@@ -2702,6 +2703,19 @@ class RecordService:
         request.check()
         self._summary_columns(schema_name, request, "UTC")
 
+    def check_chart(self, schema_name: str, chart: Chart) -> None:
+        """Whether `chart` can be drawn for records of `schema_name`, without
+        reading any record: its bars by `check_summary`, a map's field a
+        location field of the kind or of a kind above it."""
+        if chart.summary is not None:
+            self.check_summary(schema_name, chart.summary.request())
+            return
+        listed = self._schema_svc.get(schema_name)
+        field, above = chart.map_field
+        f, rel = self._locate(listed, self._relations(listed), field, above, "map")
+        if rel.direction == "down" or f.dtype != "geo":
+            raise ValidationError(f"'{chart.map}' is not a location field")
+
     def _summary_columns(
         self, schema_name: str, request: summary.SummaryRequest, zone_default: str
     ) -> tuple[
@@ -2774,6 +2788,28 @@ class RecordService:
                 measure_plans.append(summary.MeasurePlan("count"))
                 measure_columns.append(
                     summary.MeasureColumn(m.key, "count", summary.MEASURES["count"])
+                )
+                continue
+            if m.measure == summary.INSIDE:
+                below = {
+                    s.name: (s, depth)
+                    for s, depth in self._schema_svc.descendants(schema)
+                }
+                if m.field not in below:
+                    raise ValidationError(
+                        f"'{m.field}' is not a kind of record beneath '{schema.name}'"
+                    )
+                child, depth = below[m.field]
+                measure_plans.append(
+                    summary.MeasurePlan(summary.INSIDE, child=(child.id, depth))
+                )
+                measure_columns.append(
+                    summary.MeasureColumn(
+                        key=m.key,
+                        measure=summary.INSIDE,
+                        label=f"{child.display_name} inside",
+                        field=child.name,
+                    )
                 )
                 continue
             f, hops, owner, label = locate(m.field, m.schema, "work out")

@@ -27,6 +27,7 @@ from civex.server.models import (
     RestorePlanResponse,
     SchemaDeleteImpactResponse,
     SchemaResponse,
+    SetChartsRequest,
     SetUniqueKeysRequest,
     UpdateFieldRequest,
     UpdateSchemaRequest,
@@ -394,6 +395,23 @@ def set_unique_keys(
     """
     try:
         dto = ctx.schema_svc.set_unique_keys(name, body.keys)
+        ctx.commit()
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    return SchemaResponse.from_dto(dto)
+
+
+@router.put("/{name}/charts", response_model=SchemaResponse)
+def set_charts(name: str, body: SetChartsRequest, ctx: AppContext = Depends(get_ctx)):
+    """Replace the charts a list of this kind opens with, in order. Each is
+    bars (groupings and measures over the kind's fields or those of a kind
+    above) or a map of a location field. An empty list puts back the
+    suggested charts. Needs the right to change the structure; the change is
+    in the schema's history and syncs with it."""
+    try:
+        dto = ctx.schema_svc.set_charts(name, [c.to_dict() for c in body.charts])
         ctx.commit()
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))

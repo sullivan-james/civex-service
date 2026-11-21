@@ -462,6 +462,7 @@ def build_context(
         audit_repo,
         permissions=may,
     )
+    schema_svc.use_chart_check(record_svc.check_chart)
     note_svc = NoteService(
         LocalNoteRepository(session),
         record_repo,
@@ -534,12 +535,7 @@ def build_context(
     container_plugin_svc = ContainerPluginService(config.civex_dir)
     policy_svc = PolicyService(config.civex_dir)
     view_svc = ViewService(
-        view_repo,
-        schema_svc,
-        record_svc,
-        audit_repo,
-        permissions=may,
-        datasets=dataset_repo,
+        view_repo, schema_svc, record_svc, audit_repo, permissions=may
     )
     export_def_svc = ExportDefinitionService(
         LocalExportDefinitionRepository(session),
@@ -709,7 +705,9 @@ def build_context(
         view_svc=view_svc,
         dashboard_svc=DashboardService(
             LocalDashboardRepository(session),
-            view_repo,
+            schema_svc,
+            record_svc,
+            dataset_repo,
             audit_repo,
             permissions=may,
         ),

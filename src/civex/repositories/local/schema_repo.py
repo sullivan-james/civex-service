@@ -100,6 +100,7 @@ class LocalSchemaRepository:
         display_template=_SENTINEL,
         label=_SENTINEL,
         unique_keys=_SENTINEL,
+        charts=_SENTINEL,
     ) -> SchemaDTO:
         row = self._s.query(Schema).filter_by(id=id).first()
         if row is None:
@@ -114,6 +115,8 @@ class LocalSchemaRepository:
             row.label = label or None  # None/"" reverts to the derived label
         if unique_keys is not self._SENTINEL:
             row.unique_keys = unique_keys or None
+        if charts is not self._SENTINEL:
+            row.charts = charts or None
         self._s.flush()
         return _schema_to_dto(row)
 
@@ -314,6 +317,7 @@ def _schema_to_dto(row: Schema) -> SchemaDTO:
         parent_id=row.parent_id,
         display_template=row.display_template,
         unique_keys=row.unique_keys or [],
+        charts=row.charts or [],
         created_at=row.created_at,
         fields=[_field_to_dto(f) for f in row.fields if f.deleted_at is None],
         deleted_at=row.deleted_at,

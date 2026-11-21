@@ -50,6 +50,9 @@ def _study(ctx: AppContext) -> dict[str, uuid.UUID]:
     )
     ctx.schema_svc.update("encounter", display_template="{depth}")
     ctx.schema_svc.set_unique_keys("species", [["common_name"]])
+    ctx.schema_svc.set_charts(
+        "encounter", [{"id": "a", "group_by": ["depth:5"], "measures": ["count"]}]
+    )
     ctx.schema_svc.create("note", parent="encounter")
     ctx.schema_svc.add_field("note", "text", "string")
     ctx.dataset_svc.create("study", timezone="Europe/London", scope="global")
@@ -96,6 +99,9 @@ def test_a_bundle_round_trips_structure_records_ids_and_files(
     assert result.records_added == 3 and result.records_skipped == 0
     assert result.files_added == 1 and result.skipped == []
 
+    assert other.schema_svc.get("encounter").charts == [
+        {"id": "a", "group_by": ["depth:5"], "measures": ["count"]}
+    ]
     fields = {f.name: f for f in other.schema_svc.get("encounter").fields}
     assert fields["species"].restrictions == {"schema": "species"}
     assert fields["depth"].restrictions == {"min": 0, "unit": "m"}

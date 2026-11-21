@@ -116,6 +116,9 @@ class Schema(Base):
     # within the same parent (or, at the top level, the same collection).
     # Enforced by RecordService, not the database (see domain/uniqueness.py).
     unique_keys: Mapped[list[list[str]] | None] = mapped_column(_JSON, nullable=True)
+    # The charts a list of this kind opens with: a list of chart definitions
+    # (`civex.domain.charts`), or NULL for none set (suggested ones are shown).
+    charts: Mapped[list[dict[str, Any]] | None] = mapped_column(_JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
     # Soft-delete marker. NULL = live. Set instead of a hard DELETE so a
     # schema (and, via SchemaRepository's cascade, the records typed by it)
@@ -213,10 +216,6 @@ class View(Base):
     files_layout: Mapped[str] = mapped_column(
         String(10), nullable=False, default="tree", server_default="tree"
     )
-    # A saved analysis: the view summarised (groupings, measures, how it is
-    # shown, where it was made; `civex.domain.summary.SavedSummary`), or None
-    # for a plain saved filter.
-    summary: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
 
     schema: Mapped[Schema] = relationship("Schema")

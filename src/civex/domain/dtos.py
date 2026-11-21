@@ -95,6 +95,9 @@ class SchemaDTO:
     # Uniqueness policies: each a list of this schema's own field ids. See
     # domain/uniqueness.py.
     unique_keys: list[list[str]] = field(default_factory=list)
+    # The charts a list of this kind opens with (`civex.domain.charts`, each
+    # as `Chart.to_dict` writes it); empty: none set.
+    charts: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def display_name(self) -> str:
@@ -120,6 +123,7 @@ class SchemaDTO:
             "parent_id": str(self.parent_id) if self.parent_id else None,
             "display_template": self.display_template,
             "unique_keys": self.unique_keys,
+            "charts": self.charts,
             "created_at": self.created_at.isoformat(),
             "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
         }
@@ -140,6 +144,7 @@ class SchemaDTO:
                 else None
             ),
             unique_keys=d.get("unique_keys") or [],
+            charts=d.get("charts") or [],
             created_at=datetime.fromisoformat(d["created_at"]),
             deleted_at=_parse_dt(d.get("deleted_at")),
         )
@@ -286,9 +291,6 @@ class ViewDTO:
     # How the view's files are arranged when exported: "tree" or "flat"
     # (civex.domain.file_access.LAYOUTS).
     files_layout: str = "tree"
-    # A saved analysis's summary (`civex.domain.summary.SavedSummary` as a
-    # dict), or None for a plain saved filter.
-    summary: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         # schema_name excluded -- denormalized display field, not stored on the entity
@@ -300,7 +302,6 @@ class ViewDTO:
             "filter_tree": self.filter_tree,
             "sort": self.sort,
             "files_layout": self.files_layout,
-            "summary": self.summary,
             "created_at": self.created_at.isoformat(),
         }
 
@@ -316,7 +317,6 @@ class ViewDTO:
             sort=d.get("sort") or [],
             created_at=datetime.fromisoformat(d["created_at"]),
             files_layout=d.get("files_layout") or "tree",
-            summary=d.get("summary"),
         )
 
 
@@ -339,11 +339,16 @@ class DashboardDTO:
 
 @dataclass
 class DashboardCardDTO:
-    """A card as the page shows it: the stored card, and for an analysis the
-    saved view it names (None when that view has been deleted since)."""
+    """A card as the page shows it: the stored card, and for a chart the
+    names of the kind and collection its records are of (None when that
+    kind, or the collection, is gone)."""
 
     card: Any  # civex.domain.dashboard.Card
-    view: ViewDTO | None = None
+    schema_name: str | None = None
+    schema_label: str | None = None
+    collection_name: str | None = None
+    # Why the chart can't be drawn any more (its kind or collection is gone).
+    problem: str | None = None
 
 
 @dataclass
