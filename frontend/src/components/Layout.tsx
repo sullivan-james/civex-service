@@ -45,6 +45,7 @@ import {
   FolderPlus,
   Folder,
   FolderTree,
+  BookMarked,
   ChevronDown,
   LayoutGrid,
   MessageSquare,
@@ -131,6 +132,7 @@ const navGroups: NavGroupDef[] = [
       // Every record with a thread not yet resolved: All records, filtered.
       { to: openNotesHref(), label: 'Open notes', icon: MessageSquare },
       { to: '/exports', label: 'Exports', icon: FolderTree },
+      { to: '/releases', label: 'Releases', icon: BookMarked },
       { to: '/activity', label: 'Activity', icon: History },
     ],
   },

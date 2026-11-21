@@ -21,6 +21,8 @@ export function describeAnyAuditEntry(entry: AuditLogEntry): AuditSummary {
       return { title: 'Analytics page edited', detail: null }
     case 'note':
       return describeNoteEntry(entry)
+    case 'release':
+      return describeReleaseEntry(entry)
     case 'view': {
       // A saved view with a summary is an analysis; say which when the
       // entry holds the whole view (an edit keeps only what changed).
@@ -70,6 +72,13 @@ export function auditEntryTarget(
       return { to: `/collections/${entry.entity_id}`, label: 'Collection' }
     case 'dashboard':
       return { to: '/analytics', label: 'Analytics' }
+    case 'release': {
+      const name = (entry.new_data?.name ?? entry.old_data?.name) as
+        string | undefined
+      return name
+        ? { to: `/releases/${encodeURIComponent(name)}`, label: 'Release' }
+        : null
+    }
     case 'note': {
       const recordId = (entry.new_data?.record_id ??
         entry.old_data?.record_id) as string | undefined
@@ -90,6 +99,7 @@ const NOUNS: Record<string, [string, string]> = {
   view: ['saved view', 'saved views'],
   dashboard: ['Analytics page', 'Analytics pages'],
   note: ['note', 'notes'],
+  release: ['release', 'releases'],
 }
 
 const PAST: Record<string, string> = {
@@ -199,4 +209,24 @@ function describeNoteEntry(entry: AuditLogEntry): AuditSummary {
       return { title: `${noun} edited`, detail }
     }
   }
+}
+
+/** A release made, its details corrected, or withdrawn (`domain/release`). */
+function describeReleaseEntry(entry: AuditLogEntry): AuditSummary {
+  const before = (entry.old_data ?? {}) as { withdrawn_at?: string | null }
+  const after = (entry.new_data ?? {}) as {
+    name?: string
+    title?: string
+    withdrawn_at?: string | null
+    withdrawn_reason?: string | null
+  }
+  const what = `Release${after.name ? ` ${after.name}` : ''}`
+  if (entry.action === 'create')
+    return { title: `${what} made`, detail: after.title ?? null }
+  if (after.withdrawn_at && !before.withdrawn_at)
+    return {
+      title: `${what} withdrawn`,
+      detail: after.withdrawn_reason ?? null,
+    }
+  return { title: `${what}: details corrected`, detail: null }
 }

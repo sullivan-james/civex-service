@@ -67,6 +67,7 @@ export {
   House,
   Archive,
   Bookmark,
+  BookMarked,
   FolderTree,
   SlidersHorizontal,
 } from 'lucide-react'

@@ -12,6 +12,8 @@ const SchemaDetailPage = lazy(() => import('./pages/SchemaDetailPage'))
 const SchemaRecordsPage = lazy(() => import('./pages/SchemaRecordsPage'))
 const ViewRedirect = lazy(() => import('./pages/ViewRedirect'))
 const RecordDetailPage = lazy(() => import('./pages/RecordDetailPage'))
+const ReleasesPage = lazy(() => import('./pages/ReleasesPage'))
+const ReleasePage = lazy(() => import('./pages/ReleasePage'))
 const NewRecordPage = lazy(() => import('./pages/NewRecordPage'))
 const WorkflowsPage = lazy(() => import('./pages/WorkflowsPage'))
 const WorkflowEditorPage = lazy(() => import('./pages/WorkflowEditorPage'))
@@ -116,6 +118,8 @@ export default function App() {
             <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="/activity" element={<ActivityPage />} />
             <Route path="/exports" element={<ExportsPage />} />
+            <Route path="/releases" element={<ReleasesPage />} />
+            <Route path="/releases/:name" element={<ReleasePage />} />
             <Route path="/exports/new" element={<ExportEditorPage />} />
             <Route
               path="/exports/:schema/:name"
