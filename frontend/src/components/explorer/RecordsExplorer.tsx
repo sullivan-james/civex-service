@@ -138,6 +138,8 @@ export function RecordsExplorer({
   const x = useExplorer(scope)
   const { state, patch, listed, listedName, allKinds } = x
   const dataset = scope.dataset
+  // Shown under a record's fields ("Inside this …"): a quieter explorer.
+  const inside = !!scope.root
   const { data: collection } = useCollection(dataset ?? '')
   const location = useLocation()
 
@@ -213,8 +215,10 @@ export function RecordsExplorer({
   // this project (not, to start with, on a narrow screen). `charts` is the
   // charts at full width: a screen over the same records, with a way back.
   const [layout, setLayout] = useStored<ExplorerLayout>(
-    'explorer.layout',
-    typeof window !== 'undefined' && window.innerWidth < 1024
+    // Under a record's own fields the page is already full: charts start
+    // folded there, with a setting of their own.
+    inside ? 'explorer.layout.inside' : 'explorer.layout',
+    inside || (typeof window !== 'undefined' && window.innerWidth < 1024)
       ? 'records'
       : 'both',
   )
@@ -646,7 +650,7 @@ export function RecordsExplorer({
               />
             </Field>
           </div>
-          {!showFiles && x.searchFields.length > 1 && (
+          {!inside && !showFiles && x.searchFields.length > 1 && (
             // Which field the search looks in: every one, or just one.
             <Field label="Search in" hideLabel>
               <Select
@@ -665,7 +669,8 @@ export function RecordsExplorer({
           )}
           <div className="ml-auto flex flex-wrap items-center gap-2">
             {toolbarActions}
-            {pinTarget && (
+            {/* The record's own page has its star. */}
+            {pinTarget && !inside && (
               <PinButton
                 target={pinTarget}
                 noun={
