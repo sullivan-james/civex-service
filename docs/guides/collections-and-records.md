@@ -110,8 +110,8 @@ record. **Filters** say which rows you see. **Charts** count the rows you see.
   (in the collection, in every collection on **All records**, or inside the
   record you are in), with its name, kind, collection and when it was last
   edited. It can be searched, filtered by open notes, sorted by those columns,
-  moved and deleted; filtering by a field, **Edit…** and **Run workflow** need
-  one kind, so pick one first. Its chart counts each kind.
+  moved and deleted; filtering by a field, charts, **Edit…** and **Run
+  workflow** need one kind, so pick one first.
 - **Search** is scoped to where you are. It looks, ignoring case, in what the
   records hold: text, numbers, the items of a list (tags, choices) and the
   names of files. It never matches a file's hash, a reference or a location,
@@ -153,10 +153,12 @@ collection, schema and field (`GET /api/records/{id}/referrers`).
 
 ### Charts
 
-Charts are a column beside the records. Drag the line between them to make it
-wider (the cards then sit in two columns), or **Hide charts**; both are
-remembered in this browser. Every chart counts exactly the records listed: the
-same kind, place, search and filters.
+Charts are a column beside the records. **Records | Both | Charts**, beside the
+count, shows the records alone, the two side by side, or the charts alone;
+drag the line between them to make the charts wider (the cards then sit in
+two columns). Both choices are remembered in this browser. Every chart counts
+exactly the records listed: the same kind, place, search and filters. There
+are no charts until someone adds one.
 
 - **Click a bar** to filter by its value. The table and the other charts
   follow, a chip appears above, and clicking the bar again takes it out.
@@ -168,17 +170,15 @@ same kind, place, search and filters.
   another field, or "is not"), the chart counts the filtered records with
   nothing lit.
 - **Which charts.** A kind of record says which charts its lists open with
-  (its **Charts** tab on the schema page). A kind with none set gets suggested
-  ones, chosen from its records here before any filter or search (so they
-  stay put as you filter): a field with about 2 to 20 different
-  values (dates by month, or by year over a long span), shown columns first,
-  and a map where there is a location. Suggestions are not saved.
+  (its **Charts** tab on the schema page). A kind starts with none.
 - **Add chart** asks two things: **One bar for each** (a field; a date by
   year, month, week or day; a number in steps you choose) and **Each bar
   shows** (how many records, or the average, total, smallest or largest of a
   number, how many have a field filled in, or how many records of a kind
   beneath are inside them). The title it will get is shown before you add it.
-  **A map** is a chart too.
+  **A map** is a chart too. Above the two choices, ready-made charts for the
+  kind (how many per field of choices, per month of its first date) can be
+  added with one click.
 - When the charts on screen differ from the kind's, **Use for every … list**
   saves them for the kind (it needs the right to change the structure) and
   **Put back** returns to the kind's. Until then they are in the address.

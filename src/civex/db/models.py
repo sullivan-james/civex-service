@@ -117,7 +117,7 @@ class Schema(Base):
     # Enforced by RecordService, not the database (see domain/uniqueness.py).
     unique_keys: Mapped[list[list[str]] | None] = mapped_column(_JSON, nullable=True)
     # The charts a list of this kind opens with: a list of chart definitions
-    # (`civex.domain.charts`), or NULL for none set (suggested ones are shown).
+    # (`civex.domain.charts`), or NULL for none.
     charts: Mapped[list[dict[str, Any]] | None] = mapped_column(_JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
     # Soft-delete marker. NULL = live. Set instead of a hard DELETE so a

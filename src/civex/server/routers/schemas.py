@@ -407,8 +407,8 @@ def set_unique_keys(
 def set_charts(name: str, body: SetChartsRequest, ctx: AppContext = Depends(get_ctx)):
     """Replace the charts a list of this kind opens with, in order. Each is
     bars (groupings and measures over the kind's fields or those of a kind
-    above) or a map of a location field. An empty list puts back the
-    suggested charts. Needs the right to change the structure; the change is
+    above) or a map of a location field. An empty list leaves it with none.
+    Needs the right to change the structure; the change is
     in the schema's history and syncs with it."""
     try:
         dto = ctx.schema_svc.set_charts(name, [c.to_dict() for c in body.charts])

@@ -214,7 +214,7 @@ def schema_charts_list(name: str = typer.Argument(..., help="Schema name")) -> N
     finally:
         ctx.close()
     if not charts:
-        console.print(f"'{name}' has no charts set: suggested ones are shown.")
+        console.print(f"'{name}' has no charts.")
         return
     for chart in charts:
         console.print(_chart_line(chart))
@@ -294,8 +294,7 @@ def schema_charts_remove(
 
 @charts_app.command("clear")
 def schema_charts_clear(name: str = typer.Argument(..., help="Schema name")) -> None:
-    """Remove every chart set for this kind, so its lists show the suggested
-    ones again."""
+    """Remove every chart set for this kind."""
     ctx = _ctx()
     try:
         ctx.schema_svc.set_charts(name, [])
@@ -305,7 +304,7 @@ def schema_charts_clear(name: str = typer.Argument(..., help="Schema name")) -> 
         raise typer.Exit(1)
     finally:
         ctx.close()
-    console.print(f"[success]'{name}' shows the suggested charts again.[/success]")
+    console.print(f"[success]'{name}' has no charts now.[/success]")
 
 
 def _parse_bbox(text: str) -> list[float]:

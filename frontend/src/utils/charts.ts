@@ -2,29 +2,18 @@
  * Charts: the one definition (`api/schemas.Chart`, civex/domain/charts.py)
  * as the app writes, names and suggests it. A chart is bars (one bar for
  * each value of a field, each bar showing a count or a number worked out) or
- * a map. Pure: titles in plain words, what the "New chart" panel offers, the
- * address form of a list's unsaved charts, and the charts suggested for a
- * kind that has none set.
+ * a map. Pure: titles in plain words, what the "New chart" panel offers and
+ * the address form of a list's unsaved charts. There are no charts by
+ * default: a person adds the ones they want.
  */
 
 import type { Chart, FieldTypeDescriptor, Schema } from '../api/schemas'
-import type { RecordSummary } from '../api/records'
 import type { FilterableField } from './hierarchy'
 import { displayLabel } from './naming'
 import { fieldKey, splitGroupKey } from './summary'
 
 /** Past this many listed records, charts wait for a click. */
 export const CHARTS_AUTO_UP_TO = 200_000
-/** A field is suggested as a chart when the listed records hold between
- * this many different values of it. */
-export const SUGGEST_MIN = 2
-export const SUGGEST_MAX = 20
-/** How many fields the suggestions look at, and how many charts they make. */
-export const SUGGEST_LOOK_AT = 8
-export const SUGGEST_CHARTS = 3
-/** A date is charted by year once its values span more than this many years. */
-const YEARS_BY_MONTH = 3
-
 export function newChartId(): string {
   return Math.random().toString(36).slice(2, 10)
 }
@@ -297,80 +286,33 @@ export function mapChart(field: FilterableField): Chart {
   }
 }
 
-// --- suggestions, chosen from the data
+// --- recommendations, offered while a chart is being built
 
-/** The fields worth looking at for a suggestion, shown columns first, own
- * fields before those of a kind above: at most SUGGEST_LOOK_AT. */
-export function suggestionCandidates(
-  usable: Usable[],
-  shown: string[],
-): Usable[] {
-  const rank = (u: Usable) =>
-    (shown.includes(u.field.name) && u.field.relation === 'self' ? 0 : 2) +
-    (u.field.relation === 'self' ? 0 : 1)
-  return usable
-    .filter((u) => u.type.grouping && u.type.grouping !== 'each')
-    .filter(
-      (u) => u.type.measures.includes('distinct') || u.field.type === 'boolean',
+/** How many ready-made charts the New chart panel offers. */
+export const RECOMMEND_UP_TO = 4
+
+/** Charts worth offering for a kind, from its definition alone (never from
+ * the data, so they are the same everywhere): how many per field for its
+ * own fields of choices and yes/no fields, then per month for its first
+ * date. One click adds one; nothing is on screen until a person does. */
+export function recommendedCharts(usable: Usable[]): Chart[] {
+  const own = usable.filter((u) => u.field.relation === 'self')
+  const choices = own.filter((u) => {
+    const listed = u.field.restrictions?.choices
+    return (
+      u.field.type === 'enum' ||
+      u.field.type === 'boolean' ||
+      (Array.isArray(listed) && listed.length > 0)
     )
-    .map((u, i) => ({ u, i }))
-    .sort((a, b) => rank(a.u) - rank(b.u) || a.i - b.i)
-    .slice(0, SUGGEST_LOOK_AT)
-    .map((x) => x.u)
-}
-
-/** What to ask the summary so the suggestions can be chosen: how many
- * different values each candidate holds, and a date's first and last. */
-export function suggestionMeasures(candidates: Usable[]): string[] {
-  return candidates.flatMap((u) => {
-    const key = fieldKey(u.field)
-    if (u.type.grouping === 'bucket')
-      return [`distinct:${key}`, `min:${key}`, `max:${key}`]
-    return u.type.measures.includes('distinct') ? [`distinct:${key}`] : []
   })
-}
-
-/** The charts suggested for a list whose kind has none set: one per field
- * the listed records hold a handful of different values of (dates by month,
- * or by year over a long span), then a map where there is a location. */
-export function suggestCharts(
-  candidates: Usable[],
-  answer: RecordSummary | undefined,
-  geo: FilterableField | undefined,
-): Chart[] {
-  const total = new Map<string, unknown>()
-  answer?.measure_columns.forEach((c, i) => total.set(c.key, answer.total[i]))
-  const charts: Chart[] = []
-  for (const u of candidates) {
-    if (charts.length >= SUGGEST_CHARTS) break
-    const key = fieldKey(u.field)
-    const different = Number(total.get(`distinct:${key}`) ?? 0)
-    if (u.type.grouping === 'bucket') {
-      if (different < SUGGEST_MIN) continue
-      const first = String(total.get(`min:${key}`) ?? '').slice(0, 4)
-      const last = String(total.get(`max:${key}`) ?? '').slice(0, 4)
-      const years = Number(last) - Number(first)
-      const how = years > YEARS_BY_MONTH ? 'year' : 'month'
-      charts.push({
-        id: `s-${key}`,
-        group_by: [`${key}:${how}`],
-        measures: ['count'],
-      })
-      continue
-    }
-    const few =
-      u.field.type === 'boolean'
-        ? !!answer
-        : different >= SUGGEST_MIN && different <= SUGGEST_MAX
-    if (few)
-      charts.push({ id: `s-${key}`, group_by: [key], measures: ['count'] })
-  }
-  if (geo)
-    charts.push({
-      id: `s-map-${fieldKey(geo)}`,
-      map: fieldKey(geo),
-      group_by: [],
-      measures: [],
-    })
-  return charts
+  const date = own.find((u) => u.type.grouping === 'bucket')
+  const keys = [
+    ...choices.map((u) => fieldKey(u.field)),
+    ...(date ? [`${fieldKey(date.field)}:month`] : []),
+  ]
+  return keys.slice(0, RECOMMEND_UP_TO).map((key) => ({
+    id: newChartId(),
+    group_by: [key],
+    measures: ['count'],
+  }))
 }

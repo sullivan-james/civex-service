@@ -135,7 +135,7 @@ class ChartModel(BaseModel):
 class SetChartsRequest(BaseModel):
     charts: list[ChartModel] = Field(
         description="Every chart a list of this kind opens with, in order "
-        "(this replaces the list; an empty list puts back the suggested ones)."
+        "(this replaces the list; an empty list leaves it with none)."
     )
 
 
@@ -170,7 +170,7 @@ class SchemaResponse(BaseModel):
     charts: list[ChartModel] = Field(
         default_factory=list,
         description="The charts a list of this kind opens with, in order. "
-        "Empty: none set, so suggested ones are shown.",
+        "Empty: it has none.",
     )
     deleted_at: datetime | None = Field(
         default=None,

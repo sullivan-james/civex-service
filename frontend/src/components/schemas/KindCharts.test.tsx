@@ -127,14 +127,11 @@ function show(schema: Schema) {
 }
 
 describe('a kind’s charts', () => {
-  it('shows the charts its lists show when none are set, and keeps them', async () => {
+  it('has no charts until someone adds one, and saves the one added', async () => {
     show(sample([]))
-    // The same suggestion a list of samples would open with.
-    expect(
-      await screen.findByText('How many samples per site'),
-    ).toBeInTheDocument()
-    expect(screen.getByText('Suggested')).toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: 'Keep these' }))
+    expect(screen.queryByText(/How many samples/)).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: /Add chart/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Add chart' }))
     await waitFor(() =>
       expect(put).toEqual([
         expect.objectContaining({ group_by: ['site'], measures: ['count'] }),
@@ -142,14 +139,12 @@ describe('a kind’s charts', () => {
     )
   })
 
-  it('shows the charts that are set, with nothing marked suggested', async () => {
+  it('shows the charts that are set, as they are', async () => {
     show(
       sample([
         { id: 'a', title: 'By site', group_by: ['site'], measures: ['count'] },
       ]),
     )
     expect(await screen.findByText('By site')).toBeInTheDocument()
-    expect(screen.queryByText('Suggested')).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Keep these' })).toBeNull()
   })
 })

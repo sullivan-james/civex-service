@@ -603,7 +603,7 @@ class SchemaService:
 
     def set_charts(self, name: str, charts: list[dict[str, Any]]) -> SchemaDTO:
         """Replace the charts a list of this kind opens with (in order; an
-        empty list puts back the suggested ones). Each is checked as it would
+        empty list leaves it with none). Each is checked as it would
         be drawn: its fields are the kind's own or those of a kind above."""
         self._permissions.require(permissions.CHANGE_STRUCTURE)
         schema = self.get(name)

@@ -236,6 +236,7 @@ const lastRecordCall = () => {
 }
 
 beforeEach(() => {
+  localStorage.clear()
   calls = []
   viewName = EMPTY_TABLES.name
   override = null
@@ -631,19 +632,15 @@ describe('RecordsExplorer', () => {
       'aria-current',
       'true',
     )
-    // The charts column counts each kind; a bar lists that kind.
-    expect(
-      within(screen.getByRole('region', { name: 'Charts' })).getByText(
-        'How many of each kind',
-      ),
-    ).toBeInTheDocument()
+    // Charts are of one kind's fields: there are none here.
+    expect(screen.queryByRole('region', { name: 'Charts' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Choose columns' })).toBeNull()
     await user.click(screen.getByRole('checkbox', { name: /Select record E1/ }))
     expect(screen.getByRole('button', { name: 'Edit…' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Run workflow' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Move to…' })).toBeEnabled()
     // Picking a kind lists that kind as before.
-    await user.click(screen.getAllByRole('button', { name: /^Recording/ })[0])
+    await user.click(screen.getByRole('button', { name: /^Recording/ }))
     await waitFor(() => expect(search().get('schema')).toBe('recording'))
   })
 
@@ -1594,38 +1591,21 @@ describe('charts beside the records', () => {
     expect(screen.getByRole('button', { name: 'Put back' })).toBeEnabled()
   })
 
-  it('suggests charts from the data for a kind with none set', async () => {
-    kindCharts = []
-    renderExplorer({}, '/collections/hb?schema=recording')
-    // rate has 2 different values among those listed; site has 400.
-    expect(
-      await screen.findByText('How many recordings per rate'),
-    ).toBeInTheDocument()
-    expect(screen.queryByText(/per site/)).toBeNull()
-    // Suggested, not saved: nothing is in the address or sent to the kind.
-    expect(search().get('charts')).toBeNull()
-    expect(put).toBeNull()
-  })
-
-  it('keeps the suggested charts as the list is filtered', async () => {
+  it('shows no charts for a kind with none set: only a way to add one', async () => {
     const user = userEvent.setup()
     kindCharts = []
-    renderExplorer({}, '/collections/hb?schema=recording&q=9')
-    await user.click(await bar(/96/))
-    await waitFor(() => expect(search().get('filter')).not.toBeNull())
-    // The chart clicked is still there, its bar lit.
-    expect(await bar(/96/)).toHaveAttribute('aria-pressed', 'true')
-    // Which charts to suggest is asked of the kind here, never of the
-    // filtered or searched list.
-    const picking = calls.filter(
-      (c) =>
-        c.path === '/api/records/summary' &&
-        (c.body!.group_by as string[]).length === 0 &&
-        (c.body!.measures as string[]).includes('distinct:rate'),
-    )
-    expect(picking.length).toBeGreaterThan(0)
-    for (const c of picking)
-      expect(c.body).toMatchObject({ filter: null, search: null })
+    renderExplorer({}, '/collections/hb?schema=recording')
+    const column = await charts()
+    await screen.findByRole('table')
+    expect(within(column).queryByText(/How many/)).toBeNull()
+    expect(calls.some((c) => c.path === '/api/records/summary')).toBe(false)
+    // Building one offers nothing ready-made here (no fields of choices),
+    // and the two choices make it.
+    await user.click(within(column).getByRole('button', { name: /Add chart/ }))
+    await user.selectOptions(screen.getByLabelText('One bar for each'), 'rate')
+    await user.click(screen.getByRole('button', { name: 'Add chart' }))
+    expect(await bar(/96/)).toBeInTheDocument()
+    expect(put).toBeNull()
   })
 
   it('opens a chart large from the address, with its numbers, and Back closes it', async () => {
@@ -1643,20 +1623,24 @@ describe('charts beside the records', () => {
     await waitFor(() => expect(search().get('chart')).toBeNull())
   })
 
-  it('folds the charts away and brings them back, remembered here', async () => {
+  it('shows the records, the charts or both, remembered here', async () => {
     const user = userEvent.setup()
     const first = renderExplorer({}, '/collections/hb?schema=recording')
-    await user.click(
-      within(await charts()).getByRole('button', { name: 'Hide charts' }),
-    )
+    // Both to start with.
+    expect(await charts()).toBeInTheDocument()
+    expect(screen.getByRole('table')).toBeInTheDocument()
+    await user.click(screen.getByRole('radio', { name: 'Records' }))
     expect(screen.queryByRole('region', { name: 'Charts' })).toBeNull()
     expect(screen.getByRole('table')).toBeInTheDocument()
+    await user.click(screen.getByRole('radio', { name: 'Charts' }))
+    expect(await bar(/Georges/)).toBeInTheDocument()
+    expect(screen.queryByRole('table')).toBeNull()
     first.unmount()
+    // Coming back, it is as it was left.
     renderExplorer({}, '/collections/hb?schema=recording')
-    await screen.findByRole('table')
-    expect(screen.queryByRole('region', { name: 'Charts' })).toBeNull()
-    await user.click(screen.getByRole('button', { name: 'Charts' }))
-    expect(await charts()).toBeInTheDocument()
+    expect(await bar(/Georges/)).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Charts' })).toBeChecked()
+    expect(screen.queryByRole('table')).toBeNull()
   })
 
   it('a saved filter made from bars comes back as the same filter', async () => {
@@ -1770,12 +1754,17 @@ describe('a map as a chart', () => {
   })
   afterEach(() => setFieldTypesForTest(null))
 
-  it('is suggested where the kind, or one above it, has a location, and maps what is listed', async () => {
+  it('is added as a chart where there is a location, and maps what is listed', async () => {
+    const user = userEvent.setup()
     const filter = JSON.stringify({ field: 'rate', op: 'eq', value: '96' })
     renderExplorer(
       {},
       `/collections/hb?schema=recording&q=96&filter=${encodeURIComponent(filter)}`,
     )
+    await user.click(await screen.findByRole('button', { name: /Add chart/ }))
+    await user.click(screen.getByRole('radio', { name: 'A map' }))
+    expect(screen.queryByLabelText('One bar for each')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Add chart' }))
     expect(await screen.findByText('Where they are')).toBeInTheDocument()
     await waitFor(() =>
       expect(
@@ -1800,8 +1789,10 @@ describe('a map as a chart', () => {
   it('is not offered where there is no location anywhere', async () => {
     override = null
     renderExplorer({}, '/collections/hb?schema=selection')
-    await screen.findByRole('table')
-    expect(screen.queryByText('Where they are')).toBeNull()
+    await userEvent.click(
+      await screen.findByRole('button', { name: /Add chart/ }),
+    )
+    expect(screen.queryByRole('radio', { name: 'A map' })).toBeNull()
   })
 })
 

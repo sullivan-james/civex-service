@@ -26,7 +26,7 @@ def test_a_kinds_charts_are_added_listed_and_removed(
 ):
     _seed(make_schema, make_collection, make_record)
     none = runner.invoke(app, ["schema", "charts", "list", "sample"])
-    assert "no charts set" in none.output
+    assert "has no charts" in none.output
     added = runner.invoke(
         app,
         ["schema", "charts", "add", "sample", "--by", "habitat", "-m", "mean:depth"],
@@ -49,7 +49,7 @@ def test_a_kinds_charts_are_added_listed_and_removed(
     )
     assert runner.invoke(app, ["schema", "charts", "clear", "sample"]).exit_code == 0
     assert (
-        "no charts set"
+        "has no charts"
         in runner.invoke(app, ["schema", "charts", "list", "sample"]).output
     )
 

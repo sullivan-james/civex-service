@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import type { FieldTypeDescriptor } from '../api/schemas'
-import type { RecordSummary } from '../api/records'
 import type { FilterableField } from './hierarchy'
 import {
   buildChart,
@@ -8,9 +7,7 @@ import {
   chartsFromParam,
   chartsToParam,
   sameCharts,
-  suggestCharts,
-  suggestionCandidates,
-  suggestionMeasures,
+  recommendedCharts,
   type Usable,
 } from './charts'
 import { totalsCells, totalsMeasures } from './totals'
@@ -129,51 +126,19 @@ describe('a list’s own charts in the address', () => {
   })
 })
 
-describe('suggested charts', () => {
-  const answer = (totals: Record<string, unknown>): RecordSummary =>
-    ({
-      measure_columns: Object.keys(totals).map((key) => ({ key })),
-      total: Object.values(totals),
-    }) as never
-
-  it('looks at shown columns first and asks one summary', () => {
-    const candidates = suggestionCandidates(FIELDS, ['site'])
-    expect(candidates[0].field.name).toBe('site')
-    expect(candidates.map((c) => c.field.name)).not.toContain('spot')
-    expect(suggestionMeasures(candidates)).toEqual(
-      expect.arrayContaining(['distinct:site', 'min:taken', 'max:taken']),
-    )
-  })
-
-  it('picks fields with a handful of values, dates by month or year, and a map', () => {
-    const candidates = suggestionCandidates(FIELDS, [])
-    const got = suggestCharts(
-      candidates,
-      answer({
-        'distinct:name': 240,
-        'distinct:site': 4,
-        'distinct:depth': 180,
-        'distinct:taken': 90,
-        'min:taken': '2012-03-01',
-        'max:taken': '2024-01-09',
-      }),
-      FIELDS[4].field,
-    )
-    expect(got.map((c) => c.map ?? c.group_by[0])).toEqual([
+describe('charts recommended while building one', () => {
+  it('come from the kind’s own definition: choices, yes/no, then a date by month', () => {
+    const fields = [
+      usable('name', 'string'),
+      usable('site', 'string', { choices: ['a', 'b'] }),
+      usable('depth', 'float'),
+      usable('taken', 'date'),
+    ]
+    expect(recommendedCharts(fields).map((c) => c.group_by[0])).toEqual([
       'site',
-      'taken:year',
-      'spot',
+      'taken:month',
     ])
-    const short = suggestCharts(
-      candidates,
-      answer({
-        'distinct:taken': 9,
-        'min:taken': '2024-01',
-        'max:taken': '2024-09',
-      }),
-      undefined,
-    )
-    expect(short.map((c) => c.group_by[0])).toEqual(['taken:month'])
+    expect(recommendedCharts([usable('name', 'string')])).toEqual([])
   })
 })
 

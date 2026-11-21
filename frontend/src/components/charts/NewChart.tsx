@@ -1,6 +1,14 @@
 import { useState } from 'react'
 import type { Chart, Schema } from '../../api/schemas'
-import { Button, Card, Field, Input, SegmentedControl, Select } from '../ui'
+import {
+  Button,
+  Card,
+  Chip,
+  Field,
+  Input,
+  SegmentedControl,
+  Select,
+} from '../ui'
 import {
   PERIOD_CHOICES,
   SHOWS,
@@ -11,6 +19,7 @@ import {
   kindsBeneath,
   mapChart,
   plural,
+  recommendedCharts,
   measureFields,
   type Usable,
 } from '../../utils/charts'
@@ -73,9 +82,21 @@ export function NewChart({
   const valid =
     what === 'map' || (!!by && (how !== 'steps' || Number(steps) > 0))
 
+  const recommended = recommendedCharts(usable)
+
   return (
     <Card title="New chart" selected>
       <div className="space-y-3">
+        {recommended.length > 0 && (
+          // Ready-made ones for this kind: a click adds it.
+          <div className="flex flex-wrap gap-2" aria-label="Recommended">
+            {recommended.map((c) => (
+              <Chip key={c.group_by[0]} onClick={() => onAdd(c)}>
+                {chartTitle(c, usable, kind, schemas)}
+              </Chip>
+            ))}
+          </div>
+        )}
         {geo.length > 0 && (
           <SegmentedControl
             size="sm"

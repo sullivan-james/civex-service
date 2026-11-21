@@ -22,7 +22,6 @@ export function ChartsColumn({
   onFilter,
   enabled,
   onShow,
-  onHide,
 }: {
   model: ExplorerCharts
   listed: Schema
@@ -36,7 +35,6 @@ export function ChartsColumn({
   /** False: the list is too big to chart without being asked. */
   enabled: boolean
   onShow: () => void
-  onHide: () => void
 }) {
   const { can, canSomewhere, why } = usePermissions()
   const addToAnalytics = useAddToAnalytics()
@@ -45,9 +43,6 @@ export function ChartsColumn({
     <section aria-label="Charts" className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Subheading as="h2">Charts</Subheading>
-        <Button size="sm" variant="ghost" onClick={onHide}>
-          Hide charts
-        </Button>
       </div>
       {model.changed && (
         <div className="flex flex-wrap gap-2">

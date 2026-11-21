@@ -27,16 +27,11 @@ import {
   Field,
   Select,
   Skeleton,
+  SegmentedControl,
   SplitPane,
   Subheading,
 } from '../ui'
-import {
-  AlertTriangle,
-  BarChart3,
-  ChevronDown,
-  Columns3,
-  Plus,
-} from '../ui/icons'
+import { AlertTriangle, ChevronDown, Columns3, Plus } from '../ui/icons'
 import { toTableRows } from '../records/tableRows'
 import {
   RecordsTable,
@@ -59,7 +54,6 @@ import { SAVED_KINDS } from '../../utils/savedKinds'
 import { ChecksView } from './ChecksView'
 import { withCondition } from '../../utils/summary'
 import { ChartsColumn } from './ChartsColumn'
-import { KindsChart } from './KindsChart'
 import { useExplorerCharts } from './useExplorerCharts'
 import { OpenChart } from '../charts/ChartBoard'
 import { CHARTS_AUTO_UP_TO, chartTitle, plural } from '../../utils/charts'
@@ -87,6 +81,9 @@ import { HIGH_IMPACT_RECORD_THRESHOLD } from '../../lib/deleteImpact'
 import { errorMessage } from '../../lib/errors'
 import { pluralise } from '../../lib/utils'
 import { displayLabel } from '../../utils/naming'
+
+/** What the explorer shows of a list: its records, its charts, or both. */
+type ExplorerLayout = 'records' | 'both' | 'charts'
 
 /** Past this many listed records, the data check is not run just to count
  * (it reads every record): the count waits until Checks is opened. */
@@ -198,23 +195,24 @@ export function RecordsExplorer({
   // --- charts: beside the records, counting exactly what is listed. They
   // are asked for once the rows are in, and a very big list waits for a click.
   const records = queryBody({ ...x.query, sort: undefined }, dataset)
-  const [chartsHidden, setChartsHidden] = useStored(
-    'explorer.charts.hidden',
-    typeof window !== 'undefined' && window.innerWidth < 1024,
+  // What is on screen, remembered in this browser for this project: the
+  // records, the charts, or both side by side (records only to start with
+  // on a narrow screen).
+  const [layout, setLayout] = useStored<ExplorerLayout>(
+    'explorer.layout',
+    typeof window !== 'undefined' && window.innerWidth < 1024
+      ? 'records'
+      : 'both',
   )
+  const chartsHidden = layout === 'records'
+  const chartsOnly = layout === 'charts' && !!listed
   const [chartsAsked, setChartsAsked] = useState(false)
   // Problems and files are screens of their own over the same records:
   // the charts, which count records, step aside.
   const aside = showChecks || showFiles
   const rowsIn = x.page.data !== undefined && !x.page.error
   const chartsOn = rowsIn && (listedTotal <= CHARTS_AUTO_UP_TO || chartsAsked)
-  const charts = useExplorerCharts(
-    listed ?? null,
-    x.filterFields,
-    x.columnNames,
-    records,
-    chartsOn && !chartsHidden,
-  )
+  const charts = useExplorerCharts(listed ?? null, x.filterFields)
   const setFilter = (filter: typeof x.filter) => patch({ filter })
   // --- totals under the table, for every record listed.
   const totalsAsk = listed ? totalsMeasures(x.columnNames, listed.fields) : []
@@ -774,10 +772,18 @@ export function RecordsExplorer({
               </Button>
             )}
             <div className="ml-auto flex items-center gap-2">
-              {chartsHidden && !aside && (listed || allKinds) && (
-                <Button size="sm" onClick={() => setChartsHidden(false)}>
-                  <BarChart3 size={14} /> Charts
-                </Button>
+              {listed && !aside && (
+                <SegmentedControl
+                  size="sm"
+                  label="Layout"
+                  value={layout}
+                  onChange={setLayout}
+                  options={[
+                    { value: 'records', label: 'Records' },
+                    { value: 'both', label: 'Both' },
+                    { value: 'charts', label: 'Charts' },
+                  ]}
+                />
               )}
             </div>
           </div>
@@ -802,6 +808,8 @@ export function RecordsExplorer({
         <SplitPane
           storageKey="explorer.charts.width"
           label="Charts"
+          // Charts alone: the records step aside (the count stays above).
+          sideOnly={chartsOnly && !aside}
           side={
             chartsHidden || aside || x.page.error ? undefined : listed ? (
               <ChartsColumn
@@ -817,14 +825,6 @@ export function RecordsExplorer({
                 onFilter={setFilter}
                 enabled={chartsOn}
                 onShow={() => setChartsAsked(true)}
-                onHide={() => setChartsHidden(true)}
-              />
-            ) : allKinds ? (
-              <KindsChart
-                levels={x.levels}
-                total={total}
-                onPick={pickLevel}
-                onHide={() => setChartsHidden(true)}
               />
             ) : undefined
           }

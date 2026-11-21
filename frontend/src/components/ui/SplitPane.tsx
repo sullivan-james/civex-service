@@ -5,10 +5,11 @@ import { useStored } from '../../hooks/useStored'
  * one whose width is kept per browser and project. The divider takes the
  * arrow keys (Home and End: narrowest and widest). On a narrow screen the
  * panes stack, main first, and there is no divider. With no `side` the main
- * pane has the whole width. */
+ * pane has the whole width; with `sideOnly` the side pane has. */
 export function SplitPane({
   main,
   side,
+  sideOnly = false,
   storageKey,
   label,
   initial = 340,
@@ -17,6 +18,8 @@ export function SplitPane({
 }: {
   main: ReactNode
   side?: ReactNode
+  /** Show the side pane alone, at full width. */
+  sideOnly?: boolean
   /** Where the width is remembered. */
   storageKey: string
   /** What the divider resizes, for a screen reader ("Charts"). */
@@ -42,6 +45,7 @@ export function SplitPane({
   }
 
   if (!side) return <div className="min-w-0">{main}</div>
+  if (sideOnly) return <div className="min-w-0">{side}</div>
   return (
     <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-0">
       <div className="min-w-0 flex-1">{main}</div>

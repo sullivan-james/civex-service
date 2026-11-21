@@ -4,10 +4,11 @@ import type { Schema } from '../../api/schemas'
 import { usePermissions } from '../../hooks/useMe'
 import { useSetCharts } from '../../hooks/useSchemas'
 import { ChartBoard, OpenChart } from '../charts/ChartBoard'
-import { Badge, Button, EmptyState } from '../ui'
-import { useSuggestedCharts } from '../explorer/useExplorerCharts'
+import { EmptyState } from '../ui'
+import { useFieldTypes } from '../../hooks/useFieldTypes'
 import { OPEN_CHART_PARAM, chartTitle, storedChart } from '../../utils/charts'
-import { defaultColumnNames, filterableFields } from '../../utils/hierarchy'
+import { filterableFields } from '../../utils/hierarchy'
+import { summaryFields } from '../../utils/summary'
 import { displayLabel } from '../../utils/naming'
 
 /** A kind's charts (`schemas.charts`): the ones every list of the kind
@@ -28,19 +29,12 @@ export function KindCharts({
     [schema, schemas],
   )
   const records = useMemo(() => ({ schema_name: schema.name }), [schema.name])
-  const set = schema.charts ?? []
-  // With none set, a list of the kind shows suggested charts: so does this
-  // tab, by the same rule, until someone keeps or changes them.
-  const suggested = useSuggestedCharts(
-    schema,
-    fields,
-    defaultColumnNames(schema),
-    records,
-    set.length === 0,
+  const types = useFieldTypes()
+  const usable = useMemo(
+    () => summaryFields(fields, types?.types ?? []),
+    [fields, types],
   )
-  const usable = suggested.usable
-  const unsaved = set.length === 0 && suggested.charts.length > 0
-  const charts = unsaved ? suggested.charts : set
+  const charts = schema.charts ?? []
   const kind = displayLabel(schema.name, schema.label)
   const mayChange = can('change_structure')
   const setOpen = (id: string | null) =>
@@ -62,22 +56,8 @@ export function KindCharts({
           onClose={() => setOpen(null)}
         />
       )}
-      {unsaved && (
-        <div className="flex items-center gap-2">
-          <Badge>Suggested</Badge>
-          {mayChange && (
-            <Button
-              size="sm"
-              disabled={save.isPending}
-              onClick={() => save.mutate(charts.map(storedChart))}
-            >
-              Keep these
-            </Button>
-          )}
-        </div>
-      )}
       {charts.length === 0 && !mayChange ? (
-        <EmptyState title="No charts set" />
+        <EmptyState title="No charts" />
       ) : (
         <ChartBoard
           charts={charts}
