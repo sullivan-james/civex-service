@@ -1535,16 +1535,18 @@ describe('charts beside the records', () => {
     await bar(/Georges/)
     expect(screen.queryByRole('button', { name: /Use for every/ })).toBeNull()
     await user.click(screen.getByRole('button', { name: /Add chart/ }))
-    const panel = screen.getByRole('heading', { name: 'New chart' })
-      .parentElement!.parentElement!
-    await user.selectOptions(
-      within(panel).getByLabelText('One bar for each'),
-      'rate',
-    )
+    // The builder is at full width, in the address, with a live preview.
+    await waitFor(() => expect(search().get('chart')).toBe('new'))
+    await user.selectOptions(screen.getByLabelText('One bar for each'), 'rate')
+    const preview = screen.getByRole('region', { name: 'Preview' })
     expect(
-      within(panel).getByText('How many recordings per rate'),
+      within(preview).getByRole('heading', {
+        name: 'How many recordings per rate',
+      }),
     ).toBeInTheDocument()
-    await user.click(within(panel).getByRole('button', { name: 'Add chart' }))
+    expect(await within(preview).findAllByText('96')).not.toHaveLength(0)
+    await user.click(screen.getByRole('button', { name: 'Add chart' }))
+    await waitFor(() => expect(search().get('chart')).toBeNull())
     // The change is in the address until it is saved or put back.
     await waitFor(() => expect(search().get('charts')).toContain('rate'))
     await bar(/96/)
@@ -1623,24 +1625,72 @@ describe('charts beside the records', () => {
     await waitFor(() => expect(search().get('chart')).toBeNull())
   })
 
-  it('shows the records, the charts or both, remembered here', async () => {
+  it('folds the charts panel to a strip, or opens it at full width, remembered here', async () => {
     const user = userEvent.setup()
     const first = renderExplorer({}, '/collections/hb?schema=recording')
-    // Both to start with.
-    expect(await charts()).toBeInTheDocument()
-    expect(screen.getByRole('table')).toBeInTheDocument()
-    await user.click(screen.getByRole('radio', { name: 'Records' }))
+    // Beside the records to start with; the records are always the page.
+    await user.click(
+      within(await charts()).getByRole('button', { name: 'Collapse charts' }),
+    )
     expect(screen.queryByRole('region', { name: 'Charts' })).toBeNull()
     expect(screen.getByRole('table')).toBeInTheDocument()
-    await user.click(screen.getByRole('radio', { name: 'Charts' }))
+    first.unmount()
+    const second = renderExplorer({}, '/collections/hb?schema=recording')
+    await screen.findByRole('table')
+    expect(screen.queryByRole('region', { name: 'Charts' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Expand charts' }))
+    // Full width is a screen over the same records, with a way back.
+    await user.click(
+      within(await charts()).getByRole('button', {
+        name: 'Charts at full width',
+      }),
+    )
     expect(await bar(/Georges/)).toBeInTheDocument()
     expect(screen.queryByRole('table')).toBeNull()
-    first.unmount()
-    // Coming back, it is as it was left.
+    second.unmount()
     renderExplorer({}, '/collections/hb?schema=recording')
     expect(await bar(/Georges/)).toBeInTheDocument()
-    expect(screen.getByRole('radio', { name: 'Charts' })).toBeChecked()
     expect(screen.queryByRole('table')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Back to records' }))
+    expect(await screen.findByRole('table')).toBeInTheDocument()
+    expect(await charts()).toBeInTheDocument()
+  })
+
+  it('exports the charts on screen from the Export menu, one or all', async () => {
+    const user = userEvent.setup()
+    renderExplorer({}, '/collections/hb?schema=recording')
+    await bar(/Georges/)
+    await user.click(screen.getByRole('button', { name: /^Export/ }))
+    expect(
+      screen.getByRole('menuitem', { name: 'All 2 charts' }),
+    ).toBeInTheDocument()
+    await user.click(
+      screen.getByRole('menuitem', { name: 'How many recordings per rate' }),
+    )
+    await waitFor(() =>
+      expect(
+        calls.find(
+          (c) =>
+            c.path === '/api/records/summary' &&
+            c.params.get('format') === 'csv',
+        )?.body,
+      ).toMatchObject({ group_by: ['rate'], measures: ['count'] }),
+    )
+  })
+
+  it('keeps Columns beside the count of the records it is about', async () => {
+    renderExplorer({}, '/collections/hb?schema=recording')
+    await screen.findByRole('table')
+    const columns = screen.getByRole('button', { name: /Columns/ })
+    const count = screen.getByText(/recordings$/)
+    expect(count.parentElement!.contains(columns)).toBe(true)
+    // Not offered over the charts at full width.
+    await userEvent.click(
+      within(await charts()).getByRole('button', {
+        name: 'Charts at full width',
+      }),
+    )
+    expect(screen.queryByRole('button', { name: /Columns/ })).toBeNull()
   })
 
   it('a saved filter made from bars comes back as the same filter', async () => {

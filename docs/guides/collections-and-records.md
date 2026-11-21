@@ -125,10 +125,11 @@ record. **Filters** say which rows you see. **Charts** count the rows you see.
 - **Saved filters** keep a filter to come back to: see
   [Saved filters](views.md). **Save this filter** saves yours, and everyone
   sees it.
-- **Columns** include parents' fields and fields through a reference. Click a
-  header to sort.
+- **Columns**, beside the count of records, include parents' fields and
+  fields through a reference. Click a header to sort.
 - **Export** takes exactly the rows listed or ticked. See
-  [Get files out](../how-to/export-files.md).
+  [Get files out](../how-to/export-files.md). It also offers the charts on
+  screen, one or all of them, as tables of their numbers.
 - The files of what's listed (to move between drives, download or free up)
   are under **Files** in the page's **⋯** menu. See
   [Files](files.md#working-on-many-files).
@@ -153,10 +154,12 @@ collection, schema and field (`GET /api/records/{id}/referrers`).
 
 ### Charts
 
-Charts are a column beside the records. **Records | Both | Charts**, beside the
-count, shows the records alone, the two side by side, or the charts alone;
-drag the line between them to make the charts wider (the cards then sit in
-two columns). Both choices are remembered in this browser. Every chart counts
+Charts are a panel beside the records. Like the navigation on the left, it
+folds away to a strip with the button at its top and opens again from the
+strip; another button shows the charts at full width, with **Back to
+records**. Drag the line between the records and the charts to make the panel
+wider (the cards then sit in two columns). These choices are remembered in
+this browser. Every chart counts
 exactly the records listed: the same kind, place, search and filters. There
 are no charts until someone adds one.
 
@@ -171,14 +174,14 @@ are no charts until someone adds one.
   nothing lit.
 - **Which charts.** A kind of record says which charts its lists open with
   (its **Charts** tab on the schema page). A kind starts with none.
-- **Add chart** asks two things: **One bar for each** (a field; a date by
-  year, month, week or day; a number in steps you choose) and **Each bar
-  shows** (how many records, or the average, total, smallest or largest of a
-  number, how many have a field filled in, or how many records of a kind
-  beneath are inside them). The title it will get is shown before you add it.
-  **A map** is a chart too. Above the two choices, ready-made charts for the
-  kind (how many per field of choices, per month of its first date) can be
-  added with one click.
+- **Add chart** opens the builder at full width: the choices on the left and
+  the chart they make on the right, drawn live. **One bar for each** is a
+  field (a date by year, month, week or day; a number in steps you choose).
+  **Each bar shows** is how many records, or the average, total, smallest or
+  largest of a number, how many have a field filled in, or how many records
+  of a kind beneath are inside them. **A map** is a chart too. **Quick
+  picks** fill the choices in for the kind's fields of choices and its first
+  date. Give it a title of your own if you like, then **Add chart**.
 - When the charts on screen differ from the kind's, **Use for every … list**
   saves them for the kind (it needs the right to change the structure) and
   **Put back** returns to the kind's. Until then they are in the address.

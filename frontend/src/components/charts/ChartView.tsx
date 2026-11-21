@@ -9,23 +9,15 @@ import { MapView } from '../explorer/MapView'
 import { SummaryChart } from '../explorer/SummaryChart'
 import { SummaryResult } from '../explorer/SummaryResult'
 import { errorMessage } from '../../lib/errors'
-import { filterForChart, litBars, toggleBar } from '../../utils/chartFilter'
+import {
+  barFieldOf,
+  chartRequest,
+  litBars,
+  toggleBar,
+} from '../../utils/chartFilter'
 import type { FilterTreeWire } from '../../utils/filterTree'
 import type { FilterableField } from '../../utils/hierarchy'
-import { splitGroupKey } from '../../utils/summary'
 import { TABLE_FORMATS } from '../../utils/tableFormats'
-
-/** The field a chart's bars are of, from its first grouping (`site`,
- * `kind.field:month`): what a click on a bar filters by. */
-function barField(chart: Chart, listed: string) {
-  const first = chart.group_by[0]
-  if (!first) return undefined
-  const name = splitGroupKey(first).field
-  const dot = name.lastIndexOf('.')
-  return dot < 0
-    ? { field: name, schema_name: listed }
-    : { field: name.slice(dot + 1), schema_name: name.slice(0, dot) }
-}
 
 export interface ChartViewProps {
   chart: Chart
@@ -40,6 +32,8 @@ export interface ChartViewProps {
   large?: boolean
   /** False: don't ask yet (the list is still loading, or too big). */
   enabled?: boolean
+  /** Opened large: offer the numbers as a file (not in a preview). */
+  download?: boolean
 }
 
 /** One chart, drawn: the one renderer behind a kind's charts, the
@@ -55,20 +49,13 @@ export function ChartView({
   onFilter,
   large = false,
   enabled = true,
+  download: offerDownload = true,
 }: ChartViewProps) {
   const toast = useToast()
   const listed = records.schema_name ?? ''
-  const of = barField(chart, listed)
+  const of = barFieldOf(chart.group_by, listed)
   const filter = records.filter as FilterTreeWire | null
-  const body =
-    chart.map || !enabled
-      ? null
-      : {
-          ...records,
-          filter: onFilter ? filterForChart(filter, of, listed) : filter,
-          group_by: chart.group_by,
-          measures: chart.measures.length ? chart.measures : ['count'],
-        }
+  const body = enabled ? chartRequest(chart, records, !!onFilter) : null
   const { data, isLoading, isFetching, error } = useRecordSummary(body)
 
   if (chart.map)
@@ -138,23 +125,25 @@ export function ChartView({
           />
         </div>
       </div>
-      <Menu
-        align="left"
-        items={TABLE_FORMATS.map((f) => ({
-          label: f.name,
-          onClick: () => download(f.id),
-        }))}
-        trigger={({ open, toggle }) => (
-          <Button
-            size="sm"
-            aria-haspopup="menu"
-            aria-expanded={open}
-            onClick={toggle}
-          >
-            <Download size={14} /> Download numbers
-          </Button>
-        )}
-      />
+      {offerDownload && (
+        <Menu
+          align="left"
+          items={TABLE_FORMATS.map((f) => ({
+            label: f.name,
+            onClick: () => download(f.id),
+          }))}
+          trigger={({ open, toggle }) => (
+            <Button
+              size="sm"
+              aria-haspopup="menu"
+              aria-expanded={open}
+              onClick={toggle}
+            >
+              <Download size={14} /> Download numbers
+            </Button>
+          )}
+        />
+      )}
     </div>
   )
 }

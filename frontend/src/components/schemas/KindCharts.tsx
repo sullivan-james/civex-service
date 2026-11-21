@@ -4,9 +4,15 @@ import type { Schema } from '../../api/schemas'
 import { usePermissions } from '../../hooks/useMe'
 import { useSetCharts } from '../../hooks/useSchemas'
 import { ChartBoard, OpenChart } from '../charts/ChartBoard'
+import { NewChart } from '../charts/NewChart'
 import { EmptyState } from '../ui'
 import { useFieldTypes } from '../../hooks/useFieldTypes'
-import { OPEN_CHART_PARAM, chartTitle, storedChart } from '../../utils/charts'
+import {
+  NEW_CHART,
+  OPEN_CHART_PARAM,
+  chartTitle,
+  storedChart,
+} from '../../utils/charts'
 import { filterableFields } from '../../utils/hierarchy'
 import { summaryFields } from '../../utils/summary'
 import { displayLabel } from '../../utils/naming'
@@ -45,8 +51,23 @@ export function KindCharts({
       return out
     })
   const open = charts.find((c) => c.id === sp.get(OPEN_CHART_PARAM))
+  const building = sp.get(OPEN_CHART_PARAM) === NEW_CHART && mayChange
   return (
     <div className="space-y-4">
+      {building && (
+        <NewChart
+          listed={schema}
+          schemas={schemas}
+          usable={usable}
+          kind={kind}
+          records={records}
+          onAdd={(chart) => {
+            save.mutate([...charts, chart].map(storedChart))
+            setOpen(null)
+          }}
+          onCancel={() => setOpen(null)}
+        />
+      )}
       {open && (
         <OpenChart
           chart={open}
@@ -65,7 +86,7 @@ export function KindCharts({
           usable={usable}
           kind={kind}
           schemas={schemas}
-          listed={schema}
+          onBuild={building ? undefined : () => setOpen(NEW_CHART)}
           onChange={
             mayChange ? (next) => save.mutate(next.map(storedChart)) : undefined
           }

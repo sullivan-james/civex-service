@@ -15,7 +15,8 @@ import { fieldKey, splitGroupKey } from './summary'
 /** Past this many listed records, charts wait for a click. */
 export const CHARTS_AUTO_UP_TO = 200_000
 export function newChartId(): string {
-  return Math.random().toString(36).slice(2, 10)
+  // Never the builder's own address word.
+  return `c${Math.random().toString(36).slice(2, 10)}`
 }
 
 /** "samples" for a kind's display name: the app's one plural (an "s", as
@@ -136,8 +137,9 @@ export function storedChart(chart: Chart): Chart {
 // --- the address: a list's own charts, while they differ from the kind's
 
 export const CHARTS_PARAM = 'charts'
-/** The chart opened large. */
+/** The chart opened large, or `NEW_CHART` while one is being built. */
 export const OPEN_CHART_PARAM = 'chart'
+export const NEW_CHART = 'new'
 
 export function chartsToParam(charts: Chart[]): string {
   return JSON.stringify(

@@ -13,6 +13,7 @@
  * the filtered records with nothing lit, and a click adds its condition.
  */
 
+import type { RecordSelectionBody, SummaryRequest } from '../api/records'
 import type { FilterConditionWire, FilterTreeWire } from './filterTree'
 import { topLevelTerms } from './filterLabels'
 
@@ -166,4 +167,41 @@ export function toggleBar(
   if (term) out[at] = term
   else out.splice(at, 1)
   return rebuild(out)
+}
+
+/** The field a chart's bars are of, from its first grouping (`site`,
+ * `kind.field:month`): what a click on a bar filters by. */
+export function barFieldOf(
+  groupBy: string[],
+  listed: string,
+): BarField | undefined {
+  const first = groupBy[0]
+  if (!first) return undefined
+  const cut = first.indexOf(':')
+  const name = cut < 0 ? first : first.slice(0, cut)
+  const dot = name.lastIndexOf('.')
+  return dot < 0
+    ? { field: name, schema_name: listed }
+    : { field: name.slice(dot + 1), schema_name: name.slice(0, dot) }
+}
+
+/** What a chart asks the summary: the records it counts, without the
+ * condition on its own field where bars filter (`own`), so what is drawn and
+ * what is downloaded are the same numbers. Null for a map. */
+export function chartRequest(
+  chart: { map?: string | null; group_by: string[]; measures: string[] },
+  records: RecordSelectionBody,
+  own: boolean,
+): SummaryRequest | null {
+  if (chart.map) return null
+  const listed = records.schema_name ?? ''
+  const filter = (records.filter ?? null) as FilterTreeWire | null
+  return {
+    ...records,
+    filter: own
+      ? filterForChart(filter, barFieldOf(chart.group_by, listed), listed)
+      : filter,
+    group_by: chart.group_by,
+    measures: chart.measures.length ? chart.measures : ['count'],
+  }
 }

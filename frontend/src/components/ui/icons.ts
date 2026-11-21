@@ -60,6 +60,8 @@ export {
   Send,
   Square,
   PanelRightClose,
+  PanelRightOpen,
+  Maximize2,
   FileText,
   MapPin,
   HardDrive,

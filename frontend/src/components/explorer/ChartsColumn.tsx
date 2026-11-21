@@ -2,8 +2,8 @@ import type { RecordSelectionBody } from '../../api/records'
 import type { Schema } from '../../api/schemas'
 import { useAddToAnalytics } from '../../hooks/useDashboard'
 import { usePermissions } from '../../hooks/useMe'
-import { Button, Subheading } from '../ui'
-import { BarChart3 } from '../ui/icons'
+import { Button, IconButton, Subheading } from '../ui'
+import { BarChart3, Maximize2, PanelRightClose } from '../ui/icons'
 import { ChartBoard } from '../charts/ChartBoard'
 import type { FilterTreeWire } from '../../utils/filterTree'
 import type { ExplorerCharts } from './useExplorerCharts'
@@ -22,6 +22,8 @@ export function ChartsColumn({
   onFilter,
   enabled,
   onShow,
+  onExpand,
+  onCollapse,
 }: {
   model: ExplorerCharts
   listed: Schema
@@ -35,6 +37,10 @@ export function ChartsColumn({
   /** False: the list is too big to chart without being asked. */
   enabled: boolean
   onShow: () => void
+  /** Show the charts alone, at full width (absent when they already are). */
+  onExpand?: () => void
+  /** Fold the panel away to its strip. */
+  onCollapse?: () => void
 }) {
   const { can, canSomewhere, why } = usePermissions()
   const addToAnalytics = useAddToAnalytics()
@@ -43,6 +49,25 @@ export function ChartsColumn({
     <section aria-label="Charts" className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Subheading as="h2">Charts</Subheading>
+        {/* The panel's own controls, as the navigation's on the left. */}
+        <div className="flex items-center">
+          {onExpand && (
+            <IconButton
+              icon={Maximize2}
+              size="sm"
+              aria-label="Charts at full width"
+              onClick={onExpand}
+            />
+          )}
+          {onCollapse && (
+            <IconButton
+              icon={PanelRightClose}
+              size="sm"
+              aria-label="Collapse charts"
+              onClick={onCollapse}
+            />
+          )}
+        </div>
       </div>
       {model.changed && (
         <div className="flex flex-wrap gap-2">
@@ -72,7 +97,8 @@ export function ChartsColumn({
           usable={model.usable}
           kind={kind}
           schemas={schemas}
-          listed={listed}
+          // One way to add at a time: not while the builder is open.
+          onBuild={model.building ? undefined : model.build}
           onChange={model.set}
           onFilter={onFilter}
           onOpen={model.setOpen}

@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import type { RecordSelectionBody } from '../../api/records'
 import type { Chart, Schema } from '../../api/schemas'
 import { Button, Card, IconButton, Menu, type MenuEntry } from '../ui'
@@ -6,7 +5,6 @@ import { MoreVertical, Plus, X } from '../ui/icons'
 import { chartTitle, type Usable } from '../../utils/charts'
 import type { FilterTreeWire } from '../../utils/filterTree'
 import { ChartView } from './ChartView'
-import { NewChart } from './NewChart'
 
 export interface ChartBoardProps {
   charts: Chart[]
@@ -16,8 +14,8 @@ export interface ChartBoardProps {
   /** The kind's display name ("Sample"). */
   kind: string
   schemas: Schema[]
-  /** The kind listed: with `onChange`, charts can be added. */
-  listed?: Schema
+  /** Start building a chart (the host shows `NewChart` at full width). */
+  onBuild?: () => void
   /** The charts may change: add, remove, reorder. */
   onChange?: (charts: Chart[]) => void
   /** Bars filter the records listed (`ChartView`). */
@@ -31,7 +29,8 @@ export interface ChartBoardProps {
 
 /** Chart cards: the one board behind a kind's Charts tab and the
  * explorer's charts column. Each card can be opened large; where the charts
- * may change, a card can be moved or removed and **Add chart** makes one.
+ * may change, a card can be moved or removed and **Add chart** asks the
+ * host to open the builder (`NewChart`, at full width).
  * Cards flow into as many columns as the width holds. */
 export function ChartBoard({
   charts,
@@ -39,14 +38,13 @@ export function ChartBoard({
   usable,
   kind,
   schemas,
-  listed,
+  onBuild,
   onChange,
   onFilter,
   onOpen,
   more,
   enabled = true,
 }: ChartBoardProps) {
-  const [adding, setAdding] = useState(false)
   const fields = usable.map((u) => u.field)
   const move = (from: number, to: number) => {
     const next = [...charts]
@@ -127,28 +125,11 @@ export function ChartBoard({
           </Card>
         )
       })}
-      {onChange &&
-        listed &&
-        (adding ? (
-          <NewChart
-            listed={listed}
-            schemas={schemas}
-            usable={usable}
-            kind={kind}
-            onAdd={(chart) => {
-              onChange([...charts, chart])
-              setAdding(false)
-            }}
-            onCancel={() => setAdding(false)}
-          />
-        ) : (
-          <Button
-            className="min-h-16 border-dashed"
-            onClick={() => setAdding(true)}
-          >
-            <Plus size={14} /> Add chart
-          </Button>
-        ))}
+      {onChange && onBuild && (
+        <Button className="min-h-16 border-dashed" onClick={onBuild}>
+          <Plus size={14} /> Add chart
+        </Button>
+      )}
     </div>
   )
 }

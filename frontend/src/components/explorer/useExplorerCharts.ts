@@ -5,6 +5,7 @@ import { useFieldTypes } from '../../hooks/useFieldTypes'
 import { useSetCharts } from '../../hooks/useSchemas'
 import {
   CHARTS_PARAM,
+  NEW_CHART,
   OPEN_CHART_PARAM,
   chartsFromParam,
   chartsToParam,
@@ -44,16 +45,25 @@ export function useExplorerCharts(
       { replace },
     )
   const open = charts.find((c) => c.id === sp.get(OPEN_CHART_PARAM)) ?? null
+  const writeCharts = (out: URLSearchParams, next: Chart[]) => {
+    if (sameCharts(next, base)) out.delete(CHARTS_PARAM)
+    else out.set(CHARTS_PARAM, chartsToParam(next))
+  }
 
   return {
     charts,
     usable,
     /** The charts on screen are the person's own, not the kind's. */
     changed: own !== null,
-    set: (next: Chart[]) =>
+    set: (next: Chart[]) => change((out) => writeCharts(out, next)),
+    /** A chart is being built (`chart=new`, a step in history). */
+    building: sp.get(OPEN_CHART_PARAM) === NEW_CHART,
+    build: () => change((out) => out.set(OPEN_CHART_PARAM, NEW_CHART), false),
+    /** The chart built joins the others, and the builder closes: one change. */
+    add: (chart: Chart) =>
       change((out) => {
-        if (sameCharts(next, base)) out.delete(CHARTS_PARAM)
-        else out.set(CHARTS_PARAM, chartsToParam(next))
+        writeCharts(out, [...charts, chart])
+        out.delete(OPEN_CHART_PARAM)
       }),
     putBack: () => change((out) => out.delete(CHARTS_PARAM)),
     /** Use these for every list of the kind. */
