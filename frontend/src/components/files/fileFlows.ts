@@ -54,7 +54,7 @@ const plural = (n: number, word: string) =>
   `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`
 
 /** Run `work` as a job, and say plainly if it fails. */
-async function job(
+export async function job(
   ctx: FlowContext,
   title: string,
   work: (j: JobHandle) => Promise<void>,
@@ -113,7 +113,7 @@ function watchProgress(j: JobHandle, id: string, every: number): () => void {
 }
 
 /** Run one request with its progress shown on the job while it works. */
-async function tracked<T>(
+export async function tracked<T>(
   ctx: FlowContext,
   j: JobHandle,
   run: (progressId: string) => Promise<T>,
@@ -327,14 +327,14 @@ export function downloadReport(got: DownloadResult): string {
 }
 
 /** Everything that says where files are, asked again after they moved. */
-function refreshPlaces(ctx: FlowContext) {
+export function refreshPlaces(ctx: FlowContext) {
   for (const key of ['file-listing', 'store', 'records', 'record', 'remote'])
     void ctx.qc.invalidateQueries({ queryKey: [key] })
 }
 
 /** Follow a move until it finishes, showing how far it is. A move that stops
  * for a reason a person has to deal with ends the job with that reason. */
-async function waitForMove(
+export async function waitForMove(
   ctx: FlowContext,
   j: JobHandle,
   id: string,

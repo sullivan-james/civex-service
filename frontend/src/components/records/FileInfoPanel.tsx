@@ -123,6 +123,7 @@ export function FileInfoPanel({ sha256 }: { sha256: string }) {
             `, ${data.jobs} workflow ${data.jobs === 1 ? 'run' : 'runs'}`}
         </p>
         <DeletedKeepers count={data.deleted_records} />
+        <ReleaseKeepers names={data.releases} />
         {data.collections.length > 0 && (
           <ul className="mt-1 space-y-0.5">
             {data.collections.map((c) => (
@@ -156,6 +157,28 @@ export function FileInfoPanel({ sha256 }: { sha256: string }) {
 
 /** Deleted records that still hold a file: said apart from the records that
  * use it, since they don't count until they are restored. */
+/** The releases that keep a file: it stays while any of them does. */
+export function ReleaseKeepers({ names }: { names?: string[] }) {
+  if (!names?.length) return null
+  return (
+    <p className="text-xs text-fg-subtle">
+      Kept by {names.length === 1 ? 'release' : 'releases'}{' '}
+      {names.map((n, i) => (
+        <span key={n}>
+          {i > 0 && ', '}
+          <Link
+            to={`/releases/${encodeURIComponent(n)}`}
+            className="text-accent hover:underline"
+          >
+            {n}
+          </Link>
+        </span>
+      ))}
+      ; yanking {names.length === 1 ? 'it' : 'them'} gives it up.
+    </p>
+  )
+}
+
 export function DeletedKeepers({ count }: { count?: number }) {
   if (!count) return null
   return (

@@ -648,6 +648,13 @@ export const recordsApi = {
 
   purge: (id: string) => api.delete<void>(`/records/${id}/purge`),
 
+  /** What a permanent delete would take (the record and those deleted with
+   * it), and which releases keep files of theirs, so the files stay. */
+  purgePlan: (id: string) =>
+    api.get<{ records: number; kept_by_releases: Record<string, number> }>(
+      `/records/${id}/purge-plan`,
+    ),
+
   audit: (id: string, offset = 0, limit = 50, view?: AuditView) =>
     api.get<PaginatedAuditLog>(auditUrl(`/records/${id}`, offset, limit, view)),
 }

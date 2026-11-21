@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
 import {
   releasesApi,
   type ReleaseCreateBody,
@@ -18,12 +23,45 @@ export function useRelease(name: string) {
   })
 }
 
-/** What a release of this scope would hold: the bundle's own plan. */
+/** What a release of this scope would hold, from the catalog. */
 export function useReleasePlan(body: ReleaseScopeBody, enabled = true) {
   return useQuery({
     queryKey: ['release-plan', body],
     queryFn: () => releasesApi.plan(body),
     enabled,
+    placeholderData: keepPreviousData,
+  })
+}
+
+/** How a release with these details would be cited, asked again as they
+ * change (the caller debounces). */
+export function useCitationPreview(
+  body: ReleaseMetadata & { name: string },
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ['release-citation-preview', body],
+    queryFn: () => releasesApi.preview(body),
+    enabled,
+    placeholderData: keepPreviousData,
+  })
+}
+
+/** What yanking would give up (asked when the dialog opens). */
+export function useYankPlan(name: string) {
+  return useQuery({
+    queryKey: ['releases', name, 'yank-plan'],
+    queryFn: () => releasesApi.planYank(name),
+    enabled: !!name,
+  })
+}
+
+/** Where the release's files are, and whether a zip of them is allowed. */
+export function useReleaseFilePlan(name: string, enabled = true) {
+  return useQuery({
+    queryKey: ['releases', name, 'files'],
+    queryFn: () => releasesApi.filePlan(name),
+    enabled: !!name && enabled,
   })
 }
 
@@ -64,6 +102,17 @@ export function useWithdrawRelease(name: string) {
   return useMutation({
     mutationFn: (reason: string) => releasesApi.withdraw(name, reason),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['releases'] }),
+  })
+}
+
+export function useYankRelease(name: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (reason: string) => releasesApi.yank(name, reason),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['releases'] })
+      void qc.invalidateQueries({ queryKey: ['store'] })
+    },
   })
 }
 

@@ -1,6 +1,4 @@
-import { useState } from 'react'
 import type { Release } from '../api/releases'
-import { CreateReleaseDialog } from '../components/releases/CreateReleaseDialog'
 import {
   Badge,
   Button,
@@ -15,16 +13,18 @@ import { usePermissions } from '../hooks/useMe'
 import { useReleases } from '../hooks/useReleases'
 import { errorMessage } from '../lib/errors'
 
+const stateOf = (r: Release) =>
+  r.yanked_at ? 'yanked' : r.withdrawn_at ? 'withdrawn' : 'current'
+
 const releaseHref = (r: Pick<Release, 'name'>) =>
   `/releases/${encodeURIComponent(r.name)}`
 
 /** Every release, newest first, with a search held in the address; New
- * release opens the dialog that plans before it makes. */
+ * release opens its own page, which plans before it makes. */
 export default function ReleasesPage() {
   const { data, isLoading, error } = useReleases()
   const list = useListParams('', ['state'])
   const { can, why } = usePermissions()
-  const [creating, setCreating] = useState(false)
 
   const wanted = list.q.trim().toLowerCase()
   const matching = (data ?? []).filter(
@@ -32,8 +32,7 @@ export default function ReleasesPage() {
       (!wanted ||
         r.name.toLowerCase().includes(wanted) ||
         r.title.toLowerCase().includes(wanted)) &&
-      (!list.picks.state ||
-        (list.picks.state === 'withdrawn') === !!r.withdrawn_at),
+      (!list.picks.state || stateOf(r) === list.picks.state),
   )
   const shown = matching.slice(
     list.page * list.size,
@@ -47,7 +46,11 @@ export default function ReleasesPage() {
       render: (r) => (
         <span className="font-medium text-fg">
           {r.name}{' '}
-          {r.withdrawn_at && <Badge variant="attention">Withdrawn</Badge>}
+          {r.yanked_at ? (
+            <Badge variant="danger">Yanked</Badge>
+          ) : (
+            r.withdrawn_at && <Badge variant="attention">Withdrawn</Badge>
+          )}
         </span>
       ),
     },
@@ -68,16 +71,17 @@ export default function ReleasesPage() {
   return (
     <Page
       title="Releases"
-      info="A release is a frozen copy of the data with a version, a citation and a content hash, so a paper can say exactly which data it used and the data can be read back later, however the project has moved on."
+      info="A release freezes the records with a version, a citation and a content hash, and keeps the files they cite where they are, so a paper can say exactly which data it used and the data can be had back later, however the project has moved on."
       action={
-        <Button
-          variant="primary"
-          onClick={() => setCreating(true)}
-          disabled={!can('change_structure')}
-          title={can('change_structure') ? undefined : why('change_structure')}
-        >
-          New release
-        </Button>
+        can('change_structure') ? (
+          <Button variant="primary" to="/releases/new">
+            New release
+          </Button>
+        ) : (
+          <Button variant="primary" disabled title={why('change_structure')}>
+            New release
+          </Button>
+        )
       }
     >
       <div className="space-y-3">
@@ -93,8 +97,9 @@ export default function ReleasesPage() {
               value: list.picks.state,
               options: [
                 { value: '', label: 'Every release' },
-                { value: 'current', label: 'Not withdrawn' },
+                { value: 'current', label: 'Current' },
                 { value: 'withdrawn', label: 'Withdrawn' },
+                { value: 'yanked', label: 'Yanked' },
               ],
               onChange: (state) => list.set({ state }),
             },
@@ -112,7 +117,7 @@ export default function ReleasesPage() {
           emptyTitle={
             list.q || list.picks.state ? 'No releases match' : 'No releases yet'
           }
-          emptyMessage="Make one when the data is ready to cite: it freezes a copy that never changes."
+          emptyMessage="Make one when the data is ready to cite: it freezes the records as they are and keeps the files they cite."
         />
         <Pagination
           page={list.page}
@@ -122,7 +127,6 @@ export default function ReleasesPage() {
           onPageSize={(size) => list.set({ size })}
         />
       </div>
-      {creating && <CreateReleaseDialog onClose={() => setCreating(false)} />}
     </Page>
   )
 }

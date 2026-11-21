@@ -1015,6 +1015,37 @@ export function RecordsExplorer({
                         Edit…
                       </Button>
                     )}
+                    <Button
+                      size="sm"
+                      disabled={
+                        !can('change_structure') || (allKinds && allMatching)
+                      }
+                      title={
+                        allKinds && allMatching
+                          ? pickKind('release every matching record')
+                          : can('change_structure')
+                            ? 'Freeze these records, with the files they cite, as a citable release'
+                            : why('change_structure')
+                      }
+                      onClick={() =>
+                        navigate(
+                          `/releases/new?${new URLSearchParams(
+                            allMatching
+                              ? {
+                                  query: JSON.stringify(
+                                    queryBody(
+                                      { ...x.query, sort: undefined },
+                                      dataset,
+                                    ),
+                                  ),
+                                }
+                              : { records: [...selected].join(',') },
+                          )}`,
+                        )
+                      }
+                    >
+                      Release these…
+                    </Button>
                     {(listed || allKinds) && (
                       // Moving takes the records out of this collection, so
                       // it asks for the same permission as deleting here.

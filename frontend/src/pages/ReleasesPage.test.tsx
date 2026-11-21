@@ -7,6 +7,7 @@ import { fakeServer, json } from '../components/files/testSupport'
 import type { Release } from '../api/releases'
 import ReleasesPage from './ReleasesPage'
 import ReleasePage from './ReleasePage'
+import NewReleasePage from './NewReleasePage'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -15,15 +16,15 @@ const RELEASE: Release = {
   name: 'v1',
   title: 'Seal survey',
   description: null,
-  authors: ['Ada Lovelace'],
+  authors: [{ name: 'Ada Lovelace', orcid: '0000-0002-1825-0097' }],
   licence: 'CC-BY-4.0',
   doi: '10.1234/abcd',
+  keywords: ['seals'],
   scope: {},
-  include_files: true,
   content_hash: 'sha256:' + 'a'.repeat(64),
   bundle_sha256: 'b'.repeat(64),
   bundle_size: 2048,
-  counts: { records: 12, schemas: 2, files_carried: 3, file_bytes: 1024 },
+  counts: { records: 12, schemas: 2, files: 3, file_bytes: 1024 },
   local_seq: 40,
   feed_seq: null,
   civex_version: '1.3.0',
@@ -33,19 +34,30 @@ const RELEASE: Release = {
   withdrawn_at: null,
   withdrawn_by: null,
   withdrawn_reason: null,
+  yanked_at: null,
+  yanked_by: null,
+  yanked_reason: null,
   file_name: 'release-v1.civex.zip',
 }
 
 const PLAN = {
   schemas: 2,
-  collections: ['north'],
+  collections: { north: 12 },
   records: 12,
   files: 3,
   file_bytes: 1024,
-  files_unreachable: 0,
+  by_drive: [{ volume: 'default', files: 3, bytes: 1024 }],
   workflows: 0,
   plugins: 0,
-  include_files: true,
+  feed_seq: null,
+  local_seq: 40,
+  unsent: 0,
+}
+
+const CITATION = {
+  text: 'Ada Lovelace (2026). Seal survey (Version v1) [Data set].',
+  bibtex: '@misc{Lovelace2026v1}',
+  cff: 'cff-version: 1.2.0',
 }
 
 function renderAt(url: string, routes: Record<string, unknown>) {
@@ -57,6 +69,7 @@ function renderAt(url: string, routes: Record<string, unknown>) {
         <MemoryRouter initialEntries={[url]}>
           <Routes>
             <Route path="/releases" element={<ReleasesPage />} />
+            <Route path="/releases/new" element={<NewReleasePage />} />
             <Route path="/releases/:name" element={<ReleasePage />} />
           </Routes>
         </MemoryRouter>
@@ -67,51 +80,117 @@ function renderAt(url: string, routes: Record<string, unknown>) {
 }
 
 describe('the Releases page', () => {
-  it('lists releases and plans a new one before making it', async () => {
-    const calls = renderAt('/releases', {
+  it('lists releases and links to a page that makes one', async () => {
+    renderAt('/releases', { '/api/releases': [RELEASE] })
+    expect(await screen.findByText('Seal survey')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'New release' })).toHaveAttribute(
+      'href',
+      '/releases/new',
+    )
+  })
+})
+
+describe('making a release', () => {
+  it('plans what it covers, previews the citation, then makes it', async () => {
+    const calls = renderAt('/releases/new?records=r1,r2', {
+      '/api/releases/plan': PLAN,
+      '/api/releases/citation-preview': CITATION,
       '/api/releases': (_b: unknown, method: string) =>
         json(method === 'POST' ? RELEASE : [RELEASE]),
-      '/api/releases/plan': PLAN,
       '/api/collections': [],
     })
-    expect(await screen.findByText('Seal survey')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'New release' }))
+    // The explorer's ticked records are what it covers.
     expect(await screen.findByTestId('release-plan')).toHaveTextContent(
       '12 records',
     )
-    const make = screen.getByRole('button', { name: 'Make release' })
-    expect(make).toBeDisabled()
+    expect(
+      calls.find((c) => c.path === '/api/releases/plan')?.body.records,
+    ).toEqual(['r1', 'r2'])
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+
+    const next = screen.getByRole('button', { name: 'Next' })
+    expect(next).toBeDisabled()
     fireEvent.change(screen.getByPlaceholderText('v1'), {
       target: { value: 'v2' },
     })
     fireEvent.change(screen.getByLabelText(/Title/), {
       target: { value: 'Second' },
     })
-    fireEvent.click(make)
+    fireEvent.change(screen.getByPlaceholderText('Ada Lovelace'), {
+      target: { value: 'Bo Li' },
+    })
+    await waitFor(
+      () =>
+        expect(screen.getByTestId('citation-preview')).toHaveTextContent(
+          'Seal survey (Version v1)',
+        ),
+      { timeout: 2000 },
+    )
+    fireEvent.click(next)
+
+    expect(await screen.findByText(/Taken at history entry 40/)).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Make release' }))
     await waitFor(() =>
       expect(
-        calls.some((c) => c.path === '/api/releases' && c.method === 'POST'),
-      ).toBe(true),
+        calls.find((c) => c.path === '/api/releases' && c.method === 'POST')
+          ?.body,
+      ).toMatchObject({
+        name: 'v2',
+        title: 'Second',
+        records: ['r1', 'r2'],
+        authors: [{ name: 'Bo Li' }],
+      }),
     )
   })
 })
 
 describe('a release page', () => {
-  it('shows the citation, the manifest and what changed since', async () => {
+  it('shows the citation, the manifest and its files', async () => {
     renderAt('/releases/v1', {
-      '/api/releases/v1': RELEASE,
-      '/api/releases/v1/citation': {
-        text: 'Ada Lovelace (2026). Seal survey (Version v1) [Data set].',
-        bibtex: '@misc{Lovelace2026v1}',
-        cff: 'cff-version: 1.2.0',
+      '/api/releases/v1/citation': CITATION,
+      '/api/releases/v1/files/plan': {
+        total: 3,
+        available: 3,
+        bytes: 1024,
+        available_bytes: 1024,
+        complete: true,
+        link_volume: 'default',
+        by_volume: [],
+        summary: 'All 3 files can be reached.',
+        unavailable: [],
+        tables: [],
+        zip_allowed: true,
       },
+      '/api/releases/v1': RELEASE,
     })
     expect(
       await screen.findByText(/Seal survey \(Version v1\)/),
     ).toBeInTheDocument()
     expect(screen.getByText(RELEASE.content_hash)).toBeInTheDocument()
+    expect(
+      await screen.findByText('All 3 files can be reached.'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Download as a zip' }),
+    ).toBeInTheDocument()
     fireEvent.click(screen.getByRole('radio', { name: 'BibTeX' }))
     expect(await screen.findByText('@misc{Lovelace2026v1}')).toBeInTheDocument()
+  })
+
+  it('shows a yanked release as its record only', async () => {
+    renderAt('/releases/v1', {
+      '/api/releases/v1/citation': CITATION,
+      '/api/releases/v1': {
+        ...RELEASE,
+        yanked_at: '2026-11-22T10:00:00+00:00',
+        yanked_by: 'ada',
+        yanked_reason: 'consent withdrawn',
+      },
+    })
+    expect(await screen.findByText(/consent withdrawn/)).toBeInTheDocument()
+    expect(screen.queryByText('Its files')).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('link', { name: 'Download' }),
+    ).not.toBeInTheDocument()
   })
 })
