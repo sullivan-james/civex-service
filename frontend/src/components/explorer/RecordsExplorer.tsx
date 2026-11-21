@@ -14,6 +14,7 @@ import {
 } from '../../hooks/useViews'
 import {
   Button,
+  Chip,
   ConfirmDialog,
   EmptyState,
   ErrorState,
@@ -203,7 +204,8 @@ export function RecordsExplorer({
     listed &&
       !x.page.error &&
       x.page.data !== undefined &&
-      (showChecks || listedTotal <= CHECK_COUNT_UP_TO)
+      // Not counted under a record's fields, where it isn't shown.
+      (showChecks || (!inside && listedTotal <= CHECK_COUNT_UP_TO))
       ? queryBody({ ...x.query, sort: undefined }, dataset)
       : null,
   )
@@ -215,15 +217,14 @@ export function RecordsExplorer({
   // this project (not, to start with, on a narrow screen). `charts` is the
   // charts at full width: a screen over the same records, with a way back.
   const [layout, setLayout] = useStored<ExplorerLayout>(
-    // Under a record's own fields the page is already full: charts start
-    // folded there, with a setting of their own.
-    inside ? 'explorer.layout.inside' : 'explorer.layout',
-    inside || (typeof window !== 'undefined' && window.innerWidth < 1024)
+    'explorer.layout',
+    typeof window !== 'undefined' && window.innerWidth < 1024
       ? 'records'
       : 'both',
   )
-  const chartsHidden = layout === 'records'
-  const chartsOnly = layout === 'charts' && !!listed
+  // Under a record's own fields the page is just the rows: no charts there.
+  const chartsHidden = inside || layout === 'records'
+  const chartsOnly = !inside && layout === 'charts' && !!listed
   const [chartsAsked, setChartsAsked] = useState(false)
   // Problems and files are screens of their own over the same records:
   // the charts, which count records, step aside.
@@ -266,7 +267,7 @@ export function RecordsExplorer({
   // --- totals under the table, for every record listed.
   const totalsAsk = listed ? totalsMeasures(x.columnNames, listed.fields) : []
   const totals = useRecordSummary(
-    rowsIn && totalsAsk.length > 0 && listedTotal > 0
+    rowsIn && !inside && totalsAsk.length > 0 && listedTotal > 0
       ? { ...records, group_by: [], measures: totalsAsk }
       : null,
   )
@@ -602,6 +603,8 @@ export function RecordsExplorer({
     </TriggerPopover>
   )
 
+  const kindsInside = x.levels.filter((l) => (l.count ?? 0) > 0)
+
   // Until the collection and its counts have answered, nothing is listed and
   // there is no New: a menu opened now would be replaced by the loaded one.
   if (!listed && !allKinds && (!x.countsLoaded || (dataset && !collection)))
@@ -633,6 +636,23 @@ export function RecordsExplorer({
     <div>
       <div className="min-w-0 space-y-3">
         <ScopeTrail items={trail} heading={listedLabel} />
+        {inside && kindsInside.length > 1 && (
+          // What is inside, a kind at a time: one click each.
+          <div className="flex flex-wrap gap-2" aria-label="Kinds inside">
+            {kindsInside.map((l) => (
+              <Chip
+                key={l.schema.id}
+                selected={l.schema.id === listed?.id}
+                onClick={() => pickLevel(l.schema.name)}
+              >
+                {displayLabel(l.schema.name, l.schema.label)}
+                <span className="text-xs font-normal opacity-70">
+                  {(l.count ?? 0).toLocaleString()}
+                </span>
+              </Chip>
+            ))}
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-2">
           <div className="min-w-[14rem] max-w-xl flex-1">
@@ -686,8 +706,11 @@ export function RecordsExplorer({
         </div>
 
         {/* The view's own controls: which rows (saved filters and the conditions
-            below), which columns, and Export of what that leaves. */}
-        <div className="flex flex-wrap items-start gap-2">
+            below), which columns, and Export of what that leaves. Inside a
+            record's page they are a step away (Open as a list). */}
+        <div
+          className={`flex flex-wrap items-start gap-2 ${inside ? 'hidden' : ''}`}
+        >
           <div className="min-w-0 flex-1">
             {/* A saved filter belongs to one kind of record. */}
             {!allKinds && (
@@ -770,7 +793,7 @@ export function RecordsExplorer({
           </div>
         </div>
 
-        {(listed || allKinds) && (
+        {(listed || allKinds) && (!inside || x.filter) && (
           <FilterControls
             wire={x.filter}
             fields={x.filterFields}
@@ -872,20 +895,27 @@ export function RecordsExplorer({
                             : plural(listedLabel)}
                         </p>
                       )}
-                      {listed && !!issuesFound && !showChecks && !showFiles && (
-                        // A fact beside the count: nothing is shown when all is well.
-                        <Button
-                          size="sm"
-                          variant="link"
-                          onClick={() => setShow('checks')}
-                        >
-                          <AlertTriangle size={14} className="text-attention" />
-                          {issuesFound.toLocaleString()}{' '}
-                          {issuesFound === 1 ? 'problem' : 'problems'}
-                        </Button>
-                      )}
+                      {listed &&
+                        !inside &&
+                        !!issuesFound &&
+                        !showChecks &&
+                        !showFiles && (
+                          // A fact beside the count: nothing is shown when all is well.
+                          <Button
+                            size="sm"
+                            variant="link"
+                            onClick={() => setShow('checks')}
+                          >
+                            <AlertTriangle
+                              size={14}
+                              className="text-attention"
+                            />
+                            {issuesFound.toLocaleString()}{' '}
+                            {issuesFound === 1 ? 'problem' : 'problems'}
+                          </Button>
+                        )}
                       {/* Beside the count of the records whose columns they are. */}
-                      {!aside && !chartsOnly && columnsButton}
+                      {!inside && !aside && !chartsOnly && columnsButton}
                       {(showChecks || showFiles) && (
                         <Button
                           size="sm"
@@ -896,11 +926,28 @@ export function RecordsExplorer({
                         </Button>
                       )}
                       <div className="ml-auto flex items-center gap-2">
-                        {chartsHidden && listed && !aside && (
+                        {chartsHidden && listed && !aside && !inside && (
                           // Folded away: the way back says what it opens, at
                           // the right-hand edge of the table.
                           <Button size="sm" onClick={() => setLayout('both')}>
                             <PanelRightOpen size={14} /> Charts
+                          </Button>
+                        )}
+                        {inside && listed && collection && !aside && (
+                          // Everything else a list can do (filters, charts,
+                          // columns, export, ticking rows) is one step away,
+                          // on the same records.
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            to={`/collections/${collection.id}?${new URLSearchParams(
+                              {
+                                schema: listed.name,
+                                ...(x.rootId ? { within: x.rootId } : {}),
+                              },
+                            )}`}
+                          >
+                            Open as a list
                           </Button>
                         )}
                       </div>
@@ -1136,9 +1183,11 @@ export function RecordsExplorer({
                             showAddedColumn={!allKinds}
                             sort={sort}
                             onSortChange={toggleSort}
-                            selection={dataset ? picked.table : undefined}
+                            selection={
+                              dataset && !inside ? picked.table : undefined
+                            }
                             totals={
-                              totalsAsk.length > 0 && totals.data
+                              !inside && totalsAsk.length > 0 && totals.data
                                 ? {
                                     label: `All ${total.toLocaleString()}`,
                                     cells: totalsCells(

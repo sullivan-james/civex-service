@@ -4,7 +4,8 @@ import { placeCount } from '../../utils/places'
 import { MoveToDriveButton } from '../files/MoveDialog'
 import { HardDrive } from '../ui/icons'
 
-/** Where a record's files are, with everything beneath it: how many are in
+/** Where a record's files are, with everything beneath it, shown only when
+ * some can't be reached or are missing: how many are in
  * each place (the same places the record's **Their files** shows, said as a
  * sentence: "10 on archive · 2 not on this computer"), and **Move to drive…**
  * for all of them. `filesHref` opens them listed one by one (the Contains
@@ -22,10 +23,12 @@ export function RecordStorageSummary({
   const { data } = useFileListing({ ...pick, limit: 1 })
   const places = data?.summary ?? []
   const files = places.reduce((n, p) => n + p.files, 0)
-  if (files === 0) return null
   const attention = places.some(
     (p) => p.kind === 'unreachable' || p.kind === 'missing',
   )
+  // Said only when it matters: a file that can't be reached or is missing.
+  // Where files are, when all is well, is under Files in the page's menu.
+  if (files === 0 || !attention) return null
 
   return (
     <div

@@ -81,6 +81,7 @@ export default function RecordDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [showDeleted, setShowDeleted] = useState(false)
   const [tab, setTab] = useTabParam(RECORD_TABS, 'fields')
 
   const { data: record, isLoading, error } = useRecord(id, 3000)
@@ -279,6 +280,15 @@ export default function RecordDetailPage() {
           ...(showContains
             ? [{ label: 'Files', onClick: () => navigate('?show=files') }]
             : []),
+          // Rarely wanted: the values of fields deleted since.
+          ...((record.deleted_fields ?? []).length > 0
+            ? [
+                {
+                  label: showDeleted ? 'Hide deleted fields' : 'Deleted fields',
+                  onClick: () => setShowDeleted((on) => !on),
+                },
+              ]
+            : []),
           {
             label: 'Delete record…',
             variant: 'danger' as const,
@@ -384,7 +394,9 @@ export default function RecordDetailPage() {
                 schema && <AddFieldRow schema={schema} allSchemas={schemas} />
               }
             />
-            <DeletedFieldValues fields={record.deleted_fields ?? []} />
+            {showDeleted && (
+              <DeletedFieldValues fields={record.deleted_fields ?? []} />
+            )}
           </UploadCollectionContext.Provider>
           {showContains && collection && (
             <section
