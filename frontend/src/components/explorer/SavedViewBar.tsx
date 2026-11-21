@@ -16,7 +16,7 @@ import {
   Subheading,
 } from '../ui'
 import { MoreVertical, Save } from '../ui/icons'
-import { SAVED_KINDS, viewKind } from '../../utils/savedKinds'
+import { SAVED_KINDS } from '../../utils/savedKinds'
 import { viewNameError } from '../../utils/naming'
 import { LAYOUTS, LAYOUT_SHORT } from '../../utils/exportLayouts'
 import { errorMessage } from '../../lib/errors'
@@ -27,7 +27,7 @@ const LAYOUT_HINT: Record<FilesLayout, string> = {
   flat: 'Put every file in one folder.',
 }
 
-/** Asks for a view's name -- free text, in the user's own words. */
+/** Asks for a saved filter's name -- free text, in the user's own words. */
 function ViewNameDialog({
   title,
   intro,
@@ -54,7 +54,7 @@ function ViewNameDialog({
       <ModalHeader onClose={onClose}>{title}</ModalHeader>
       <ModalBody className="space-y-3">
         {intro && <p className="text-sm text-fg-muted">{intro}</p>}
-        <Field label="View name" error={name ? invalid : undefined}>
+        <Field label="Name" error={name ? invalid : undefined}>
           <Input
             autoFocus
             value={name}
@@ -86,10 +86,10 @@ function ViewNameDialog({
 
 type Dialog = 'save-as' | 'rename' | 'delete' | null
 
-/** A schema's saved filters: one chip per view (click to apply, click again
- * to drop). The applied view can be renamed or deleted, and -- when the
- * selection isn't exactly a saved view -- saved over or saved as new. Views
- * belong to the schema, not to whoever made them. */
+/** A kind's saved filters: one chip each (click to apply, click again to
+ * drop). The applied one can be renamed or deleted, and -- when the filter
+ * on screen isn't exactly a saved one -- saved over or saved as new. They
+ * belong to the kind, not to whoever made them. */
 export function SavedViewBar({
   views,
   activeView,
@@ -129,12 +129,10 @@ export function SavedViewBar({
   if (views.length === 0 && !hasSelection) return null
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Subheading as="span">Saved</Subheading>
+      <Subheading as="span">Saved filters</Subheading>
       {views.map((v) => {
         const active = activeView?.id === v.id
-        // What it gives you: a List of records or an Analysis of them.
-        const kind = SAVED_KINDS[viewKind(v)]
-        const Icon = kind.icon
+        const Icon = SAVED_KINDS.filter.icon
         return (
           <Chip
             key={v.id}
@@ -143,14 +141,13 @@ export function SavedViewBar({
           >
             <Icon size={12} aria-hidden="true" />
             {v.name}
-            <span className="text-xs font-normal opacity-70">{kind.word}</span>
           </Chip>
         )
       })}
       {activeView && (
         <Menu
           items={[
-            { label: 'Rename view…', onClick: () => setDialog('rename') },
+            { label: 'Rename…', onClick: () => setDialog('rename') },
             ...(filesLayout && onFilesLayout
               ? LAYOUTS.filter((l) => l !== filesLayout).map((l) => ({
                   label: `Export files: ${LAYOUT_SHORT[l]}`,
@@ -159,7 +156,7 @@ export function SavedViewBar({
                 }))
               : []),
             {
-              label: 'Delete view…',
+              label: 'Delete…',
               variant: 'danger',
               onClick: () => setDialog('delete'),
             },
@@ -169,7 +166,7 @@ export function SavedViewBar({
             <IconButton
               icon={MoreVertical}
               size="sm"
-              aria-label={`Manage view ${activeView.name}`}
+              aria-label={`Manage saved filter ${activeView.name}`}
               aria-expanded={open}
               aria-haspopup="menu"
               onClick={toggle}
@@ -187,14 +184,14 @@ export function SavedViewBar({
       )}
       {hasSelection && (
         <Button size="sm" onClick={() => setDialog('save-as')}>
-          <Save size={12} /> Save as view…
+          <Save size={12} /> Save this filter
         </Button>
       )}
 
       {dialog === 'save-as' && (
         <ViewNameDialog
-          title="Save as view"
-          confirmLabel="Save view"
+          title="Save this filter"
+          confirmLabel="Save"
           isPending={pending}
           error={error}
           onClose={close}
@@ -203,7 +200,7 @@ export function SavedViewBar({
       )}
       {dialog === 'rename' && activeView && (
         <ViewNameDialog
-          title="Rename view"
+          title="Rename saved filter"
           confirmLabel="Rename"
           initialName={activeView.name}
           isPending={pending}
@@ -214,9 +211,9 @@ export function SavedViewBar({
       )}
       {dialog === 'delete' && activeView && (
         <ConfirmDialog
-          title="Delete view"
-          body={`Delete the saved view "${activeView.name}"? This only removes the saved filter — no records are affected.`}
-          confirmLabel="Delete view"
+          title="Delete saved filter"
+          body={`Delete "${activeView.name}"? No records are affected.`}
+          confirmLabel="Delete"
           variant="danger"
           isPending={pending}
           warning={error != null ? errorMessage(error) : undefined}

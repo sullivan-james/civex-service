@@ -11,25 +11,44 @@ const json = (body: unknown) =>
     headers: { 'Content-Type': 'application/json' },
   })
 
-const BY_SITE = {
-  id: '11111111-1111-1111-1111-111111111111',
-  schema_id: 'id-sample',
-  schema_name: 'sample',
-  name: 'By site',
-  columns: [],
-  filter_tree: null,
-  sort: [],
-  files_layout: 'tree',
-  summary: {
-    group_by: ['site'],
-    measures: ['count'],
-    sort: null,
-    show: 'table',
-    chart_measure: null,
+const SAMPLE = {
+  id: 'id-sample',
+  name: 'sample',
+  label: null,
+  description: null,
+  parent_id: null,
+  display_template: null,
+  deleted_at: null,
+  charts: [],
+  fields: [
+    {
+      id: 'f1',
+      name: 'site',
+      label: null,
+      type: 'string',
+      required: false,
+      restrictions: {},
+      default: null,
+      position: 0,
+    },
+  ],
+}
+
+/** A chart card as the server serves it: per site, of the deep samples in
+ * one collection. */
+const PER_SITE = {
+  id: 'a',
+  kind: 'chart',
+  size: 'wide',
+  chart: { group_by: ['site'], measures: ['count'] },
+  records: {
+    schema: 'id-sample',
     collection: 'c1',
-    within: null,
-    search: null,
+    filter: { field: 'depth', op: 'gt', value: 5 },
   },
+  schema_name: 'sample',
+  schema_label: 'Sample',
+  collection_name: 'survey',
 }
 
 const SUMMARY = {
@@ -67,7 +86,7 @@ const SUMMARY = {
         },
       ],
       values: [4],
-      where: null,
+      where: { field: 'site', schema: 'sample', op: 'eq', value: 'North' },
     },
   ],
   total: [4],
@@ -79,10 +98,12 @@ const SUMMARY = {
 let cards: unknown[]
 let me: unknown
 let puts: { cards: unknown[] }[]
+let asked: Record<string, unknown>[]
 
 beforeEach(() => {
   cards = []
   puts = []
+  asked = []
   me = undefined
   vi.stubGlobal(
     'fetch',
@@ -95,18 +116,18 @@ beforeEach(() => {
           puts.push(body)
           cards = body.cards
         }
-        return json({
-          cards: (cards as { view?: string }[]).map((c) => ({
-            ...c,
-            analysis: c.view === BY_SITE.id ? BY_SITE : undefined,
-          })),
-          edited: true,
-          widgets: { storage: 'Storage' },
-        })
+        return json({ cards, edited: true, widgets: { storage: 'Storage' } })
       }
-      if (url.pathname === '/api/views') return json([BY_SITE])
-      if (url.pathname === '/api/schemas/sample/views/By%20site/summary')
+      if (url.pathname === '/api/schemas') return json([SAMPLE])
+      if (url.pathname === '/api/collections')
+        return json([
+          { id: 'c1', name: 'survey' },
+          { id: 'c2', name: 'other' },
+        ])
+      if (url.pathname === '/api/records/summary') {
+        asked.push(JSON.parse(String(init!.body)))
         return json(SUMMARY)
+      }
       if (url.pathname === '/api/me')
         return me ? json(me) : new Response(null, { status: 404 })
       return json([])
@@ -133,45 +154,97 @@ function renderPage(url = '/analytics') {
 }
 
 describe('the Analytics page', () => {
-  it('says how to make an analysis when the page is empty', async () => {
+  it('says so in a few words when the page is empty', async () => {
+    renderPage()
+    expect(await screen.findByText('Nothing here yet')).toBeInTheDocument()
+  })
+
+  it('draws a chart over the records it was made for, with a way to them', async () => {
+    cards = [PER_SITE]
     renderPage()
     expect(
-      await screen.findByText('Nothing on this page yet'),
+      await screen.findByText('How many samples per site'),
     ).toBeInTheDocument()
-    expect(screen.getByText(/choose Summary/)).toBeInTheDocument()
-  })
-
-  it('draws a saved analysis, with a way to open it in the explorer', async () => {
-    cards = [{ id: 'a', kind: 'analysis', size: 'wide', view: BY_SITE.id }]
-    renderPage()
     expect(await screen.findByText('North')).toBeInTheDocument()
-    expect(
-      screen.getByRole('link', { name: /Open in explorer/ }),
-    ).toHaveAttribute('href', '/collections/c1?schema=sample&view=By+site')
+    expect(asked[0]).toMatchObject({
+      collection: 'survey',
+      schema_name: 'sample',
+      filter: { field: 'depth', op: 'gt', value: 5 },
+      group_by: ['site'],
+      measures: ['count'],
+    })
+    expect(screen.getByRole('link', { name: 'Records' })).toHaveAttribute(
+      'href',
+      expect.stringContaining('/collections/survey?schema=sample'),
+    )
   })
 
-  it('adds a card while editing and saves the page once, on Done', async () => {
+  it('narrows every chart to the collection picked in For', async () => {
     const user = userEvent.setup()
+    cards = [PER_SITE]
+    renderPage()
+    await screen.findByText('North')
+    await user.selectOptions(screen.getByLabelText('For'), 'other')
+    await waitFor(() =>
+      expect(asked[asked.length - 1]).toMatchObject({ collection: 'other' }),
+    )
+  })
+
+  it('opens a chart large, with its numbers, and closes it', async () => {
+    const user = userEvent.setup()
+    cards = [PER_SITE]
+    renderPage()
+    await screen.findByText('North')
+    await user.click(screen.getByRole('button', { name: 'Open' }))
+    expect(
+      await screen.findByRole('button', { name: /Download numbers/ }),
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: /Download numbers/ }),
+      ).not.toBeInTheDocument(),
+    )
+  })
+
+  it('keeps a chart whose kind is gone, saying so', async () => {
+    cards = [
+      {
+        ...PER_SITE,
+        schema_name: null,
+        problem: 'That kind of record is gone',
+      },
+    ]
+    renderPage()
+    expect(
+      await screen.findByText('That kind of record is gone'),
+    ).toBeInTheDocument()
+  })
+
+  it('edits the page and saves it once, on Done, keeping each chart whole', async () => {
+    const user = userEvent.setup()
+    cards = [PER_SITE]
     renderPage()
     await user.click(
       (await screen.findAllByRole('button', { name: 'Edit page' }))[0],
     )
     await user.click(screen.getByRole('button', { name: /Add a card/ }))
-    await user.click(await screen.findByRole('menuitem', { name: /By site/ }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Storage' }))
     const list = screen.getByRole('list', { name: 'Cards on the page' })
-    expect(within(list).getByText('By site')).toBeInTheDocument()
-    await user.click(screen.getByRole('radio', { name: 'Full width' }))
+    expect(within(list).getByText('Storage')).toBeInTheDocument()
     expect(puts).toHaveLength(0)
     await user.click(screen.getByRole('button', { name: 'Done' }))
     await waitFor(() => expect(puts).toHaveLength(1))
     expect(puts[0].cards).toEqual([
-      expect.objectContaining({
-        kind: 'analysis',
+      {
+        id: 'a',
+        kind: 'chart',
         size: 'wide',
-        view: BY_SITE.id,
-      }),
+        chart: { id: 'a', group_by: ['site'], measures: ['count'] },
+        records: PER_SITE.records,
+      },
+      expect.objectContaining({ kind: 'widget', widget: 'storage' }),
     ])
-    expect(await screen.findByText('North')).toBeInTheDocument()
   })
 
   it('lets someone who may only read see the page but not edit it', async () => {
@@ -179,7 +252,7 @@ describe('the Analytics page', () => {
       account: { name: 'reader', kind: 'user', manage_url: null },
       permissions: { actions: { read: ['project'] }, all: {} },
     }
-    cards = [{ id: 'a', kind: 'analysis', size: 'small', view: BY_SITE.id }]
+    cards = [PER_SITE]
     renderPage()
     expect(await screen.findByText('North')).toBeInTheDocument()
     await waitFor(() =>

@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Link, useLocation, useNavigate, useSearchParams } from 'react-router'
-import { recordsApi, type CivexRecord } from '../../api/records'
-import { viewsApi } from '../../api/views'
+import { useLocation, useNavigate, useSearchParams } from 'react-router'
 import {
   useDeleteManyRecords,
   useDeleteMatchingRecords,
   useRecordQuality,
+  useRecordSummary,
 } from '../../hooks/useRecords'
 import { queryBody } from '../../api/records'
 import {
@@ -14,7 +13,6 @@ import {
   useUpdateView,
 } from '../../hooks/useViews'
 import {
-  Badge,
   Button,
   ConfirmDialog,
   EmptyState,
@@ -30,8 +28,15 @@ import {
   Field,
   Select,
   Skeleton,
+  SplitPane,
 } from '../ui'
-import { ChevronDown, Columns3, Download, Plus } from '../ui/icons'
+import {
+  AlertTriangle,
+  BarChart3,
+  ChevronDown,
+  Columns3,
+  Plus,
+} from '../ui/icons'
 import { toTableRows } from '../records/tableRows'
 import {
   RecordsTable,
@@ -49,17 +54,17 @@ import { MoveRecordsDialog } from './MoveRecordsDialog'
 import { BulkEditDialog } from './BulkEditDialog'
 import { bulkEditableFields } from '../../utils/bulkEdit'
 import { FilesView } from '../files/FilesView'
-import { SummaryView } from './SummaryView'
-import { useSummaryChoices } from './useSummaryChoices'
 import type { View } from '../../api/views'
-import { saveBlob } from '../files/fileFlows'
-import { useToast } from '../ui/ToastProvider'
-import { TABLE_FORMATS } from '../../utils/tableFormats'
-import { withSavedSummary } from '../../utils/summary'
 import { SAVED_KINDS } from '../../utils/savedKinds'
 import { ChecksView } from './ChecksView'
-import { MapView, mapFields } from './MapView'
 import { withCondition } from '../../utils/summary'
+import { ChartsColumn } from './ChartsColumn'
+import { KindsChart } from './KindsChart'
+import { useExplorerCharts } from './useExplorerCharts'
+import { OpenChart } from '../charts/ChartBoard'
+import { CHARTS_AUTO_UP_TO, chartTitle, plural } from '../../utils/charts'
+import { totalsCells, totalsMeasures } from '../../utils/totals'
+import { useStored } from '../../hooks/useStored'
 import { MoveToDriveButton } from '../files/MoveDialog'
 import { useBulkSelection } from '../../hooks/useBulkSelection'
 import { BulkRunWorkflow, bulkRunnable } from '../workflows/BulkRunWorkflow'
@@ -149,43 +154,20 @@ export function RecordsExplorer({
   const [params, setParams] = useSearchParams()
   const show = params.get('show')
   const showFiles = show === 'files'
-  const showSummary = show === 'summary' && !!listed
-  // The Summary's choices, read once: the Summary draws them and the Export
-  // menu hands them over as a table.
-  const summary = useSummaryChoices(x.query, dataset, x.filterFields)
-  const toast = useToast()
-  /** Open a saved view: its filter, sort and columns, and for an analysis
-   * its Summary as saved. One change to the address. */
-  const openView = (v: View) =>
-    setParams((prev) => {
-      const out = applyExplorerPatch(prev, viewPatch(v))
-      return v.summary ? withSavedSummary(out, v.summary) : out
-    })
+  /** Open a saved filter: its filter, sort and columns. */
+  const openView = (v: View) => patch(viewPatch(v))
   // --- `?view=name` in a shared link: apply it once, when nothing else was
   // chosen. Only ever on arrival -- afterwards the URL is the truth, so
-  // clearing the filter of a view stays cleared.
-  // A saved analysis opens on its Summary, unless the link already says
-  // what to show.
+  // clearing the filter of a saved filter stays cleared.
   const seededView = useRef(false)
   useEffect(() => {
     if (seededView.current || !x.viewsLoaded) return
     seededView.current = true
     const v = x.activeView
     if (!v || x.hasSelection) return
-    if (v.summary && !params.has('show')) openView(v)
-    else patch(viewPatch(v))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    patch(viewPatch(v))
   }, [x.viewsLoaded, x.activeView, x.hasSelection, patch])
 
-  async function downloadSummary(format: string) {
-    if (!summary.body) return
-    try {
-      const got = await recordsApi.summaryFile(summary.body, format)
-      saveBlob(got.blob, got.filename ?? `summary.${format}`)
-    } catch (e) {
-      toast.error(errorMessage(e))
-    }
-  }
   // What in the listed records needs a look (`ChecksView`).
   const showChecks = show === 'checks' && !!listed
   const setShow = (v: string | null) =>
@@ -198,9 +180,6 @@ export function RecordsExplorer({
       },
       { replace: true },
     )
-  // A map is offered where the listed kind, or one above it, has a location.
-  const canMap = !!listed && mapFields(x.filterFields).length > 0
-  const showMap = show === 'map' && canMap
   // How many listed records have something to look at: the data check reads
   // every listed record, so it is asked by itself only for a list up to
   // CHECK_COUNT_UP_TO records; a bigger one is counted once Checks is opened.
@@ -216,6 +195,31 @@ export function RecordsExplorer({
       : null,
   )
   const issuesFound = checkCount.data?.records_with_issues
+  // --- charts: beside the records, counting exactly what is listed. They
+  // are asked for once the rows are in, and a very big list waits for a click.
+  const records = queryBody({ ...x.query, sort: undefined }, dataset)
+  const [chartsHidden, setChartsHidden] = useStored(
+    'explorer.charts.hidden',
+    typeof window !== 'undefined' && window.innerWidth < 1024,
+  )
+  const [chartsAsked, setChartsAsked] = useState(false)
+  const rowsIn = x.page.data !== undefined && !x.page.error
+  const chartsOn = rowsIn && (listedTotal <= CHARTS_AUTO_UP_TO || chartsAsked)
+  const charts = useExplorerCharts(
+    listed ?? null,
+    x.filterFields,
+    x.columnNames,
+    records,
+    chartsOn && !chartsHidden,
+  )
+  const setFilter = (filter: typeof x.filter) => patch({ filter })
+  // --- totals under the table, for every record listed.
+  const totalsAsk = listed ? totalsMeasures(x.columnNames, listed.fields) : []
+  const totals = useRecordSummary(
+    rowsIn && totalsAsk.length > 0 && listedTotal > 0
+      ? { ...records, group_by: [], measures: totalsAsk }
+      : null,
+  )
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [moving, setMoving] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -259,6 +263,11 @@ export function RecordsExplorer({
 
   const items = x.page.data?.items ?? []
   const total = x.page.data?.total ?? 0
+  // How many of the kind there are here before the filter and search.
+  const inScope =
+    listed && (x.filter || state.q)
+      ? (x.levels.find((l) => l.schema.id === listed.id)?.count ?? null)
+      : null
   const rows = toTableRows(items)
   // Listing records with open notes (the "Open notes" view): the column says
   // what is open, and a record opens on its Notes tab.
@@ -392,7 +401,7 @@ export function RecordsExplorer({
     .join(' ')
   const pinTarget: NavTarget | null =
     listed && x.activeView && !x.modified
-      ? viewTarget(listed, x.activeView.name, x.activeView)
+      ? viewTarget(listed, x.activeView.name)
       : listed
         ? placeTarget(
             location.pathname + location.search,
@@ -435,7 +444,7 @@ export function RecordsExplorer({
   // records of every schema.
   const navigate = useNavigate()
   // What this person may do here: the controls stay, off, saying why.
-  const { can, canSomewhere, why } = usePermissions()
+  const { can, why } = usePermissions()
   const mayWrite = can('write_records', collection?.id)
   const mayDelete = can('delete', collection?.id)
   const starters = dataset ? (x.schemas ?? []).filter((s) => !s.parent_id) : []
@@ -704,26 +713,6 @@ export function RecordsExplorer({
               presets={canExportFiles ? exportPresets : []}
               scopeSchema={listedName ?? undefined}
               builderTo={builderHref}
-              leading={
-                showSummary && summary.body
-                  ? [
-                      { heading: 'This summary as a table' },
-                      ...TABLE_FORMATS.map((f) => ({
-                        label: f.name,
-                        hint: f.hint,
-                        onClick: () => downloadSummary(f.id),
-                      })),
-                    ]
-                  : []
-              }
-              exportItem={
-                showSummary
-                  ? {
-                      label: 'Export these records…',
-                      hint: 'The records summarised: their files, a table of them, or both.',
-                    }
-                  : undefined
-              }
             />
           </div>
         </div>
@@ -738,9 +727,7 @@ export function RecordsExplorer({
         )}
         {x.ignoredConditions > 0 && (
           <p className="text-xs text-fg-muted">
-            {pluralise(x.ignoredConditions, 'filter')} on another branch of the
-            hierarchy {x.ignoredConditions === 1 ? "doesn't" : "don't"} apply
-            here.
+            {pluralise(x.ignoredConditions, 'filter')} not used here
           </p>
         )}
 
@@ -749,406 +736,361 @@ export function RecordsExplorer({
           // to see them or their files. A rule sets them apart from the
           // filters.
           <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
-            <p className="text-sm text-fg-muted" aria-live="polite">
-              <span className="font-medium text-fg">
+            <p className="text-base" aria-live="polite">
+              <span className="font-semibold text-fg">
                 {total.toLocaleString()}
               </span>{' '}
-              {listedLabel.toLowerCase()}
-              {total === 1 ? '' : 's'}
-              {state.q && <> matching “{state.q}”</>}
+              {inScope !== null && inScope !== total && (
+                <>of {inScope.toLocaleString()} </>
+              )}
+              {total === 1 ? listedLabel.toLowerCase() : plural(listedLabel)}
             </p>
-            <SegmentedControl
-              size="sm"
-              label="Show"
-              value={
-                showFiles
-                  ? 'files'
-                  : showSummary
-                    ? 'summary'
-                    : showChecks
-                      ? // Checks is a task, not a way of showing them: none
-                        // of the ways is picked while it is open.
-                        ''
-                      : showMap
-                        ? 'map'
-                        : 'records'
-              }
-              onChange={(v) =>
-                setParams(
-                  (prev) => {
-                    const out = new URLSearchParams(prev)
-                    if (v === 'records') out.delete('show')
-                    else out.set('show', v)
-                    return out
-                  },
-                  { replace: true },
-                )
-              }
-              options={[
-                { value: 'records', label: 'Records' },
-                { value: 'files', label: 'Their files' },
-                ...(listed
-                  ? [{ value: 'summary', label: 'Summary' }]
-                  : allKinds
-                    ? [
-                        {
-                          value: 'summary',
-                          label: 'Summary',
-                          disabled: pickKind('summarise them'),
-                        },
-                      ]
-                    : []),
-                ...(canMap ? [{ value: 'map', label: 'Map' }] : []),
-              ]}
-            />
-            {allKinds && (
-              <div className="ml-auto flex items-center gap-2">
-                <Button size="sm" disabled title={pickKind('check their data')}>
-                  Check data
+            {listed && !!issuesFound && !showChecks && (
+              // A fact beside the count: nothing is shown when all is well.
+              <Button
+                size="sm"
+                variant="link"
+                onClick={() => setShow('checks')}
+              >
+                <AlertTriangle size={14} className="text-attention" />
+                {issuesFound.toLocaleString()}{' '}
+                {issuesFound === 1 ? 'problem' : 'problems'}
+              </Button>
+            )}
+            {showChecks && (
+              <Button size="sm" variant="link" onClick={() => setShow(null)}>
+                Back to records
+              </Button>
+            )}
+            <div className="ml-auto flex items-center gap-2">
+              {!showChecks && (
+                <SegmentedControl
+                  size="sm"
+                  label="Show"
+                  value={showFiles ? 'files' : 'records'}
+                  onChange={(v) => setShow(v === 'files' ? 'files' : null)}
+                  options={[
+                    { value: 'records', label: 'Records' },
+                    { value: 'files', label: 'Their files' },
+                  ]}
+                />
+              )}
+              {chartsHidden && !showChecks && (listed || allKinds) && (
+                <Button size="sm" onClick={() => setChartsHidden(false)}>
+                  <BarChart3 size={14} /> Charts
                 </Button>
-              </div>
-            )}
-            {listed && (
-              <div className="ml-auto flex items-center gap-2">
-                {showChecks ? (
-                  <Button
-                    size="sm"
-                    variant="link"
-                    onClick={() => setShow(null)}
-                  >
-                    Back to records
-                  </Button>
-                ) : (
-                  <Button
-                    size="sm"
-                    onClick={() => setShow('checks')}
-                    title="Find what in these records needs a look: values the rules refuse, required fields left empty, duplicates, broken links, missing files"
-                  >
-                    Check data
-                    {issuesFound !== undefined && (
-                      <Badge
-                        variant={issuesFound > 0 ? 'attention' : 'success'}
-                        className="ml-1"
-                      >
-                        <span className="sr-only">
-                          {issuesFound === 1
-                            ? '1 record needs a look'
-                            : `${issuesFound} records need a look`}
-                        </span>
-                        <span aria-hidden="true">
-                          {issuesFound.toLocaleString()}
-                        </span>
-                      </Badge>
-                    )}
-                  </Button>
-                )}
-              </div>
-            )}
+              )}
+            </div>
           </div>
         )}
 
-        {showChecks && listed ? (
-          <ChecksView
-            query={x.query}
-            collection={dataset}
-            listed={listed}
-            mayWrite={mayWrite}
-            cannotWrite={why('write_records')}
-            // The records: the condition added to the filter, listed, in one
-            // change to the address (as a summary's group).
-            onDrill={(where) =>
-              setParams((prev) => {
-                const out = applyExplorerPatch(prev, {
-                  filter: withCondition(x.filter, where),
-                })
-                out.delete('show')
-                return out
-              })
-            }
-          />
-        ) : showSummary ? (
-          <SummaryView
-            summary={summary}
-            kindLabel={listedLabel}
-            analysis={x.activeView}
-            where={{
-              collection: collection?.id ?? null,
-              within: state.within ?? null,
-              search: state.q || null,
-            }}
-            mayWrite={canSomewhere('write_records')}
-            cannotWrite={why('write_records')}
-            onSaveAnalysis={(name, saved) =>
-              name === null
-                ? updateView.mutateAsync({
-                    summary: saved,
-                    filter_tree: x.filter,
-                    sort: x.sort,
-                    columns: x.columnNames,
-                  })
-                : createView
-                    .mutateAsync({
-                      name,
-                      summary: saved,
-                      filter_tree: x.filter,
-                      sort: x.sort,
-                      columns: x.columnNames,
-                    })
-                    .then((created) => patch({ view: created.name }))
-            }
-            // A group's records: its condition added to the filter, listed. One
-            // change to the address, so the two can't undo each other.
-            onDrill={(where) =>
-              setParams((prev) => {
-                const out = applyExplorerPatch(prev, {
-                  filter: withCondition(x.filter, where),
-                })
-                out.delete('show')
-                return out
-              })
-            }
-          />
-        ) : showMap ? (
-          <MapView
-            query={x.query}
-            collection={dataset}
-            fields={x.filterFields}
-          />
-        ) : showFiles ? (
-          <FilesView
-            // The search box looks for files here (their names, and the
-            // records they sit under), not for the records listed above them.
-            // Inside a record, its own files are among "their files" too.
-            // With no record chosen and no filter, they are every file here
-            // (the collection's, or every collection's), whatever level the
-            // rail shows: a kind of record narrows only what is filtered.
-            selection={{
-              ...selectionFor(
-                {
-                  ...x.query,
-                  search: undefined,
-                  schema:
-                    x.query.within || x.filter ? x.query.schema : undefined,
-                },
-                dataset,
-                undefined,
-                undefined,
-                true,
-              ),
-              with_within: !!x.query.within,
-            }}
-            search={state.q || undefined}
-          />
-        ) : (
-          <>
-            {dataset && (
-              <SelectionBar
-                selectedCount={selected.size}
-                pageCount={rows.length}
-                total={total}
-                allMatching={allMatching}
-                onSelectAllMatching={picked.selectAllMatching}
-                onDelete={() => setConfirmDelete(true)}
-                cannotDelete={mayDelete ? undefined : why('delete')}
-                deleting={deleteMany.isPending || deleteMatching.isPending}
-                // Runs are queued for the records ticked, not for "all matching":
-                // that would be every record the filters match, on every page.
-                actions={
-                  <>
-                    <FileAccessActions
-                      selection={exportContext(
-                        allMatching ? undefined : [...selected],
-                      )}
-                      folderName={`${folderName}-selected`}
-                      scopeSchema={listedName ?? undefined}
-                      builderTo={builderHref}
-                    />
-                    {canExportFiles && (
-                      // The files of the records ticked and of everything in
-                      // them: the one move dialog.
-                      <MoveToDriveButton
-                        label="Move files to drive…"
-                        what={`the files of ${bulkCount.toLocaleString()} record${bulkCount === 1 ? '' : 's'}`}
-                        pick={selectionFor(
-                          x.query,
-                          dataset,
-                          allMatching ? undefined : [...selected],
-                          undefined,
-                          true,
-                        )}
-                        onStarted={picked.clear}
-                      />
-                    )}
-                    {allKinds && (
-                      // Edits and workflows are about one kind's fields.
-                      <>
-                        <Button
-                          size="sm"
-                          disabled
-                          title={pickKind('run a workflow on them')}
-                        >
-                          Run workflow
-                        </Button>
-                        <Button
-                          size="sm"
-                          disabled
-                          title={pickKind('edit them together')}
-                        >
-                          Edit…
-                        </Button>
-                      </>
-                    )}
-                    {!allMatching && (
-                      <BulkRunWorkflow
-                        workflows={runnable}
-                        recordIds={[...selected]}
-                        onStarted={picked.clear}
-                      />
-                    )}
-                    {listed && bulkEditableFields(listed).length > 0 && (
-                      <Button
-                        size="sm"
-                        disabled={!mayWrite}
-                        title={mayWrite ? undefined : why('write_records')}
-                        onClick={() => setEditing(true)}
-                      >
-                        Edit…
-                      </Button>
-                    )}
-                    <Button
-                      size="sm"
-                      disabled={
-                        !can('change_structure') || (allKinds && allMatching)
-                      }
-                      title={
-                        allKinds && allMatching
-                          ? pickKind('release every matching record')
-                          : can('change_structure')
-                            ? 'Freeze these records, with the files they cite, as a citable release'
-                            : why('change_structure')
-                      }
-                      onClick={() =>
-                        navigate(
-                          `/releases/new?${new URLSearchParams(
-                            allMatching
-                              ? {
-                                  query: JSON.stringify(
-                                    queryBody(
-                                      { ...x.query, sort: undefined },
-                                      dataset,
-                                    ),
-                                  ),
-                                }
-                              : { records: [...selected].join(',') },
-                          )}`,
-                        )
-                      }
-                    >
-                      Release these…
-                    </Button>
-                    {(listed || allKinds) && (
-                      // Moving takes the records out of this collection, so
-                      // it asks for the same permission as deleting here.
-                      <Button
-                        size="sm"
-                        disabled={!mayDelete}
-                        title={mayDelete ? undefined : why('delete')}
-                        onClick={() => setMoving(true)}
-                      >
-                        Move to…
-                      </Button>
-                    )}
-                  </>
-                }
-              />
+        {charts.open && listed && !showChecks && (
+          <OpenChart
+            chart={charts.open}
+            title={chartTitle(
+              charts.open,
+              charts.usable,
+              listedLabel,
+              x.schemas,
             )}
+            records={records}
+            usable={charts.usable}
+            onFilter={setFilter}
+            onClose={() => charts.setOpen(null)}
+          />
+        )}
 
-            {x.page.error ? (
-              // In place of the rows only: the filters and search stay editable,
-              // since a bad one is usually what caused this.
-              <div className="space-y-2">
-                <ErrorState message={errorMessage(x.page.error)} />
-                {(x.hasSelection || state.q) && (
-                  <Button
-                    size="sm"
-                    onClick={() =>
-                      patch({
-                        filter: null,
-                        sort: [],
-                        cols: null,
-                        view: null,
-                        q: '',
+        <SplitPane
+          storageKey="explorer.charts.width"
+          label="Charts"
+          side={
+            chartsHidden || showChecks || x.page.error ? undefined : listed ? (
+              <ChartsColumn
+                model={charts}
+                listed={listed}
+                schemas={x.schemas}
+                kind={listedLabel}
+                records={records}
+                scope={{
+                  collection: collection?.id ?? null,
+                  within: x.rootId ?? null,
+                }}
+                onFilter={setFilter}
+                enabled={chartsOn}
+                onShow={() => setChartsAsked(true)}
+                onHide={() => setChartsHidden(true)}
+              />
+            ) : allKinds ? (
+              <KindsChart
+                levels={x.levels}
+                total={total}
+                onPick={pickLevel}
+                onHide={() => setChartsHidden(true)}
+              />
+            ) : undefined
+          }
+          main={
+            <div className="min-w-0 space-y-3">
+              {showChecks && listed ? (
+                <ChecksView
+                  query={x.query}
+                  collection={dataset}
+                  listed={listed}
+                  mayWrite={mayWrite}
+                  cannotWrite={why('write_records')}
+                  // The records: the condition added to the filter, listed, in one
+                  // change to the address (as a summary's group).
+                  onDrill={(where) =>
+                    setParams((prev) => {
+                      const out = applyExplorerPatch(prev, {
+                        filter: withCondition(x.filter, where),
                       })
-                    }
-                  >
-                    Clear filters
-                  </Button>
-                )}
-              </div>
-            ) : x.page.isLoading ? (
-              <TableSkeleton
-                columns={['w-8', 'w-24', 'w-32', 'w-32', 'w-24']}
-                rows={8}
-              />
-            ) : rows.length === 0 ? (
-              <EmptyState
-                title={`No ${listedLabel.toLowerCase()} match`}
-                message={
-                  state.q || x.filter
-                    ? 'Try removing a filter or clearing the search.'
-                    : 'Nothing here yet.'
-                }
-              />
-            ) : (
-              <div aria-busy={x.page.isFetching}>
-                <RecordsTable
-                  columns={columns}
-                  rows={rows}
-                  schemas={x.schemas}
-                  recordLink={(r) =>
-                    openNotesView
-                      ? `/records/${r.id}?tab=notes`
-                      : `/records/${r.id}`
+                      out.delete('show')
+                      return out
+                    })
                   }
-                  idHeader={allKinds ? 'Name' : undefined}
-                  showAddedColumn={!allKinds}
-                  sort={sort}
-                  onSortChange={toggleSort}
-                  selection={dataset ? picked.table : undefined}
-                  trailing={{
-                    header: 'Contains',
-                    render: (row) => (
-                      <DrillLinks
-                        counts={row.child_counts}
-                        byName={x.byName}
-                        onDrill={(child) => drill(row, child)}
-                      />
+                />
+              ) : showFiles ? (
+                <FilesView
+                  // The search box looks for files here (their names, and the
+                  // records they sit under), not for the records listed above them.
+                  // Inside a record, its own files are among "their files" too.
+                  // With no record chosen and no filter, they are every file here
+                  // (the collection's, or every collection's), whatever level the
+                  // rail shows: a kind of record narrows only what is filtered.
+                  selection={{
+                    ...selectionFor(
+                      {
+                        ...x.query,
+                        search: undefined,
+                        schema:
+                          x.query.within || x.filter
+                            ? x.query.schema
+                            : undefined,
+                      },
+                      dataset,
+                      undefined,
+                      undefined,
+                      true,
                     ),
+                    with_within: !!x.query.within,
                   }}
+                  search={state.q || undefined}
                 />
-                <Pagination
-                  page={state.page}
-                  pageSize={state.pageSize}
-                  total={total}
-                  onPage={(page) => patch({ page })}
-                  onPageSize={(pageSize) => patch({ pageSize })}
-                />
-              </div>
-            )}
-          </>
-        )}
-        {listed && listed.parent_id && !scope.root && x.chain.length === 0 && (
-          <p className="text-xs text-fg-muted">
-            Listing every {listedLabel.toLowerCase()} in this collection —{' '}
-            <Link
-              className="text-accent hover:underline"
-              to={`/schemas/${listed.parent_id}`}
-            >
-              open the schema it goes inside
-            </Link>{' '}
-            to start from the top of the hierarchy.
-          </p>
-        )}
+              ) : (
+                <>
+                  {dataset && (
+                    <SelectionBar
+                      selectedCount={selected.size}
+                      pageCount={rows.length}
+                      total={total}
+                      allMatching={allMatching}
+                      onSelectAllMatching={picked.selectAllMatching}
+                      onDelete={() => setConfirmDelete(true)}
+                      cannotDelete={mayDelete ? undefined : why('delete')}
+                      deleting={
+                        deleteMany.isPending || deleteMatching.isPending
+                      }
+                      // Runs are queued for the records ticked, not for "all matching":
+                      // that would be every record the filters match, on every page.
+                      actions={
+                        <>
+                          <FileAccessActions
+                            selection={exportContext(
+                              allMatching ? undefined : [...selected],
+                            )}
+                            folderName={`${folderName}-selected`}
+                            scopeSchema={listedName ?? undefined}
+                            builderTo={builderHref}
+                          />
+                          {canExportFiles && (
+                            // The files of the records ticked and of everything in
+                            // them: the one move dialog.
+                            <MoveToDriveButton
+                              label="Move files to drive…"
+                              what={`the files of ${bulkCount.toLocaleString()} record${bulkCount === 1 ? '' : 's'}`}
+                              pick={selectionFor(
+                                x.query,
+                                dataset,
+                                allMatching ? undefined : [...selected],
+                                undefined,
+                                true,
+                              )}
+                              onStarted={picked.clear}
+                            />
+                          )}
+                          {allKinds && (
+                            // Edits and workflows are about one kind's fields.
+                            <>
+                              <Button
+                                size="sm"
+                                disabled
+                                title={pickKind('run a workflow on them')}
+                              >
+                                Run workflow
+                              </Button>
+                              <Button
+                                size="sm"
+                                disabled
+                                title={pickKind('edit them together')}
+                              >
+                                Edit…
+                              </Button>
+                            </>
+                          )}
+                          {!allMatching && (
+                            <BulkRunWorkflow
+                              workflows={runnable}
+                              recordIds={[...selected]}
+                              onStarted={picked.clear}
+                            />
+                          )}
+                          {listed && bulkEditableFields(listed).length > 0 && (
+                            <Button
+                              size="sm"
+                              disabled={!mayWrite}
+                              title={
+                                mayWrite ? undefined : why('write_records')
+                              }
+                              onClick={() => setEditing(true)}
+                            >
+                              Edit…
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            disabled={
+                              !can('change_structure') ||
+                              (allKinds && allMatching)
+                            }
+                            title={
+                              allKinds && allMatching
+                                ? pickKind('release every matching record')
+                                : can('change_structure')
+                                  ? 'Freeze these records, with the files they cite, as a citable release'
+                                  : why('change_structure')
+                            }
+                            onClick={() =>
+                              navigate(
+                                `/releases/new?${new URLSearchParams(
+                                  allMatching
+                                    ? {
+                                        query: JSON.stringify(
+                                          queryBody(
+                                            { ...x.query, sort: undefined },
+                                            dataset,
+                                          ),
+                                        ),
+                                      }
+                                    : { records: [...selected].join(',') },
+                                )}`,
+                              )
+                            }
+                          >
+                            Release these…
+                          </Button>
+                          {(listed || allKinds) && (
+                            // Moving takes the records out of this collection, so
+                            // it asks for the same permission as deleting here.
+                            <Button
+                              size="sm"
+                              disabled={!mayDelete}
+                              title={mayDelete ? undefined : why('delete')}
+                              onClick={() => setMoving(true)}
+                            >
+                              Move to…
+                            </Button>
+                          )}
+                        </>
+                      }
+                    />
+                  )}
+
+                  {x.page.error ? (
+                    // In place of the rows only: the filters and search stay editable,
+                    // since a bad one is usually what caused this.
+                    <div className="space-y-2">
+                      <ErrorState message={errorMessage(x.page.error)} />
+                      {(x.hasSelection || state.q) && (
+                        <Button
+                          size="sm"
+                          onClick={() =>
+                            patch({
+                              filter: null,
+                              sort: [],
+                              cols: null,
+                              view: null,
+                              q: '',
+                            })
+                          }
+                        >
+                          Clear filters
+                        </Button>
+                      )}
+                    </div>
+                  ) : x.page.isLoading ? (
+                    <TableSkeleton
+                      columns={['w-8', 'w-24', 'w-32', 'w-32', 'w-24']}
+                      rows={8}
+                    />
+                  ) : rows.length === 0 ? (
+                    <EmptyState
+                      title={`No ${listedLabel.toLowerCase()} match`}
+                      message={
+                        state.q || x.filter
+                          ? 'Try removing a filter or clearing the search.'
+                          : 'Nothing here yet.'
+                      }
+                    />
+                  ) : (
+                    <div aria-busy={x.page.isFetching}>
+                      <RecordsTable
+                        columns={columns}
+                        rows={rows}
+                        schemas={x.schemas}
+                        recordLink={(r) =>
+                          openNotesView
+                            ? `/records/${r.id}?tab=notes`
+                            : `/records/${r.id}`
+                        }
+                        idHeader={allKinds ? 'Name' : undefined}
+                        showAddedColumn={!allKinds}
+                        sort={sort}
+                        onSortChange={toggleSort}
+                        selection={dataset ? picked.table : undefined}
+                        totals={
+                          totalsAsk.length > 0 && totals.data
+                            ? {
+                                label: `All ${total.toLocaleString()}`,
+                                cells: totalsCells(x.columnNames, totals.data),
+                              }
+                            : undefined
+                        }
+                        trailing={{
+                          header: 'Contains',
+                          render: (row) => (
+                            <DrillLinks
+                              counts={row.child_counts}
+                              byName={x.byName}
+                              onDrill={(child) => drill(row, child)}
+                            />
+                          ),
+                        }}
+                      />
+                      <Pagination
+                        page={state.page}
+                        pageSize={state.pageSize}
+                        total={total}
+                        onPage={(page) => patch({ page })}
+                        onPageSize={(pageSize) => patch({ pageSize })}
+                      />
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          }
+        />
       </div>
 
       {moving && dataset && (listed || allKinds) && (

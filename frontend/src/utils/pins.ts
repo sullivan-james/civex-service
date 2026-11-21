@@ -1,4 +1,4 @@
-import type { SavedKind } from './savedKinds'
+import { savedKind, type SavedKind } from './savedKinds'
 /**
  * Pins and recents, kept in this browser (civex has no user accounts to
  * attach them to). A pin is a shortcut to something the researcher keeps
@@ -26,7 +26,7 @@ export interface NavTarget {
   to: string
   /** Small muted detail, e.g. a record's schema or a view's schema. */
   context?: string
-  /** A saved thing's kind (List, Analysis, Export: `utils/savedKinds`). */
+  /** A saved thing's kind (Saved filter, Export: `utils/savedKinds`). */
   saved?: SavedKind
   /** Saved filters only: what is needed to count the matching records. */
   schema?: string
@@ -59,7 +59,11 @@ function isTarget(v: unknown): v is NavTarget {
 export function parseTargets(raw: string | null): NavTarget[] {
   try {
     const parsed = JSON.parse(raw ?? '[]')
-    return Array.isArray(parsed) ? parsed.filter(isTarget) : []
+    return Array.isArray(parsed)
+      ? parsed
+          .filter(isTarget)
+          .map((t) => (t.saved ? { ...t, saved: savedKind(t.saved) } : t))
+      : []
   } catch {
     return []
   }

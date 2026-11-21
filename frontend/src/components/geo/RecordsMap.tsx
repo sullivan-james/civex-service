@@ -33,6 +33,8 @@ export interface RecordsMapProps {
   points: RecordPoint[]
   tileUrl?: string | null
   tileAttribution?: string | null
+  /** Tailwind height of the map (default: the full map's). */
+  height?: string
 }
 
 /** How many names a popup lists before "and N more". */
@@ -50,6 +52,7 @@ export default function RecordsMap({
   points,
   tileUrl,
   tileAttribution,
+  height = 'h-[28rem]',
 }: RecordsMapProps) {
   const host = useRef<HTMLDivElement>(null)
   const parts = useRef<{
@@ -205,7 +208,7 @@ export default function RecordsMap({
         ref={host}
         role="application"
         aria-label="Map of the records listed. Click a record to see its name; a cluster to zoom in."
-        className="h-[28rem] w-full overflow-hidden rounded-md border border-border"
+        className={`${height} w-full overflow-hidden rounded-md border border-border`}
       />
       {picked && (
         <div

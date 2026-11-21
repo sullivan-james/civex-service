@@ -5,7 +5,7 @@ import {
   type QueryClient,
   type QueryKey,
 } from '@tanstack/react-query'
-import { schemasApi, type Schema, type Field } from '../api/schemas'
+import { schemasApi, type Chart, type Schema, type Field } from '../api/schemas'
 import { displayLabel } from '../utils/naming'
 import { useToast } from '../components/ui/ToastProvider'
 import { invalidateRecordNames } from './useRecordName'
@@ -97,6 +97,18 @@ export function useSetUniqueKeys(name: string) {
   return useMutation({
     mutationFn: (keys: string[][]) => schemasApi.setUniqueKeys(name, keys),
     onSuccess: () => toast.success(`Uniqueness rules for "${name}" saved`),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['schemas'] }),
+  })
+}
+
+/** Replace the charts a list of this kind opens with. */
+export function useSetCharts(name: string) {
+  const qc = useQueryClient()
+  const toast = useToast()
+  return useMutation({
+    mutationFn: (charts: Chart[]) => schemasApi.setCharts(name, charts),
+    onSuccess: () => toast.success('Charts saved'),
+    onError: (e) => toast.error(errorMessage(e)),
     onSettled: () => qc.invalidateQueries({ queryKey: ['schemas'] }),
   })
 }

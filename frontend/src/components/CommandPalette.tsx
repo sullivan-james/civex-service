@@ -78,7 +78,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           ),
         })),
         views: (views ?? []).map((v) =>
-          viewTarget({ id: v.schema_id, name: v.schema_name }, v.name, v),
+          viewTarget({ id: v.schema_id, name: v.schema_name }, v.name),
         ),
         exports: (exportDefs ?? []).map(exportTarget),
         records:

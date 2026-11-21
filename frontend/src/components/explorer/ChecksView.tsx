@@ -2,7 +2,6 @@ import { useState } from 'react'
 import {
   queryBody,
   recordsApi,
-  type QualityBlanks,
   type QualityFinding,
   type QualityIssue,
 } from '../../api/records'
@@ -14,10 +13,9 @@ import { useBulkSelection } from '../../hooks/useBulkSelection'
 import {
   Button,
   DataTable,
-  EmptyState,
   ErrorState,
-  InfoTip,
   Pagination,
+  Skeleton,
   Subheading,
   type DataTableColumn,
 } from '../ui'
@@ -75,8 +73,7 @@ export function ChecksView({
   )
 
   if (report.error) return <ErrorState message={errorMessage(report.error)} />
-  if (!report.data)
-    return <p className="text-sm text-fg-muted">Checking the records…</p>
+  if (!report.data) return <Skeleton className="h-24" />
 
   const total = kind?.records ?? 0
   const flagged = kind?.records_with_issues ?? 0
@@ -113,28 +110,16 @@ export function ChecksView({
 
   return (
     <div className={`space-y-4 ${report.isFetching ? 'opacity-70' : ''}`}>
-      <div className="flex flex-wrap items-center gap-2">
-        <p className="text-sm" aria-live="polite">
-          {flagged === 0 ? (
-            <>
-              Nothing to look at in {total.toLocaleString()} record
-              {total === 1 ? '' : 's'}.
-            </>
-          ) : (
-            <>
-              <span className="font-medium">{flagged.toLocaleString()}</span> of{' '}
-              {total.toLocaleString()} record{total === 1 ? '' : 's'} have
-              something to look at.
-            </>
-          )}
-        </p>
-        <InfoTip label="What is checked">
-          {(report.data.issues ?? [])
-            .map((i) => `${i.label}: ${i.description}`)
-            .join(' ')}{' '}
-          Unusual numbers are not looked for.
-        </InfoTip>
-      </div>
+      <p className="text-sm" aria-live="polite">
+        {flagged === 0 ? (
+          'No problems'
+        ) : (
+          <>
+            <span className="font-medium">{flagged.toLocaleString()}</span> of{' '}
+            {total.toLocaleString()} records
+          </>
+        )}
+      </p>
 
       {lines.length > 0 && (
         <DataTable
@@ -171,10 +156,6 @@ export function ChecksView({
           onDrill={onDrill}
           onClose={() => list.set({ issue: '', field: '' })}
         />
-      )}
-
-      {kind && kind.blanks.length > 0 && (
-        <EmptyFields blanks={kind.blanks} total={total} onDrill={onDrill} />
       )}
     </div>
   )
@@ -348,67 +329,5 @@ function IssueRecords({
         />
       )}
     </section>
-  )
-}
-
-/** How full each field is: how many records leave it empty. A required
- * field left empty is also a line above; here it is information. */
-function EmptyFields({
-  blanks,
-  total,
-  onDrill,
-}: {
-  blanks: QualityBlanks[]
-  total: number
-  onDrill: (where: FilterTreeWire) => void
-}) {
-  type Row = QualityBlanks
-  const columns: DataTableColumn<Row>[] = [
-    {
-      key: 'field',
-      header: 'Field',
-      render: (b) => (
-        <>
-          {b.field_label}
-          {b.required && <span className="text-fg-muted"> (required)</span>}
-        </>
-      ),
-    },
-    {
-      key: 'blank',
-      header: 'Empty',
-      align: 'right',
-      width: '7rem',
-      render: (b) => b.blank.toLocaleString(),
-    },
-    {
-      key: 'filled',
-      header: 'Filled',
-      align: 'right',
-      width: '7rem',
-      render: (b) =>
-        total ? `${Math.round((100 * (total - b.blank)) / total)}%` : '–',
-    },
-  ]
-  if (total === 0)
-    return <EmptyState title="No records" message="Nothing to check here." />
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <Subheading>How full each field is</Subheading>
-        <InfoTip label="About empty fields">
-          How many of the records listed leave each field empty. Only a field
-          marked required counts as something to look at. Click a field to list
-          the records that leave it empty.
-        </InfoTip>
-      </div>
-      <DataTable
-        columns={columns}
-        rows={blanks}
-        getRowId={(b) => b.field}
-        onRowClick={(b) => b.blank > 0 && b.filter && onDrill(b.filter)}
-        dense
-      />
-    </div>
   )
 }

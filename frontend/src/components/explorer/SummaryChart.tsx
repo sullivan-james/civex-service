@@ -1,7 +1,7 @@
 import type { RecordSummary } from '../../api/records'
 import { BarBreakdown } from '../analytics/BarBreakdown'
 import { TimeSeriesChart } from '../analytics/TimeSeriesChart'
-import { Button, Field, Select } from '../ui'
+import { Button, Field, ListButton, Select } from '../ui'
 import type { FilterTreeWire } from '../../utils/filterTree'
 import { formatSummaryValue } from '../../utils/summary'
 import {
@@ -10,6 +10,7 @@ import {
   measureAxisLabel,
   noChartReason,
   type ChartAside,
+  type SummaryChart as SummaryChartModel,
 } from '../../utils/summaryChart'
 
 /** Past this many categories, bars lie on their side so the names fit. */
@@ -28,6 +29,8 @@ export function SummaryChart({
   measureKey,
   onMeasure,
   onDrill,
+  compact = false,
+  lit,
 }: {
   summary: RecordSummary
   /** The measure on the value axis (null: the first that is a number). */
@@ -37,11 +40,17 @@ export function SummaryChart({
   onMeasure?: (key: string) => void
   /** List a group's records (none: bars and points are not links). */
   onDrill?: (where: FilterTreeWire) => void
+  /** Draw it small, for a card: one row per bar, each a button. */
+  compact?: boolean
+  /** Which bars are chosen (the rest are dimmed); none: nothing is. */
+  lit?: ((where: FilterTreeWire | null) => boolean) | null
 }) {
   const reason = noChartReason(summary)
   if (reason) return <p className="text-sm text-fg-muted">{reason}</p>
   const chart = buildSummaryChart(summary, measureKey)
   if (!chart) return null
+  if (compact && chart.series.length === 1)
+    return <BarRows chart={chart} onDrill={onDrill} lit={lit ?? null} />
   const measures = chartMeasures(summary.measure_columns)
   const valueLabel = measureAxisLabel(chart.measure)
   const drill = (index: number, seriesKey: string) => {
@@ -130,6 +139,79 @@ export function SummaryChart({
         items={chart.partial}
         onDrill={onDrill}
       />
+    </div>
+  )
+}
+
+/** How many rows a card shows before the rest wait for it to be opened. */
+const ROWS_SHOWN = 12
+
+/** A chart small enough for a card: a row per bar (label, bar, value), the
+ * same points, order and conditions as the full chart (`buildSummaryChart`).
+ * Each row is a button that says whether it is chosen. */
+function BarRows({
+  chart,
+  onDrill,
+  lit,
+}: {
+  chart: SummaryChartModel
+  onDrill?: (where: FilterTreeWire) => void
+  lit: ((where: FilterTreeWire | null) => boolean) | null
+}) {
+  const key = chart.series[0].key
+  const rows = [
+    ...chart.points.map((p, i) => ({
+      label: p.label,
+      value: p[key] as number | null,
+      where: chart.wheres[i][0],
+    })),
+    ...[...chart.partial, ...chart.noValue].map((a) => ({
+      label: a.label,
+      value: typeof a.value === 'number' ? a.value : null,
+      where: a.where,
+    })),
+  ]
+  if (rows.length === 0)
+    return <p className="text-sm text-fg-muted">Nothing to show</p>
+  const top = Math.max(...rows.map((r) => Math.abs(r.value ?? 0)), 0)
+  const shown = rows.slice(0, ROWS_SHOWN)
+  return (
+    <div>
+      {shown.map((r, i) => {
+        const on = lit ? lit(r.where) : false
+        const clickable = !!onDrill && !!r.where
+        return (
+          <ListButton
+            key={`${i}-${r.label}`}
+            className={`!min-h-8 rounded !px-1 !py-1 ${lit && !on ? 'opacity-50' : ''}`}
+            aria-pressed={clickable ? on : undefined}
+            disabled={!clickable}
+            onClick={() => r.where && onDrill?.(r.where)}
+          >
+            <span className="grid grid-cols-[minmax(0,6rem)_1fr_auto] items-center gap-2 text-fg">
+              <span className="truncate" title={r.label}>
+                {r.label}
+              </span>
+              <span className="h-3 overflow-hidden rounded-sm bg-canvas-inset">
+                <span
+                  className="block h-3 rounded-sm bg-accent"
+                  style={{
+                    width: `${top ? (Math.abs(r.value ?? 0) / top) * 100 : 0}%`,
+                  }}
+                />
+              </span>
+              <span className="tabular-nums">
+                {formatSummaryValue(r.value)}
+              </span>
+            </span>
+          </ListButton>
+        )
+      })}
+      {rows.length > shown.length && (
+        <p className="px-1 pt-1 text-xs text-fg-muted">
+          {rows.length - shown.length} more
+        </p>
+      )}
     </div>
   )
 }

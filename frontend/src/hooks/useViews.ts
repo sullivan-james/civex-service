@@ -12,10 +12,9 @@ import {
 } from '../api/views'
 import { useToast } from '../components/ui/ToastProvider'
 import { errorMessage } from '../lib/errors'
-import { SAVED_KINDS, viewKind } from '../utils/savedKinds'
 
 /** Everything a saved view shows up in: its schema's list, the palette's
- * every-view list, and the Analytics page (an analysis card names it). */
+ * every-filter list. */
 function invalidateViews(
   qc: ReturnType<typeof useQueryClient>,
   schemaName: string,
@@ -50,16 +49,6 @@ export function useView(schemaName: string, viewName: string) {
   })
 }
 
-/** A saved analysis worked out now, over the records it lists today. Under
- * `records`, so an edit to any record works it out again. */
-export function useViewSummary(schemaName: string, viewName: string) {
-  return useQuery({
-    queryKey: ['records', 'view-summary', schemaName, viewName],
-    queryFn: () => viewsApi.summary(schemaName, viewName),
-    enabled: !!schemaName && !!viewName,
-  })
-}
-
 export function useCreateView(schemaName: string) {
   const qc = useQueryClient()
   const toast = useToast()
@@ -67,9 +56,7 @@ export function useCreateView(schemaName: string) {
     mutationFn: (body: CreateViewBody) => viewsApi.create(schemaName, body),
     onSuccess: (created) => {
       invalidateViews(qc, schemaName)
-      toast.success(
-        `${SAVED_KINDS[viewKind(created)].word} “${created.name}” saved`,
-      )
+      toast.success(`Filter “${created.name}” saved`)
     },
   })
 }
@@ -82,9 +69,7 @@ export function useUpdateView(schemaName: string, viewName: string) {
       viewsApi.update(schemaName, viewName, body),
     onSuccess: (updated) => {
       invalidateViews(qc, schemaName)
-      toast.success(
-        `${SAVED_KINDS[viewKind(updated)].word} “${updated.name}” saved`,
-      )
+      toast.success(`Filter “${updated.name}” saved`)
     },
   })
 }

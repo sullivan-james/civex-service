@@ -1,7 +1,5 @@
 import { targetKeys, type NavTarget } from './pins'
 import { schemaRecordsPath } from './explorerState'
-import type { View } from '../api/views'
-import { viewKind } from './savedKinds'
 
 /** The shapes pins and recents are built from, in one place so every page
  * that offers a star describes the same thing the same way. */
@@ -36,18 +34,13 @@ export function recordTarget(r: {
 export function viewTarget(
   schema: { id: string; name: string },
   viewName: string,
-  view?: Pick<View, 'summary'> | null,
 ): NavTarget {
-  const collection = view?.summary?.collection
   return {
     key: targetKeys.view(schema.name, viewName),
     kind: 'view',
-    saved: view ? viewKind(view) : 'list',
+    saved: 'filter',
     label: viewName,
-    // An analysis opens where it was made (its collection's records).
-    to: collection
-      ? `/collections/${collection}?${new URLSearchParams({ schema: schema.name, view: viewName })}`
-      : schemaRecordsPath(schema.id, viewName),
+    to: schemaRecordsPath(schema.id, viewName),
     context: schema.name,
     schema: schema.name,
     view: viewName,

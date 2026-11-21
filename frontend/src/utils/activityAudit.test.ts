@@ -13,17 +13,11 @@ const entry = (over: Partial<AuditLogEntry>): AuditLogEntry =>
     ...over,
   }) as AuditLogEntry
 
-describe('Activity on analyses and the Analytics page', () => {
-  it('names a saved view by what it gives you', () => {
+describe('Activity on saved filters and the Analytics page', () => {
+  it('calls a saved view a saved filter', () => {
     expect(
-      describeAnyAuditEntry(
-        entry({ new_data: { name: 'By site', summary: { group_by: [] } } }),
-      ).title,
-    ).toBe('Analysis “By site” created')
-    expect(
-      describeAnyAuditEntry(entry({ new_data: { name: 'QC', summary: null } }))
-        .title,
-    ).toBe('Saved list “QC” created')
+      describeAnyAuditEntry(entry({ new_data: { name: 'QC' } })).title,
+    ).toBe('Saved filter “QC” created')
   })
 
   it('says the page was edited and links to it', () => {

@@ -1,10 +1,9 @@
 import { lazy, Suspense } from 'react'
 import { useSearchParams } from 'react-router'
-import { queryBody } from '../../api/records'
-import type { RecordQueryParams } from '../../api/query'
+import type { RecordSelectionBody } from '../../api/records'
 import { useRecordPoints } from '../../hooks/useRecords'
 import { useMapSettings } from '../../hooks/useMapSettings'
-import { ErrorState, Field, Select } from '../ui'
+import { ErrorState, Field, Select, Skeleton } from '../ui'
 import { errorMessage } from '../../lib/errors'
 import { displayLabel } from '../../utils/naming'
 import type { FilterableField } from '../../utils/hierarchy'
@@ -22,27 +21,32 @@ export function mapFields(fields: FilterableField[]): FilterableField[] {
   return fields.filter((f) => f.type === 'geo' && f.relation !== 'descendant')
 }
 
-/** The records the explorer lists, on a map: the same query (filter, search,
- * view, the record they are inside), by one of their location fields. */
+/** Records on a map, by one of their location fields: the ones `records`
+ * names (a list's own query, or an Analytics card's). `field` fixes the
+ * field (a chart's, `kind.field` for a kind above); without it the first is
+ * used and, opened large, another can be picked. `compact` is the size of a
+ * card. Clicking a point opens its record. */
 export function MapView({
-  query,
-  collection,
+  records,
   fields,
+  field,
+  compact = false,
 }: {
-  query: RecordQueryParams
-  collection: string | undefined
+  records: RecordSelectionBody
   /** The listed kind's fields and its relatives' (`filterableFields`). */
   fields: FilterableField[]
+  field?: string | null
+  compact?: boolean
 }) {
   const [params, setParams] = useSearchParams()
   const usable = mapFields(fields)
-  const chosen =
-    usable.find((f) => fieldKey(f) === params.get(FIELD_PARAM)) ?? usable[0]
+  const wanted = (compact ? null : params.get(FIELD_PARAM)) ?? field
+  const chosen = usable.find((f) => fieldKey(f) === wanted) ?? usable[0]
   const settings = useMapSettings()
   const body =
-    query.schema && chosen
+    records.schema_name && chosen
       ? {
-          ...queryBody({ ...query, sort: undefined }, collection),
+          ...records,
           field: chosen.name,
           field_schema:
             chosen.relation === 'self' ? undefined : chosen.sourceSchemaName,
@@ -50,12 +54,7 @@ export function MapView({
       : null
   const { data, isLoading, isFetching, error } = useRecordPoints(body)
 
-  if (!chosen)
-    return (
-      <p className="text-sm text-fg-muted">
-        This kind of record has no location field to map.
-      </p>
-    )
+  if (!chosen) return <p className="text-sm text-fg-muted">No location field</p>
   const label = (f: FilterableField) => {
     const own = displayLabel(f.name, f.label)
     return f.relation === 'self' ? own : `${f.sourceSchemaName} › ${own}`
@@ -64,56 +63,52 @@ export function MapView({
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        {usable.length > 1 && (
-          <>
-            <span className="text-sm text-fg-muted">Place by</span>
-            <Field label="Location field to map" hideLabel>
-              <Select
-                size="sm"
-                value={fieldKey(chosen)}
-                onChange={(e) =>
-                  setParams(
-                    (prev) => {
-                      const out = new URLSearchParams(prev)
-                      out.set(FIELD_PARAM, e.target.value)
-                      return out
-                    },
-                    { replace: true },
-                  )
-                }
-              >
-                {usable.map((f) => (
-                  <option key={fieldKey(f)} value={fieldKey(f)}>
-                    {label(f)}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          </>
+        {usable.length > 1 && !compact && (
+          <Field label="Location field" hideLabel>
+            <Select
+              size="sm"
+              value={fieldKey(chosen)}
+              onChange={(e) =>
+                setParams(
+                  (prev) => {
+                    const out = new URLSearchParams(prev)
+                    out.set(FIELD_PARAM, e.target.value)
+                    return out
+                  },
+                  { replace: true },
+                )
+              }
+            >
+              {usable.map((f) => (
+                <option key={fieldKey(f)} value={fieldKey(f)}>
+                  {label(f)}
+                </option>
+              ))}
+            </Select>
+          </Field>
         )}
         {data && (
           <p className="text-sm text-fg-muted" aria-live="polite">
             {data.truncated
-              ? `Showing the first ${data.points.length.toLocaleString()} of ${data.total.toLocaleString()} records with a ${label(chosen)}.`
-              : data.total === 0
-                ? `None of these records has a ${label(chosen)}.`
-                : `${data.total.toLocaleString()} with a ${label(chosen)}.`}
+              ? `First ${data.points.length.toLocaleString()} of ${data.total.toLocaleString()}`
+              : `${data.total.toLocaleString()} with a ${label(chosen).toLowerCase()}`}
           </p>
         )}
       </div>
       {error ? (
         <ErrorState message={errorMessage(error)} />
       ) : isLoading || !data ? (
-        <p className="text-sm text-fg-muted">Finding where they are…</p>
+        <Skeleton className={compact ? 'h-48' : 'h-[28rem]'} />
       ) : (
         <div className={isFetching ? 'opacity-70' : undefined}>
           <Suspense
-            fallback={<p className="text-sm text-fg-muted">Loading the map…</p>}
+            fallback={<Skeleton className={compact ? 'h-48' : 'h-[28rem]'} />}
           >
             <RecordsMap
               points={data.points}
               tileUrl={settings?.tile_url}
               tileAttribution={settings?.attribution}
+              height={compact ? 'h-48' : undefined}
             />
           </Suspense>
         </div>

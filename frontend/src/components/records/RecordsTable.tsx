@@ -65,6 +65,9 @@ export interface RecordsTableProps {
   onSortChange?: (columnName: string) => void
   /** An extra last column -- e.g. links down to a row's children. */
   trailing?: { header: string; render: (row: RecordsTableRow) => ReactNode }
+  /** A last row about every record listed, not just this page: what the
+   * first column says ("All 240") and a cell per column name. */
+  totals?: { label: string; cells: Record<string, string> }
 }
 
 function formatCellValue(value: unknown): string {
@@ -171,6 +174,7 @@ export function RecordsTable({
   sort,
   onSortChange,
   trailing,
+  totals,
 }: RecordsTableProps) {
   const cols: DataTableColumn<RecordsTableRow>[] = []
   if (showIdColumn)
@@ -243,6 +247,18 @@ export function RecordsTable({
       sort={sort}
       onSortChange={onSortChange}
       emptyTitle="No records"
+      footer={
+        totals && (
+          <tr className="bg-canvas-subtle text-xs text-fg-muted">
+            {selection && <td />}
+            {cols.map((c, i) => (
+              <td key={c.key} className="px-4 py-2">
+                {i === 0 ? totals.label : (totals.cells[c.key] ?? null)}
+              </td>
+            ))}
+          </tr>
+        )
+      }
     />
   )
 }

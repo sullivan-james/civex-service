@@ -13,6 +13,22 @@ export interface Field {
   position: number | null
 }
 
+/** A chart (civex/domain/charts.py): bars (what the records are grouped by
+ * and what each bar shows, as a summary writes them) or a map of a location
+ * field. The one definition a kind's charts, the explorer and the Analytics
+ * page share. */
+export interface Chart {
+  id: string
+  title?: string | null
+  /** A map: the location field (`field`, or `kind.field` for a kind above). */
+  map?: string | null
+  group_by: string[]
+  measures: string[]
+  sort?: { column: string; direction: 'asc' | 'desc' } | null
+  show?: 'table' | 'chart'
+  chart_measure?: string | null
+}
+
 export interface Schema {
   id: string
   name: string
@@ -26,6 +42,9 @@ export interface Schema {
    * values no two records may share (within the same parent record, or the
    * same collection for a top-level record). */
   unique_keys?: string[][]
+  /** The charts a list of this kind opens with, in order (none: suggested
+   * ones are shown). */
+  charts?: Chart[]
   fields: Field[]
   /** When this schema was soft-deleted. Null means live. */
   deleted_at: string | null
@@ -208,6 +227,8 @@ export const schemasApi = {
   ) => api.patch<Schema>(`/schemas/${name}`, body),
   setUniqueKeys: (name: string, keys: string[][]) =>
     api.put<Schema>(`/schemas/${name}/unique-keys`, { keys }),
+  setCharts: (name: string, charts: Chart[]) =>
+    api.put<Schema>(`/schemas/${name}/charts`, { charts }),
   delete: (name: string) => api.delete<void>(`/schemas/${name}`),
   listDeleted: () => api.get<Schema[]>('/schemas/deleted'),
   restore: (name: string) => api.post<Schema>(`/schemas/${name}/restore`, {}),

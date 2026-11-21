@@ -24,18 +24,8 @@ export function describeAnyAuditEntry(entry: AuditLogEntry): AuditSummary {
     case 'release':
       return describeReleaseEntry(entry)
     case 'view': {
-      // A saved view with a summary is an analysis; say which when the
-      // entry holds the whole view (an edit keeps only what changed).
-      const snap = (entry.new_data ?? entry.old_data ?? {}) as {
-        name?: string
-        summary?: unknown
-      }
-      const whole = 'summary' in snap
-      const word = snap.summary
-        ? 'Analysis'
-        : whole
-          ? 'Saved list'
-          : 'Saved view'
+      const snap = (entry.new_data ?? entry.old_data ?? {}) as { name?: string }
+      const word = 'Saved filter'
       return {
         title: `${word}${snap.name ? ` “${snap.name}”` : ''} ${PAST[entry.action] ?? entry.action}`,
         detail: null,
@@ -96,7 +86,7 @@ const NOUNS: Record<string, [string, string]> = {
   schema: ['schema', 'schemas'],
   field: ['field', 'fields'],
   dataset: ['collection', 'collections'],
-  view: ['saved view', 'saved views'],
+  view: ['saved filter', 'saved filters'],
   dashboard: ['Analytics page', 'Analytics pages'],
   note: ['note', 'notes'],
   release: ['release', 'releases'],

@@ -1,7 +1,6 @@
 import { api } from './client'
 import type { FilterTreeWire } from '../utils/filterTree'
 import type { SortEntry } from './query'
-import type { RecordSummary } from './records'
 
 export type ViewSortEntry = SortEntry
 
@@ -16,24 +15,6 @@ export interface View {
   /** How the view's files are arranged when exported as a folder or zip: a
    * folder per record above each file, or all in one folder. */
   files_layout: FilesLayout
-  /** Set for a saved analysis: the summary the explorer opens on and the
-   * Analytics page draws; null for a plain saved filter. */
-  summary?: SavedSummary | null
-}
-
-/** A summary kept on a view (civex/domain/summary.py `SavedSummary`): its
- * groupings and measures as the address writes them, the table's sort, table
- * or chart and the chart's measure, and where it was made. */
-export interface SavedSummary {
-  group_by: string[]
-  measures: string[]
-  sort: { column: string; direction: 'asc' | 'desc' } | null
-  show: 'table' | 'chart'
-  chart_measure: string | null
-  /** The collection's id; null for every collection. */
-  collection: string | null
-  within: string | null
-  search: string | null
 }
 
 export type FilesLayout = 'tree' | 'grouped' | 'flat'
@@ -49,7 +30,6 @@ export interface CreateViewBody {
   filter_tree?: FilterTreeWire | null
   sort?: ViewSortEntry[]
   files_layout?: FilesLayout
-  summary?: SavedSummary | null
 }
 
 export interface UpdateViewBody {
@@ -59,7 +39,6 @@ export interface UpdateViewBody {
   sort?: ViewSortEntry[]
   files_layout?: FilesLayout
   /** null makes an analysis a plain saved filter again. */
-  summary?: SavedSummary | null
 }
 
 export interface PreviewViewBody {
@@ -94,12 +73,6 @@ export const viewsApi = {
   delete: (schemaName: string, viewName: string) =>
     api.delete<void>(
       `/schemas/${encodeURIComponent(schemaName)}/views/${encodeURIComponent(viewName)}`,
-    ),
-
-  /** A saved analysis worked out now (what an Analytics card draws). */
-  summary: (schemaName: string, viewName: string) =>
-    api.get<RecordSummary>(
-      `/schemas/${encodeURIComponent(schemaName)}/views/${encodeURIComponent(viewName)}/summary`,
     ),
 
   preview: (schemaName: string, body: PreviewViewBody) =>
