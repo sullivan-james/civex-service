@@ -208,4 +208,15 @@ def test_a_field_index_is_built_and_serves_a_sort_and_a_range(pg):
 
     pg.index_svc.set_indexed("sample", "depth", False)
     pg.commit()
+    # A read in the same transaction holds a lock on records, which a
+    # CONCURRENTLY drop waits for: the repository ends it first instead of
+    # waiting on itself for ever.
+    pg.record_svc.count_records(sort)
     assert pg.index_svc.reconcile().dropped == [index_name(depth.id)]
+    # Each index keeps statistics on its value (a partial index's own are
+    # ignored by the planner's estimates); they go with it.
+    stats = {
+        r[0] for r in pg._session.execute(text("SELECT stxname FROM pg_statistic_ext"))
+    }
+    assert f"{index_name(taken.id)}_stats" in stats
+    assert f"{index_name(depth.id)}_stats" not in stats

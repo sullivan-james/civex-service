@@ -5,8 +5,9 @@ transaction (DDL and ANALYZE are transactional there, and a second connection
 would wait on the session's own write lock): the caller commits, as for any
 write. On PostgreSQL an index is built and dropped CONCURRENTLY, which can't
 run inside a transaction, so it uses a connection of its own in autocommit;
-call it with nothing pending in the session (the CLI and the server's
-`index_jobs` do), or the build waits for the session's transaction.
+the session's transaction is committed first (a CONCURRENTLY build waits for
+every transaction holding a lock on records, its caller's included), so call
+it with nothing pending (the CLI and the server's `index_jobs` do).
 """
 
 from __future__ import annotations
@@ -29,6 +30,12 @@ class LocalFieldIndexRepository:
         return self._s.get_bind().dialect.name == "postgresql"
 
     def _autocommit(self) -> Connection:
+        # A CONCURRENTLY build or drop waits for every transaction that holds
+        # a lock on records, this session's own included (any read takes
+        # one), and this thread would wait on itself for ever: end it first.
+        if self._s.new or self._s.dirty or self._s.deleted:
+            raise RuntimeError("Commit before changing indexes: changes are pending")
+        self._s.commit()
         engine = cast(Engine, self._s.get_bind())
         return engine.connect().execution_options(isolation_level="AUTOCOMMIT")
 

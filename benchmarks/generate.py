@@ -515,7 +515,6 @@ def main() -> None:
     ctx.dataset_svc.create(
         "reference-data",
         scope="global",
-        schemas=["site", "species", "observer"],
         description="Shared sites, species and observers",
     )
     years = [args.first_year + i for i in range(args.collections)]
@@ -523,7 +522,6 @@ def main() -> None:
         ctx.dataset_svc.create(
             f"survey-{y}",
             timezone="UTC",
-            schemas=["encounter", "recording", "selection"],
             description=f"{y} field season",
         )
     ctx.commit()

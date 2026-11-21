@@ -57,17 +57,37 @@ def existing(conn: Connection) -> set[str]:
     return {row[0] for row in conn.execute(text(sql), {"p": _LIKE})}
 
 
-def create_sql(spec: FieldIndexSpec, dialect: Any) -> str:
-    """The CREATE INDEX statement for `spec` in `dialect` (an `Engine.dialect`)."""
+def _value_sql(spec: FieldIndexSpec, dialect: Any) -> str:
     expr = FieldValue(
         column("data", Record.__table__.c.data.type), str(spec.field_id), spec.kind
     )
+    return str(expr.compile(dialect=dialect, compile_kwargs={"literal_binds": True}))
+
+
+def stats_name(name: str) -> str:
+    """PostgreSQL: the statistics object kept beside a field index."""
+    return f"{name}_stats"
+
+
+def stats_sql(spec: FieldIndexSpec, dialect: Any) -> str:
+    """PostgreSQL ignores a *partial* index's statistics when it estimates how
+    many records a condition on its expression matches (a range then counts as
+    a third of the table, and the planner scans everything rather than use the
+    index), so each index has statistics on the value of its own, which
+    `ANALYZE` fills (PostgreSQL 14+)."""
+    return (
+        f"CREATE STATISTICS IF NOT EXISTS {stats_name(spec.name)} "
+        f"ON ({_value_sql(spec, dialect)}) FROM records"
+    )
+
+
+def create_sql(spec: FieldIndexSpec, dialect: Any) -> str:
+    """The CREATE INDEX statement for `spec` in `dialect` (an `Engine.dialect`)."""
     where = column("deleted_at").is_(None) & (
         column("schema_id", Record.__table__.c.schema_id.type) == spec.schema_id
     )
-    literal = {"literal_binds": True}
-    on = expr.compile(dialect=dialect, compile_kwargs=literal)
-    cond = where.compile(dialect=dialect, compile_kwargs=literal)
+    on = _value_sql(spec, dialect)
+    cond = where.compile(dialect=dialect, compile_kwargs={"literal_binds": True})
     concurrently = " CONCURRENTLY" if dialect.name == "postgresql" else ""
     return (
         f"CREATE INDEX{concurrently} IF NOT EXISTS {spec.name} "
@@ -83,6 +103,8 @@ def create(conn: Connection, spec: FieldIndexSpec) -> None:
         # Not listed by `existing` but maybe there, invalid: start again.
         conn.exec_driver_sql(f"DROP INDEX CONCURRENTLY IF EXISTS {spec.name}")
     conn.exec_driver_sql(create_sql(spec, conn.dialect))
+    if conn.dialect.name == "postgresql":
+        conn.exec_driver_sql(stats_sql(spec, conn.dialect))
 
 
 def drop(conn: Connection, name: str) -> None:
@@ -90,6 +112,8 @@ def drop(conn: Connection, name: str) -> None:
         raise ValueError(f"'{name}' is not a managed field index")
     concurrently = " CONCURRENTLY" if conn.dialect.name == "postgresql" else ""
     conn.exec_driver_sql(f"DROP INDEX{concurrently} IF EXISTS {name}")
+    if conn.dialect.name == "postgresql":
+        conn.exec_driver_sql(f"DROP STATISTICS IF EXISTS {stats_name(name)}")
 
 
 def specs_for(conn: Connection, field_ids: list[uuid.UUID]) -> list[FieldIndexSpec]:

@@ -213,40 +213,75 @@ def table(rows: list[dict], cols: list[str]) -> None:
 
 # -- queries ------------------------------------------------------------------
 
-# The fields `queries` indexes for its "with" run (all on generate.py --flat's
-# kind): one of each type the explorer sorts and filters by.
-QUERY_INDEXED = ["depth", "taken", "site", "count"]
+# What `queries` reads, per kind of project: `generate.py --flat` (one kind of
+# twenty fields) or the study (`--preset`; its biggest kind, selections, in the
+# first survey). `indexed` are the fields indexed for the "with" run; `eq`,
+# `range`, `range2` filters, `sort`/`sort2` fields, `search` a word to find.
+QUERY_TARGETS = {
+    "flat": dict(
+        collection="flat",
+        kind="sample",
+        indexed=["depth", "taken", "site", "count"],
+        eq={"field": "site", "op": "eq", "value": "Site 007"},
+        range={"field": "depth", "op": "gt", "value": 3900},
+        range2={"field": "taken", "op": "gte", "value": "2024-12-01"},
+        sort="depth",
+        sort2="taken",
+        search="Site 007",
+    ),
+    "study": dict(
+        collection=None,  # the first survey-<year>
+        kind="selection",
+        indexed=["label", "confidence", "begin_s", "low_freq_hz"],
+        eq={"field": "label", "op": "eq", "value": "whistle"},
+        range={"field": "confidence", "op": "gt", "value": 0.98},
+        range2={"field": "low_freq_hz", "op": "lt", "value": 500},
+        sort="confidence",
+        sort2="begin_s",
+        search="whistle",
+    ),
+}
 
 
-def _query_ops():
+def _query_target(ctx) -> dict:
+    names = sorted(d.name for d in ctx.dataset_svc.list_all())
+    if "flat" in names:
+        return QUERY_TARGETS["flat"]
+    surveys = [n for n in names if n.startswith("survey-")]
+    if not surveys:
+        raise SystemExit(
+            "Nothing to query: make the project with generate.py --flat N or --preset."
+        )
+    return {**QUERY_TARGETS["study"], "collection": surveys[0]}
+
+
+def _query_ops(t: dict):
     from civex.domain.query import RecordQuery
 
     def q(**kw):
-        return RecordQuery(dataset="flat", schema="sample", **kw)
+        return RecordQuery(dataset=t["collection"], schema=t["kind"], **kw)
 
-    site = {"field": "site", "op": "eq", "value": "Site 007"}
-    deep = {"field": "depth", "op": "gt", "value": 3900}
-    when = {"field": "taken", "op": "gte", "value": "2024-12-01"}
+    asc, desc = [{"field": t["sort"]}], [{"field": t["sort"], "direction": "desc"}]
     return [
         ("first page", "page", q()),
-        ("filter = page", "page", q(filter_tree=site)),
-        ("filter = count", "count", q(filter_tree=site)),
-        ("range page", "page", q(filter_tree=deep)),
-        ("range count", "count", q(filter_tree=deep)),
-        ("date range count", "count", q(filter_tree=when)),
-        ("sort number asc", "page", q(sort=[{"field": "depth"}])),
-        ("sort number desc", "page", q(sort=[{"field": "depth", "direction": "desc"}])),
-        ("sort date asc", "page", q(sort=[{"field": "taken"}])),
-        ("sort, page 100", "deep", q(sort=[{"field": "depth"}])),
-        ("filter + sort", "page", q(filter_tree=site, sort=[{"field": "depth"}])),
-        ("search page", "page", q(search="Site 007")),
-        ("search count", "count", q(search="Site 007")),
+        ("filter = page", "page", q(filter_tree=t["eq"])),
+        ("filter = count", "count", q(filter_tree=t["eq"])),
+        ("range page", "page", q(filter_tree=t["range"])),
+        ("range count", "count", q(filter_tree=t["range"])),
+        ("second range count", "count", q(filter_tree=t["range2"])),
+        ("sort number asc", "page", q(sort=asc)),
+        ("sort number desc", "page", q(sort=desc)),
+        ("sort other field asc", "page", q(sort=[{"field": t["sort2"]}])),
+        ("sort, page 100", "deep", q(sort=asc)),
+        ("filter + sort", "page", q(filter_tree=t["eq"], sort=asc)),
+        ("search page", "page", q(search=t["search"])),
+        ("search count", "count", q(search=t["search"])),
     ]
 
 
-def _time_ops(ctx, reps: int) -> dict[str, float]:
+def _time_ops(ctx, target: dict, reps: int) -> dict[str, float]:
     out = {}
-    for label, how, query in _query_ops():
+    for label, how, query in _query_ops(target):
         times = []
         for rep in range(reps + 1):  # the first is a warm-up
             ctx._session.expunge_all()
@@ -262,10 +297,13 @@ def _time_ops(ctx, reps: int) -> dict[str, float]:
     return out
 
 
-def queries(reps: int) -> None:
-    """Time the explorer's reads on `generate.py --flat`'s collection through
-    civex's own services (in process: the query, not HTTP), first with no
-    field indexes, then with `QUERY_INDEXED` indexed. The planner's
+QUERY_COLUMNS = ["operation", "without (ms)", "with (ms)"]
+
+
+def queries(reps: int) -> dict:
+    """Time the explorer's reads on one kind in one collection through civex's
+    own services (in process: the query, not HTTP), first with no field
+    indexes, then with the target's `indexed` fields indexed. The planner's
     statistics are refreshed before each run, as civex now does. The
     project's own index choices are put back afterwards."""
     from civex.config import load_config
@@ -274,13 +312,14 @@ def queries(reps: int) -> None:
     print("\nqueries")
     ctx = build_local_context(load_config())
     try:
-        n = ctx.record_svc.count_records(_query_ops()[0][2])
-        if not n:
-            raise SystemExit("No `flat` collection: run generate.py --flat N first.")
+        target = _query_target(ctx)
+        n = ctx.record_svc.count_records(_query_ops(target)[0][2])
         config = ctx.config_store.load()
         chosen = list(config.db.indexed_fields)
         dialect = ctx._session.get_bind().dialect.name
-        print(f"  {n:,} records of one kind, {dialect}")
+        print(
+            f"  {n:,} records of {target['kind']} in {target['collection']}, {dialect}"
+        )
 
         config.db.indexed_fields = []
         ctx.config_store.save(config)
@@ -288,36 +327,83 @@ def queries(reps: int) -> None:
         ctx.commit()
         ctx.index_svc.after_bulk_write()
         ctx.commit()
-        without = _time_ops(ctx, reps)
+        without = _time_ops(ctx, target, reps)
 
-        for name in QUERY_INDEXED:
-            ctx.index_svc.set_indexed("sample", name, True)
+        for name in target["indexed"]:
+            ctx.index_svc.set_indexed(target["kind"], name, True)
         ctx.commit()
         built = ctx.index_svc.reconcile()
         ctx.commit()
-        with_ = _time_ops(ctx, reps)
+        with_ = _time_ops(ctx, target, reps)
 
         rows = [
             {"operation": k, "without (ms)": without[k], "with (ms)": with_[k]}
             for k in without
         ]
-        table(rows, ["operation", "without (ms)", "with (ms)"])
+        table(rows, QUERY_COLUMNS)
         print(f"  building {len(built.created)} indexes took {built.seconds:.1f}s")
-        REPORT["parts"]["queries"] = {
+        result = {
             "records": n,
+            "kind": target["kind"],
+            "collection": target["collection"],
             "dialect": dialect,
-            "indexed": QUERY_INDEXED,
+            "indexed": target["indexed"],
             "index_build_seconds": round(built.seconds, 1),
             "p50_ms": rows,
         }
+        REPORT["parts"]["queries"] = result
 
         config = ctx.config_store.load()
         config.db.indexed_fields = chosen
         ctx.config_store.save(config)
         ctx.index_svc.reconcile()
         ctx.commit()
+        return result
     finally:
         ctx.close()
+
+
+def queries_markdown(result: dict, slower: list[str] | None = None) -> str:
+    """The results as a markdown table (for a CI job summary)."""
+    lines = [
+        f"{result['records']:,} records of `{result['kind']}` in "
+        f"`{result['collection']}` ({result['dialect']}); median ms. "
+        f"Indexed for *with*: {', '.join(result['indexed'])} "
+        f"(built in {result['index_build_seconds']} s).",
+        "",
+        "| " + " | ".join(QUERY_COLUMNS) + " |",
+        "|" + "---|" * len(QUERY_COLUMNS),
+    ]
+    for row in result["p50_ms"]:
+        lines.append("| " + " | ".join(str(row[c]) for c in QUERY_COLUMNS) + " |")
+    if slower:
+        lines += ["", "**More than twice as slow as the previous run:**", ""]
+        lines += [f"- {s}" for s in slower]
+    return "\n".join(lines) + "\n"
+
+
+# A time this much (ms) over the baseline is never noise; below it a 2x jump
+# can be (a 2 ms query taking 5 ms on a busy runner), so it isn't counted.
+NOISE_MS = 10.0
+
+
+def slower_than(result: dict, baseline: dict, factor: float) -> list[str]:
+    """The operations more than `factor` times as slow as in `baseline` (and
+    more than `NOISE_MS` slower), in words. Operations or columns the
+    baseline lacks are skipped, so a changed benchmark never fails."""
+    before = {r["operation"]: r for r in baseline.get("p50_ms", [])}
+    out = []
+    for row in result["p50_ms"]:
+        old = before.get(row["operation"])
+        if not old:
+            continue
+        for col in QUERY_COLUMNS[1:]:
+            was, now = old.get(col), row.get(col)
+            if not was or now is None:
+                continue
+            if now > was * factor and now - was > NOISE_MS:
+                out.append(f"{row['operation']}, {col}: {was} ms then, {now} ms now")
+    return out
 
 
 # -- bench --------------------------------------------------------------------
@@ -998,6 +1084,18 @@ def main() -> None:
         default=0.0,
         help="chaos: seconds after the move starts copying before it is killed",
     )
+    ap.add_argument("--results", help="queries: write its results (JSON) here")
+    ap.add_argument("--markdown", help="queries: write them as a markdown table here")
+    ap.add_argument(
+        "--baseline",
+        help="queries: an earlier --results file; exit 1 when something got slower",
+    )
+    ap.add_argument(
+        "--max-slowdown",
+        type=float,
+        default=2.0,
+        help="queries: how many times slower than the baseline counts as slower",
+    )
     args = ap.parse_args()
 
     if not Path("_civex").is_dir():
@@ -1022,7 +1120,22 @@ def main() -> None:
     elif args.part in ("check",):
         ok = check(args.hash)
     elif args.part == "queries":
-        queries(args.reps)
+        result = queries(args.reps)
+        slower = None
+        if args.baseline:
+            try:
+                baseline = json.loads(Path(args.baseline).read_text())
+            except (OSError, ValueError):
+                print(f"  no usable baseline at {args.baseline}: nothing to compare")
+            else:
+                slower = slower_than(result, baseline, args.max_slowdown)
+                for line in slower:
+                    print(f"  SLOWER: {line}")
+                ok = not slower
+        if args.results:
+            Path(args.results).write_text(json.dumps(result, indent=2))
+        if args.markdown:
+            Path(args.markdown).write_text(queries_markdown(result, slower))
 
     out = Path(f"stress-{datetime.now():%Y%m%d-%H%M%S}.json")
     out.write_text(json.dumps(REPORT, indent=2, default=str))
