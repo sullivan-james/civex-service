@@ -16,7 +16,7 @@ import {
   SortableList,
   type MenuEntry,
 } from '../components/ui'
-import { Maximize2, Plus, Trash2 } from '../components/ui/icons'
+import { Plus, Trash2 } from '../components/ui/icons'
 import {
   AnalyticsFilterBar,
   JobSuccessRateWidget,
@@ -378,13 +378,9 @@ function ChartCard({
           >
             Records
           </Button>
-          <IconButton
-            icon={Maximize2}
-            size="sm"
-            variant="subtle"
-            aria-label={`Enlarge ${title}`}
-            onClick={onOpen}
-          />
+          <Button size="sm" variant="ghost" onClick={onOpen}>
+            Numbers
+          </Button>
         </div>
       }
     >

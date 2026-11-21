@@ -3,6 +3,8 @@ import type { FieldTypeDescriptor } from '../api/schemas'
 import type { FilterableField } from './hierarchy'
 import {
   buildChart,
+  chartPick,
+  chartTypes,
   chartTitle,
   recommendedCharts,
   type Usable,
@@ -97,14 +99,60 @@ describe('a chart’s title, in plain words', () => {
   })
 })
 
-describe('the two choices of a new chart', () => {
-  it('writes them as a summary does', () => {
-    expect(
-      buildChart({ by: 'taken', how: 'month', show: 'count', of: '' }),
-    ).toMatchObject({ group_by: ['taken:month'], measures: ['count'] })
+describe('building a chart: what, then how', () => {
+  it('writes the choices as a summary does, and reads them back', () => {
+    const line = buildChart({
+      by: 'taken',
+      how: 'month',
+      show: 'count',
+      of: '',
+      type: 'line',
+    })
+    expect(line).toMatchObject({
+      group_by: ['taken:month'],
+      measures: ['count'],
+      show: 'line',
+    })
+    expect(chartPick(line)).toEqual({
+      by: 'taken',
+      how: 'month',
+      show: 'count',
+      of: '',
+      type: 'line',
+    })
     expect(
       buildChart({ by: 'site', how: '', show: 'mean', of: 'depth' }),
     ).toMatchObject({ group_by: ['site'], measures: ['mean:depth'] })
+    const map = buildChart({
+      by: 'spot',
+      how: '',
+      show: 'count',
+      of: '',
+      type: 'map',
+    })
+    expect(map).toMatchObject({ map: 'spot', group_by: [] })
+    expect(chartPick(map).type).toBe('map')
+  })
+
+  it('offers the ways that fit what was chosen, the usual one first', () => {
+    expect(chartTypes(FIELDS, 'site', 'count')).toEqual([
+      'bars',
+      'pie',
+      'table',
+    ])
+    // An average does not add up to a whole: no pie.
+    expect(chartTypes(FIELDS, 'site', 'mean')).toEqual(['bars', 'table'])
+    expect(chartTypes(FIELDS, 'taken', 'count')).toEqual([
+      'line',
+      'bars',
+      'table',
+    ])
+    expect(chartTypes(FIELDS, 'depth', 'count')).toEqual([
+      'bars',
+      'line',
+      'table',
+    ])
+    expect(chartTypes(FIELDS, 'spot', 'count')).toEqual(['map'])
   })
 })
 

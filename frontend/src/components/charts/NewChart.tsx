@@ -12,6 +12,7 @@ import {
   Subheading,
 } from '../ui'
 import {
+  CHART_TYPES,
   PERIOD_CHOICES,
   SHOWS,
   barFields,
@@ -19,23 +20,24 @@ import {
   buildChart,
   chartPick,
   chartTitle,
+  chartTypes,
   kindsBeneath,
-  mapChart,
   measureFields,
   plural,
   recommendedCharts,
+  type ChartType,
   type Usable,
 } from '../../utils/charts'
-import { mapFields } from '../explorer/MapView'
 import { ChartView } from './ChartView'
 
 /** Building a chart, at full width: the choices on the left, the chart they
- * make on the right, drawn live over the records it will count. Two choices
- * make bars: **One bar for each** (a field; a date's period, a number's
- * steps) and **Each bar shows** (how many, or a number worked out). **A
- * map** needs none. Ready-made charts for the kind fill the choices in with
- * one click. Nothing is added until **Add chart**. With `initial` it changes
- * that chart instead (**Save**). */
+ * make on the right, drawn live over the records it will count. First
+ * **What**: what to **Show** (how many, or a number worked out) **For each**
+ * value of a field (a date's period, a number's steps; a location places the
+ * records). Then **How**: the ways that can be drawn (bars, a line, a pie, a
+ * table; a map for a location), the usual one first. Ready-made charts for
+ * the kind fill the choices in with one click. Nothing is added until **Add
+ * chart**. With `initial` it changes that chart instead (**Save**). */
 export function NewChart({
   listed,
   schemas,
@@ -59,15 +61,11 @@ export function NewChart({
   onCancel: () => void
 }) {
   const from = initial ? chartPick(initial) : null
-  const bars = barFields(usable)
+  const each = barFields(usable)
   const fields = usable.map((u) => u.field)
-  const geo = mapFields(fields)
   const below = kindsBeneath(listed, schemas)
   const recommended = recommendedCharts(usable)
-  const [what, setWhat] = useState<'bars' | 'map'>(
-    initial?.map ? 'map' : 'bars',
-  )
-  const [by, setBy] = useState(from?.by || (bars[0]?.value ?? ''))
+  const [by, setBy] = useState(from?.by || (each[0]?.value ?? ''))
   const startsAs = barHow(usable, from?.by ?? '')
   const [period, setPeriod] = useState(
     (startsAs === 'period' && from?.how) || 'month',
@@ -77,6 +75,7 @@ export function NewChart({
   )
   const [show, setShow] = useState(from?.show ?? 'count')
   const [of, setOf] = useState(from?.of ?? '')
+  const [picked, setPicked] = useState<ChartType | null>(from?.type ?? null)
   const [title, setTitle] = useState(initial?.title ?? '')
 
   const how = barHow(usable, by)
@@ -92,19 +91,18 @@ export function NewChart({
   const ofValue = ofChoices.some((c) => c.value === of)
     ? of
     : (ofChoices[0]?.value ?? '')
-  const valid =
-    what === 'map'
-      ? geo.length > 0
-      : !!by && (how !== 'steps' || Number(steps) > 0)
-  const drawn: Chart =
-    what === 'map' && geo[0]
-      ? mapChart(geo[0])
-      : buildChart({
-          by,
-          how: how === 'period' ? period : how === 'steps' ? steps : '',
-          show,
-          of: ofValue,
-        })
+  // How it can be drawn follows from what was chosen; the usual way unless
+  // another that still fits was picked.
+  const types = chartTypes(usable, by, show)
+  const type = picked && types.includes(picked) ? picked : types[0]
+  const valid = !!by && (how !== 'steps' || Number(steps) > 0)
+  const drawn = buildChart({
+    by,
+    how: how === 'period' ? period : how === 'steps' ? steps : '',
+    show,
+    of: ofValue,
+    type,
+  })
   const named = chartTitle(drawn, usable, kind, schemas)
   // Changed, a chart keeps its id (so its place) and its size.
   const chart: Chart = {
@@ -120,11 +118,11 @@ export function NewChart({
 
   /** Fill the choices in from a ready-made chart. */
   function use(c: Chart) {
-    const [field, cut = ''] = (c.group_by[0] ?? '').split(':')
-    setWhat('bars')
-    setBy(field)
-    if (cut) setPeriod(cut)
+    const pick = chartPick(c)
+    setBy(pick.by)
+    if (pick.how) setPeriod(pick.how)
     setShow('count')
+    setPicked(null)
   }
 
   return (
@@ -139,9 +137,7 @@ export function NewChart({
                   <Chip
                     key={c.group_by[0]}
                     selected={
-                      what === 'bars' &&
-                      show === 'count' &&
-                      drawn.group_by[0] === c.group_by[0]
+                      show === 'count' && drawn.group_by[0] === c.group_by[0]
                     }
                     onClick={() => use(c)}
                   >
@@ -151,55 +147,11 @@ export function NewChart({
               </div>
             </div>
           )}
-          {geo.length > 0 && (
-            <SegmentedControl
-              size="sm"
-              label="Kind of chart"
-              value={what}
-              onChange={setWhat}
-              options={[
-                { value: 'bars', label: 'Bars' },
-                { value: 'map', label: 'A map' },
-              ]}
-            />
-          )}
-          {what === 'bars' && (
-            <>
+          <section aria-label="What" className="space-y-3">
+            <Subheading>What</Subheading>
+            {type !== 'map' && (
               <div className="space-y-2">
-                <Field label="One bar for each">
-                  <Select value={by} onChange={(e) => setBy(e.target.value)}>
-                    {bars.map((b) => (
-                      <option key={b.value} value={b.value}>
-                        {b.label}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                {how === 'period' && (
-                  <SegmentedControl
-                    size="sm"
-                    label="Dates"
-                    value={period}
-                    onChange={setPeriod}
-                    options={PERIOD_CHOICES.map((p) => ({
-                      value: p.value,
-                      label: p.label,
-                    }))}
-                  />
-                )}
-                {how === 'steps' && (
-                  <Field label="In steps of">
-                    <Input
-                      type="number"
-                      min={0}
-                      value={steps}
-                      onChange={(e) => setSteps(e.target.value)}
-                    />
-                  </Field>
-                )}
-              </div>
-              <div className="space-y-2">
-                <Field label="Each bar shows">
+                <Field label="Show">
                   <Select
                     value={show}
                     onChange={(e) => setShow(e.target.value)}
@@ -229,16 +181,62 @@ export function NewChart({
                   </Field>
                 )}
               </div>
-            </>
-          )}
-          <Field label="Title">
-            <Input
-              value={title}
-              placeholder={named}
-              maxLength={200}
-              onChange={(e) => setTitle(e.target.value)}
+            )}
+            <div className="space-y-2">
+              <Field label="For each">
+                <Select value={by} onChange={(e) => setBy(e.target.value)}>
+                  {each.map((b) => (
+                    <option key={b.value} value={b.value}>
+                      {b.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              {how === 'period' && (
+                <SegmentedControl
+                  size="sm"
+                  label="Dates"
+                  value={period}
+                  onChange={setPeriod}
+                  options={PERIOD_CHOICES.map((p) => ({
+                    value: p.value,
+                    label: p.label,
+                  }))}
+                />
+              )}
+              {how === 'steps' && (
+                <Field label="In steps of">
+                  <Input
+                    type="number"
+                    min={0}
+                    value={steps}
+                    onChange={(e) => setSteps(e.target.value)}
+                  />
+                </Field>
+              )}
+            </div>
+          </section>
+          <section aria-label="How" className="space-y-3">
+            <Subheading>How</Subheading>
+            <SegmentedControl
+              size="sm"
+              label="Drawn as"
+              value={type}
+              onChange={setPicked}
+              options={types.map((t) => ({
+                value: t,
+                label: CHART_TYPES[t],
+              }))}
             />
-          </Field>
+            <Field label="Title">
+              <Input
+                value={title}
+                placeholder={named}
+                maxLength={200}
+                onChange={(e) => setTitle(e.target.value)}
+              />
+            </Field>
+          </section>
           <div className="flex gap-2 border-t border-border pt-4">
             <Button
               variant="primary"

@@ -1098,7 +1098,7 @@ export function RecordsExplorer({
                                 })
                               }
                             >
-                              Clear filters
+                              Reset
                             </Button>
                           )}
                         </div>

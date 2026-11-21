@@ -538,8 +538,10 @@ def measure_label(measure: str, field_label: str | None) -> str:
 
 # --- a chart's summary (`civex.domain.charts.Chart`)
 
-#: How a chart opens: its bars, or its table of numbers.
-SHOWS = ("table", "chart")
+#: How a chart is drawn: `chart` picks from what it groups by (a line over
+#: time for dates, bars otherwise); or bars, a line, a pie, or its table of
+#: numbers, as chosen.
+SHOWS = ("chart", "bars", "line", "pie", "table")
 SORT_DIRECTIONS = ("asc", "desc")
 
 
@@ -617,7 +619,7 @@ class SavedSummary:
             sort = {"column": sort["column"], "direction": sort.get("direction", "asc")}
         show = d.get("show") or "chart"
         if show not in SHOWS:
-            raise ValidationError(f"A chart opens as one of: {', '.join(SHOWS)}")
+            raise ValidationError(f"A chart is drawn as one of: {', '.join(SHOWS)}")
         chart = d.get("chart_measure") or None
         if chart is not None and chart not in [m.key for m in measures]:
             raise ValidationError("The chart draws one of its measures")

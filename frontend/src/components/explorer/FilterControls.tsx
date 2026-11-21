@@ -156,6 +156,11 @@ export function FilterControls({
             </>
           )}
         </Button>
+        {terms.length > 0 && (
+          <Button size="sm" variant="ghost" onClick={() => onChange(null)}>
+            Clear filters
+          </Button>
+        )}
       </div>
       {open && (
         <section

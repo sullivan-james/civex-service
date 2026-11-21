@@ -48,6 +48,19 @@ describe('clicking a bar', () => {
     })
   })
 
+  it('never adds the same range twice: a lone range is the whole filter', () => {
+    // An AND of "from" and "under" reads as two terms when it is all there is.
+    const one = toggleBar(null, step(5), depth, 'sample')
+    expect(one).toEqual(step(5))
+    expect(litBars(one, depth, 'sample')!(step(5))).toBe(true)
+    expect(filterForChart(one, depth, 'sample')).toBeNull()
+    expect(toggleBar(one, step(5), depth, 'sample')).toBeNull()
+    // A second range joins it as one term, and comes out again.
+    const two = toggleBar(one, step(10), depth, 'sample')
+    expect(two).toEqual({ or: [step(5), step(10)] })
+    expect(toggleBar(two, step(10), depth, 'sample')).toEqual(step(5))
+  })
+
   it('treats the empty bar as one choice', () => {
     const tree = toggleBar(is('north'), blank, site, 'sample')
     const lit = litBars(tree, site, 'sample')!

@@ -163,8 +163,9 @@ this browser. Every chart counts
 exactly the records listed: the same kind, place, search and filters. There
 are no charts until someone adds one.
 
-- **Click a bar** to filter by its value. The table and the other charts
-  follow, a chip appears above, and clicking the bar again takes it out.
+- **Click a bar** (or a point, or a slice) to filter by its value. The table
+  and the other charts follow, a chip appears above, and clicking it again
+  takes it out. **Clear filters** beside the chips removes them all.
   Several bars of one chart are "is any of". The chart you clicked keeps all
   its bars, with the chosen ones lit, so you can pick another.
 - A filter made from bars is the ordinary filter: it can be changed with
@@ -175,21 +176,24 @@ are no charts until someone adds one.
 - **Which charts.** A kind of record says which charts its lists open with
   (also on its **Charts** tab on the schema page). A kind starts with none.
 - **Add chart** opens the builder at full width: the choices on the left and
-  the chart they make on the right, drawn live. **One bar for each** is a
-  field (a date by year, month, week or day; a number in steps you choose).
-  **Each bar shows** is how many records, or the average, total, smallest or
-  largest of a number, how many have a field filled in, or how many records
-  of a kind beneath are inside them. **A map** is a chart too. **Quick
-  picks** fill the choices in for the kind's fields of choices and its first
-  date. Give it a title of your own if you like, then **Add chart**.
-- A chart's **⋮** menu has **Edit…** (the builder again, on that chart, where
-  you can also give it a title of your own), **Larger** / **Smaller**, **Move
-  up** / **Move down** and **Remove**. Every change is saved for the kind at
-  once, for everyone, like a saved filter (it takes the right to write
-  records).
-- The arrows button on a card enlarges it: the chart above the records with
-  its table of numbers and **Download numbers** (CSV, Excel, TSV, JSON). It
-  is in the address, so it is a link and Back closes it.
+  the chart they make on the right, drawn live. First **What**: what to
+  **Show** (how many records, or the average, total, smallest or largest of
+  a number, how many have a field filled in, or how many records of a kind
+  beneath are inside them) **For each** value of a field (a date by year,
+  month, week or day; a number in steps you choose; a location places the
+  records). Then **How** it is drawn, from the ways that fit: **Bars**,
+  **Line** (over dates or steps), **Pie** (of counts and totals), **Table**,
+  or **Map** (for a location). **Quick picks** fill the choices in for the
+  kind's fields of choices and its first date. Give it a title of your own
+  if you like, then **Add chart**.
+- Drag a chart by its title to move it. Its **⋮** menu has **Edit…** (the
+  builder again, on that chart, where you can also give it a title of your
+  own), **Larger** / **Smaller**, **See numbers** (the chart above the
+  records with its table of numbers and **Download numbers**: CSV, Excel,
+  TSV, JSON; it is in the address, so it is a link and Back closes it),
+  **Move up** / **Move down** and **Remove**. Every change is saved for the
+  kind at once, for everyone, like a saved filter (it takes the right to
+  write records).
 - **Add to Analytics page**, in a chart's menu, puts it on the
   [Analytics page](views.md#the-analytics-page) with the records it counts now.
 - A very large list (over 200,000 records) waits for **Show charts**.

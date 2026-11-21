@@ -114,8 +114,11 @@ class ChartModel(BaseModel):
         description="{column, direction}: its table sorted by one of its "
         "groupings' or measures' keys, 'asc' or 'desc'. None: the groups' order.",
     )
-    show: Literal["table", "chart"] = Field(
-        default="chart", description="Opens as a chart or as its table."
+    show: Literal["chart", "bars", "line", "pie", "table"] = Field(
+        default="chart",
+        description="How it is drawn: 'chart' picks from what it groups by (a "
+        "line over time for dates, bars otherwise), or bars, a line, a pie or "
+        "its table of numbers.",
     )
     chart_measure: str | None = Field(
         default=None,

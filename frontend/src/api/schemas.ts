@@ -27,7 +27,9 @@ export interface Chart {
   group_by: string[]
   measures: string[]
   sort?: { column: string; direction: 'asc' | 'desc' } | null
-  show?: 'table' | 'chart'
+  /** How it is drawn: `chart` (or absent) picks from what it groups by; or
+   * bars, a line, a pie or its table of numbers. */
+  show?: 'chart' | 'bars' | 'line' | 'pie' | 'table'
   chart_measure?: string | null
 }
 

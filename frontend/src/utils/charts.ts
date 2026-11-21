@@ -111,7 +111,7 @@ export function storedChart(chart: Chart): Chart {
   out.group_by = chart.group_by
   out.measures = chart.measures.length ? chart.measures : ['count']
   if (chart.sort) out.sort = chart.sort
-  if (chart.show === 'table') out.show = 'table'
+  if (chart.show && chart.show !== 'chart') out.show = chart.show
   if (chart.chart_measure) out.chart_measure = chart.chart_measure
   return out
 }
@@ -131,17 +131,52 @@ export interface Choice {
   label: string
 }
 
-/** "One bar for each": the fields whose values can be put in groups. */
+/** "For each": the fields whose values can be put in groups, then the
+ * location fields (records placed by one are a map). */
 export function barFields(usable: Usable[]): Choice[] {
-  return usable
-    .filter((u) => u.type.grouping)
-    .map((u) => ({
-      value: fieldKey(u.field),
-      label:
-        u.field.relation === 'self'
-          ? displayLabel(u.field.name, u.field.label)
-          : `${displayLabel(u.field.sourceSchemaName)} › ${displayLabel(u.field.name, u.field.label)}`,
-    }))
+  const name = (u: Usable) =>
+    u.field.relation === 'self'
+      ? displayLabel(u.field.name, u.field.label)
+      : `${displayLabel(u.field.sourceSchemaName)} › ${displayLabel(u.field.name, u.field.label)}`
+  return [
+    ...usable
+      .filter((u) => u.type.grouping)
+      .map((u) => ({ value: fieldKey(u.field), label: name(u) })),
+    ...usable
+      .filter((u) => isPlace(u))
+      .map((u) => ({ value: fieldKey(u.field), label: name(u) })),
+  ]
+}
+
+const isPlace = (u: Usable) =>
+  u.field.type === 'geo' && u.field.relation !== 'descendant'
+
+/** The ways a chart can be drawn, in plain words. */
+export type ChartType = 'bars' | 'line' | 'pie' | 'table' | 'map'
+export const CHART_TYPES: Record<ChartType, string> = {
+  bars: 'Bars',
+  line: 'Line',
+  pie: 'Pie',
+  table: 'Table',
+  map: 'Map',
+}
+/** What adds up to a whole, so a pie of it means something. */
+const ADDS_UP = new Set(['count', 'sum', 'filled', 'inside'])
+
+/** How what was chosen can be drawn, the usual way first: records by a
+ * location are a map; over dates a line, bars or a table; over steps of a
+ * number bars, a line or a table; over anything else bars, a pie (of
+ * something that adds up) or a table. */
+export function chartTypes(
+  usable: Usable[],
+  by: string,
+  show: string,
+): ChartType[] {
+  const u = find(usable, by)
+  if (u && isPlace(u)) return ['map']
+  if (u?.type.grouping === 'bucket') return ['line', 'bars', 'table']
+  if (u?.type.grouping === 'bin') return ['bars', 'line', 'table']
+  return ['bars', ...(ADDS_UP.has(show) ? (['pie'] as const) : []), 'table']
 }
 
 /** How a field's bars are cut: a date's periods, a number's steps. */
@@ -221,10 +256,20 @@ export function buildChart(pick: {
   how: string
   show: string
   of: string
+  /** How it is drawn (`chartTypes`); none: the usual way. */
+  type?: ChartType
 }): Chart {
+  if (pick.type === 'map')
+    return { id: newChartId(), map: pick.by, group_by: [], measures: [] }
   const group = pick.by ? [pick.how ? `${pick.by}:${pick.how}` : pick.by] : []
   const measure = pick.show === 'count' ? 'count' : `${pick.show}:${pick.of}`
-  return { id: newChartId(), group_by: group, measures: [measure] }
+  const chart: Chart = {
+    id: newChartId(),
+    group_by: group,
+    measures: [measure],
+  }
+  if (pick.type) chart.show = pick.type
+  return chart
 }
 
 /** A chart as the builder's choices, to change it: the reverse of
@@ -234,7 +279,10 @@ export function chartPick(chart: Chart): {
   how: string
   show: string
   of: string
+  type: ChartType | null
 } {
+  if (chart.map)
+    return { by: chart.map, how: '', show: 'count', of: '', type: 'map' }
   const { field, how } = splitGroupKey(chart.group_by[0] ?? '')
   const measure = chart.chart_measure ?? chart.measures[0] ?? 'count'
   const at = measure.indexOf(':')
@@ -243,15 +291,7 @@ export function chartPick(chart: Chart): {
     how,
     show: at < 0 ? measure : measure.slice(0, at),
     of: at < 0 ? '' : measure.slice(at + 1),
-  }
-}
-
-export function mapChart(field: FilterableField): Chart {
-  return {
-    id: newChartId(),
-    map: fieldKey(field),
-    group_by: [],
-    measures: [],
+    type: chart.show && chart.show !== 'chart' ? chart.show : null,
   }
 }
 

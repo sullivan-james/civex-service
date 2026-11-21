@@ -100,19 +100,30 @@ function rebuild(terms: FilterTreeWire[]): FilterTreeWire | null {
   return terms.length === 1 ? terms[0] : { and: terms }
 }
 
-/** Where the tree's one simple term about the chart's field is (-1: none,
- * or the field is used in a way a chart can't show). */
-function simpleTermIndex(
+/** The tree's simple choice about the chart's field: which top-level terms
+ * hold it and the alternatives it allows. It is one term (a value, several,
+ * a range, an OR of them), or a range written flat as two terms ("from" and
+ * "under": what a lone range is when it is the whole filter, since an AND
+ * of two conditions reads as two terms). Null when the field isn't used, or
+ * is used in a way a chart can't show. */
+function chosen(
   tree: FilterTreeWire | null,
   of: BarField,
   listed: string,
-): number {
+): { at: number[]; alts: FilterTreeWire[] } | null {
   const terms = topLevelTerms(tree)
-  const touching = terms
+  const at = terms
     .map((t, i) => (mentions(t, of, listed) ? i : -1))
     .filter((i) => i >= 0)
-  if (touching.length !== 1) return -1
-  return about(terms[touching[0]], of, listed) ? touching[0] : -1
+  if (at.length === 1 && about(terms[at[0]], of, listed))
+    return { at, alts: alternatives(terms[at[0]]) }
+  if (at.length === 2) {
+    const [a, b] = at.map((i) => terms[i])
+    const ops = [a, b].map((t) => (isGroup(t) ? '' : t.op)).sort()
+    if (ops[0] === 'gte' && ops[1] === 'lt')
+      return { at, alts: [{ and: [a, b] }] }
+  }
+  return null
 }
 
 /** The filter a chart counts with: the explorer's, without the simple
@@ -122,29 +133,28 @@ export function filterForChart(
   of: BarField | undefined,
   listed: string,
 ): FilterTreeWire | null {
-  if (!of) return tree
-  const at = simpleTermIndex(tree, of, listed)
-  if (at < 0) return tree
-  return rebuild(topLevelTerms(tree).filter((_, i) => i !== at))
+  const own = of ? chosen(tree, of, listed) : null
+  if (!own) return tree
+  return rebuild(topLevelTerms(tree).filter((_, i) => !own.at.includes(i)))
 }
 
 /** A test for "is this bar chosen?": true for a bar whose condition the
- * tree's simple term about the field allows. Null when nothing is lit. */
+ * tree's simple choice about the field allows. Null when nothing is lit. */
 export function litBars(
   tree: FilterTreeWire | null,
   of: BarField | undefined,
   listed: string,
 ): ((where: FilterTreeWire | null) => boolean) | null {
-  if (!of) return null
-  const at = simpleTermIndex(tree, of, listed)
-  if (at < 0) return null
-  const chosen = new Set(alternatives(topLevelTerms(tree)[at]).map(key))
+  const own = of ? chosen(tree, of, listed) : null
+  if (!own) return null
+  const keys = new Set(own.alts.map(key))
   return (where) =>
-    !!where && alternatives(where).every((alt) => chosen.has(key(alt)))
+    !!where && alternatives(where).every((alt) => keys.has(key(alt)))
 }
 
 /** Click a bar: its condition goes into the tree, or comes out when it was
- * there. Several bars of one chart are alternatives of one term. */
+ * there (so clicking the same one again never adds it twice). Several bars
+ * of one chart are alternatives of one term. */
 export function toggleBar(
   tree: FilterTreeWire | null,
   where: FilterTreeWire,
@@ -152,20 +162,19 @@ export function toggleBar(
   listed: string,
 ): FilterTreeWire | null {
   const terms = topLevelTerms(tree)
-  const at = of ? simpleTermIndex(tree, of, listed) : -1
-  if (at < 0) return rebuild([...terms, where])
-  const have = alternatives(terms[at])
+  const own = of ? chosen(tree, of, listed) : null
+  if (!own) return rebuild([...terms, where])
   const clicked = alternatives(where)
   const clickedKeys = new Set(clicked.map(key))
-  const haveKeys = new Set(have.map(key))
+  const haveKeys = new Set(own.alts.map(key))
   const on = clicked.every((alt) => haveKeys.has(key(alt)))
   const next = on
-    ? have.filter((alt) => !clickedKeys.has(key(alt)))
-    : [...have, ...clicked.filter((alt) => !haveKeys.has(key(alt)))]
+    ? own.alts.filter((alt) => !clickedKeys.has(key(alt)))
+    : [...own.alts, ...clicked.filter((alt) => !haveKeys.has(key(alt)))]
   const term = termOf(next)
-  const out = [...terms]
-  if (term) out[at] = term
-  else out.splice(at, 1)
+  // The choice goes back where it was, as one term.
+  const out = terms.filter((_, i) => !own.at.includes(i))
+  if (term) out.splice(own.at[0], 0, term)
   return rebuild(out)
 }
 

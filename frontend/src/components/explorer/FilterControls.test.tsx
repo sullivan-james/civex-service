@@ -158,6 +158,25 @@ describe('FilterControls', () => {
   })
 })
 
+describe('clearing', () => {
+  it('takes every filter out at once, and is not offered when there are none', async () => {
+    const onChange = vi.fn()
+    const { rerender } = renderControls(
+      {
+        and: [
+          { field: 'note', op: 'eq', value: 'x' },
+          { field: 'age', op: 'gt', value: 3 },
+        ],
+      },
+      onChange,
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
+    expect(onChange).toHaveBeenCalledWith(null)
+    rerender(null)
+    expect(screen.queryByRole('button', { name: 'Clear filters' })).toBeNull()
+  })
+})
+
 describe('values to pick from', () => {
   it('shows how many of the listed records hold each value, and picks one', async () => {
     const user = userEvent.setup()

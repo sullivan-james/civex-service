@@ -74,7 +74,7 @@ def test_a_kind_keeps_its_charts_as_the_server_writes_them(ctx: AppContext, stud
         ({"measures": ["mean:site"]}, "mean"),
         ({"group_by": ["site:month"]}, "not a date"),
         ({"measures": ["count"], "sort": {"column": "mean:depth"}}, "sorted by"),
-        ({"show": "pie"}, "opens as"),
+        ({"show": "donut"}, "drawn as"),
         ({"size": "huge"}, "size is one of"),
         ({"measures": ["count"], "chart_measure": "sum:depth"}, "chart draws"),
         ({"colour": "red"}, "no colour"),

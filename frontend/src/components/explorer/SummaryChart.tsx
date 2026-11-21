@@ -1,5 +1,6 @@
 import type { RecordSummary } from '../../api/records'
 import { BarBreakdown } from '../analytics/BarBreakdown'
+import { PieBreakdown } from '../analytics/PieBreakdown'
 import { TimeSeriesChart } from '../analytics/TimeSeriesChart'
 import { Button, Field, ListButton, Select } from '../ui'
 import type { FilterTreeWire } from '../../utils/filterTree'
@@ -31,6 +32,7 @@ export function SummaryChart({
   onDrill,
   compact = false,
   lit,
+  as,
 }: {
   summary: RecordSummary
   /** The measure on the value axis (null: the first that is a number). */
@@ -42,6 +44,9 @@ export function SummaryChart({
   onDrill?: (where: FilterTreeWire) => void
   /** Draw it small, for a card: one row per bar, each a button. */
   compact?: boolean
+  /** Draw it as bars, a line or a pie whatever its grouping would pick
+   * (none: a line over time for dates, bars otherwise). */
+  as?: 'bars' | 'line' | 'pie' | null
   /** Which bars are chosen (the rest are dimmed); none: nothing is. */
   lit?: ((where: FilterTreeWire | null) => boolean) | null
 }) {
@@ -52,7 +57,16 @@ export function SummaryChart({
   // In a card, categories are a row per bar (each a button that says
   // whether it is chosen); a line over time and a histogram keep their own
   // form, smaller, so a card looks like the chart it opens as.
-  if (compact && chart.series.length === 1 && chart.form === 'bars')
+  const draw =
+    as === 'pie' && chart.series.length > 1
+      ? 'bars' // a pie is of one thing
+      : (as ?? (chart.form === 'time' ? 'line' : 'bars'))
+  if (
+    compact &&
+    draw === 'bars' &&
+    chart.series.length === 1 &&
+    chart.form === 'bars'
+  )
     return <BarRows chart={chart} onDrill={onDrill} lit={lit ?? null} />
   const measures = chartMeasures(summary.measure_columns)
   const valueLabel = measureAxisLabel(chart.measure)
@@ -96,7 +110,20 @@ export function SummaryChart({
       >
         {chart.points.length === 0 ? (
           <p className="text-sm text-fg-muted">Nothing to draw on the axis.</p>
-        ) : chart.form === 'time' ? (
+        ) : draw === 'pie' ? (
+          <PieBreakdown
+            data={chart.points.map((p) => ({
+              label: p.label,
+              value: Number(p[chart.series[0].key] ?? 0),
+            }))}
+            height={height}
+            formatValue={formatValue}
+            onSliceClick={
+              onDrill ? (i) => drill(i, chart.series[0].key) : undefined
+            }
+            animate={false}
+          />
+        ) : draw === 'line' ? (
           <TimeSeriesChart
             data={chart.points}
             series={chart.series}
@@ -114,7 +141,7 @@ export function SummaryChart({
             data={chart.points as never}
             series={chart.series}
             stacked={chart.stacked}
-            contiguous={chart.form === 'histogram'}
+            contiguous={chart.form !== 'bars'}
             layout={sideways ? 'vertical' : 'horizontal'}
             categoryKey="axis"
             tooltipKey="label"

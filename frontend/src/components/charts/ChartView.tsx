@@ -83,18 +83,24 @@ export function ChartView({
       onDrill={onDrill}
       compact={small}
       lit={lit}
+      as={
+        chart.show === 'bars' || chart.show === 'line' || chart.show === 'pie'
+          ? chart.show
+          : null
+      }
     />
   )
   if (!large)
     return (
       <div className={isFetching ? 'opacity-70' : undefined}>
-        {chart.group_by.length === 0 ? (
+        {chart.group_by.length === 0 || chart.show === 'table' ? (
           <SummaryResult
             data={data}
             isLoading={isLoading}
             show="table"
-            sort={null}
+            sort={chart.sort ?? null}
             chartMeasure={null}
+            onDrill={onDrill}
           />
         ) : (
           drawn
@@ -114,7 +120,9 @@ export function ChartView({
   return (
     <div className="space-y-3">
       <div className="grid gap-6 lg:grid-cols-[2fr_1fr]">
-        <div className="min-w-0">{chart.group_by.length > 0 && drawn}</div>
+        <div className="min-w-0">
+          {chart.group_by.length > 0 && chart.show !== 'table' && drawn}
+        </div>
         <div className="min-w-0">
           <SummaryResult
             data={data}

@@ -190,12 +190,12 @@ describe('the Analytics page', () => {
     )
   })
 
-  it('enlarges a chart, with its numbers, and closes it', async () => {
+  it('shows a chart with its numbers, and closes it', async () => {
     const user = userEvent.setup()
     cards = [PER_SITE]
     renderPage()
     await screen.findByText('North')
-    await user.click(screen.getByRole('button', { name: /^Enlarge/ }))
+    await user.click(screen.getByRole('button', { name: 'Numbers' }))
     expect(
       await screen.findByRole('button', { name: /Download numbers/ }),
     ).toBeInTheDocument()

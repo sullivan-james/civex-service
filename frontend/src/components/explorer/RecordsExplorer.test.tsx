@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
@@ -941,7 +947,7 @@ describe('RecordsExplorer', () => {
       screen.getByRole('button', { name: /Remove filter/ }),
     ).toBeInTheDocument()
     expect(screen.getByRole('searchbox')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Clear filters' }))
+    await user.click(screen.getByRole('button', { name: 'Reset' }))
     expect(await screen.findByText('a.txt')).toBeInTheDocument()
   })
 
@@ -1537,7 +1543,7 @@ describe('charts beside the records', () => {
     await user.click(screen.getByRole('button', { name: /Add chart/ }))
     // The builder is at full width, in the address, with a live preview.
     await waitFor(() => expect(search().get('chart')).toBe('new'))
-    await user.selectOptions(screen.getByLabelText('One bar for each'), 'rate')
+    await user.selectOptions(screen.getByLabelText('For each'), 'rate')
     const preview = screen.getByRole('region', { name: 'Preview' })
     expect(
       within(preview).getByRole('heading', {
@@ -1545,15 +1551,33 @@ describe('charts beside the records', () => {
       }),
     ).toBeInTheDocument()
     expect(await within(preview).findAllByText('96')).not.toHaveLength(0)
+    // What comes first, then how it is drawn: the ways that fit, bars first.
+    const what = screen.getByRole('region', { name: 'What' })
+    const how = screen.getByRole('region', { name: 'How' })
+    expect(
+      what.compareDocumentPosition(how) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(
+      within(how)
+        .getAllByRole('radio')
+        .map((r) => r.getAttribute('aria-label') ?? r.textContent),
+    ).toEqual(['Bars', 'Pie', 'Table'])
+    await user.click(within(how).getByRole('radio', { name: 'Pie' }))
     await user.click(screen.getByRole('button', { name: 'Add chart' }))
     await waitFor(() => expect(search().get('chart')).toBeNull())
     // No second step: it is the kind's chart now, for every list of it.
     await waitFor(() => expect(put).toHaveLength(2))
-    expect(put![1]).toMatchObject({ group_by: ['rate'], measures: ['count'] })
+    expect(put![1]).toMatchObject({
+      group_by: ['rate'],
+      measures: ['count'],
+      show: 'pie',
+    })
     expect(search().get('charts')).toBeNull()
     expect(screen.queryByRole('button', { name: /Use for every/ })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Put back' })).toBeNull()
-    expect(await bar(/96/)).toBeInTheDocument()
+    expect(
+      await screen.findByText('How many recordings per rate'),
+    ).toBeInTheDocument()
   })
 
   const menu = async (
@@ -1588,7 +1612,7 @@ describe('charts beside the records', () => {
       screen.getByRole('heading', { name: 'Edit chart' }),
     ).toBeInTheDocument()
     // It opens on the chart as it is.
-    expect(screen.getByLabelText('One bar for each')).toHaveValue('rate')
+    expect(screen.getByLabelText('For each')).toHaveValue('rate')
     await user.type(screen.getByLabelText('Title'), 'Sample rates')
     await user.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(put).toHaveLength(2))
@@ -1600,6 +1624,19 @@ describe('charts beside the records', () => {
     })
     await waitFor(() => expect(search().get('chart')).toBeNull())
     expect(await screen.findByText('Sample rates')).toBeInTheDocument()
+  })
+
+  it('drags a chart by its title to another place', async () => {
+    renderExplorer({}, '/collections/hb?schema=recording')
+    await bar(/Georges/)
+    const rate = screen.getByText('How many recordings per rate')
+    const site = screen.getByText('How many recordings per site')
+    const transfer = { effectAllowed: '' }
+    fireEvent.dragStart(rate, { dataTransfer: transfer })
+    fireEvent.dragOver(site, { dataTransfer: transfer })
+    fireEvent.drop(site, { dataTransfer: transfer })
+    await waitFor(() => expect(put).toHaveLength(2))
+    expect((put as { id: string }[]).map((c) => c.id)).toEqual(['b', 'a'])
   })
 
   it('makes a chart larger and smaller from its menu', async () => {
@@ -1644,17 +1681,24 @@ describe('charts beside the records', () => {
     // Building one offers nothing ready-made here (no fields of choices),
     // and the two choices make it.
     await user.click(within(column).getByRole('button', { name: /Add chart/ }))
-    await user.selectOptions(screen.getByLabelText('One bar for each'), 'rate')
+    await user.selectOptions(screen.getByLabelText('For each'), 'rate')
     await user.click(screen.getByRole('button', { name: 'Add chart' }))
     expect(await bar(/96/)).toBeInTheDocument()
     expect(put).toHaveLength(1)
   })
 
-  it('enlarges a chart, in the address, with its numbers, and closes it', async () => {
+  it('shows a chart with its numbers, in the address, and closes it', async () => {
     const user = userEvent.setup()
     renderExplorer({}, '/collections/hb?schema=recording')
     await bar(/Georges/)
-    await user.click(screen.getAllByRole('button', { name: /^Enlarge/ })[0])
+    await user.click(
+      screen.getByRole('button', {
+        name: 'More for How many recordings per site',
+      }),
+    )
+    await user.click(
+      await screen.findByRole('menuitem', { name: 'See numbers' }),
+    )
     await waitFor(() => expect(search().get('chart')).toBe('a'))
     expect(
       await screen.findByRole('button', { name: /Download numbers/ }),
@@ -1863,8 +1907,14 @@ describe('a map as a chart', () => {
       `/collections/hb?schema=recording&q=96&filter=${encodeURIComponent(filter)}`,
     )
     await user.click(await screen.findByRole('button', { name: /Add chart/ }))
-    await user.click(screen.getByRole('radio', { name: 'A map' }))
-    expect(screen.queryByLabelText('One bar for each')).toBeNull()
+    // What: the recordings, for each place. How: that is a map, nothing else.
+    await user.selectOptions(
+      screen.getByLabelText('For each'),
+      'encounter.place',
+    )
+    expect(screen.getByRole('radio', { name: 'Map' })).toBeChecked()
+    expect(screen.queryByRole('radio', { name: 'Bars' })).toBeNull()
+    expect(screen.queryByLabelText('Show')).toBeNull()
     await user.click(screen.getByRole('button', { name: 'Add chart' }))
     expect(await screen.findByText('Where they are')).toBeInTheDocument()
     await waitFor(() =>
@@ -1893,7 +1943,8 @@ describe('a map as a chart', () => {
     await userEvent.click(
       await screen.findByRole('button', { name: /Add chart/ }),
     )
-    expect(screen.queryByRole('radio', { name: 'A map' })).toBeNull()
+    expect(screen.queryByRole('radio', { name: 'Map' })).toBeNull()
+    expect(screen.getByRole('radio', { name: 'Bars' })).toBeChecked()
   })
 })
 
