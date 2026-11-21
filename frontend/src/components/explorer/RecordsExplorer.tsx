@@ -887,7 +887,15 @@ export function RecordsExplorer({
                           Back to records
                         </Button>
                       )}
-                      <div className="ml-auto flex items-center gap-2"></div>
+                      <div className="ml-auto flex items-center gap-2">
+                        {chartsHidden && listed && !aside && (
+                          // Folded away: the way back says what it opens, at
+                          // the right-hand edge of the table.
+                          <Button size="sm" onClick={() => setLayout('both')}>
+                            <PanelRightOpen size={14} /> Charts
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   )}
 
@@ -1158,14 +1166,6 @@ export function RecordsExplorer({
               }
             />
           </div>
-          {chartsHidden && listed && !aside && !x.page.error && (
-            // Folded away: the way back says what it opens.
-            <div className="hidden shrink-0 lg:block">
-              <Button size="sm" onClick={() => setLayout('both')}>
-                <PanelRightOpen size={14} /> Charts
-              </Button>
-            </div>
-          )}
         </div>
       </div>
 
