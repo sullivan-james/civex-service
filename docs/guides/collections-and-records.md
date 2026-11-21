@@ -96,7 +96,7 @@ any unique prefix of it works wherever an id is asked for.
 ### The explorer
 
 A collection's page is its records, in one explorer. The same explorer is on
-a record's page, under its fields, as **Inside this …**. Exports, Activity and
+a record's page, under its fields, as **Inside this …**. Files, Exports, Activity and
 the collection's details are in the **⋯** menu at the top of the page.
 
 The explorer has three ideas. **Records** are the rows: each row is one
@@ -129,8 +129,9 @@ record. **Filters** say which rows you see. **Charts** count the rows you see.
   header to sort.
 - **Export** takes exactly the rows listed or ticked. See
   [Get files out](../how-to/export-files.md).
-- **Records | Their files** switches the rows to the files of what's listed.
-  See [Files](files.md#working-on-many-files-their-files).
+- The files of what's listed (to move between drives, download or free up)
+  are under **Files** in the page's **⋯** menu. See
+  [Files](files.md#working-on-many-files).
 - **Charts** sit beside the records and count exactly what is listed: see
   [Charts](#charts).
 - Under the table, a last row gives, for every record listed (not just the
