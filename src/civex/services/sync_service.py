@@ -270,6 +270,19 @@ class SyncService:
             files_waiting=waiting,
         )
 
+    def history_position(self) -> tuple[int | None, int]:
+        """Where this copy is in the authority's numbered history, and how many
+        changes made here it hasn't been sent: the feed's head and 0 when this
+        project serves devices (after numbering its own edits); the last number
+        applied here and the unsent count when it follows one; (None, 0)
+        otherwise. What a release records as the point it was taken at."""
+        if self._config.sync.serve:
+            self._repo.sequence_local_entries()
+            return self._repo.head_seq(), 0
+        if self.configured:
+            return self._repo.meta().cursor, self._repo.count_pending()
+        return None, 0
+
     def files_waiting(self, limit: int = 5000) -> FilesWaiting:
         """Why files haven't gone to the server, from the inventory and each
         drive's own status (asked once per drive): `limit` files at most are

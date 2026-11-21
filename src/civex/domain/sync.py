@@ -45,7 +45,16 @@ DEVICE_LOGIN = "device_login"
 DIRECT_FILES = features.DIRECT_FILES
 
 # The order a project's things must exist in: each refers to the ones before it.
-ENTITY_ORDER = ("schema", "field", "dataset", "view", "dashboard", "record", "note")
+ENTITY_ORDER = (
+    "schema",
+    "field",
+    "dataset",
+    "view",
+    "dashboard",
+    "record",
+    "note",
+    "release",
+)
 
 # What of each kind travels, and nothing else: a column added for this machine
 # alone (a cache, a search index) stays off the wire, and adding one here is a
@@ -131,13 +140,40 @@ WIRE_FIELDS: dict[str, frozenset[str]] = {
             "deleted_at",
         }
     ),
+    # A release's manifest and citation (`domain/release`); its bundle travels
+    # as a file. `local_seq` is this copy's own and stays here.
+    "release": frozenset(
+        {
+            "id",
+            "name",
+            "title",
+            "description",
+            "authors",
+            "licence",
+            "doi",
+            "scope",
+            "include_files",
+            "content_hash",
+            "bundle_sha256",
+            "bundle_size",
+            "counts",
+            "feed_seq",
+            "civex_version",
+            "created_at",
+            "created_by",
+            "updated_at",
+            "withdrawn_at",
+            "withdrawn_by",
+            "withdrawn_reason",
+        }
+    ),
 }
 
 # What each protocol version added, so a server still answers a device on an
 # older one with only what it can read (`kinds_for`, `entry_for`,
 # `snapshot_for`; applied in the peer router, never in the core): a kind, or a
 # kind's field, and the version it travels from.
-KINDS_SINCE: dict[str, int] = {"dashboard": 4, "note": 4}
+KINDS_SINCE: dict[str, int] = {"dashboard": 4, "note": 4, "release": 4}
 FIELDS_SINCE: dict[str, dict[str, int]] = {"view": {"summary": 4}}
 
 

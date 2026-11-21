@@ -65,6 +65,7 @@ if TYPE_CHECKING:
     from civex.services.view_service import ViewService
     from civex.services.dashboard_service import DashboardService
     from civex.services.note_service import NoteService
+    from civex.services.release_service import ReleaseService
     from civex.services.workflow_job_service import WorkflowJobService
     from civex.services.workflow_service import WorkflowService
 
@@ -117,6 +118,8 @@ class AppContext:
     dashboard_svc: DashboardService
     # Notes people leave on records (`domain/notes`).
     note_svc: NoteService
+    # Frozen, citable copies of the data (`domain/release`).
+    release_svc: ReleaseService
     export_def_svc: ExportDefinitionService
     bundle_svc: BundleService
     sync_repo: LocalSyncRepository
@@ -577,6 +580,9 @@ def build_context(
     from civex.services.sync_service import SyncService
     from civex.services.sync_transport import build_transport
 
+    from civex.repositories.local.release_repo import LocalReleaseRepository
+
+    release_repo = LocalReleaseRepository(session)
     sync_repo = LocalSyncRepository(session)
     applier = SyncApplier(sync_repo, audit_repo)
     device_keys = DeviceKeys(sync_repo)
@@ -591,6 +597,7 @@ def build_context(
         # device pushes (the local user's refuses nothing).
         policy=may,
         notes=note_svc,
+        releases=lambda: ctx.release_svc,
         capabilities=CAPABILITIES
         + ((DIRECT_FILES,) if features.DIRECT_FILES in project.features else ()),
     )
@@ -626,6 +633,31 @@ def build_context(
         shas, dry_run=dry
     )
     file_access_svc.why_not_here = lambda shas: _sync().not_here_reasons(shas)
+
+    from civex.services.release_service import ReleaseService
+
+    bundle_svc = BundleService(
+        schema_svc,
+        dataset_svc,
+        record_svc,
+        file_svc,
+        session.commit,
+        config.civex_dir,
+        batch=history_svc.batch,
+    )
+    release_svc = ReleaseService(
+        release_repo,
+        bundle_svc,
+        file_store,
+        audit_repo,
+        permissions=may,
+        actor=project.actor,
+        collections=lambda: {
+            d.id: d.name for d in dataset_svc.list_all(with_count=False)
+        },
+    )
+    release_svc.position = lambda: _sync().history_position()
+    release_svc.fetch = lambda sha: _sync().fetch_file(sha)
 
     from civex.repositories.local.library_repo import LocalLibraryRepository
     from civex.services.library_service import LibraryService
@@ -669,16 +701,9 @@ def build_context(
             permissions=may,
         ),
         note_svc=note_svc,
+        release_svc=release_svc,
         export_def_svc=export_def_svc,
-        bundle_svc=BundleService(
-            schema_svc,
-            dataset_svc,
-            record_svc,
-            file_svc,
-            session.commit,
-            config.civex_dir,
-            batch=history_svc.batch,
-        ),
+        bundle_svc=bundle_svc,
         sync_repo=sync_repo,
         authority_svc=authority_svc,
         device_keys=device_keys,

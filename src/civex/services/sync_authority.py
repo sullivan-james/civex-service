@@ -80,8 +80,12 @@ class SyncAuthorityService:
         policy: SyncPolicy | None = None,
         capabilities: tuple[str, ...] = CAPABILITIES,
         notes: Any = None,
+        releases: Any = None,
     ) -> None:
         self._repo = repo
+        # () -> ReleaseService: whether a pushed release is one a person could
+        # have made, and that a made one's content stays as it is.
+        self._releases = releases
         # NoteService: where a pushed note's record is, and whether its text
         # is one a person's note could have.
         self._notes = notes
@@ -414,6 +418,8 @@ class SyncAuthorityService:
     def _take(self, who: Principal, entry: SyncEntry) -> OpResult:
         """Merge the change into what is held, write it, and record it."""
         kind, eid = entry.entity_type, entry.entity_id
+        if kind == "release" and entry.action in ("delete", "purge"):
+            raise ValidationError("A release is never deleted: it can be withdrawn")
         head = self._applier.head(kind, eid)
         cascade = self._cascade_before(entry, head)
         conflicts: list[dict[str, Any]] = []
@@ -473,6 +479,8 @@ class SyncAuthorityService:
                 self._records.check_incoming(final, head)
             elif kind == "note" and self._notes is not None:
                 self._check_note(who, final)
+            elif kind == "release" and self._releases is not None:
+                self._releases().check_incoming(final, head)
             self._applier.apply_state(kind, eid, final)
         elif entry.action == "delete":
             if head is not None and head.get("deleted_at"):

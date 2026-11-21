@@ -43,6 +43,8 @@ def test_a_snapshot_carries_exactly_what_travels(project):
     ctx.view_svc.create("encounter", "deep", columns=["site"])
     ctx.dashboard_svc.add(widget="storage")
     ctx.note_svc.add(str(record.id), "a note")
+    ctx.release_svc.create("v1", "A release", doi="10.1234/x")
+    ctx.release_svc.withdraw("v1", "superseded")
     ctx.commit()
     for kind in ENTITY_ORDER:
         (snapshot,) = ctx.sync_repo.snapshots_page(kind, None, 1)

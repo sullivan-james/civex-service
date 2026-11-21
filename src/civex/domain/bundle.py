@@ -20,6 +20,9 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
+from civex.domain.dtos import DERIVED_FILE_KEYS
+from civex.domain.query import RecordQuery
+
 FORMAT = 1
 """The bundle layout this civex writes; a reader refuses a newer one."""
 
@@ -50,6 +53,9 @@ class ExportOptions:
     include_workflows: bool = True
     # Only these collections' records (and files); None = every collection.
     collections: list[str] | None = None
+    # Only the records this query lists (and the records above them, so the
+    # bundle reads in whole); None = every record of the collections.
+    query: RecordQuery | None = None
 
 
 @dataclass
@@ -212,6 +218,21 @@ def file_refs(data: dict[str, Any]) -> list[dict[str, Any]]:
                 if isinstance(v, dict) and isinstance(v.get("sha256"), str)
             )
     return refs
+
+
+def plain_data(data: dict[str, Any]) -> dict[str, Any]:
+    """A record's values without what a read adds to a file (where it is stored
+    here, its resolved name): those differ by machine and moment, so neither a
+    bundle nor its hash carries them."""
+
+    def plain(value: Any) -> Any:
+        if isinstance(value, dict) and isinstance(value.get("sha256"), str):
+            return {k: v for k, v in value.items() if k not in DERIVED_FILE_KEYS}
+        if isinstance(value, list):
+            return [plain(v) for v in value]
+        return value
+
+    return {k: plain(v) for k, v in data.items()}
 
 
 def sort_schemas(schemas: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -27,6 +27,7 @@ from civex.cli.demo import demo
 from civex.cli.doctor import doctor
 from civex.cli import bundle as bundle_cli
 from civex.cli import dashboard as dashboard_cli
+from civex.cli import release as release_cli
 from civex.cli.init import init
 from civex.cli.license import license_cmd
 from civex.cli.resolve import resolve
@@ -94,6 +95,7 @@ app.command("resolve", rich_help_panel=_WORK)(resolve)
 app.command("doctor", rich_help_panel=_WORK)(doctor)
 
 app.add_typer(bundle_cli.app, name="bundle", rich_help_panel=_COLLAB)
+app.add_typer(release_cli.app, name="release", rich_help_panel=_COLLAB)
 app.command("dump", hidden=True, context_settings=bundle_cli._ANY_ARGS)(
     bundle_cli.dump_replaced
 )

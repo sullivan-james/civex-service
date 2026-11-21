@@ -6,7 +6,7 @@ from typing import Any, Iterable
 from sqlalchemy import case, delete, func, insert, select, update
 from sqlalchemy.orm import Session
 
-from civex.db.models import FileReference, Record, WorkflowJob
+from civex.db.models import FileReference, Record, Release, WorkflowJob
 from civex.domain.file_refs import collect_sha256_refs
 from civex.domain.placement import Pointer
 
@@ -32,7 +32,16 @@ class LocalFileReferenceRepository:
             .where(FileReference.sha256.in_(wanted))
             .distinct()
         )
-        return {sha for (sha,) in rows}
+        return {sha for (sha,) in rows} | self._release_bundles(wanted)
+
+    def _release_bundles(self, shas: list[str]) -> set[str]:
+        """Which of these are a release's bundle: kept as long as the release
+        exists, which is always (releases are withdrawn, never deleted)."""
+        return set(
+            self._s.scalars(
+                select(Release.bundle_sha256).where(Release.bundle_sha256.in_(shas))
+            )
+        )
 
     def copies_in_use(self, copies: Iterable[tuple[str, str]]) -> set[tuple[str, str]]:
         """Which of these copies (sha256, volume) are in use: something points
@@ -69,6 +78,7 @@ class LocalFileReferenceRepository:
             for sha in chunk:
                 if sha in pointed and not (pointed[sha] & present.get(sha, set())):
                     keep_all.add(sha)
+            keep_all |= self._release_bundles(chunk)
         return {
             (sha, volume)
             for sha, volume in wanted

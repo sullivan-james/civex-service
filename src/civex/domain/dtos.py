@@ -900,6 +900,70 @@ class NoteDTO:
 
 
 @dataclass
+class ReleaseDTO:
+    """A frozen, citable copy of the data (`civex.domain.release`)."""
+
+    id: uuid.UUID
+    name: str
+    title: str
+    content_hash: str
+    bundle_sha256: str
+    bundle_size: int
+    created_at: datetime
+    description: str | None = None
+    authors: list[str] = field(default_factory=list)
+    licence: str | None = None
+    doi: str | None = None
+    # What it covers: {} the whole project, {"collections": [names]}, or
+    # {"query": RecordQuery fields}.
+    scope: dict[str, Any] = field(default_factory=dict)
+    include_files: bool = True
+    counts: dict[str, Any] = field(default_factory=dict)
+    # The history position it was taken at: this copy's audit_log.local_seq
+    # (local only: another copy's numbers mean nothing here, so it never
+    # travels) and the authority's feed number on a synced project.
+    local_seq: int | None = None
+    feed_seq: int | None = None
+    civex_version: str = ""
+    created_by: str | None = None
+    updated_at: datetime | None = None
+    withdrawn_at: datetime | None = None
+    withdrawn_by: str | None = None
+    withdrawn_reason: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        def iso(v: datetime | None) -> str | None:
+            return v.isoformat() if v else None
+
+        out: dict[str, Any] = {
+            "id": str(self.id),
+            "name": self.name,
+            "title": self.title,
+            "description": self.description,
+            "authors": list(self.authors),
+            "licence": self.licence,
+            "doi": self.doi,
+            "scope": self.scope,
+            "include_files": self.include_files,
+            "content_hash": self.content_hash,
+            "bundle_sha256": self.bundle_sha256,
+            "bundle_size": self.bundle_size,
+            "counts": self.counts,
+            "feed_seq": self.feed_seq,
+            "civex_version": self.civex_version,
+            "created_at": self.created_at.isoformat(),
+            "created_by": self.created_by,
+            "updated_at": iso(self.updated_at),
+            "withdrawn_at": iso(self.withdrawn_at),
+            "withdrawn_by": self.withdrawn_by,
+            "withdrawn_reason": self.withdrawn_reason,
+        }
+        if self.local_seq is not None:
+            out["local_seq"] = self.local_seq
+        return out
+
+
+@dataclass
 class ReferrerGroupDTO:
     """How many live records of one schema, in one collection, reference a
     record through one field -- one row of a record's "Referenced by"."""

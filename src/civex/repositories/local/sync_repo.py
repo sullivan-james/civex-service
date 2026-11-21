@@ -13,7 +13,19 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import BigInteger, and_, delete, func, or_, select, update
+from sqlalchemy import (
+    BigInteger,
+    and_,
+    cast,
+    delete,
+    func,
+    null,
+    or_,
+    select,
+    union,
+    union_all,
+    update,
+)
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -26,6 +38,7 @@ from civex.db.models import (
     Dashboard,
     Dataset,
     RecordNote,
+    Release,
     Field,
     FileReference,
     Record,
@@ -62,6 +75,7 @@ from civex.repositories.local.record_repo import _to_dto as _record_dto
 from civex.repositories.local.schema_repo import _field_to_dto, _schema_to_dto
 from civex.repositories.local.dashboard_repo import _to_dto as _dashboard_dto
 from civex.repositories.local.note_repo import _to_dto as _note_dto
+from civex.repositories.local.release_repo import _to_dto as _release_dto
 from civex.repositories.local.view_repo import _to_dto as _view_dto
 
 _MODELS: dict[str, Any] = {
@@ -72,9 +86,11 @@ _MODELS: dict[str, Any] = {
     "dashboard": Dashboard,
     "record": Record,
     "note": RecordNote,
+    "release": Release,
 }
-# A column PostgreSQL maintains itself (a trigger); never written from a snapshot.
-_NOT_WRITTEN = frozenset({"search_vector"})
+# A column PostgreSQL maintains itself (a trigger), or one that is this copy's
+# own (a release's place in this copy's history); never written from a snapshot.
+_NOT_WRITTEN = frozenset({"search_vector", "local_seq"})
 
 
 # The order changes were made in here: the number the database gave each entry
@@ -167,55 +183,61 @@ class LocalSyncRepository:
         self, after: str, limit: int, unconfirmed: bool = False
     ) -> list[str]:
         """Hashes of the files live records cite (a deleted record's are sent if
-        it is restored), in hash order, `limit` of them
+        it is restored) and of releases' bundles, in hash order, `limit` of them
         after `after`; `unconfirmed`: only those the authority hasn't said it
         holds. The catalog is kept up to date as records are written, so
         what a device still owes its authority is worked out from it each time
         rather than remembered."""
-        query = self._referenced().where(FileReference.sha256 > after)
+        sha = self._referenced()
+        query = select(sha).where(sha > after)
         if unconfirmed:
-            query = query.where(FileReference.sha256.not_in(select(ServerFile.sha256)))
-        rows = self._s.execute(query.order_by(FileReference.sha256).limit(limit))
-        return [sha for (sha,) in rows]
+            query = query.where(sha.not_in(select(ServerFile.sha256)))
+        rows = self._s.execute(query.order_by(sha).limit(limit))
+        return [s for (s,) in rows]
 
     def _referenced(self):  # type: ignore[no-untyped-def]
-        return (
-            select(FileReference.sha256)
+        """The column of every file this project needs the authority to hold:
+        those live records cite, and every release's bundle."""
+        refs = (
+            select(FileReference.sha256.label("sha256"))
             .join(Record, Record.id == FileReference.record_id)
             .where(Record.deleted_at.is_(None))
-            .distinct()
         )
+        bundles = select(Release.bundle_sha256.label("sha256"))
+        return union(refs, bundles).subquery().c.sha256
 
     def count_unconfirmed(self) -> int:
-        """How many files live records cite that the authority hasn't said it
-        holds: not on the server yet, as far as this device knows."""
-        query = self._referenced().where(
-            FileReference.sha256.not_in(select(ServerFile.sha256))
+        """How many files live records cite (or releases keep) that the
+        authority hasn't said it holds: not on the server yet, as far as this
+        device knows."""
+        sha = self._referenced()
+        return int(
+            self._s.execute(
+                select(func.count()).where(sha.not_in(select(ServerFile.sha256)))
+            ).scalar_one()
         )
-        return self._s.execute(
-            select(func.count()).select_from(query.subquery())
-        ).scalar_one()
 
     def unconfirmed_copies(self, limit: int) -> dict[str, list[str]]:
         """Up to `limit` files live records cite that the authority hasn't said
         it holds, each with the volumes holding a copy here (none: not on this
         computer), for saying why they haven't gone."""
+        sha = self._referenced()
         shas = list(
             self._s.scalars(
-                self._referenced()
-                .where(FileReference.sha256.not_in(select(ServerFile.sha256)))
-                .order_by(FileReference.sha256)
+                select(sha)
+                .where(sha.not_in(select(ServerFile.sha256)))
+                .order_by(sha)
                 .limit(limit)
             )
         )
-        where: dict[str, list[str]] = {sha: [] for sha in shas}
+        where: dict[str, list[str]] = {s: [] for s in shas}
         for at in range(0, len(shas), 500):
-            for sha, volume in self._s.execute(
+            for s, volume in self._s.execute(
                 select(StoredObject.sha256, StoredObject.volume).where(
                     StoredObject.sha256.in_(shas[at : at + 500])
                 )
             ):
-                where[sha].append(volume)
+                where[s].append(volume)
         return where
 
     def unconfirmed_of(self, shas: set[str]) -> set[str]:
@@ -274,18 +296,40 @@ class LocalSyncRepository:
                 .execution_options(synchronize_session=False)
             )
 
-    def _not_here(self):  # type: ignore[no-untyped-def]
+    def _not_here(self, collections: set[uuid.UUID] | None = None):  # type: ignore[no-untyped-def]
         """Files live records here cite that no drive here is recorded to hold
         (a deleted record's files are fetched if it comes back and is opened,
-        not in the background)."""
+        not in the background), each with a collection that uses it; with
+        `collections`, only files records in those use. Without, releases'
+        bundles not here too (with no collection)."""
         stored = stored_files()
-        return (
-            select(FileReference.sha256, func.min(Record.dataset_id))
+        refs = (
+            select(
+                FileReference.sha256.label("sha"),
+                func.min(Record.dataset_id).label("cid"),
+            )
             .join(Record, Record.id == FileReference.record_id)
             .outerjoin(stored, stored.c.sha == FileReference.sha256)
             .where(stored.c.sha.is_(None), Record.deleted_at.is_(None))
-            .group_by(FileReference.sha256)
         )
+        if collections is not None:
+            refs = refs.where(Record.dataset_id.in_(collections))
+        refs = refs.group_by(FileReference.sha256)
+        if collections is not None:
+            return refs.subquery()
+        held = stored_files()
+        bundles = (
+            select(
+                Release.bundle_sha256.label("sha"),
+                cast(null(), Record.dataset_id.type).label("cid"),
+            )
+            .outerjoin(held, held.c.sha == Release.bundle_sha256)
+            .where(
+                held.c.sha.is_(None),
+                Release.bundle_sha256.not_in(select(FileReference.sha256)),
+            )
+        )
+        return union_all(refs, bundles).subquery()
 
     def files_not_here(
         self,
@@ -294,27 +338,21 @@ class LocalSyncRepository:
         shas: list[str] | None = None,
         collections: set[uuid.UUID] | None = None,
     ) -> list[tuple[str, uuid.UUID | None]]:
-        """Files the records here cite that no drive here holds (another device
-        added them), in hash order after `after`, each with a collection that
-        uses it (to choose the drive it is written to). With `shas`, only those;
-        with `collections`, only files records in those collections use."""
-        query = self._not_here().where(FileReference.sha256 > after)
+        """Files the records here cite (or releases keep) that no drive here
+        holds (another device added them), in hash order after `after`, each
+        with a collection that uses it (to choose the drive it is written to).
+        With `shas`, only those; with `collections`, only files records in
+        those collections use."""
+        q = self._not_here(collections)
+        query = select(q.c.sha, q.c.cid).where(q.c.sha > after)
         if shas is not None:
-            query = query.where(FileReference.sha256.in_(shas))
-        if collections is not None:
-            query = query.where(Record.dataset_id.in_(collections))
-        rows = self._s.execute(query.order_by(FileReference.sha256).limit(limit))
+            query = query.where(q.c.sha.in_(shas))
+        rows = self._s.execute(query.order_by(q.c.sha).limit(limit))
         return [(sha, collection) for sha, collection in rows]
 
     def count_files_not_here(self, collections: set[uuid.UUID] | None = None) -> int:
-        query = self._not_here()
-        if collections is not None:
-            query = query.where(Record.dataset_id.in_(collections))
-        return int(
-            self._s.execute(
-                select(func.count()).select_from(query.subquery())
-            ).scalar_one()
-        )
+        q = self._not_here(collections)
+        return int(self._s.execute(select(func.count()).select_from(q)).scalar_one())
 
     def added_by(self, shas: list[str]) -> dict[str, str | None]:
         """Which device added each of these files (its name, as the authority
@@ -996,6 +1034,8 @@ class LocalSyncRepository:
             dicts = [_dashboard_dto(r).to_dict() for r in rows]
         elif kind == "note":
             dicts = [_note_dto(r).to_dict() for r in rows]
+        elif kind == "release":
+            dicts = [_release_dto(r).to_dict() for r in rows]
         else:
             dicts = [_record_dto(r).to_dict() for r in rows]
         return [wire_state(kind, d) or {} for d in dicts]

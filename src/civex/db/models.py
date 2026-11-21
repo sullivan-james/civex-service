@@ -471,6 +471,43 @@ class RecordNote(Base):
     )
 
 
+class Release(Base):
+    """A frozen, citable copy of the data (`civex.domain.release`): citation
+    metadata, what it covers, and the manifest of the bundle made for it,
+    which is kept in the object store under `bundle_sha256` (a GC root, and
+    sent to the authority like a record's file). Never deleted and never
+    changed in content; the metadata may be corrected and the release
+    withdrawn, each a history entry. Synced and audited as kind `release`."""
+
+    __tablename__ = "releases"
+    __table_args__ = (Index("ux_releases_name", "name", unique=True),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    authors: Mapped[list[Any]] = mapped_column(_JSON, nullable=False, default=list)
+    licence: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    doi: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    scope: Mapped[dict[str, Any]] = mapped_column(_JSON, nullable=False, default=dict)
+    include_files: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    content_hash: Mapped[str] = mapped_column(String(80), nullable=False)
+    bundle_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    bundle_size: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    counts: Mapped[dict[str, Any]] = mapped_column(_JSON, nullable=False, default=dict)
+    # This copy's history position when it was made (local only, never sent).
+    local_seq: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # The authority's feed number it was made at, on a synced project.
+    feed_seq: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    civex_version: Mapped[str] = mapped_column(String(40), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
+    created_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+    withdrawn_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+    withdrawn_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    withdrawn_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class AuditBatch(Base):
     """A set of audit entries that happened as one thing: an import, a delete
     that took a whole tree with it, a workflow run. Gives a bulk operation a

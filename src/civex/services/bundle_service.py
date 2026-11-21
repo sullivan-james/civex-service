@@ -239,8 +239,15 @@ class BundleService:
         plan = BundlePlan(include_files=options.include_files)
         schemas = self._export_schemas()
         plan.schemas = len(schemas)
+        chosen = (
+            self._chosen_records(options.query)
+            if options.include_records and options.query is not None
+            else None
+        )
         datasets = (
-            self._selected_collections(options) if options.include_records else []
+            self._selected_collections(options, chosen)
+            if options.include_records
+            else []
         )
         collections = [
             {
@@ -253,7 +260,9 @@ class BundleService:
         ]
         plan.collections = [d.name for d in datasets]
         cited: dict[str, int] = {}
-        total = sum(d.record_count for d in datasets)
+        total = (
+            len(chosen) if chosen is not None else sum(d.record_count for d in datasets)
+        )
         if progress:
             progress.phase("Writing records", total)
         out = (
@@ -262,25 +271,26 @@ class BundleService:
             else None
         )
         try:
-            for dataset in datasets:
-                for page in self._records.iter_find(dataset.name):
-                    for record in page:
-                        for ref in spec.file_refs(record.data):
-                            cited.setdefault(ref["sha256"], int(ref.get("size") or 0))
-                        if out is not None:
-                            line = RecordLine(
-                                id=record.id,
-                                collection=dataset.name,
-                                schema=record.schema_name,
-                                parent=record.parent_record_id,
-                                data=record.data,
-                                created_at=record.created_at.isoformat(),
-                                updated_at=record.updated_at.isoformat(),
-                            )
-                            out.write((line.to_json() + "\n").encode("utf-8"))
-                    plan.records += len(page)
-                    if progress:
-                        progress.advance(plan.records)
+            names = {d.id: d.name for d in datasets}
+            for page in self._pages(datasets, chosen):
+                for record in page:
+                    data = spec.plain_data(record.data)
+                    for ref in spec.file_refs(data):
+                        cited.setdefault(ref["sha256"], int(ref.get("size") or 0))
+                    if out is not None:
+                        line = RecordLine(
+                            id=record.id,
+                            collection=names[record.dataset_id],
+                            schema=record.schema_name,
+                            parent=record.parent_record_id,
+                            data=data,
+                            created_at=record.created_at.isoformat(),
+                            updated_at=record.updated_at.isoformat(),
+                        )
+                        out.write((line.to_json() + "\n").encode("utf-8"))
+                plan.records += len(page)
+                if progress:
+                    progress.advance(plan.records)
         finally:
             if out is not None:
                 out.close()
@@ -300,8 +310,40 @@ class BundleService:
             )
         return plan, schemas, collections
 
-    def _selected_collections(self, options: ExportOptions):
+    def _pages(self, datasets, chosen: list[Any] | None) -> Iterator[list[Any]]:
+        """The records to write, a page at a time: the chosen ones (the records
+        above them first), else every record of each collection."""
+        if chosen is not None:
+            for at in range(0, len(chosen), 500):
+                yield chosen[at : at + 500]
+            return
+        for dataset in datasets:
+            yield from self._records.iter_find(dataset.name)
+
+    def _chosen_records(self, query: Any) -> list[Any]:
+        """The records a query lists, with every record above them (so each
+        has its parent in the bundle), parents first. A few queries per page
+        of records and one per level above them."""
+        listed = [r for page in self._records.stream_records(query) for r in page]
+        trails = self._records.ancestor_trails(listed)
+        seen: set[Any] = set()
+        out: list[Any] = []
+        for record in listed:
+            for above in trails.get(record.id, []):
+                if above.id not in seen:
+                    seen.add(above.id)
+                    out.append(above)
+        for record in listed:
+            if record.id not in seen:
+                seen.add(record.id)
+                out.append(record)
+        return out
+
+    def _selected_collections(self, options: ExportOptions, chosen=None):
         every = self._datasets.list_all(with_count=True)
+        if chosen is not None:
+            used = {r.dataset_id for r in chosen}
+            return [d for d in every if d.id in used]
         if options.collections is None:
             return every
         by_name = {d.name: d for d in every}

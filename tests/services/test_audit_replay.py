@@ -3,7 +3,7 @@
 Sync will send these entries and nothing else, so a change that wrote no entry
 (or a stale one) would never reach another device. This does everything a
 person can do to schemas, fields, collections, views, the Analytics page,
-records and their notes, then, for
+records and their notes, and releases, then, for
 every thing, starts from its create and applies each entry in the order written
 (an edit stores only what changed) and checks the result is what is in the
 database."""
@@ -45,6 +45,8 @@ def _current(ctx: AppContext, kind: str, entity_id: Any) -> dict[str, Any] | Non
         found = ctx.dashboard_svc._repo.get()
     elif kind == "note":
         found = ctx.note_svc._repo.get(entity_id)
+    elif kind == "release":
+        found = ctx.release_svc._repo.get(entity_id)
     elif kind == "record":
         rows = ctx.record_svc._records.list_by_ids([entity_id])
         found = rows[0] if rows else None
@@ -208,6 +210,12 @@ def test_history_describes_everything_a_person_can_do(ctx: AppContext) -> None:
     ctx.note_svc.delete(str(aside.id))
     ctx.note_svc.delete(str(restored.id))
     ctx.note_svc.restore(str(restored.id))
+    ctx.commit()
+
+    # Releases: made, their citation corrected, withdrawn.
+    ctx.release_svc.create("v1", "Study", authors=["A. Person"])
+    ctx.release_svc.correct("v1", title="The study", doi="10.1234/abc")
+    ctx.release_svc.withdraw("v1", "superseded")
     ctx.commit()
 
     # Deleting and bringing back.

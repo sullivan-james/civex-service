@@ -101,12 +101,14 @@ nav:
       - Sync a project: how-to/set-up-sync.md
       - Undo a mistake: how-to/undo-mistakes.md
       - Back up a project: how-to/back-up.md
+      - Cite the data in a paper: how-to/cite-data.md
   - Guides:
       - Data:
           - Schemas & fields: guides/schemas-and-fields.md
           - Collections & records: guides/collections-and-records.md
           - Views: guides/views.md
           - Deleting & restoring: guides/deleting-and-restoring.md
+          - Releases: guides/releases.md
       - Files:
           - Files: guides/files.md
           - Storage volumes: guides/storage.md
@@ -142,6 +144,7 @@ nav:
           - civex plugin: reference/cli/plugin.md
           - civex policy: reference/cli/policy.md
           - civex record: reference/cli/record.md
+          - civex release: reference/cli/release.md
           - civex retention: reference/cli/retention.md
           - civex schema: reference/cli/schema.md
           - civex store: reference/cli/store.md

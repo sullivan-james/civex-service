@@ -34,6 +34,7 @@ from civex.server.routers import (
     record_files,
     notes,
     records,
+    releases,
     remote,
     retention,
     schemas,
@@ -144,6 +145,13 @@ _OPENAPI_TAGS = [
             "Notes on records, in threads: leave one, reply, resolve a "
             "thread. In history and sync; find what is open with the "
             "records' `@open_notes` filter."
+        ),
+    },
+    {
+        "name": "releases",
+        "description": (
+            "Frozen, citable copies of the data: a named version with a content "
+            "hash, a citation, and a bundle that can be read back into a project."
         ),
     },
     {
@@ -419,6 +427,7 @@ def api_routers(
         (bundle.router, None),
         (plugins.router, features_.PLUGIN_EDITOR),
         (notes.router, None),
+        (releases.router, None),
         (records.router, None),
         (record_files.router, None),
         (export_definitions.router, None),
