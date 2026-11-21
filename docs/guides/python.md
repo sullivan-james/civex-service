@@ -212,24 +212,24 @@ with civex.open() as project:
 `quality_svc.check_field(schema, field, restrictions={...})` counts what a
 rule would leave behind before you change it.
 
-## Review status and notes
+## Notes
 
-`record_svc.set_review(status, ids=... | query=...)` marks records as
-`needs_check`, `checked` or `none`, as you, now (`dry_run=True` only counts);
-`note_svc` adds, lists, resolves and deletes the notes left on a record, and
-counts the open ones among the records a query lists:
+`note_svc` adds notes to a record, replies in their threads, resolves and
+deletes them, lists a record's threads (each with its `replies`), and counts
+the open threads among the records a query lists; the `@open_notes` filter
+finds the records with one:
 
 ```python
 with civex.open() as project:
-    query = RecordQuery(dataset="survey-2024", schema="sample")
-    project.record_svc.set_review("needs_check", query=query)
-    project.note_svc.add("f623", "depth looks off, re-check the calibration")
-    print(project.note_svc.open_notes(query).notes)
-    waiting = RecordQuery(
+    note = project.note_svc.add("f623", "depth looks off, re-check the calibration")
+    project.note_svc.reply(str(note.id), "it was the sensor")
+    project.note_svc.resolve(str(note.id))
+    open_ones = RecordQuery(
         dataset="survey-2024",
         schema="sample",
-        filter_tree={"field": "@review", "op": "eq", "value": "needs_check"},
+        filter_tree={"field": "@open_notes", "op": "eq", "value": True},
     )
+    print(project.note_svc.open_notes(open_ones).notes)
 ```
 
 ## Writing results back

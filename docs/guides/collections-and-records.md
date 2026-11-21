@@ -304,39 +304,45 @@ taken where the records would land, or the kind of record can't sit where it
 would go. The move is one event in Activity, and a record's history reads it
 as a change of collection.
 
-## Reviewing records as a team
-
-Two things help a team go over its data: a **review status** on each record
-and **notes** left on it.
-
-A record is **Not reviewed**, **Needs a check** or **Checked**. On a record's
-page the status is beside its name; open it to change it. In the explorer, tick
-records (or **all matching**) and choose **Review** on the selection bar. The
-status says who set it and when; it is not an edit of the record's values, so
-its *Updated* date stays and no workflow starts. Show it as a column with
-**Columns › Review**, and find what is waiting with the filter **Review is
-Needs a check** (or **Has open notes**).
+## Notes on records
 
 A note is a short text about a record, "value looks off, re-check the
-calibration". The record's **Notes** tab lists them oldest first with who wrote
-them and when, and anyone who may change records in the collection can add one,
-**Resolve** it once dealt with (or **Reopen** it), or delete it; only its author
-can change its words. A record's tab shows how many notes are still open.
+calibration". The record's **Notes** tab lists its notes as threads: each note
+with the replies to it underneath, oldest first, with who wrote them and when.
+Anyone who may change records in the collection can add a note, **Reply** in a
+thread, **Resolve** a thread once it is dealt with (or **Reopen** it), and
+delete a note or a reply; only its author can change its words. Replying to a
+resolved thread opens it again. Deleting the note that starts a thread hides
+its replies too, and restoring it brings them back.
+
+The record's header says how many threads are still open, and links to its
+Notes tab. **Open notes** in the sidebar lists every record with an open
+thread, in every collection: it is the **All records** tab of Collections,
+filtered with **Has open notes**, so the usual search, filters and columns
+work on it, and a record opens on its Notes tab. The **Open notes** column
+(**Columns › Open notes**) shows how many threads are open and the first line
+of the latest, in any list.
 
 ```bash
-civex record review needs_check --in survey -s sample -w site=reef   # all that match
-civex record review checked --id f623 --id a91c
 civex record note add f623 "depth looks off, re-check the calibration"
+civex record note reply 3c1d "it was the sensor, swapped on the 3rd"
 civex record note list f623 --open
 civex record note resolve 3c1d
 ```
 
-Both are in history (a review over many records is one event in Activity) and
-sync to the other computers following the project. Two people marking the same
-record at once is not a conflict: the later mark stays. Deleting a record
-hides its notes until it is restored; deleting it permanently removes them,
-history and all. Scripts use `POST /api/records/review` (the list's selectors
-or `ids`, and `status`) and `/api/records/{id}/notes`.
+Notes are in history and sync to the other computers following the project;
+two people replying at once are just two replies. Deleting a record hides its
+notes until it is restored; deleting it permanently removes them, history and
+all. Scripts use `/api/records/{id}/notes` and `/api/notes/{id}/replies`.
+
+### Signing off records
+
+To mark records as checked, or to track a QC state ("pending", "passed",
+"failed"), add a field for it: a **Choice** field such as `qc` with those
+choices, or a **Yes / no** field `checked`. Set it on many records at once with
+**Edit…** on the explorer's selection bar (bulk edit), and find what is waiting
+with the explorer's filter (**qc is pending**). Being a field, it is in each
+record's history, syncs, exports, and can start a workflow.
 
 ## Deleting and undoing
 
