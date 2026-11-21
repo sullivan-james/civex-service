@@ -428,10 +428,6 @@ class Record(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(
         _UTCDateTime(), nullable=True, default=None
     )
-    # Whether someone has looked at it: {status: needs_check | checked, by, at}
-    # (`civex.domain.review`), or None. Part of the record, its history and
-    # sync, but not one of its values: setting it leaves `updated_at` alone.
-    review: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
 
     dataset: Mapped[Dataset] = relationship("Dataset", back_populates="records")
     # Every record read names its schema (RecordDTO.schema_name); joined, that
@@ -443,10 +439,12 @@ class RecordNote(Base):
     """
     A note a person left on a record ("value looks off, re-check the
     calibration"): plain text, who wrote it, and whether it has been resolved
-    (`civex.domain.review`). Synced and audited as kind `note`. Soft-deleted
+    (`civex.domain.notes`). Synced and audited as kind `note`. Soft-deleted
     like a record; a record deleted for good takes its notes with it (the
     foreign key cascades), and `NoteService` keeps them hidden while their
-    record is deleted.
+    record is deleted. A note with a `thread_id` is a reply in the thread that
+    note starts (one level: a reply to a reply joins the same thread); a
+    thread's replies are hidden while the note that starts it is deleted.
     """
 
     __tablename__ = "record_notes"
@@ -456,6 +454,10 @@ class RecordNote(Base):
     record_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("records.id", ondelete="CASCADE"), nullable=False
     )
+    # The note this one replies to (always a thread's first note), or None
+    # for a note that starts a thread. No foreign key: sync writes notes by
+    # snapshot, and a reply may arrive on a copy before the note it answers.
+    thread_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     # Who wrote it, as history names people (`identity.local_actor`, or the
     # label a device gave): a name, not an account.

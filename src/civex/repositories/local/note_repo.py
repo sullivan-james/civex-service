@@ -12,7 +12,7 @@ from civex.repositories.local._ids import prefix_span
 
 
 class LocalNoteRepository:
-    """Notes left on records (`civex.domain.review`). Plain storage: the
+    """Notes left on records (`civex.domain.notes`). Plain storage: the
     rules, permissions and history are `NoteService`'s."""
 
     def __init__(self, session: Session) -> None:
@@ -43,13 +43,23 @@ class LocalNoteRepository:
     def for_record(
         self, record_id: uuid.UUID, include_resolved: bool = True
     ) -> list[NoteDTO]:
-        """A record's live notes, oldest first."""
-        q = self._s.query(RecordNote).filter(
-            RecordNote.record_id == record_id, RecordNote.deleted_at.is_(None)
+        """A record's live threads, oldest first, each with its live replies
+        (`NoteDTO.replies`, oldest first). A reply whose thread is deleted is
+        hidden with it; without `include_resolved`, resolved threads are left
+        out. One query whatever the number of threads."""
+        rows = (
+            self._s.query(RecordNote)
+            .filter(RecordNote.record_id == record_id, RecordNote.deleted_at.is_(None))
+            .order_by(RecordNote.created_at, RecordNote.id)
         )
-        if not include_resolved:
-            q = q.filter(RecordNote.resolved_at.is_(None))
-        return [_to_dto(r) for r in q.order_by(RecordNote.created_at, RecordNote.id)]
+        notes = [_to_dto(r) for r in rows]
+        threads = {n.id: n for n in notes if n.thread_id is None}
+        for n in notes:
+            if n.thread_id is not None and n.thread_id in threads:
+                threads[n.thread_id].replies.append(n)
+        return [
+            t for t in threads.values() if include_resolved or t.resolved_at is None
+        ]
 
     def create(
         self,
@@ -57,10 +67,12 @@ class LocalNoteRepository:
         body: str,
         author: str | None,
         id: uuid.UUID | None = None,
+        thread_id: uuid.UUID | None = None,
     ) -> NoteDTO:
         row = RecordNote(
             id=id or uuid.uuid4(),
             record_id=record_id,
+            thread_id=thread_id,
             body=body,
             author=author,
             created_at=datetime.now(timezone.utc),
@@ -85,6 +97,7 @@ def _to_dto(row: RecordNote) -> NoteDTO:
     return NoteDTO(
         id=row.id,
         record_id=row.record_id,
+        thread_id=row.thread_id,
         body=row.body,
         author=row.author,
         created_at=row.created_at,

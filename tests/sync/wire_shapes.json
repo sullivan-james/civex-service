@@ -148,7 +148,8 @@
    "id",
    "record_id",
    "resolved_at",
-   "resolved_by"
+   "resolved_by",
+   "thread_id"
   ],
   "record": [
    "created_at",
@@ -157,7 +158,6 @@
    "deleted_at",
    "id",
    "parent_record_id",
-   "review",
    "schema_id",
    "updated_at"
   ],

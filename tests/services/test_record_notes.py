@@ -1,7 +1,7 @@
-"""Review status and notes on records (`civex.domain.review`): setting a status
-on a selection, notes written, edited, resolved and deleted, who may, what
-history says, what a record's delete, restore and purge do to its notes, and
-filtering a list by either."""
+"""Notes on records and their threads (`civex.domain.notes`): notes written,
+replied to, edited, resolved and deleted, who may, what history says, what a
+record's delete, restore and purge do to its notes, and finding records with
+open threads."""
 
 from __future__ import annotations
 
@@ -28,10 +28,6 @@ def study(ctx: AppContext, make_schema, make_collection, make_record):
     return [make_record("survey", "sample", {"site": s}) for s in ("a", "b", "c")]
 
 
-def _ids(records) -> list[str]:
-    return [str(r.id) for r in records]
-
-
 def _listed(ctx: AppContext, tree) -> set[str]:
     page = ctx.record_svc.query_records(
         RecordQuery(dataset="survey", schema="sample", filter_tree=tree)
@@ -39,99 +35,55 @@ def _listed(ctx: AppContext, tree) -> set[str]:
     return {r.data["site"] for r in page}
 
 
-# --- review status
-
-
-def test_marking_records_needs_a_check_and_then_checked(ctx: AppContext, study):
-    a, b, c = study
-    before = ctx.record_svc.get(str(a.id)).updated_at
-    result = ctx.record_svc.set_review("needs_check", ids=_ids([a, b]))
-    ctx.commit()
-    assert (result.records, result.changed, result.unchanged) == (2, 2, 0)
-    got = ctx.record_svc.get(str(a.id))
-    assert got.review["status"] == "needs_check"
-    assert got.review["by"] == ctx.record_svc.actor
-    # A review is not an edit of the record's values.
-    assert got.updated_at == before
-
-    again = ctx.record_svc.set_review("needs_check", ids=_ids([a, b, c]))
-    assert (again.changed, again.unchanged) == (1, 2)
-    ctx.commit()
-
-    cleared = ctx.record_svc.set_review("none", ids=_ids([c]))
-    ctx.commit()
-    assert cleared.changed == 1
-    assert ctx.record_svc.get(str(c.id)).review is None
-
-
-def test_a_review_by_query_marks_what_the_list_shows(ctx: AppContext, study):
-    query = RecordQuery(
-        dataset="survey",
-        schema="sample",
-        filter_tree={"field": "site", "op": "in", "value": ["a", "b"]},
-    )
-    planned = ctx.record_svc.set_review("checked", query=query, dry_run=True)
-    assert planned.changed == 2
-    assert _listed(ctx, {"field": "@review", "op": "eq", "value": "checked"}) == set()
-    ctx.record_svc.set_review("checked", query=query)
-    ctx.commit()
-    assert _listed(ctx, {"field": "@review", "op": "eq", "value": "checked"}) == {
-        "a",
-        "b",
-    }
-    assert _listed(ctx, {"field": "@review", "op": "eq", "value": "none"}) == {"c"}
-    assert _listed(ctx, {"field": "@review", "op": "ne", "value": "checked"}) == {"c"}
-    assert _listed(
-        ctx, {"field": "@review", "op": "in", "value": ["none", "checked"]}
-    ) == {"a", "b", "c"}
-
-
-def test_an_unknown_status_or_operator_is_refused(ctx: AppContext, study):
-    with pytest.raises(ValidationError):
-        ctx.record_svc.set_review("looked_at", ids=_ids(study))
-    with pytest.raises(ValidationError):
-        _listed(ctx, {"field": "@review", "op": "gt", "value": "checked"})
-    with pytest.raises(ValidationError):
-        _listed(ctx, {"field": "@review", "op": "eq", "value": "maybe"})
+def test_a_filter_on_open_notes_takes_true_or_false(ctx: AppContext, study):
     with pytest.raises(ValidationError):
         _listed(ctx, {"field": "@open_notes", "op": "eq", "value": "yes"})
+    with pytest.raises(ValidationError):
+        _listed(ctx, {"field": "@open_notes", "op": "ne", "value": True})
 
 
-def test_a_review_is_one_event_in_history_and_reads_as_words(ctx: AppContext, study):
-    ctx.record_svc.set_review("needs_check", ids=_ids(study))
+def test_a_list_shows_open_threads_and_the_latest_ones_first_line(
+    ctx: AppContext, study
+):
+    a, b, c = study
+    ctx.note_svc.add(str(a.id), "older thread")
+    latest = ctx.note_svc.add(str(a.id), "  depth looks off\nsee the log  ")
+    ctx.note_svc.reply(str(latest.id), "a reply is not a thread")
+    done = ctx.note_svc.add(str(b.id), "resolved")
+    ctx.note_svc.resolve(str(done.id))
     ctx.commit()
-    entries = (
-        ctx._session.query(AuditLog)
-        .filter(AuditLog.entity_type == "record", AuditLog.action == "update")
-        .all()
-    )
-    assert len(entries) == 3
-    assert len({e.batch_id for e in entries}) == 1 and entries[0].batch_id
-    assert ctx.audit_svc.get_batch(entries[0].batch_id).kind == "review"
-    one = ctx.history_svc.get(entries[0].id)
-    (change,) = one.changes
-    assert (change["label"], change["before"], change["after"]) == (
-        "Review",
-        "Not reviewed",
-        "Needs a check",
-    )
+    listed = {
+        r.data["site"]: (r.open_notes, r.latest_note)
+        for r in ctx.record_svc.query_records(
+            RecordQuery(dataset="survey", schema="sample"),
+            columns=["@open_notes"],
+        )
+    }
+    assert listed == {"a": (2, "depth looks off"), "b": (0, None), "c": (0, None)}
 
 
-def test_marking_many_records_costs_the_same_however_many(
+def test_listing_open_notes_costs_the_same_however_many(
     ctx: AppContext, make_schema, make_collection, make_record
 ):
     make_schema("sample", fields=[("site", "string")])
-    make_collection("survey")
-    few = [str(make_record("survey", "sample", {"site": "x"}).id) for _ in range(3)]
-    many = [str(make_record("survey", "sample", {"site": "y"}).id) for _ in range(30)]
+    make_collection("few")
+    make_collection("many")
+    for name, n in (("few", 2), ("many", 20)):
+        for i in range(n):
+            record = make_record(name, "sample", {"site": f"{name}{i}"})
+            for j in range(3):
+                note = ctx.note_svc.add(str(record.id), f"thread {j}")
+                ctx.note_svc.reply(str(note.id), "reply")
+    ctx.commit()
 
-    def cost(ids: list[str]) -> int:
+    def cost(name: str) -> int:
         with _statements(ctx) as seen:
-            ctx.record_svc.set_review("checked", ids=ids)
-        ctx.commit()
-        return len([s for s in seen if not s.lstrip().upper().startswith("INSERT")])
+            ctx.record_svc.query_records(
+                RecordQuery(dataset=name, schema="sample"), columns=["@open_notes"]
+            )
+        return len(seen)
 
-    assert cost(few) == cost(many)
+    assert cost("few") == cost("many")
 
 
 # --- notes
@@ -142,7 +94,7 @@ def test_notes_are_written_resolved_edited_and_deleted(ctx: AppContext, study):
     note = ctx.note_svc.add(str(a.id), "  value looks off, re-check calibration ")
     ctx.commit()
     assert note.body == "value looks off, re-check calibration"
-    assert note.author == ctx.record_svc.actor
+    assert note.author == ctx.note_svc._actor
     assert ctx.record_svc.get(str(a.id)).open_notes == 1
 
     ctx.note_svc.edit(str(note.id)[:8], "re-check the calibration")
@@ -193,6 +145,114 @@ def test_open_notes_count_and_filter(ctx: AppContext, study):
         "b",
         "c",
     }
+
+
+# --- threads
+
+
+def test_replies_are_listed_under_the_note_they_answer(ctx: AppContext, study):
+    a = study[0]
+    first = ctx.note_svc.add(str(a.id), "depth looks off")
+    second = ctx.note_svc.add(str(a.id), "site name misspelt")
+    reply = ctx.note_svc.reply(str(first.id), "it was the sensor, fixed")
+    # A reply to a reply joins the same thread.
+    again = ctx.note_svc.reply(str(reply.id)[:8], "thanks")
+    ctx.commit()
+    assert reply.thread_id == first.id and again.thread_id == first.id
+    threads = ctx.note_svc.notes(str(a.id))
+    assert [(t.body, [r.body for r in t.replies]) for t in threads] == [
+        ("depth looks off", ["it was the sensor, fixed", "thanks"]),
+        ("site name misspelt", []),
+    ]
+    assert second.replies == []
+    # Two threads open, however many replies.
+    assert ctx.record_svc.get(str(a.id)).open_notes == 2
+    counted = ctx.note_svc.open_notes(RecordQuery(dataset="survey", schema="sample"))
+    assert (counted.notes, counted.records) == (2, 1)
+
+
+def test_a_thread_is_resolved_whole_and_a_reply_opens_it_again(ctx: AppContext, study):
+    a = study[0]
+    first = ctx.note_svc.add(str(a.id), "depth looks off")
+    reply = ctx.note_svc.reply(str(first.id), "fixed")
+    # Resolving from a reply resolves the thread.
+    resolved = ctx.note_svc.resolve(str(reply.id))
+    ctx.commit()
+    assert resolved.id == first.id and resolved.resolved_at is not None
+    assert ctx.note_svc.notes(str(a.id), include_resolved=False) == []
+    assert _listed(ctx, {"field": "@open_notes", "op": "eq", "value": True}) == set()
+
+    ctx.note_svc.reply(str(first.id), "no, still off")
+    ctx.commit()
+    (thread,) = ctx.note_svc.notes(str(a.id), include_resolved=False)
+    assert thread.resolved_at is None and len(thread.replies) == 2
+    # The reply and the reopening are one action.
+    ops = {
+        e.op_id
+        for e in ctx._session.query(AuditLog)
+        .filter(AuditLog.entity_type == "note")
+        .order_by(AuditLog.local_seq.desc())
+        .limit(2)
+    }
+    assert len(ops) == 1 and None not in ops
+
+
+def test_replies_are_deleted_alone_or_hidden_with_their_thread(ctx: AppContext, study):
+    a = study[0]
+    first = ctx.note_svc.add(str(a.id), "depth looks off")
+    gone = ctx.note_svc.reply(str(first.id), "typo")
+    kept = ctx.note_svc.reply(str(first.id), "fixed")
+    ctx.note_svc.delete(str(gone.id))
+    ctx.commit()
+    assert [r.body for r in ctx.note_svc.notes(str(a.id))[0].replies] == ["fixed"]
+
+    ctx.note_svc.delete(str(first.id))
+    ctx.commit()
+    assert ctx.note_svc.notes(str(a.id)) == []
+    with pytest.raises(NotFoundError):
+        ctx.note_svc.reply(str(kept.id), "hello?")
+    with pytest.raises(ValidationError):
+        ctx.note_svc.restore(str(gone.id))
+
+    ctx.note_svc.restore(str(first.id))
+    ctx.commit()
+    # The thread's replies come back with it; the one deleted by itself stays.
+    assert [r.body for r in ctx.note_svc.notes(str(a.id))[0].replies] == ["fixed"]
+    ctx.note_svc.restore(str(gone.id))
+    ctx.commit()
+    assert [r.body for r in ctx.note_svc.notes(str(a.id))[0].replies] == [
+        "typo",
+        "fixed",
+    ]
+
+
+def test_only_its_author_changes_a_reply(ctx: AppContext, study):
+    first = ctx.note_svc.add(str(study[0].id), "depth looks off")
+    reply = ctx.note_svc.reply(str(first.id), "fixd")
+    ctx.note_svc.edit(str(reply.id), "fixed")
+    ctx.commit()
+    ctx.note_svc._actor = "someone else"
+    with pytest.raises(NotAllowedError):
+        ctx.note_svc.edit(str(reply.id), "not fixed")
+    # Anyone who may write may reply.
+    ctx.note_svc.reply(str(reply.id), "agreed")
+
+
+def test_listing_threads_costs_the_same_however_many(ctx: AppContext, study):
+    a, b, _ = study
+    for record, threads in ((a, 2), (b, 12)):
+        for i in range(threads):
+            note = ctx.note_svc.add(str(record.id), f"note {i}")
+            for j in range(3):
+                ctx.note_svc.reply(str(note.id), f"reply {j}")
+    ctx.commit()
+
+    def cost(record) -> int:
+        with _statements(ctx) as seen:
+            ctx.note_svc.notes(str(record.id))
+        return len(seen)
+
+    assert cost(a) == cost(b)
 
 
 def test_a_deleted_record_hides_its_notes_and_brings_them_back(ctx: AppContext, study):
@@ -266,25 +326,20 @@ def as_someone(tmp_path: Path):
     owner.close()
 
 
-def test_who_may_write_notes_and_set_reviews(as_someone):
+def test_who_may_write_notes(as_someone):
     as_, mine, here, there = as_someone
     reader = as_(Permissions.of(p.READ))
     try:
         assert reader.note_svc.notes(str(here.id)) == []
         with pytest.raises(NotAllowedError):
             reader.note_svc.add(str(here.id), "hello")
-        with pytest.raises(NotAllowedError):
-            reader.record_svc.set_review("checked", ids=[str(here.id)])
     finally:
         reader.close()
     writer = as_(Permissions.of(p.READ, p.WRITE_RECORDS, collections=[mine.id]))
     try:
         note = writer.note_svc.add(str(here.id), "hello")
-        writer.record_svc.set_review("checked", ids=[str(here.id)])
         with pytest.raises(NotAllowedError):
             writer.note_svc.add(str(there.id), "hello")
-        with pytest.raises(NotAllowedError):
-            writer.record_svc.set_review("checked", ids=[str(here.id), str(there.id)])
         writer.commit()
     finally:
         writer.close()
@@ -293,6 +348,7 @@ def test_who_may_write_notes_and_set_reviews(as_someone):
         with pytest.raises(NotAllowedError):
             other.note_svc.edit(str(note.id), "changed")
         other.note_svc.resolve(str(note.id))
+        other.note_svc.reply(str(note.id), "seen")
         other.commit()
     finally:
         other.close()

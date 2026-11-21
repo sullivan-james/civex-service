@@ -190,16 +190,22 @@ def test_history_describes_everything_a_person_can_do(ctx: AppContext) -> None:
     ctx.dataset_svc.update("c", description="study", scope="global")
     ctx.commit()
 
-    # Curating: review statuses and notes.
-    ctx.record_svc.set_review("needs_check", ids=[str(enc.id), str(rec.id)])
-    ctx.record_svc.set_review("checked", ids=[str(rec.id)])
-    ctx.record_svc.set_review("none", ids=[str(enc.id)])
+    # Notes on records, and their threads.
     note = ctx.note_svc.add(str(rec.id), "re-check the rate")
     ctx.note_svc.edit(str(note.id), "re-check the sample rate")
     ctx.note_svc.resolve(str(note.id))
     dropped = ctx.note_svc.add(str(enc.id), "typo")
     ctx.note_svc.delete(str(dropped.id))
     restored = ctx.note_svc.add(str(enc.id), "kept")
+    ctx.note_svc.delete(str(restored.id))
+    ctx.note_svc.restore(str(restored.id))
+    # Threads: replies, one deleted alone, a resolved thread a reply reopens,
+    # and a thread deleted and brought back with its replies.
+    answer = ctx.note_svc.reply(str(note.id), "done, 48 kHz")
+    ctx.note_svc.edit(str(answer.id), "done: 48 kHz")
+    ctx.note_svc.reply(str(answer.id), "thanks")
+    aside = ctx.note_svc.reply(str(restored.id), "aside")
+    ctx.note_svc.delete(str(aside.id))
     ctx.note_svc.delete(str(restored.id))
     ctx.note_svc.restore(str(restored.id))
     ctx.commit()

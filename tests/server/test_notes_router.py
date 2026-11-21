@@ -1,4 +1,4 @@
-"""HTTP contract for review status and notes on records."""
+"""HTTP contract for notes on records, their threads, and finding what is open."""
 
 from __future__ import annotations
 
@@ -20,50 +20,6 @@ def _study(client: TestClient) -> list[str]:
         assert made.status_code == 201, made.text
         ids.append(made.json()["id"])
     return ids
-
-
-def test_records_are_marked_by_ids_or_query_and_filtered(client: TestClient):
-    a, b, c = _study(client)
-    marked = client.post(
-        "/api/records/review", json={"ids": [a, b], "status": "needs_check"}
-    )
-    assert marked.status_code == 200, marked.text
-    assert marked.json() == {
-        "status": "needs_check",
-        "records": 2,
-        "changed": 2,
-        "unchanged": 0,
-    }
-    record = client.get(f"/api/records/{a}").json()
-    assert record["review"]["status"] == "needs_check"
-
-    planned = client.post(
-        "/api/records/review",
-        json={
-            "collection": "survey",
-            "schema_name": "sample",
-            "status": "checked",
-            "dry_run": True,
-        },
-    )
-    assert planned.json()["changed"] == 3
-    assert client.get(f"/api/records/{c}").json()["review"] is None
-
-    waiting = client.get(
-        "/api/collections/survey/records",
-        params={
-            "schema": "sample",
-            "filter": json.dumps(
-                {"field": "@review", "op": "eq", "value": "needs_check"}
-            ),
-            "columns": "@review",
-        },
-    )
-    assert waiting.status_code == 200, waiting.text
-    assert sorted(r["id"] for r in waiting.json()["items"]) == sorted([a, b])
-
-    bad = client.post("/api/records/review", json={"ids": [a], "status": "maybe"})
-    assert bad.status_code == 422
 
 
 def test_notes_are_added_listed_edited_resolved_and_deleted(client: TestClient):
@@ -94,3 +50,41 @@ def test_notes_are_added_listed_edited_resolved_and_deleted(client: TestClient):
     assert empty.status_code == 422
     missing = client.post("/api/records/ffffffff/notes", json={"body": "hello"})
     assert missing.status_code == 404
+
+
+def test_replies_make_a_thread_and_open_threads_are_found(client: TestClient):
+    a, b, _ = _study(client)
+    note = client.post(
+        f"/api/records/{a}/notes", json={"body": "depth looks off\nsee log"}
+    ).json()
+    client.post(f"/api/records/{b}/notes", json={"body": "fine"})
+    done = client.get(f"/api/records/{b}/notes").json()[0]
+    client.post(f"/api/notes/{done['id']}/resolve")
+
+    reply = client.post(f"/api/notes/{note['id']}/replies", json={"body": "fixed"})
+    assert reply.status_code == 201, reply.text
+    assert reply.json()["thread_id"] == note["id"]
+    again = client.post(f"/api/notes/{reply.json()['id']}/replies", json={"body": "ok"})
+    assert again.json()["thread_id"] == note["id"]
+    (thread,) = client.get(f"/api/records/{a}/notes").json()
+    assert [r["body"] for r in thread["replies"]] == ["fixed", "ok"]
+
+    record = client.get(f"/api/records/{a}").json()
+    assert (record["open_notes"], record["latest_note"]) == (1, "depth looks off")
+    listed = client.get(
+        "/api/schemas/sample/records",
+        params={
+            "filter": json.dumps({"field": "@open_notes", "op": "eq", "value": True}),
+            "columns": "@open_notes",
+        },
+    )
+    assert listed.status_code == 200, listed.text
+    assert [r["id"] for r in listed.json()["items"]] == [a]
+    assert listed.json()["items"][0]["latest_note"] == "depth looks off"
+    bad = client.get(
+        "/api/schemas/sample/records",
+        params={
+            "filter": json.dumps({"field": "@open_notes", "op": "eq", "value": "yes"})
+        },
+    )
+    assert bad.status_code == 422

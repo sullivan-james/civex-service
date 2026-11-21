@@ -1,8 +1,7 @@
-"""records.review and record_notes: review status and notes on records
+"""record_notes: notes on records, in threads
 
-A record may carry a review (whether it needs a check or has been checked, by
-whom and when), and people may leave notes on it. Both sync and are in
-history.
+People may leave notes on a record and reply to them (a note with a thread_id
+is a reply in that note's thread). Notes sync and are in history.
 
 Revision ID: c2f8a4d6e1b9
 Revises: a6e3c9f1d4b8
@@ -26,11 +25,6 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     inspector = sa.inspect(op.get_bind())
-    if "review" not in {c["name"] for c in inspector.get_columns("records")}:
-        # A plain ADD COLUMN (no table rebuild): records is large.
-        op.add_column(
-            "records", sa.Column("review", civex.db.models._JSON, nullable=True)
-        )
     if "record_notes" not in inspector.get_table_names():
         op.create_table(
             "record_notes",
@@ -41,6 +35,7 @@ def upgrade() -> None:
                 sa.ForeignKey("records.id", ondelete="CASCADE"),
                 nullable=False,
             ),
+            sa.Column("thread_id", sa.Uuid(), nullable=True),
             sa.Column("body", sa.Text(), nullable=False),
             sa.Column("author", sa.String(200), nullable=True),
             sa.Column("created_at", civex.db.models._UTCDateTime(), nullable=False),
@@ -55,5 +50,3 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("ix_record_notes_record", table_name="record_notes")
     op.drop_table("record_notes")
-    with op.batch_alter_table("records") as batch:
-        batch.drop_column("review")

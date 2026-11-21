@@ -891,70 +891,6 @@ def record_delete_all(
         raise typer.Exit(1)
 
 
-@app.command("review")
-def record_review(
-    status: str = typer.Argument(
-        ..., help="needs_check, checked, or none to clear the review"
-    ),
-    record_ids: Optional[list[str]] = typer.Option(
-        None, "--id", help="A record to mark (id or prefix); repeat for several"
-    ),
-    collection: Optional[str] = typer.Option(
-        None, "--in", help="Mark every record this collection lists (with the filters)"
-    ),
-    schema: Optional[str] = typer.Option(
-        None, "--schema", "-s", help="Only records of this schema"
-    ),
-    where: Optional[list[str]] = typer.Option(
-        None, "--where", "-w", help="Only records with field=value; repeatable"
-    ),
-    search: Optional[str] = typer.Option(
-        None, "--search", "-q", help="Only records whose values contain this text"
-    ),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", help="Say how many would change, only"
-    ),
-) -> None:
-    """Mark records as needing a check, checked, or not reviewed.
-
-    Choose the records with --id (repeatable), or with --in and the same
-    filters as listing them. The review is recorded as you, now; records that
-    already have the status are left as they are. It is not an edit of the
-    records' values (no workflow starts), is in their history, and syncs.
-    """
-    from civex.domain.query import RecordQuery
-    from civex.domain.review import LABELS
-
-    if bool(record_ids) == bool(collection):
-        console.print("[error]Choose the records: --id, or --in a collection.[/error]")
-        raise typer.Exit(1)
-    ctx = _ctx()
-    try:
-        selection = (
-            {"ids": record_ids}
-            if record_ids
-            else {
-                "query": RecordQuery(
-                    dataset=collection, schema=schema, where=where or [], search=search
-                )
-            }
-        )
-        result = ctx.record_svc.set_review(status, dry_run=dry_run, **selection)
-        if not dry_run:
-            ctx.commit()
-        verb = "Would mark" if dry_run else "Marked"
-        console.print(
-            f"[success]{verb} {result.changed} record(s) '{LABELS[status]}'."
-            + (f" {result.unchanged} already were." if result.unchanged else "")
-            + "[/success]"
-        )
-    except (NotFoundError, ValidationError, ValueError) as e:
-        console.print(f"[error]{e}[/error]")
-        raise typer.Exit(1)
-    finally:
-        ctx.close()
-
-
 note_app = typer.Typer(help="Notes left on records")
 app.add_typer(note_app, name="note")
 
@@ -974,6 +910,14 @@ def _print_notes(notes) -> None:
             n.body,
             f"by {n.resolved_by or '?'}" if n.resolved_at else "",
         )
+        for r in n.replies:
+            table.add_row(
+                f"  {str(r.id)[:8]}",
+                r.author or "",
+                r.created_at.strftime("%Y-%m-%d %H:%M"),
+                f"  ↳ {r.body}",
+                "",
+            )
     console.print(table)
 
 
@@ -982,7 +926,8 @@ def note_add(
     record_id: str = typer.Argument(..., help="The record (id or prefix)"),
     body: str = typer.Argument(..., help="The note's text"),
 ) -> None:
-    """Leave a note on a record, as you."""
+    """Leave a note on a record, as you. It starts a thread that others can
+    reply in (`note reply`)."""
     ctx = _ctx()
     try:
         note = ctx.note_svc.add(record_id, body)
@@ -995,12 +940,34 @@ def note_add(
         ctx.close()
 
 
+@note_app.command("reply")
+def note_reply(
+    note_id: str = typer.Argument(
+        ..., help="A note or reply in the thread (id or prefix)"
+    ),
+    body: str = typer.Argument(..., help="The reply's text"),
+) -> None:
+    """Reply in a note's thread, as you. A resolved thread opens again."""
+    ctx = _ctx()
+    try:
+        reply = ctx.note_svc.reply(note_id, body)
+        ctx.commit()
+        console.print(f"[success]Reply {str(reply.id)[:8]} added.[/success]")
+    except (NotFoundError, ValidationError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+
+
 @note_app.command("list")
 def note_list(
     record_id: str = typer.Argument(..., help="The record (id or prefix)"),
-    open_only: bool = typer.Option(False, "--open", help="Only notes not yet resolved"),
+    open_only: bool = typer.Option(
+        False, "--open", help="Only threads not yet resolved"
+    ),
 ) -> None:
-    """List a record's notes, oldest first."""
+    """List a record's notes, oldest first, each thread's replies under it."""
     ctx = _ctx()
     try:
         notes = ctx.note_svc.notes(record_id, include_resolved=not open_only)
@@ -1038,15 +1005,15 @@ def note_resolve(
     note_id: str = typer.Argument(..., help="The note (id or prefix)"),
     reopen: bool = typer.Option(False, "--reopen", help="Open it again instead"),
 ) -> None:
-    """Mark a note resolved (or, with --reopen, open again)."""
+    """Mark a note's thread resolved (or, with --reopen, open again)."""
     ctx = _ctx()
     try:
         ctx.note_svc.resolve(note_id, resolved=not reopen)
         ctx.commit()
         console.print(
-            "[success]Note opened again.[/success]"
+            "[success]Thread opened again.[/success]"
             if reopen
-            else "[success]Note resolved.[/success]"
+            else "[success]Thread resolved.[/success]"
         )
     except (NotFoundError, ValidationError) as e:
         console.print(f"[error]{e}[/error]")
@@ -1059,7 +1026,8 @@ def note_resolve(
 def note_delete(
     note_id: str = typer.Argument(..., help="The note (id or prefix)"),
 ) -> None:
-    """Delete a note. It stays in history, and `note restore` brings it back."""
+    """Delete a note or a reply. It stays in history, and `note restore` brings
+    it back. Deleting the note that starts a thread hides its replies too."""
     ctx = _ctx()
     try:
         ctx.note_svc.delete(note_id)

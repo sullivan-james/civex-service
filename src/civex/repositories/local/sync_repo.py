@@ -1011,10 +1011,6 @@ class LocalSyncRepository:
             for name, value in snap.items()
             if name in columns
         }
-        if kind == "record":
-            # A record snapshot leaves out a review it hasn't got
-            # (`RecordDTO.to_dict`): absent is "not reviewed".
-            values.setdefault("review", None)
         row = self._s.get(model, values["id"])
         if row is None:
             row = model(**values)

@@ -26,7 +26,6 @@ HOWS = [
     "purge",
     "move",
     "edit",
-    "review",
     "workflow",
 ]
 # Where the record a change is about is now.

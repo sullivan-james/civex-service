@@ -115,13 +115,13 @@ WIRE_FIELDS: dict[str, frozenset[str]] = {
             "created_at",
             "updated_at",
             "deleted_at",
-            "review",
         }
     ),
     "note": frozenset(
         {
             "id",
             "record_id",
+            "thread_id",
             "body",
             "author",
             "created_at",
@@ -138,10 +138,7 @@ WIRE_FIELDS: dict[str, frozenset[str]] = {
 # `snapshot_for`; applied in the peer router, never in the core): a kind, or a
 # kind's field, and the version it travels from.
 KINDS_SINCE: dict[str, int] = {"dashboard": 4, "note": 4}
-FIELDS_SINCE: dict[str, dict[str, int]] = {
-    "view": {"summary": 4},
-    "record": {"review": 4},
-}
+FIELDS_SINCE: dict[str, dict[str, int]] = {"view": {"summary": 4}}
 
 
 def kinds_for(protocol: int) -> tuple[str, ...]:

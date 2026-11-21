@@ -80,21 +80,7 @@ def diff_entry(
             was, now = (old or {}).get(key), (new or {}).get(key)
             if was != now:
                 changes.insert(0, Change(key, was, now))
-        # Its review: a status, not a value (who and when are the entry's own).
-        was_s, now_s = _review_status(old), _review_status(new)
-        if was_s != now_s:
-            changes.insert(0, Change(REVIEW_KEY, was_s, now_s))
     return changes
-
-
-# A record's review (`civex.domain.review`), reported as a change of its status
-# under a name no field can have (it starts with `@`, as the filter's does).
-REVIEW_KEY = "@review"
-
-
-def _review_status(snapshot: dict[str, Any] | None) -> str | None:
-    review = (snapshot or {}).get("review")
-    return review.get("status") if isinstance(review, dict) else None
 
 
 # A record's place: its collection and the record it sits inside. Reported as
@@ -179,6 +165,7 @@ IDENTITY_KEYS = frozenset(
         "parent_id",
         "parent_record_id",
         "record_id",  # a note's: the record it is on
+        "thread_id",  # a reply's: the note it answers
         "dtype",  # a field's: how its values (and restrictions) read
         # Whether it was deleted when changed: an edit to something live that
         # meets a delete elsewhere keeps it; one made to something already

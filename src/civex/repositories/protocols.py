@@ -218,7 +218,7 @@ class DashboardRepository(Protocol):
 
 
 class NoteRepository(Protocol):
-    """Notes left on records (`civex.domain.review`)."""
+    """Notes left on records (`civex.domain.notes`)."""
 
     def get(self, id: uuid.UUID) -> NoteDTO | None: ...
     def get_by_prefix(self, prefix: str) -> NoteDTO | None: ...
@@ -231,6 +231,7 @@ class NoteRepository(Protocol):
         body: str,
         author: str | None,
         id: uuid.UUID | None = None,
+        thread_id: uuid.UUID | None = None,
     ) -> NoteDTO: ...
     def update(self, id: uuid.UUID, **values: Any) -> NoteDTO: ...
 
@@ -407,10 +408,9 @@ class RecordRepository(Protocol):
     def purgeable_deleted(
         self, cutoff: datetime
     ) -> list[tuple[uuid.UUID, uuid.UUID, uuid.UUID]]: ...
-    def set_review(
-        self, ids: list[uuid.UUID], review: dict[str, Any] | None
-    ) -> None: ...
-    def open_note_counts(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, int]: ...
+    def open_notes_of(
+        self, ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, tuple[int, str]]: ...
     def count_open_notes(self, query: ResolvedQuery) -> tuple[int, int]: ...
     def delete_many(
         self, ids: list[uuid.UUID], stamp: datetime | None = None

@@ -1,4 +1,4 @@
-"""Review status and notes on records (`civex.domain.review`)."""
+"""Notes on records, in threads (`civex.domain.notes`)."""
 
 from __future__ import annotations
 
@@ -12,34 +12,15 @@ from civex.server.models import (
     NoteResponse,
     OpenNotesResponse,
     RecordQueryRequest,
-    ReviewRequest,
-    ReviewResponse,
 )
-from civex.server.routers.records import _selection
 
-router = APIRouter(tags=["review"])
-
-
-@router.post("/records/review", response_model=ReviewResponse)
-def set_review(body: ReviewRequest, ctx: AppContext = Depends(get_ctx)):
-    """Mark the chosen records (exactly `ids`, or every record the query lists)
-    as needing a check, checked, or (`none`) not reviewed, as whoever is
-    asking, now. Not an edit of the records' values: their last-changed date
-    stays and no workflow starts. Records that already have the status are
-    left as they are. Each record changed is in its history, the lot one event
-    in Activity; it syncs."""
-    result = ctx.record_svc.set_review(
-        body.status, dry_run=body.dry_run, **_selection(body, "review")
-    )
-    if not body.dry_run:
-        ctx.commit()
-    return ReviewResponse(**result.to_dict())
+router = APIRouter(tags=["notes"])
 
 
 @router.post("/records/open-notes", response_model=OpenNotesResponse)
 def open_notes(body: RecordQueryRequest, ctx: AppContext = Depends(get_ctx)):
-    """How many notes are not yet resolved, and on how many records, among the
-    records the query lists."""
+    """How many threads are not yet resolved, and on how many records, among
+    the records the query lists (a note and its replies count once)."""
     return OpenNotesResponse(**ctx.note_svc.open_notes(body.to_query()).to_dict())
 
 
@@ -47,11 +28,12 @@ def open_notes(body: RecordQueryRequest, ctx: AppContext = Depends(get_ctx)):
 def list_notes(
     record_id: str,
     include_resolved: bool = Query(
-        default=True, description="Also list notes already resolved."
+        default=True, description="Also list threads already resolved."
     ),
     ctx: AppContext = Depends(get_ctx),
 ):
-    """A record's notes, oldest first."""
+    """A record's threads, oldest first: each note that starts one, with its
+    replies, oldest first, in `replies`."""
     return [
         NoteResponse.from_dto(n)
         for n in ctx.note_svc.notes(record_id, include_resolved)
@@ -60,16 +42,27 @@ def list_notes(
 
 @router.post("/records/{record_id}/notes", response_model=NoteResponse, status_code=201)
 def add_note(record_id: str, body: NoteRequest, ctx: AppContext = Depends(get_ctx)):
-    """Leave a note on a record, as whoever is asking. Needs permission to
-    write records in its collection."""
+    """Leave a note on a record, starting a thread, as whoever is asking.
+    Needs permission to write records in its collection."""
     note = ctx.note_svc.add(record_id, body.body)
+    ctx.commit()
+    return NoteResponse.from_dto(note)
+
+
+@router.post("/notes/{note_id}/replies", response_model=NoteResponse, status_code=201)
+def reply_to_note(note_id: str, body: NoteRequest, ctx: AppContext = Depends(get_ctx)):
+    """Reply in the thread a note is in (the note that starts it, or any reply
+    in it: a reply to a reply joins the same thread), as whoever is asking. A
+    resolved thread opens again. Needs permission to write records in the
+    record's collection."""
+    note = ctx.note_svc.reply(note_id, body.body)
     ctx.commit()
     return NoteResponse.from_dto(note)
 
 
 @router.patch("/notes/{note_id}", response_model=NoteResponse)
 def edit_note(note_id: str, body: NoteRequest, ctx: AppContext = Depends(get_ctx)):
-    """Change a note's words. Only its author may."""
+    """Change a note's or a reply's words. Only its author may."""
     note = ctx.note_svc.edit(note_id, body.body)
     ctx.commit()
     return NoteResponse.from_dto(note)
@@ -81,7 +74,8 @@ def resolve_note(
     body: NoteResolveRequest | None = None,
     ctx: AppContext = Depends(get_ctx),
 ):
-    """Mark a note resolved, or (`resolved: false`) open it again."""
+    """Mark the thread a note is in resolved, or (`resolved: false`) open it
+    again. Answers the note that starts the thread."""
     note = ctx.note_svc.resolve(note_id, body.resolved if body else True)
     ctx.commit()
     return NoteResponse.from_dto(note)
@@ -89,7 +83,8 @@ def resolve_note(
 
 @router.delete("/notes/{note_id}", response_model=NoteResponse)
 def delete_note(note_id: str, ctx: AppContext = Depends(get_ctx)):
-    """Delete a note. It stays in history and can be restored."""
+    """Delete a note or a reply. It stays in history and can be restored.
+    Deleting the note that starts a thread hides its replies with it."""
     note = ctx.note_svc.delete(note_id)
     ctx.commit()
     return NoteResponse.from_dto(note)
@@ -97,7 +92,8 @@ def delete_note(note_id: str, ctx: AppContext = Depends(get_ctx)):
 
 @router.post("/notes/{note_id}/restore", response_model=NoteResponse)
 def restore_note(note_id: str, ctx: AppContext = Depends(get_ctx)):
-    """Bring back a deleted note."""
+    """Bring back a deleted note (with its thread's replies, but those deleted
+    by themselves) or a reply (only into a thread that is there)."""
     note = ctx.note_svc.restore(note_id)
     ctx.commit()
     return NoteResponse.from_dto(note)

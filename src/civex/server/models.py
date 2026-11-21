@@ -730,31 +730,16 @@ class RecordSelectionRequest(RecordQueryRequest):
     )
 
 
-class ReviewRequest(RecordSelectionRequest):
-    """Set the review status of the chosen records."""
-
-    status: str = Field(
-        description="'needs_check', 'checked', or 'none' to clear the review."
-    )
-    dry_run: bool = Field(
-        default=False, description="Only count what would change; change nothing."
-    )
-
-
-class ReviewResponse(BaseModel):
-    """What setting a review status did (or, with `dry_run`, would do)."""
-
-    status: str = Field(description="The status set.")
-    records: int = Field(description="Live records chosen.")
-    changed: int = Field(description="Records whose status changed.")
-    unchanged: int = Field(description="Records that already had that status.")
-
-
 class NoteResponse(BaseModel):
-    """A note left on a record."""
+    """A note left on a record, or a reply in a note's thread."""
 
     id: str
     record_id: str = Field(description="The record the note is on.")
+    thread_id: str | None = Field(
+        default=None,
+        description="For a reply, the note that starts its thread; null for a "
+        "note that starts one.",
+    )
     body: str = Field(description="The note's text (plain).")
     author: str | None = Field(default=None, description="Who wrote it.")
     created_at: datetime
@@ -764,9 +749,18 @@ class NoteResponse(BaseModel):
     resolved_at: datetime | None = Field(
         default=None, description="When it was marked resolved; null while open."
     )
-    resolved_by: str | None = Field(default=None, description="Who resolved it.")
+    resolved_by: str | None = Field(
+        default=None,
+        description="Who resolved it. A thread is resolved as a whole, on the "
+        "note that starts it.",
+    )
     deleted_at: datetime | None = Field(
         default=None, description="When it was deleted; null while it is there."
+    )
+    replies: list[NoteResponse] = Field(
+        default_factory=list,
+        description="A thread's replies, oldest first (listed on the note that "
+        "starts it, when a record's notes are listed; empty otherwise).",
     )
 
     @classmethod
@@ -774,6 +768,7 @@ class NoteResponse(BaseModel):
         return cls(
             id=str(dto.id),
             record_id=str(dto.record_id),
+            thread_id=str(dto.thread_id) if dto.thread_id else None,
             body=dto.body,
             author=dto.author,
             created_at=dto.created_at,
@@ -781,6 +776,7 @@ class NoteResponse(BaseModel):
             resolved_at=dto.resolved_at,
             resolved_by=dto.resolved_by,
             deleted_at=dto.deleted_at,
+            replies=[cls.from_dto(r) for r in getattr(dto, "replies", [])],
         )
 
 
@@ -791,7 +787,7 @@ class NoteRequest(BaseModel):
 
 
 class NoteResolveRequest(BaseModel):
-    """Resolve a note, or open it again."""
+    """Resolve a note's thread, or open it again."""
 
     resolved: bool = Field(
         default=True, description="True to mark it resolved, false to reopen it."
@@ -799,10 +795,10 @@ class NoteResolveRequest(BaseModel):
 
 
 class OpenNotesResponse(BaseModel):
-    """Notes not yet resolved among the records a query lists."""
+    """Threads not yet resolved among the records a query lists."""
 
-    notes: int = Field(description="Open notes.")
-    records: int = Field(description="Records with at least one open note.")
+    notes: int = Field(description="Open threads (a note and its replies count once).")
+    records: int = Field(description="Records with at least one open thread.")
 
 
 class RecordSummaryRequest(RecordQueryRequest):
@@ -1361,15 +1357,6 @@ class DeletedFieldValue(BaseModel):
     )
 
 
-class ReviewValue(BaseModel):
-    """A record's review: whether it needs a check or has been checked, by
-    whom and when."""
-
-    status: str = Field(description="'needs_check' or 'checked'.")
-    by: str | None = Field(default=None, description="Who set it.")
-    at: datetime = Field(description="When it was set.")
-
-
 class RecordResponse(BaseModel):
     id: str
     dataset_id: str
@@ -1442,16 +1429,15 @@ class RecordResponse(BaseModel):
         "(`POST /schemas/{schema_name}/fields/{id}/restore`) puts each back in "
         "`data`. Null when there are none.",
     )
-    review: ReviewValue | None = Field(
-        default=None,
-        description="Whether someone has looked at this record: its review "
-        "status, who set it and when. Null when it has not been reviewed. Set "
-        "with POST /records/review.",
-    )
     open_notes: int | None = Field(
         default=None,
-        description="How many notes on this record are not yet resolved "
-        "(GET /records/{record_id}/notes lists them).",
+        description="How many threads of notes on this record are not yet "
+        "resolved (GET /records/{record_id}/notes lists them).",
+    )
+    latest_note: str | None = Field(
+        default=None,
+        description="The first line of the latest thread not yet resolved; "
+        "null when none is open.",
     )
 
     @classmethod
@@ -1477,8 +1463,8 @@ class RecordResponse(BaseModel):
             deleted_fields=[DeletedFieldValue(**d) for d in dto.deleted_fields]
             if dto.deleted_fields
             else None,
-            review=ReviewValue(**dto.review) if dto.review else None,
             open_notes=dto.open_notes,
+            latest_note=dto.latest_note,
         )
 
 

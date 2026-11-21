@@ -27,10 +27,6 @@ LIFECYCLE_KEYS = frozenset({"id", "created_at", "updated_at", "deleted_at"})
 NESTED_KEYS = frozenset({"data"})
 # Derived from other attributes, so never merged on their own.
 DERIVED_KEYS = frozenset({"schemas", "record_count"})
-# Never a conflict: the edit's value is taken whenever it changed it. A record's
-# review (`civex.domain.review`) says who looked at it last; two people marking
-# it at once is not a disagreement to settle by hand.
-LATEST_WINS = frozenset({"review"})
 
 
 @dataclass
@@ -86,8 +82,6 @@ def merge(
             head.get(key, _MISSING),
             incoming.get(key, _MISSING),
         )
-        if outcome is _CONFLICT and key in LATEST_WINS:
-            outcome = incoming.get(key, _MISSING)
         if outcome is _KEEP:
             continue
         if outcome is _CONFLICT:

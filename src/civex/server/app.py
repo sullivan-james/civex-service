@@ -139,10 +139,11 @@ _OPENAPI_TAGS = [
         ),
     },
     {
-        "name": "review",
+        "name": "notes",
         "description": (
-            "Curate records as a team: mark records as needing a check or "
-            "checked, and leave notes on them. Both are in history and sync."
+            "Notes on records, in threads: leave one, reply, resolve a "
+            "thread. In history and sync; find what is open with the "
+            "records' `@open_notes` filter."
         ),
     },
     {

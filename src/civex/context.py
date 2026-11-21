@@ -115,7 +115,7 @@ class AppContext:
     policy_svc: PolicyService
     view_svc: ViewService
     dashboard_svc: DashboardService
-    # Notes people leave on records (`domain/review`).
+    # Notes people leave on records (`domain/notes`).
     note_svc: NoteService
     export_def_svc: ExportDefinitionService
     bundle_svc: BundleService
@@ -458,7 +458,6 @@ def build_context(
         audit_repo,
         permissions=may,
     )
-    record_svc.actor = project.actor
     note_svc = NoteService(
         LocalNoteRepository(session),
         record_repo,
