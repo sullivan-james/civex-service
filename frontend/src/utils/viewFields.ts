@@ -59,6 +59,9 @@ export function joinableColumns(
     const targetSchema = schemasByName.get(targetSchemaName)
     if (!targetSchema) continue
     for (const targetField of collectFields(targetSchema, schemasById)) {
+      // A link reaches stored values: a formula on the record it points at
+      // is worked out only where that record is read.
+      if (targetField.type === 'formula') continue
       columns.push({
         value: `${field.name}.${targetField.name}`,
         label: `${field.label ?? field.name} → ${targetField.label ?? targetField.name}`,

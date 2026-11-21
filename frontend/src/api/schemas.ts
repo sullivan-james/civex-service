@@ -61,6 +61,22 @@ export interface FieldTypeDescriptor {
   grouping: 'value' | 'bin' | 'bucket' | 'each' | null
   /** The periods a `bucket` grouping offers. */
   buckets: string[]
+  /** Worked out from other fields when read, never stored (a formula): it
+   * can't be typed in, filtered or sorted by. */
+  computed?: boolean
+}
+
+/** What a formula would give, saving nothing (`POST
+ * /schemas/{s}/fields/preview-formula`). */
+export interface FormulaPreview {
+  value: unknown
+  /** Why it can't be worked out for that record. */
+  error: string | null
+  /** Why the formula can't be saved. */
+  problem: string | null
+  result: string | null
+  record_id: string | null
+  record_name: string | null
 }
 
 /** A measure a summary can work out. */
@@ -151,6 +167,20 @@ export const schemasApi = {
       kind: 'record' | 'file'
     },
   ) => api.post<NamePreview>(`/schemas/${name}/preview-name`, body),
+  previewFormula: (
+    name: string,
+    body: {
+      expression: string
+      result?: string | null
+      decimals?: number | null
+      field?: string | null
+      record_id?: string | null
+    },
+  ) =>
+    api.post<FormulaPreview>(
+      `/schemas/${encodeURIComponent(name)}/fields/preview-formula`,
+      body,
+    ),
   create: (body: {
     name: string
     label?: string

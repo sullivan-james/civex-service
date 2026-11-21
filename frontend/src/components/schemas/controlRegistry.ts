@@ -6,7 +6,10 @@ import {
   ChoicesControl,
   DateBoundControl,
   DatetimeBoundControl,
+  DecimalsControl,
   FilenameTemplateControl,
+  FormulaControl,
+  FormulaResultControl,
   FromFilenameControl,
   GeometryTypesControl,
   NumberControl,
@@ -36,4 +39,7 @@ export const CONTROLS: Record<string, ComponentType<ControlProps>> = {
   precision: PrecisionControl,
   geometry_types: GeometryTypesControl,
   bbox: BboxControl,
+  formula: FormulaControl,
+  formula_result: FormulaResultControl,
+  decimals: DecimalsControl,
 }

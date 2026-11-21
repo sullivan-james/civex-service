@@ -347,6 +347,10 @@ export default function RecordDetailPage() {
                 )
               }
               data={record.data}
+              computed={{
+                values: record.derived,
+                errors: record.formula_errors,
+              }}
               referenceLabels={record.reference_labels}
               referenceCollections={record.reference_collections}
               onSave={saveField}
