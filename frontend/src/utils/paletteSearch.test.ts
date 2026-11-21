@@ -52,7 +52,7 @@ describe('buildGroups', () => {
     })
     expect(groups.map((g) => g.heading)).toEqual([
       'Collections',
-      'Saved filters',
+      'Saved lists and analyses',
     ])
     expect(groups[0].items).toHaveLength(1)
   })

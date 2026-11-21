@@ -34,6 +34,8 @@ export interface PaletteSources {
   collections: NavTarget[]
   schemas: NavTarget[]
   views: NavTarget[]
+  /** Saved exports (optional: older callers have none). */
+  exports?: NavTarget[]
   records: NavTarget[]
 }
 
@@ -49,7 +51,8 @@ export function buildGroups(
     ? [
         { heading: 'Collections', items: pick(q, src.collections) },
         { heading: 'Schemas', items: pick(q, src.schemas) },
-        { heading: 'Saved filters', items: pick(q, src.views) },
+        { heading: 'Saved lists and analyses', items: pick(q, src.views) },
+        { heading: 'Saved exports', items: pick(q, src.exports ?? []) },
         // Records were already matched by the server.
         { heading: 'Records', items: src.records.slice(0, GROUP_LIMIT) },
         {

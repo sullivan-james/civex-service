@@ -158,3 +158,43 @@ def test_a_device_asks_to_join_over_http_and_is_let_in_by_the_admin(serving, ctx
         ).status_code
         == 422
     )
+
+
+def test_a_device_on_the_previous_protocol_is_served_what_it_can_read(serving, ctx):
+    """Protocol 4 added the Analytics page and a view's summary; a device on 3
+    still syncs: it is never sent a page entry (a run of them is read past)
+    nor a summary, and can't ask for the page's snapshot."""
+    client, headers = serving
+    ctx.schema_svc.create("sample")
+    ctx.schema_svc.add_field("sample", "site", "string")
+    view = ctx.view_svc.create("sample", "by site", summary={"group_by": ["site"]})
+    for size in ("wide", "small", "wide"):
+        ctx.dashboard_svc.add(view_id=str(view.id), size=size)
+    ctx.commit()
+    old = {**headers, "X-Civex-Protocol": "3"}
+
+    feed = client.get("/api/sync/v1/feed", params={"limit": 2}, headers=old).json()
+    kinds = [e["entity_type"] for e in feed["entries"]]
+    assert "dashboard" not in kinds and kinds
+    every = client.get("/api/sync/v1/feed", params={"limit": 500}, headers=old).json()
+    assert {e["entity_type"] for e in every["entries"]} == {"schema", "field", "view"}
+    for e in every["entries"]:
+        assert "summary" not in (e.get("new_data") or {})
+    # Past the view, only page entries are left: read past, nothing sent.
+    view_seq = max(e["hub_seq"] for e in every["entries"])
+    rest = client.get(
+        "/api/sync/v1/feed", params={"after": view_seq, "limit": 1}, headers=old
+    ).json()
+    assert rest["entries"] == [] and rest["more"] is False
+
+    views = client.get("/api/sync/v1/snapshot/view", headers=old).json()
+    assert "summary" not in views["items"][0]
+    page = client.get("/api/sync/v1/snapshot/dashboard", headers=old)
+    assert page.status_code == 422
+
+    # On the current protocol, all of it.
+    now = client.get("/api/sync/v1/feed", params={"limit": 500}, headers=headers)
+    assert "dashboard" in {e["entity_type"] for e in now.json()["entries"]}
+    assert client.get("/api/sync/v1/snapshot/dashboard", headers=headers).json()[
+        "items"
+    ]

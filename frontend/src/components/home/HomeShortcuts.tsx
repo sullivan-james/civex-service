@@ -3,6 +3,7 @@ import { usePins, useRecents } from '../../hooks/usePins'
 import { TargetLabel } from '../TargetLabel'
 import { PinCount } from '../PinnedNav'
 import { PIN_ICONS } from '../pinIcons'
+import { SAVED_KINDS } from '../../utils/savedKinds'
 import { IconButton } from '../ui'
 import { Star } from '../ui/icons'
 import type { NavTarget } from '../../utils/pins'
@@ -62,7 +63,9 @@ export function HomeShortcuts() {
           </h2>
           <ul className="divide-y divide-border-muted rounded-md border border-border">
             {recents.map((r) => {
-              const Icon = PIN_ICONS[r.kind]
+              const Icon = r.saved
+                ? SAVED_KINDS[r.saved].icon
+                : PIN_ICONS[r.kind]
               const pinned = isPinned(r.key)
               return (
                 <li

@@ -4,6 +4,7 @@ import {
   ACTIONS,
   EVERYTHING,
   can,
+  canSomewhere,
   notAllowed,
   type Action,
   type Allowed,
@@ -29,6 +30,8 @@ export function useAccount(): Me['account'] {
  * the one way a control learns what this person may do. */
 export function usePermissions(): {
   can: (action: Action, collectionId?: string | null) => boolean
+  /** Allowed in at least one place (a thing the whole project shares). */
+  canSomewhere: (action: Action) => boolean
   why: (action: Action) => string
 } {
   const me = useMe()
@@ -36,6 +39,7 @@ export function usePermissions(): {
   const words = { ...ACTIONS, ...(me?.permissions.all ?? {}) }
   return {
     can: (action, collectionId) => can(allowed, action, collectionId),
+    canSomewhere: (action) => canSomewhere(allowed, action),
     why: (action) => notAllowed(action, words),
   }
 }

@@ -54,8 +54,8 @@ class SyncApplier:
         self._repo.apply_snapshot(kind, state)
 
     def apply_delete(self, kind: str, entity_id: uuid.UUID, stamp: datetime) -> None:
-        if kind == "view":
-            self._repo.delete_view(entity_id)
+        if kind in ("view", "dashboard"):
+            self._repo.delete_view(entity_id, kind)
         else:
             self._repo.soft_delete(kind, entity_id, stamp)
 

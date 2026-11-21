@@ -13,10 +13,13 @@ import {
   placeTarget,
   recordTarget,
   viewTarget,
+  exportTarget,
 } from '../utils/navTargets'
 import type { NavTarget } from '../utils/pins'
 import { displayLabel } from '../utils/naming'
 import { PIN_ICONS } from './pinIcons'
+import { SAVED_KINDS } from '../utils/savedKinds'
+import { useAllExports } from '../hooks/useExportDefinitions'
 import { IconButton } from './ui/IconButton'
 import { Modal, ModalHeader } from './ui/Modal'
 import { Search, Star } from './ui/icons'
@@ -48,6 +51,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const { data: collections } = useCollections()
   const { data: schemas } = useSchemas()
   const { data: views } = useAllViews()
+  const { data: exportDefs } = useAllExports()
 
   // One request for records of every schema and collection, once the
   // person has paused typing.
@@ -74,8 +78,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           ),
         })),
         views: (views ?? []).map((v) =>
-          viewTarget({ id: v.schema_id, name: v.schema_name }, v.name),
+          viewTarget({ id: v.schema_id, name: v.schema_name }, v.name, v),
         ),
+        exports: (exportDefs ?? []).map(exportTarget),
         records:
           recordQuery.length >= MIN_RECORD_QUERY
             ? foundRecords.map(recordTarget)
@@ -88,6 +93,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       collections,
       schemas,
       views,
+      exportDefs,
       recordQuery,
       foundRecords,
     ],
@@ -176,7 +182,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
               {group.items.map((item) => {
                 index += 1
                 const i = index
-                const Icon = PIN_ICONS[item.kind]
+                const Icon = item.saved
+                  ? SAVED_KINDS[item.saved].icon
+                  : PIN_ICONS[item.kind]
                 const pinned = isPinned(item.key)
                 return (
                   <div
@@ -198,6 +206,11 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
                     <span className="min-w-0 truncate font-medium text-fg">
                       <TargetLabel target={item} />
                     </span>
+                    {item.saved && (
+                      <span className="shrink-0 text-xs text-fg-muted">
+                        {SAVED_KINDS[item.saved].word}
+                      </span>
+                    )}
                     {item.context && (
                       <span className="truncate text-xs text-fg-subtle">
                         {item.context}

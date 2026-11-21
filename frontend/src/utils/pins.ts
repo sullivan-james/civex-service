@@ -1,3 +1,4 @@
+import type { SavedKind } from './savedKinds'
 /**
  * Pins and recents, kept in this browser (civex has no user accounts to
  * attach them to). A pin is a shortcut to something the researcher keeps
@@ -13,7 +14,7 @@ export const PINS_KEY = projectKey('civex.pins')
 export const RECENTS_KEY = projectKey('civex.recents')
 export const MAX_RECENTS = 12
 
-export type PinKind = 'view' | 'collection' | 'record' | 'place'
+export type PinKind = 'view' | 'collection' | 'record' | 'place' | 'export'
 
 export interface NavTarget {
   /** Identity: the same thing always has the same key, so pinning twice is
@@ -25,6 +26,8 @@ export interface NavTarget {
   to: string
   /** Small muted detail, e.g. a record's schema or a view's schema. */
   context?: string
+  /** A saved thing's kind (List, Analysis, Export: `utils/savedKinds`). */
+  saved?: SavedKind
   /** Saved filters only: what is needed to count the matching records. */
   schema?: string
   view?: string
@@ -39,7 +42,7 @@ export const targetKeys = {
   place: (to: string) => `place:${to}`,
 }
 
-const KINDS: PinKind[] = ['view', 'collection', 'record', 'place']
+const KINDS: PinKind[] = ['view', 'collection', 'record', 'place', 'export']
 
 function isTarget(v: unknown): v is NavTarget {
   if (!v || typeof v !== 'object') return false

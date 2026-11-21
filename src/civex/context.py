@@ -63,6 +63,7 @@ if TYPE_CHECKING:
     from civex.services.sync_authority import SyncAuthorityService
     from civex.services.sync_service import SyncService
     from civex.services.view_service import ViewService
+    from civex.services.dashboard_service import DashboardService
     from civex.services.workflow_job_service import WorkflowJobService
     from civex.services.workflow_service import WorkflowService
 
@@ -112,6 +113,7 @@ class AppContext:
     container_plugin_svc: ContainerPluginService
     policy_svc: PolicyService
     view_svc: ViewService
+    dashboard_svc: DashboardService
     export_def_svc: ExportDefinitionService
     bundle_svc: BundleService
     sync_repo: LocalSyncRepository
@@ -379,6 +381,8 @@ def build_context(
         LocalExportDefinitionRepository,
     )
     from civex.repositories.local.view_repo import LocalViewRepository
+    from civex.repositories.local.dashboard_repo import LocalDashboardRepository
+    from civex.services.dashboard_service import DashboardService
     from civex.services.ai.service import AiService
     from civex.services.ai_usage_service import AiUsageService
     from civex.services.analytics_service import AnalyticsService
@@ -513,7 +517,12 @@ def build_context(
     container_plugin_svc = ContainerPluginService(config.civex_dir)
     policy_svc = PolicyService(config.civex_dir)
     view_svc = ViewService(
-        view_repo, schema_svc, record_svc, audit_repo, permissions=may
+        view_repo,
+        schema_svc,
+        record_svc,
+        audit_repo,
+        permissions=may,
+        datasets=dataset_repo,
     )
     export_def_svc = ExportDefinitionService(
         LocalExportDefinitionRepository(session),
@@ -639,6 +648,12 @@ def build_context(
         container_plugin_svc=container_plugin_svc,
         policy_svc=policy_svc,
         view_svc=view_svc,
+        dashboard_svc=DashboardService(
+            LocalDashboardRepository(session),
+            view_repo,
+            audit_repo,
+            permissions=may,
+        ),
         export_def_svc=export_def_svc,
         bundle_svc=BundleService(
             schema_svc,

@@ -345,6 +345,15 @@ def record_summarise(
             typer.echo(path.read_text(encoding="utf-8"), nl=False)
         return
 
+    print_summary(result)
+
+
+def print_summary(result) -> None:
+    """A summary as a table on the terminal, totals last (also `civex view
+    show` of a saved analysis)."""
+    from civex.domain import summary
+
+    columns, rows = summary.table_of(result)
     table = Table(*columns)
     for i, row in enumerate(rows):
         cells = [

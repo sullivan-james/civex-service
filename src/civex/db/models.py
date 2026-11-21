@@ -213,9 +213,31 @@ class View(Base):
     files_layout: Mapped[str] = mapped_column(
         String(10), nullable=False, default="tree", server_default="tree"
     )
+    # A saved analysis: the view summarised (groupings, measures, how it is
+    # shown, where it was made; `civex.domain.summary.SavedSummary`), or None
+    # for a plain saved filter.
+    summary: Mapped[dict[str, Any] | None] = mapped_column(_JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
 
     schema: Mapped[Schema] = relationship("Schema")
+
+
+class Dashboard(Base):
+    """
+    The project's Analytics page: its cards in order (saved analyses and
+    built-in widgets, `civex.domain.dashboard`). One row, with a fixed id
+    (`dashboard.DASHBOARD_ID`), made the first time the page is edited; until
+    then the page shows the default cards. Shared by everyone, and synced and
+    audited like a view.
+    """
+
+    __tablename__ = "dashboards"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    cards: Mapped[list[dict[str, Any]]] = mapped_column(
+        _JSON, nullable=False, default=list
+    )
+    created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
 
 
 class ExportDefinition(Base):

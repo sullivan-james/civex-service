@@ -54,6 +54,7 @@ from civex.domain.sync import (
     LoginStarted,
     DEFERRED,
     ENTITY_ORDER,
+    PROTOCOL_MAX,
     COPYING,
     DeviceCredentials,
     FILLING,
@@ -66,6 +67,7 @@ from civex.domain.sync import (
     SyncError,
     SyncProgress,
     agree,
+    kinds_for,
     plain_failure,
     protocol_mismatch,
     retiring_notice,
@@ -618,7 +620,7 @@ class SyncService:
             if mode == "joined":
                 self._join(transport, hello, progress)
             elif mode == "seeded":
-                self._seed(transport, progress)
+                self._seed(transport, progress, hello.protocol_version)
             else:
                 self._repo.set_cursor(
                     hello.head_seq if mode == "empty" else self._repo.meta().cursor
@@ -1388,7 +1390,7 @@ class SyncService:
         done = 0
         head: int | None = None
         held: dict[str, set[str]] = {}
-        for kind in ENTITY_ORDER:
+        for kind in kinds_for(hello.protocol_version):
             # Things that sit under another of their kind that has not arrived
             # yet (it was made later, on a clock that was ahead): the database
             # refuses them until it has, so they wait for it, by its id.
@@ -1783,7 +1785,10 @@ class SyncService:
             after = snapshot_cursor(snaps[-1])
 
     def _seed(
-        self, transport: SyncTransport, progress: ProgressFn | None = None
+        self,
+        transport: SyncTransport,
+        progress: ProgressFn | None = None,
+        protocol: int = PROTOCOL_MAX,
     ) -> None:
         """Give an empty authority everything this project holds. Each thing is
         sent as a create with an id made from the project and the thing, so an
@@ -1830,7 +1835,9 @@ class SyncService:
                 progress(SyncProgress(FILLING, sent, total and max(total, sent), kind))
             batch = []
 
-        for kind in ENTITY_ORDER:
+        # Only the kinds the authority reads (one on an older protocol has no
+        # Analytics page to take, say).
+        for kind in kinds_for(protocol):
             for snap in self._seed_snapshots(kind):
                 now = datetime.now(timezone.utc)
                 batch.append(

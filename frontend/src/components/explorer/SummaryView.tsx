@@ -1,137 +1,108 @@
-import { useMemo, useState } from 'react'
-import { recordsApi, queryBody, type SummaryRow } from '../../api/records'
-import type { RecordQueryParams } from '../../api/query'
+import { useState } from 'react'
+import type { SavedSummary, View } from '../../api/views'
 import { useRecordSummary } from '../../hooks/useRecords'
-import { useFieldTypes } from '../../hooks/useFieldTypes'
-import { useListParams } from '../../hooks/useListParams'
 import {
   Button,
   Chip,
-  DataTable,
-  ErrorState,
   Field,
+  FormError,
+  IconButton,
   InfoTip,
   Input,
   Menu,
+  Modal,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
   SegmentedControl,
   Select,
-  type DataTableColumn,
   type MenuEntry,
 } from '../ui'
-import { ChevronDown, Download, Plus } from '../ui/icons'
-import { saveBlob } from '../files/fileFlows'
-import { SummaryChart } from './SummaryChart'
-import { TABLE_FORMATS } from '../../utils/tableFormats'
+import { BarChart3, ChevronDown, Plus, X } from '../ui/icons'
+import { SummaryResult } from './SummaryResult'
 import { errorMessage } from '../../lib/errors'
-import { displayLabel } from '../../utils/naming'
+import { displayLabel, viewNameError } from '../../utils/naming'
 import type { FilterableField } from '../../utils/hierarchy'
 import type { FilterTreeWire } from '../../utils/filterTree'
 import {
-  compareSummaryCells,
   fieldKey,
-  formatSummaryValue,
+  groupingWords,
+  savedSummaryOf,
   splitGroupKey,
-  splitKeys,
-  summaryFields,
 } from '../../utils/summary'
+import type { SummaryChoicesState } from './useSummaryChoices'
 
-/** Address names (beside the explorer's own): `sum.by`, `sum.m`, `sum.sort`,
- * `sum.view` (`chart`, else the table) and `sum.y` (the measure charted). */
-const NS = 'sum.'
-const PERIOD_NAMES: Record<string, string> = {
-  year: 'By year',
-  month: 'By month',
-  week: 'By week',
-  day: 'By day',
-}
-const TOTAL_ID = '__total'
+const PERIODS = ['year', 'month', 'week', 'day']
+const MAX_GROUPINGS = 3
 
-type Row = { id: string; row: SummaryRow | null; cells: unknown[] }
-
-/** The records the explorer lists, summarised: grouped by fields of their
- * kind (or of a kind above it), with counts, averages and the like for each
- * group and a total. The choices are in the address, so a summary is a
- * link. Clicking a group lists its records. */
+/** The records the explorer lists, summarised. The choices read as one
+ * sentence ("Work out [Records] for the Sample records listed, grouped by
+ * [Site] then by [Taken: by month]"), each slot a dropdown in plain words with
+ * a tip; with nothing chosen it groups by a sensible field, so the screen is
+ * never blank. Everything is in the address (`useSummaryChoices`), so a
+ * summary is a link, and **Save analysis…** keeps it as a saved view. Clicking
+ * a group lists its records. Downloading it is the explorer's Export menu. */
 export function SummaryView({
-  query,
-  collection,
-  fields,
+  summary,
+  kindLabel,
   onDrill,
+  analysis,
+  onSaveAnalysis,
+  where,
+  mayWrite,
+  cannotWrite,
 }: {
-  /** The explorer's own query: what it lists. */
-  query: RecordQueryParams
-  collection: string | undefined
-  /** The listed kind's fields and its relatives' (`filterableFields`). */
-  fields: FilterableField[]
+  /** The Summary's choices (the explorer reads them once, for its Export
+   * menu too). */
+  summary: SummaryChoicesState
+  /** The listed kind, as the page calls it ("Sample"). */
+  kindLabel: string
   /** List the records of a group: its condition, added to the filter. */
   onDrill: (where: FilterTreeWire) => void
+  /** The saved view this was opened from, if any (an analysis is updated). */
+  analysis: View | null
+  /** Save as a new analysis (`name`) or update `analysis` (`name` null). */
+  onSaveAnalysis: (name: string | null, saved: SavedSummary) => Promise<unknown>
+  /** Where the Summary is: what a saved analysis remembers. */
+  where: {
+    collection: string | null
+    within: string | null
+    search: string | null
+  }
+  mayWrite: boolean
+  /** Why saving is switched off, when it is. */
+  cannotWrite?: string
 }) {
-  const list = useListParams(NS, ['by', 'm', 'view', 'y'])
-  const asChart = list.picks.view === 'chart'
-  const by = splitKeys(list.picks.by)
-  const chosenMeasures = splitKeys(list.picks.m)
-  const measures = chosenMeasures.length ? chosenMeasures : ['count']
-  const types = useFieldTypes()
-  const usable = useMemo(
-    () => summaryFields(fields, types?.types ?? []),
-    [fields, types],
-  )
+  const { choices, by, byDefault, measures, usable, types, body } = summary
+  const { data, isLoading, isFetching, error } = useRecordSummary(body)
+  const [saving, setSaving] = useState(false)
+
   const measureNames = new Map(
     (types?.summary_measures ?? []).map((m) => [m.key, m]),
   )
   const byKey = new Map(usable.map((u) => [fieldKey(u.field), u]))
-  const [downloading, setDownloading] = useState(false)
-  const [downloadError, setDownloadError] = useState<string | null>(null)
-
-  const body = query.schema
-    ? {
-        ...queryBody({ ...query, sort: undefined }, collection),
-        group_by: by,
-        measures,
-      }
-    : null
-  const { data, isLoading, isFetching, error } = useRecordSummary(body)
-
-  const setBy = (next: string[]) => list.set({ by: next.join(',') })
-  const setMeasures = (next: string[]) =>
-    list.set({
-      m: next.length === 1 && next[0] === 'count' ? '' : next.join(','),
-    })
+  const groupable = usable.filter((u) => u.type.grouping)
 
   function labelOf(f: FilterableField) {
     const own = displayLabel(f.name, f.label)
     return f.relation === 'self' ? own : `${f.sourceSchemaName} › ${own}`
   }
 
-  // --- what can be added
-  const groupItems: MenuEntry[] = []
-  let lastKind = ''
-  for (const { field, type } of usable) {
-    if (!type.grouping) continue
-    const key = fieldKey(field)
-    if (by.some((b) => splitGroupKey(b).field === key)) continue
-    if (field.sourceSchemaName !== lastKind) {
-      lastKind = field.sourceSchemaName
-      groupItems.push({ heading: field.sourceSchemaName })
-    }
-    groupItems.push({
-      label: displayLabel(field.name, field.label),
-      hint: type.grouping === 'each' ? 'A group for each item' : undefined,
-      onClick: () =>
-        setBy([
-          ...by,
-          type.grouping === 'bucket' && type.buckets.includes('month')
-            ? `${key}:month`
-            : key,
-        ]),
-    })
+  // A grouping's first form: a date by month, anything else by each value.
+  const startOf = (key: string) => {
+    const u = byKey.get(key)
+    return u?.type.grouping === 'bucket' && u.type.buckets.includes('month')
+      ? `${key}:month`
+      : key
   }
+
+  // --- what can be worked out
   const measureItems: MenuEntry[] = []
   if (!measures.includes('count'))
     measureItems.push({
       label: measureNames.get('count')?.label ?? 'Records',
       hint: measureNames.get('count')?.help,
-      onClick: () => setMeasures([...measures, 'count']),
+      onClick: () => summary.setMeasures([...measures, 'count']),
     })
   for (const { field, type } of usable) {
     const key = fieldKey(field)
@@ -141,90 +112,131 @@ export function SummaryView({
     for (const m of open)
       measureItems.push({
         label: measureNames.get(m)?.label ?? m,
-        onClick: () => setMeasures([...measures, `${m}:${key}`]),
+        hint: measureNames.get(m)?.help,
+        onClick: () => summary.setMeasures([...measures, `${m}:${key}`]),
       })
   }
+  const measureLabel = (key: string) =>
+    data?.measure_columns.find((c) => c.key === key)?.label ??
+    measureNames.get(key)?.label ??
+    key
 
-  // --- the table
-  const groupCols = data?.group_columns ?? []
-  const measureCols = data?.measure_columns ?? []
-  const rows: Row[] = (data?.rows ?? []).map((row, i) => ({
-    id: String(i),
-    row,
-    cells: [...row.groups.map((g) => g.value), ...row.values],
-  }))
-  const sortIndex = list.sort
-    ? [...groupCols, ...measureCols].findIndex(
-        (c) => c.key === list.sort!.field,
-      )
-    : -1
-  if (sortIndex >= 0) {
-    const dir = list.sort!.dir === 'desc' ? -1 : 1
-    rows.sort(
-      (a, b) =>
-        dir * compareSummaryCells(a.cells[sortIndex], b.cells[sortIndex]),
-    )
+  /** The fields a grouping slot offers, by the kind they belong to. */
+  function fieldOptions(current: string) {
+    const kinds = new Map<string, typeof groupable>()
+    for (const u of groupable) {
+      const key = fieldKey(u.field)
+      if (key !== current && by.some((b) => splitGroupKey(b).field === key))
+        continue
+      const list = kinds.get(u.field.sourceSchemaName) ?? []
+      list.push(u)
+      kinds.set(u.field.sourceSchemaName, list)
+    }
+    return [...kinds.entries()].map(([kind, list]) => (
+      <optgroup key={kind} label={kind}>
+        {list.map((u) => (
+          <option key={fieldKey(u.field)} value={fieldKey(u.field)}>
+            {displayLabel(u.field.name, u.field.label)}
+          </option>
+        ))}
+      </optgroup>
+    ))
   }
-  if (data && groupCols.length > 0)
-    rows.push({
-      id: TOTAL_ID,
-      row: null,
-      cells: [...groupCols.map(() => null), ...data.total],
-    })
-  if (data && groupCols.length === 0)
-    rows.push({ id: TOTAL_ID, row: null, cells: data.total })
 
-  const columns: DataTableColumn<Row>[] = [
-    ...groupCols.map<DataTableColumn<Row>>((c, i) => ({
-      key: c.key,
-      header: c.label,
-      sortable: true,
-      render: (r) =>
-        r.row === null ? (
-          i === 0 ? (
-            <span className="font-semibold">Total</span>
-          ) : null
-        ) : (
-          <span
-            className={
-              r.row.groups[i].value === null || r.row.groups[i].precision
-                ? 'italic text-fg-muted'
-                : undefined
+  function groupSlot(index: number) {
+    const key = by[index]
+    const { field, how } = splitGroupKey(key)
+    const u = byKey.get(field)
+    const name = u ? labelOf(u.field) : field
+    const unit =
+      typeof u?.field.restrictions?.unit === 'string'
+        ? (u.field.restrictions.unit as string)
+        : null
+    const replace = (next: string) =>
+      summary.setBy(by.map((b, i) => (i === index ? next : b)))
+    return (
+      <span className="inline-flex flex-wrap items-center gap-1">
+        <Select
+          size="sm"
+          aria-label={index === 0 ? 'Group by' : `Then by (${index + 1})`}
+          value={field}
+          onChange={(e) =>
+            e.target.value
+              ? replace(startOf(e.target.value))
+              : summary.setBy(by.filter((_, i) => i !== index))
+          }
+        >
+          {index === 0 && by.length === 1 && (
+            <option value="">nothing (one total)</option>
+          )}
+          {!byKey.has(field) && <option value={field}>{field}</option>}
+          {fieldOptions(field)}
+        </Select>
+        {u?.type.grouping === 'bucket' && (
+          <Select
+            size="sm"
+            aria-label={`How to group ${name}`}
+            value={how}
+            onChange={(e) =>
+              replace(e.target.value ? `${field}:${e.target.value}` : field)
             }
           >
-            {r.row.groups[i].label}
+            <option value="">each value</option>
+            {u.type.buckets
+              .filter((b) => PERIODS.includes(b))
+              .map((b) => (
+                <option key={b} value={b}>
+                  {groupingWords(b, u.type)}
+                </option>
+              ))}
+          </Select>
+        )}
+        {u?.type.grouping === 'bin' && (
+          <span className="inline-flex items-center gap-1 text-fg-muted">
+            <span>{how ? 'in ranges of' : 'each value, or ranges of'}</span>
+            <Field label={`Range width for ${name}`} hideLabel>
+              <Input
+                key={key}
+                size="sm"
+                type="number"
+                min={0}
+                step="any"
+                className="w-20"
+                placeholder="width"
+                defaultValue={how}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') e.currentTarget.blur()
+                }}
+                onBlur={(e) => {
+                  const w = Number(e.target.value)
+                  const next = e.target.value && w > 0 ? `${field}:${w}` : field
+                  if (next !== key) replace(next)
+                }}
+              />
+            </Field>
+            {unit && <span>{unit}</span>}
           </span>
-        ),
-    })),
-    ...measureCols.map<DataTableColumn<Row>>((c, i) => ({
-      key: c.key,
-      header: c.unit ? `${c.label} (${c.unit})` : c.label,
-      headerTitle: measureNames.get(c.measure)?.help,
-      align: 'right',
-      sortable: true,
-      render: (r) => (
-        <span className={r.row === null ? 'font-semibold' : undefined}>
-          {formatSummaryValue(r.cells[groupCols.length + i])}
-        </span>
-      ),
-    })),
-  ]
-
-  async function download(format: string) {
-    if (!body) return
-    setDownloading(true)
-    setDownloadError(null)
-    try {
-      const got = await recordsApi.summaryFile(body, format)
-      saveBlob(got.blob, got.filename ?? `summary.${format}`)
-    } catch (e) {
-      setDownloadError(errorMessage(e))
-    } finally {
-      setDownloading(false)
-    }
+        )}
+        {u?.type.grouping === 'each' && (
+          <span className="text-fg-muted">({groupingWords(how, u.type)})</span>
+        )}
+        {index > 0 && (
+          <IconButton
+            icon={X}
+            size="sm"
+            aria-label={`Stop grouping by ${name}`}
+            onClick={() => summary.setBy(by.filter((_, i) => i !== index))}
+          />
+        )}
+      </span>
+    )
   }
 
-  if (!query.schema)
+  const nextField = groupable
+    .map((u) => fieldKey(u.field))
+    .find((k) => !by.some((b) => splitGroupKey(b).field === k))
+
+  if (!body)
     return (
       <p className="text-sm text-fg-muted">
         Choose a kind of record to summarise.
@@ -233,112 +245,41 @@ export function SummaryView({
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm text-fg-muted">Group by</span>
-        {by.map((key) => {
-          const { field, how } = splitGroupKey(key)
-          const u = byKey.get(field)
-          const name = u ? labelOf(u.field) : field
-          const replace = (next: string) =>
-            setBy(by.map((b) => (b === key ? next : b)))
-          return (
-            <span key={key} className="inline-flex items-center gap-1">
-              <Chip
-                onRemove={() => setBy(by.filter((b) => b !== key))}
-                removeLabel={`Stop grouping by ${name}`}
-              >
-                {name}
-              </Chip>
-              {u?.type.grouping === 'bucket' && (
-                <Select
-                  size="sm"
-                  aria-label={`How to group ${name}`}
-                  value={how}
-                  onChange={(e) =>
-                    replace(
-                      e.target.value ? `${field}:${e.target.value}` : field,
-                    )
-                  }
-                >
-                  <option value="">Each value</option>
-                  {u.type.buckets.map((b) => (
-                    <option key={b} value={b}>
-                      {PERIOD_NAMES[b] ?? b}
-                    </option>
-                  ))}
-                </Select>
-              )}
-              {u?.type.grouping === 'bin' && (
-                <Field label={`Range width for ${name}`} hideLabel>
-                  <Input
-                    size="sm"
-                    type="number"
-                    min={0}
-                    step="any"
-                    className="w-28"
-                    placeholder="Each value"
-                    title="Group into ranges this wide (leave empty for each value)"
-                    defaultValue={how}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') e.currentTarget.blur()
-                    }}
-                    onBlur={(e) => {
-                      const w = Number(e.target.value)
-                      const next =
-                        e.target.value && w > 0 ? `${field}:${w}` : field
-                      if (next !== key) replace(next)
-                    }}
-                  />
-                </Field>
-              )}
-            </span>
-          )
-        })}
-        {by.length < 3 && groupItems.length > 0 && (
-          <Menu
-            align="left"
-            wide
-            items={groupItems}
-            trigger={({ open, toggle }) => (
-              <Button
-                size="sm"
-                aria-haspopup="menu"
-                aria-expanded={open}
-                onClick={toggle}
-              >
-                <Plus size={14} /> {by.length ? 'And by…' : 'Group by…'}
-                <ChevronDown size={14} />
-              </Button>
-            )}
-          />
-        )}
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm text-fg-muted">Show</span>
-        {measures.map((key) => {
-          const col = measureCols.find((c) => c.key === key)
-          return (
-            <Chip
-              key={key}
-              onRemove={
-                measures.length > 1
-                  ? () => setMeasures(measures.filter((m) => m !== key))
-                  : undefined
-              }
-              removeLabel={`Stop showing ${col?.label ?? key}`}
-            >
-              {col?.label ?? key}
-            </Chip>
-          )
-        })}
+      <div
+        className="flex flex-wrap items-center gap-x-2 gap-y-2 rounded-md border border-border bg-canvas-subtle p-3 text-sm"
+        role="group"
+        aria-label="What the summary works out"
+      >
+        <span className="inline-flex items-center gap-1 font-medium">
+          Work out
+          <InfoTip label="About what is worked out">
+            What each row counts or measures: how many records there are, or for
+            a field, how many have it filled, its smallest, largest, average or
+            total. Add as many as you like.
+          </InfoTip>
+        </span>
+        {measures.map((key) => (
+          <Chip
+            key={key}
+            onRemove={
+              measures.length > 1
+                ? () => summary.setMeasures(measures.filter((m) => m !== key))
+                : undefined
+            }
+            removeLabel={`Stop working out ${measureLabel(key)}`}
+          >
+            {measureLabel(key)}
+          </Chip>
+        ))}
         {measureItems.length > 0 && (
           <Menu
             align="left"
+            wide
             items={measureItems}
             trigger={({ open, toggle }) => (
               <Button
                 size="sm"
+                variant="ghost"
                 aria-haspopup="menu"
                 aria-expanded={open}
                 onClick={toggle}
@@ -348,104 +289,201 @@ export function SummaryView({
             )}
           />
         )}
-        <div className="ml-auto flex items-center gap-2">
-          <SegmentedControl
-            size="sm"
-            label="Show the summary as"
-            value={asChart ? 'chart' : 'table'}
-            onChange={(v) => list.set({ view: v === 'chart' ? 'chart' : '' })}
-            options={[
-              { value: 'table', label: 'Table' },
-              { value: 'chart', label: 'Chart' },
-            ]}
-          />
-          <InfoTip label="About summaries">
-            Worked out over every record the list shows, with its filters and
-            search. A date known only to the year keeps a group of its own when
-            grouped by month. A list (tags, links) puts a record in a group for
-            each item, so groups can add up to more than the total. Click a
-            group to list its records.
+        <span>
+          of the <span className="font-medium">{kindLabel}</span> records
+          listed,
+        </span>
+        <span className="inline-flex items-center gap-1 font-medium">
+          grouped by
+          <InfoTip label="About grouping">
+            Grouping puts records with the same value in one row: grouped by
+            Site, each site gets a row with its own count. A date can be grouped
+            by year or month, a number into ranges (every 5 m, say). Add a
+            second grouping to split each row again: Site, then Year. With
+            nothing to group by you get one total.
           </InfoTip>
-          <Menu
-            items={TABLE_FORMATS.map((f) => ({
-              label: f.name,
-              hint: f.hint,
-              onClick: () => download(f.id),
-            }))}
-            trigger={({ open, toggle }) => (
-              <Button
-                size="sm"
-                aria-haspopup="menu"
-                aria-expanded={open}
-                onClick={toggle}
-                disabled={!data || downloading}
-              >
-                <Download size={14} /> Download <ChevronDown size={14} />
-              </Button>
-            )}
-          />
+        </span>
+        {by.length === 0 ? (
+          <Select
+            size="sm"
+            aria-label="Group by"
+            value=""
+            onChange={(e) =>
+              e.target.value && summary.setBy([startOf(e.target.value)])
+            }
+          >
+            <option value="">nothing (one total)</option>
+            {fieldOptions('')}
+          </Select>
+        ) : (
+          by.map((key, i) => (
+            <span key={key} className="inline-flex items-center gap-1">
+              {i > 0 && <span className="font-medium">then by</span>}
+              {groupSlot(i)}
+            </span>
+          ))
+        )}
+        {by.length > 0 && by.length < MAX_GROUPINGS && nextField && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => summary.setBy([...by, startOf(nextField)])}
+          >
+            <Plus size={14} /> then by…
+          </Button>
+        )}
+        {byDefault && by.length > 0 && (
+          <span className="text-xs text-fg-muted">
+            (a start: group by anything you like)
+          </span>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <SegmentedControl
+          size="sm"
+          label="Show the summary as"
+          value={choices.show}
+          onChange={(v) => summary.set({ view: v === 'chart' ? 'chart' : '' })}
+          options={[
+            { value: 'table', label: 'Table' },
+            { value: 'chart', label: 'Chart' },
+          ]}
+        />
+        <InfoTip label="About summaries">
+          Worked out over every record the list shows, with its filters and
+          search. A date known only to the year keeps a group of its own when
+          grouped by month. A list (tags, links) puts a record in a group for
+          each item, so groups can add up to more than the total. Click a group
+          to list its records. To download it, use Export.
+        </InfoTip>
+        <div className="ml-auto flex items-center gap-2">
+          {analysis?.summary && (
+            <span className="inline-flex items-center gap-1 text-sm text-fg-muted">
+              <BarChart3 size={14} aria-hidden="true" />
+              Analysis “{analysis.name}”
+            </span>
+          )}
+          <Button
+            size="sm"
+            onClick={() => setSaving(true)}
+            disabled={!mayWrite}
+            title={mayWrite ? undefined : cannotWrite}
+          >
+            Save analysis…
+          </Button>
         </div>
       </div>
 
-      {downloadError && <ErrorState message={downloadError} />}
-      {data?.truncated && (
-        <p className="text-sm text-fg-muted">
-          Only the first {data.limit.toLocaleString()} groups are shown.
-        </p>
-      )}
-      {data?.timezone && (
-        <p className="text-xs text-fg-muted">
-          Dates and times are grouped in {data.timezone}.
-        </p>
-      )}
+      <SummaryResult
+        data={data}
+        isLoading={isLoading}
+        isFetching={isFetching}
+        error={error}
+        show={choices.show}
+        sort={choices.sort}
+        onSort={(column) =>
+          summary.set({
+            sort:
+              choices.sort?.column !== column
+                ? `${column}:asc`
+                : choices.sort.direction === 'asc'
+                  ? `${column}:desc`
+                  : '',
+          })
+        }
+        chartMeasure={choices.y}
+        onChartMeasure={(y) => summary.set({ y })}
+        onDrill={onDrill}
+      />
 
-      <div className={isFetching && data ? 'opacity-70' : undefined}>
-        {asChart ? (
-          error ? (
-            <ErrorState message={errorMessage(error)} />
-          ) : data ? (
-            <SummaryChart
-              summary={data}
-              measureKey={list.picks.y || null}
-              onMeasure={(y) => list.set({ y })}
-              onDrill={onDrill}
-            />
-          ) : (
-            <p className="text-sm text-fg-muted">Working it out…</p>
-          )
-        ) : (
-          <DataTable
-            columns={columns}
-            rows={rows}
-            getRowId={(r) => r.id}
-            isLoading={isLoading}
-            error={error ? errorMessage(error) : undefined}
-            emptyTitle="Nothing to summarise"
-            sort={
-              list.sort
-                ? { key: list.sort.field, direction: list.sort.dir }
-                : undefined
-            }
-            onSortChange={list.toggleSort}
-            onRowClick={(r) => {
-              if (r.row?.where) onDrill(r.row.where)
-            }}
-            rowClassName={(r) =>
-              r.row === null
-                ? 'border-t-2 border-border'
-                : r.row.where
-                  ? 'cursor-pointer'
-                  : ''
-            }
-            dense
-          />
-        )}
-      </div>
-      {by.length === 0 && (
-        <p className="text-xs text-fg-muted">
-          Add a grouping to break the total down.
-        </p>
+      {saving && (
+        <SaveAnalysisDialog
+          analysis={analysis?.summary ? analysis : null}
+          onClose={() => setSaving(false)}
+          onSave={(name) =>
+            onSaveAnalysis(name, savedSummaryOf(choices, by, where)).then(() =>
+              setSaving(false),
+            )
+          }
+        />
       )}
     </div>
+  )
+}
+
+/** Name a saved analysis: a new one, or (opened from one) update it. */
+function SaveAnalysisDialog({
+  analysis,
+  onSave,
+  onClose,
+}: {
+  analysis: View | null
+  /** `name`: save as new; null: update `analysis`. */
+  onSave: (name: string | null) => Promise<unknown>
+  onClose: () => void
+}) {
+  const [name, setName] = useState('')
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<unknown>(null)
+  const invalid = viewNameError(name.trim())
+  const run = (n: string | null) => {
+    setPending(true)
+    setError(null)
+    onSave(n).catch((e) => {
+      setError(e)
+      setPending(false)
+    })
+  }
+  return (
+    <Modal onClose={onClose} size="sm" dismissible={!pending}>
+      <ModalHeader onClose={onClose}>Save analysis</ModalHeader>
+      <ModalBody className="space-y-3">
+        <p className="text-sm text-fg-muted">
+          Keeps this summary with the list's filters and search, for everyone in
+          the project. It is listed with the saved lists, can be pinned, and can
+          be put on the Analytics page.
+        </p>
+        {analysis && (
+          <p className="text-sm">
+            Opened from <span className="font-medium">“{analysis.name}”</span>:
+            update it, or save these choices as a new analysis.
+          </p>
+        )}
+        <Field
+          label={analysis ? 'Name for a new analysis' : 'Name'}
+          error={name ? (invalid ?? undefined) : undefined}
+        >
+          <Input
+            autoFocus
+            value={name}
+            placeholder="Samples by site and month"
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !invalid) run(name.trim())
+            }}
+          />
+        </Field>
+        {error != null && <FormError message={errorMessage(error)} />}
+      </ModalBody>
+      <ModalFooter>
+        <Button size="sm" onClick={onClose} disabled={pending}>
+          Cancel
+        </Button>
+        {analysis && (
+          <Button size="sm" disabled={pending} onClick={() => run(null)}>
+            Update “{analysis.name}”
+          </Button>
+        )}
+        <Button
+          size="sm"
+          variant="primary"
+          disabled={!!invalid || pending}
+          onClick={() => run(name.trim())}
+        >
+          {pending ? 'Saving…' : analysis ? 'Save as new' : 'Save analysis'}
+        </Button>
+      </ModalFooter>
+    </Modal>
   )
 }

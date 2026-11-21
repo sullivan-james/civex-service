@@ -1,6 +1,6 @@
 import type { FileSelection } from '../../api/fileAccess'
 import { useExportHost } from '../../hooks/useExportHost'
-import { Button, Menu } from '../ui'
+import { Button, Menu, type MenuEntry } from '../ui'
 import {
   Bookmark,
   ChevronDown,
@@ -29,6 +29,8 @@ export function FileAccessActions({
   scopeSchema,
   label = 'Export',
   size = 'sm',
+  leading = [],
+  exportItem,
 }: {
   selection: FileSelection
   /** Names the folder on the server: the same name refreshes the same folder. */
@@ -42,6 +44,12 @@ export function FileAccessActions({
   /** The button's words ('Files' where the menu is about files in general). */
   label?: string
   size?: 'sm' | 'md'
+  /** What else this page hands over, first in the menu (the explorer's
+   * Summary: "This summary as a table"). The menu stays the one way out. */
+  leading?: MenuEntry[]
+  /** The one-time export's words, where the page says what it covers
+   * ("Export these records…" from an analysis). */
+  exportItem?: { label: string; hint: string }
 }) {
   const { navigate, openExport, dialogs } = useExportHost({
     selection,
@@ -55,6 +63,9 @@ export function FileAccessActions({
         align="left"
         wide
         items={[
+          ...(leading.length > 0
+            ? [...leading, { separator: true as const }]
+            : []),
           ...(presets.length > 0
             ? [
                 { heading: 'Saved exports' },
@@ -68,8 +79,10 @@ export function FileAccessActions({
               ]
             : []),
           {
-            label: 'Export…',
-            hint: 'Take the files, a table of the records, or both.',
+            label: exportItem?.label ?? 'Export…',
+            hint:
+              exportItem?.hint ??
+              'Take the files, a table of the records, or both.',
             icon: Upload,
             onClick: () => openExport(),
           },
