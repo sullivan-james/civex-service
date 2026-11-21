@@ -16,6 +16,8 @@ Parts (each also on its own):
     chaos   take a volume away (rename its folder) and check reads say so
             instead of failing; kill a file move half way, resume it, and
             check nothing was lost
+    queries on a `generate.py --flat` project: list reads through the services,
+            without and with field indexes (not part of `all`)
     check   every file a record uses is on a volume and (with --hash) still
             hashes to its name; the inventory matches the disk; `civex doctor`
 
@@ -207,6 +209,115 @@ def table(rows: list[dict], cols: list[str]) -> None:
     print("  " + "  ".join(c.ljust(widths[c]) for c in cols))
     for r in rows:
         print("  " + "  ".join(str(r.get(c, "")).ljust(widths[c]) for c in cols))
+
+
+# -- queries ------------------------------------------------------------------
+
+# The fields `queries` indexes for its "with" run (all on generate.py --flat's
+# kind): one of each type the explorer sorts and filters by.
+QUERY_INDEXED = ["depth", "taken", "site", "count"]
+
+
+def _query_ops():
+    from civex.domain.query import RecordQuery
+
+    def q(**kw):
+        return RecordQuery(dataset="flat", schema="sample", **kw)
+
+    site = {"field": "site", "op": "eq", "value": "Site 007"}
+    deep = {"field": "depth", "op": "gt", "value": 3900}
+    when = {"field": "taken", "op": "gte", "value": "2024-12-01"}
+    return [
+        ("first page", "page", q()),
+        ("filter = page", "page", q(filter_tree=site)),
+        ("filter = count", "count", q(filter_tree=site)),
+        ("range page", "page", q(filter_tree=deep)),
+        ("range count", "count", q(filter_tree=deep)),
+        ("date range count", "count", q(filter_tree=when)),
+        ("sort number asc", "page", q(sort=[{"field": "depth"}])),
+        ("sort number desc", "page", q(sort=[{"field": "depth", "direction": "desc"}])),
+        ("sort date asc", "page", q(sort=[{"field": "taken"}])),
+        ("sort, page 100", "deep", q(sort=[{"field": "depth"}])),
+        ("filter + sort", "page", q(filter_tree=site, sort=[{"field": "depth"}])),
+        ("search page", "page", q(search="Site 007")),
+        ("search count", "count", q(search="Site 007")),
+    ]
+
+
+def _time_ops(ctx, reps: int) -> dict[str, float]:
+    out = {}
+    for label, how, query in _query_ops():
+        times = []
+        for rep in range(reps + 1):  # the first is a warm-up
+            ctx._session.expunge_all()
+            t = time.perf_counter()
+            if how == "count":
+                ctx.record_svc.count_records(query)
+            else:
+                offset = 50 * 99 if how == "deep" else 0
+                ctx.record_svc.query_records(query, limit=50, offset=offset)
+            if rep:
+                times.append(time.perf_counter() - t)
+        out[label] = round(statistics.median(times) * 1000, 1)
+    return out
+
+
+def queries(reps: int) -> None:
+    """Time the explorer's reads on `generate.py --flat`'s collection through
+    civex's own services (in process: the query, not HTTP), first with no
+    field indexes, then with `QUERY_INDEXED` indexed. The planner's
+    statistics are refreshed before each run, as civex now does. The
+    project's own index choices are put back afterwards."""
+    from civex.config import load_config
+    from civex.context import build_local_context
+
+    print("\nqueries")
+    ctx = build_local_context(load_config())
+    try:
+        n = ctx.record_svc.count_records(_query_ops()[0][2])
+        if not n:
+            raise SystemExit("No `flat` collection: run generate.py --flat N first.")
+        config = ctx.config_store.load()
+        chosen = list(config.db.indexed_fields)
+        dialect = ctx._session.get_bind().dialect.name
+        print(f"  {n:,} records of one kind, {dialect}")
+
+        config.db.indexed_fields = []
+        ctx.config_store.save(config)
+        ctx.index_svc.reconcile()
+        ctx.commit()
+        ctx.index_svc.after_bulk_write()
+        ctx.commit()
+        without = _time_ops(ctx, reps)
+
+        for name in QUERY_INDEXED:
+            ctx.index_svc.set_indexed("sample", name, True)
+        ctx.commit()
+        built = ctx.index_svc.reconcile()
+        ctx.commit()
+        with_ = _time_ops(ctx, reps)
+
+        rows = [
+            {"operation": k, "without (ms)": without[k], "with (ms)": with_[k]}
+            for k in without
+        ]
+        table(rows, ["operation", "without (ms)", "with (ms)"])
+        print(f"  building {len(built.created)} indexes took {built.seconds:.1f}s")
+        REPORT["parts"]["queries"] = {
+            "records": n,
+            "dialect": dialect,
+            "indexed": QUERY_INDEXED,
+            "index_build_seconds": round(built.seconds, 1),
+            "p50_ms": rows,
+        }
+
+        config = ctx.config_store.load()
+        config.db.indexed_fields = chosen
+        ctx.config_store.save(config)
+        ctx.index_svc.reconcile()
+        ctx.commit()
+    finally:
+        ctx.close()
 
 
 # -- bench --------------------------------------------------------------------
@@ -869,7 +980,9 @@ def chaos(srv: Server, kill_after: float) -> bool:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("part", choices=["bench", "load", "chaos", "check", "all"])
+    ap.add_argument(
+        "part", choices=["bench", "load", "chaos", "check", "queries", "all"]
+    )
     ap.add_argument(
         "--reps", type=int, default=5, help="bench: times each operation runs"
     )
@@ -891,7 +1004,7 @@ def main() -> None:
         raise SystemExit(
             "Run this from inside a civex project (a folder with _civex/)."
         )
-    if not Path(CIVEX).exists():
+    if args.part != "queries" and not Path(CIVEX).exists():
         raise SystemExit(
             f"No civex next to {sys.executable}; run with the venv's python."
         )
@@ -908,6 +1021,8 @@ def main() -> None:
             ok = chaos(srv, args.kill_after) and ok
     elif args.part in ("check",):
         ok = check(args.hash)
+    elif args.part == "queries":
+        queries(args.reps)
 
     out = Path(f"stress-{datetime.now():%Y%m%d-%H%M%S}.json")
     out.write_text(json.dumps(REPORT, indent=2, default=str))

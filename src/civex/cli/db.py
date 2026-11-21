@@ -716,3 +716,43 @@ def revert(
     console.print(
         f"[success]Switched back to {record.source_label}:[/success] {record.source_location}"
     )
+
+
+@app.command("indexes")
+def indexes(
+    reconcile: bool = typer.Option(
+        False, "--reconcile", help="Build what is missing and drop what isn't wanted"
+    ),
+) -> None:
+    """List the field indexes in this computer's database.
+
+    A field is indexed when it is part of a uniqueness key or someone asked
+    for it (`civex schema index`). With --reconcile, missing indexes are built
+    and unwanted ones dropped; a running `civex serve` does this by itself.
+    """
+    from rich.table import Table
+
+    from civex.cli.utils import get_ctx, reconcile_indexes
+
+    ctx = get_ctx()
+    try:
+        if reconcile:
+            reconcile_indexes(ctx)
+        report = ctx.index_svc.status()
+    finally:
+        ctx.close()
+    if not report.fields and not report.stale:
+        console.print("No field indexes.")
+        return
+    table = Table("Schema", "Field", "Why", "Built")
+    for f in report.fields:
+        why = ", ".join(
+            {"unique_key": "unique key", "chosen": "chosen"}[r] for r in f.reasons
+        )
+        table.add_row(f.schema_name, f.field_name, why, "yes" if f.built else "not yet")
+    console.print(table)
+    if report.stale:
+        console.print(
+            f"{len(report.stale)} index(es) nothing needs any more "
+            "(dropped by `civex db indexes --reconcile`)."
+        )

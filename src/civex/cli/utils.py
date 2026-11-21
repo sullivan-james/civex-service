@@ -313,3 +313,19 @@ def format_bytes(b: float | None) -> str:
     if b >= 1_048_576:
         return f"{b / 1_048_576:.0f} MB"
     return f"{b / 1024:.0f} KB"
+
+
+def reconcile_indexes(ctx: AppContext) -> None:
+    """Bring the field indexes in step in the foreground (the server does it on
+    a thread of its own) and say what changed. Call after `ctx.commit()`."""
+    if ctx.index_svc.in_step():
+        return
+    with console.status("Updating the field indexes…"):
+        result = ctx.index_svc.reconcile()
+        ctx.commit()
+    if result.created:
+        console.print(
+            f"  built {len(result.created)} index(es) in {result.seconds:.1f}s"
+        )
+    if result.dropped:
+        console.print(f"  dropped {len(result.dropped)} index(es) nothing needs")

@@ -2559,7 +2559,7 @@ class RecordService:
             if leaf.field == note_rules.OPEN_NOTES_FILTER:
                 return leaf  # about the record itself, not one of its fields
             f, rel = self._locate(schema, related, leaf.field, leaf.schema, "filter")
-            return dataclasses.replace(leaf, field=str(f.id), rel=rel)
+            return dataclasses.replace(leaf, field=str(f.id), rel=rel, dtype=f.dtype)
 
         return map_leaves(node, resolve_leaf)
 

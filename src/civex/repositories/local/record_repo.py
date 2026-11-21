@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -29,6 +30,7 @@ from sqlalchemy.sql.base import Executable
 from sqlalchemy.sql.expression import ClauseElement
 from sqlalchemy.orm import Session, aliased
 
+from civex.db.field_values import field_value
 from civex.db.models import (
     Dataset,
     Record,
@@ -88,23 +90,25 @@ def _sort_terms(sort: list[SortKey] | None) -> list[tuple[Any, bool, bool]]:
         if key.meta is not None:
             terms.append((_meta_value(key.meta), key.descending, False))
             continue
+        kind = "number" if key.numeric else "text"
         if key.rel.direction == "up":
-            value = _up_value(key.rel.hops, key.field_id, key.numeric)
+            value = _up_value(key.rel.hops, key.field_id, kind)
         else:
-            col = Record.data[key.field_id]
-            value = col.as_float() if key.numeric else col.as_string()
+            value = field_value(Record, key.field_id, kind)
         terms.append((value, key.descending, True))
     return terms
 
 
 def _order_by(sort: list[SortKey] | None) -> list[Any]:
-    """ORDER BY terms for `_sort_terms` (a nullable term is preceded by its
-    IS NULL flag, which puts nulls last)."""
+    """ORDER BY terms for `_sort_terms`, each written `<value> ASC|DESC NULLS
+    LAST` (nulls last whatever the direction) over `field_value`, so a managed
+    field index (`db/field_indexes.py`) can hand rows over in order: SQLite
+    and PostgreSQL both walk an index for that form, where the equivalent
+    `<value> IS NULL, <value>` made them sort every record."""
     out: list[Any] = []
     for value, descending, nullable in _sort_terms(sort):
-        if nullable:
-            out.append(value.is_(None))
-        out.append(value.desc() if descending else value.asc())
+        ordered = value.desc() if descending else value.asc()
+        out.append(ordered.nulls_last() if nullable else ordered)
     return out
 
 
@@ -156,6 +160,19 @@ def _meta_value(name: str) -> Any:
     return Record.created_at
 
 
+def _tie_breakers(sort: list[SortKey] | None) -> list[Any]:
+    """What orders records the sort leaves equal: oldest first, or newest
+    first when the (last) sort key is descending, so a list sorted one way
+    is exactly the reverse of the other and a field index
+    (`db/field_indexes.py`, whose columns end with these) gives the whole
+    order. created_at alone isn't a total order (bulk inserts share
+    timestamps), so ties are broken on id -- otherwise OFFSET pages can
+    repeat or skip rows."""
+    if sort and sort[-1].descending:
+        return [Record.created_at.desc(), Record.id.desc()]
+    return [Record.created_at, Record.id]
+
+
 def _chain(columns: Any, hops: int, link: Any):
     """`SELECT columns` over `hops` aliased Records joined in a chain
     (`link(prev, next)` is the join condition), plus the aliases."""
@@ -186,12 +203,11 @@ def _exists_up(hops: int, predicate):
     )
 
 
-def _up_value(hops: int, field_id: str, numeric: bool):
+def _up_value(hops: int, field_id: str, kind: str):
     """The value of `field_id` on the ancestor `hops` levels above the outer
     Record, as a correlated scalar -- NULL when there is none."""
     aliases = [aliased(Record) for _ in range(hops)]
-    col = aliases[-1].data[field_id]
-    value = col.as_float() if numeric else col.as_string()
+    value = field_value(aliases[-1], field_id, kind)
     q = select(value).select_from(aliases[0])
     for prev, nxt in zip(aliases, aliases[1:]):
         q = q.join(nxt, _up(prev, nxt))
@@ -388,10 +404,7 @@ class LocalRecordRepository:
                     and_(Record.created_at == when, Record.id > last_id),
                 )
             )
-        # created_at alone isn't a total order (bulk inserts share
-        # timestamps), so ties are broken on id -- otherwise OFFSET pages can
-        # repeat or skip rows.
-        q = q.order_by(*_order_by(query.sort), Record.created_at, Record.id)
+        q = q.order_by(*_order_by(query.sort), *_tie_breakers(query.sort))
         if offset:
             q = q.offset(offset)
         return [_to_dto(r) for r in q.limit(limit).all()]
@@ -991,7 +1004,7 @@ class LocalRecordRepository:
         if exclude_id is not None:
             q = q.filter(Record.id != exclude_id)
         for field_id, value in key.items():
-            q = q.filter(_typed_comparison(Record.data[field_id], "eq", value))
+            q = q.filter(_typed_comparison(Record, field_id, "eq", value))
         row = q.order_by(Record.created_at).first()
         return _to_dto(row) if row else None
 
@@ -1290,14 +1303,11 @@ def _base_query(session: Session, query: ResolvedQuery, is_postgres: bool = Fals
             doc = json.dumps({key: _coerce_json_value(value)})
             q = q.filter(Record.data.op("@>")(cast(literal(doc), PG_JSONB)))
         else:
-            # SQLite: json_extract (via .as_string()) returns the *unquoted* scalar
-            # but preserves its storage class, so a numeric field would compare as
-            # INTEGER 30 != TEXT '30'. Casting the extracted value to TEXT normalises
-            # both strings and numbers to match the string filter value.
-            # (Plain cast(data[key], String) would instead yield the JSON form '"S02"'.)
-            q = q.filter(cast(Record.data[key].as_string(), String) == value)
+            # SQLite: the value as text (a cast of json_extract's unquoted
+            # scalar), so a number 30 matches the filter's "30".
+            q = q.filter(field_value(Record, key, "text") == value)
     if query.filter_tree is not None:
-        q = q.filter(_build_filter_condition(query.filter_tree))
+        q = q.filter(_build_filter_condition(query.filter_tree, is_postgres))
     if query.search:
         q = q.filter(text_match(query.search, is_postgres))
     return q
@@ -1400,18 +1410,18 @@ def _values_contain(
     )
 
 
-def _build_filter_condition(node: FilterNode):
+def _build_filter_condition(node: FilterNode, pg: bool = False):
     if isinstance(node, FilterGroup):
-        clauses = [_build_filter_condition(c) for c in node.conditions]
+        clauses = [_build_filter_condition(c, pg) for c in node.conditions]
         return and_(*clauses) if node.op == "and" else or_(*clauses)
     rel = node.rel
     if rel.direction == "up":
-        return _exists_up(rel.hops, lambda a: _build_leaf_condition(node, a))
+        return _exists_up(rel.hops, lambda a: _build_leaf_condition(node, a, pg))
     if rel.direction == "down":
         return _exists_down(
-            rel.hops, rel.schema_id, lambda d: _build_leaf_condition(node, d)
+            rel.hops, rel.schema_id, lambda d: _build_leaf_condition(node, d, pg)
         )
-    return _build_leaf_condition(node, Record)
+    return _build_leaf_condition(node, Record, pg)
 
 
 def _open_notes_condition(node: FilterCondition, entity: Any):
@@ -1430,36 +1440,84 @@ def _open_notes_condition(node: FilterCondition, entity: Any):
     return open_note if node.value else not_(open_note)
 
 
-def _build_leaf_condition(node: FilterCondition, entity: Any):
+def _build_leaf_condition(node: FilterCondition, entity: Any, pg: bool = False):
     if node.field == note_rules.OPEN_NOTES_FILTER:
         return _open_notes_condition(node, entity)
-    col = entity.data[node.field]
+    text_value = field_value(entity, node.field, "text")
     if node.op == "is_null":
-        # `.as_string()` (->>` on PG, plain json_extract on SQLite) collapses
-        # "key absent" and "key present with JSON null" to the same SQL NULL
-        # on both backends -- the bare accessor doesn't: SQLite's JSON_QUOTE
-        # wrapper turns a missing key into the *string* "null" rather than
-        # SQL NULL, and PG's `->` returns a non-NULL jsonb 'null' for an
-        # explicit null value.
-        return col.as_string().is_(None) if node.value else col.as_string().isnot(None)
+        # The value as text is SQL NULL both when the key is absent and when it
+        # holds JSON null, on both backends.
+        return text_value.is_(None) if node.value else text_value.isnot(None)
     if node.op == "contains":
-        return col.as_string().ilike(f"%{node.value}%")
+        return text_value.ilike(f"%{node.value}%")
+    if pg and node.op in ("eq", "in"):
+        values = node.value if node.op == "in" else [node.value]
+        if values and all(_contains_same(node.dtype, v) for v in values):
+            return or_(*[_contains(entity, node.field, v) for v in values])
     if node.op == "in":
-        return or_(*[_typed_comparison(col, "eq", v) for v in node.value])
-    return _typed_comparison(col, node.op, node.value)
+        return or_(
+            *[_typed_comparison(entity, node.field, "eq", v) for v in node.value]
+        )
+    return _typed_comparison(entity, node.field, node.op, node.value)
 
 
-def _typed_comparison(col, op: str, value: Any):
-    """Compare a JSON field against `value`, dispatching to the JSON
-    accessor variant matching value's own type (as parsed from the filter's
-    JSON body) so e.g. 30 compares numerically rather than lexically."""
-    typed_value: Any
+# The JSON type every stored value of a field type has (values are checked on
+# every write, and a field's type never changes), by `_typed_comparison`'s
+# reading of a filter value.
+_JSON_TYPE_OF_DTYPE = {
+    "integer": "number",
+    "float": "number",
+    "boolean": "boolean",
+    "string": "text",
+    "enum": "text",
+    "url": "text",
+    "date": "text",
+    "datetime": "text",
+    "reference": "text",
+}
+
+
+def _value_kind(value: Any) -> str | None:
     if isinstance(value, bool):
-        typed_col, typed_value = col.as_boolean(), value
-    elif isinstance(value, (int, float)):
-        typed_col, typed_value = col.as_float(), float(value)
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        return "text"
+    return None
+
+
+def _contains_same(dtype: str | None, value: Any) -> bool:
+    """Whether `data @> {field: value}` (JSONB containment, which the GIN index
+    `ix_records_data_gin` answers) matches exactly the records `_typed_comparison`
+    does for `eq`: when the field's stored values are of the JSON type the
+    comparison reads `value` as. Numbers then compare numerically in both
+    (JSONB's numeric equality has 1 == 1.0), strings exactly, booleans as
+    booleans. A string compared with a number field (which `_typed_comparison`
+    reads as text, matching 30 to "30") is left to it."""
+    kind = _value_kind(value)
+    if isinstance(value, float) and not math.isfinite(value):
+        return False  # not JSON
+    return kind is not None and _JSON_TYPE_OF_DTYPE.get(dtype or "") == kind
+
+
+def _contains(entity: Any, field_id: str, value: Any):
+    doc = json.dumps({field_id: value})
+    return entity.data.op("@>")(cast(literal(doc), PG_JSONB))
+
+
+def _typed_comparison(entity: Any, field_id: str, op: str, value: Any):
+    """Compare a JSON field against `value`, reading the field as the kind of
+    value it is compared with (as parsed from the filter's JSON body), so e.g.
+    30 compares numerically rather than lexically. Through `field_value`, so
+    a managed field index of that kind serves it."""
+    typed_value: Any
+    kind = _value_kind(value) or "text"
+    typed_col = field_value(entity, field_id, kind)
+    if kind == "number":
+        typed_value = float(value)
     else:
-        typed_col, typed_value = col.as_string(), value
+        typed_value = value
     if op == "eq":
         return typed_col == typed_value
     if op == "ne":

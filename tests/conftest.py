@@ -158,9 +158,11 @@ def _stop_the_transfer_worker() -> Iterator[None]:
     first time a move is queued. Left running, it would carry on polling
     whichever project a later test is using, so stop it after each test."""
     yield
+    from civex.services.index_jobs import index_jobs
     from civex.services.transfer_jobs import jobs
 
     jobs.shutdown()
+    index_jobs.shutdown()  # likewise the field-index upkeep thread
 
 
 _template: dict[str, sqlite3.Connection] = {}

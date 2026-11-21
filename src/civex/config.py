@@ -164,6 +164,10 @@ class MapConfig:
 class DBConfig:
     url: str
     docker_managed: bool = False
+    # Field ids a person chose to index in this computer's database
+    # (`IndexService`, `domain/field_index.py`). About this database only: a
+    # setting, never synced or in history, and kept when the database moves.
+    indexed_fields: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -473,6 +477,7 @@ def parse_config(data: dict, root: Path) -> Config:
         db=DBConfig(
             url=data["db"]["url"],
             docker_managed=bool(data["db"].get("docker_managed", False)),
+            indexed_fields=[str(f) for f in data["db"].get("indexed_fields", [])],
         ),
         store=store,
         ai=ai,
@@ -531,6 +536,9 @@ def render_config(config: Config) -> str:
     ]
     if config.db.docker_managed:
         lines.append("docker_managed = true\n")
+    if config.db.indexed_fields:
+        listed = ", ".join(_tv(f) for f in config.db.indexed_fields)
+        lines.append(f"indexed_fields = [{listed}]\n")
 
     if config.ai and not config.ai.from_env:
         lines += ["\n[ai]\n", f'api_key = "{_ts(config.ai.api_key)}"\n']
