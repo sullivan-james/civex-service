@@ -171,7 +171,13 @@ steps:
     )
 
     assert [s["status"] for s in step_executions] == ["success"] * 3
-    assert step_executions[2]["outputs"] == {"created": 2, "updated": 0, "skipped": 0}
+    assert step_executions[2]["outputs"] == {
+        "created": 2,
+        "updated": 0,
+        "unchanged": 0,
+        "skipped": 0,
+        "skipped_rows": [],
+    }
 
     created = ctx.record_svc.find("study", schema_name="item")
     assert {r.data["label"] for r in created} == {"Alice", "Bob"}

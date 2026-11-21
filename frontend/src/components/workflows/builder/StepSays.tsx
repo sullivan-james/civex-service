@@ -33,12 +33,11 @@ function settingWords(
   if (hint.kind === 'field') {
     const of = hint.of ? String(config[hint.of] ?? '') : ctx.schema
     const schema = ctx.schemas.find((x) => x.name === of)
-    const field = schema
-      ? fieldsWithInherited(schema, ctx.schemas, false).find(
-          (f) => f.name === v,
-        )
-      : undefined
-    return field?.label ?? String(v)
+    const fields = schema ? fieldsWithInherited(schema, ctx.schemas, false) : []
+    const label = (name: unknown) =>
+      fields.find((f) => f.name === name)?.label ?? String(name)
+    if (Array.isArray(v)) return v.length ? v.map(label).join(', ') : null
+    return label(v)
   }
   if (hint.kind === 'choice')
     return hint.choices?.find((c) => c.value === v)?.label ?? String(v)

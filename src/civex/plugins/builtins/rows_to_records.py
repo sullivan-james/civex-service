@@ -1,27 +1,52 @@
 from __future__ import annotations
 
-import logging
 from typing import Any
 
+from civex_plugin_sdk import Ctx
+from civex_plugin_sdk import Plugin as PluginBase
 from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel, ConfigDict, Field
 
-from civex_plugin_sdk import RpcError
-
-from civex.plugins.builtins._refusals import refused
-from civex_plugin_sdk import Ctx
-from civex_plugin_sdk import Plugin as PluginBase
+from civex.plugins.builtins._table_rows import save_rows
 from civex.plugins.hints import advanced, hint, says
 
-log = logging.getLogger(__name__)
+#: What both names of this step give back (`civex.upsert_records` too).
+OUTPUTS = [
+    IOSpec(name="created", type="number", description="How many records it made."),
+    IOSpec(
+        name="updated",
+        type="number",
+        description="How many rows matched a record and changed it.",
+    ),
+    IOSpec(
+        name="unchanged",
+        type="number",
+        description="How many rows matched a record that already held their values.",
+    ),
+    IOSpec(
+        name="skipped",
+        type="number",
+        description="How many rows were not saved.",
+    ),
+    IOSpec(
+        name="skipped_rows",
+        type="list",
+        description="Why each row not saved was left out: no key value, a key "
+        "repeated in the table, several records with that key, or a value the "
+        "record refused.",
+    ),
+]
 
 
 class Plugin(PluginBase):
     id = "civex.rows_to_records"
     name = "Make a record for each row"
     description = (
-        "Create one new record per table row. Pure insert -- use Upsert "
-        "Records to match existing records instead."
+        "Save each table row as a record. With Match rows by (or a unique key "
+        "on the kind of record), a row whose key matches a record already "
+        "there updates that record instead, changing only the table's columns, "
+        "so running the same table again changes nothing. With neither, every "
+        "row makes a new record."
     )
     category = "outputs"
     capabilities: list[str] = ["read", "write_records"]
@@ -32,19 +57,13 @@ class Plugin(PluginBase):
             description="The table to make records from. Its columns go into the fields of the same name, unless Columns to fields says otherwise.",
         )
     ]
-    outputs = [
-        IOSpec(name="created", type="number", description="How many records it made."),
-        IOSpec(
-            name="skipped",
-            type="number",
-            description="The rows whose record could not be made.",
-        ),
-    ]
+    outputs = OUTPUTS
 
     class Config(BaseModel):
         model_config = ConfigDict(
             json_schema_extra=says(
-                "Makes a {schema} inside this record for each row of {table}."
+                "For each row of {table}, makes a {schema} inside this record, "
+                "or updates the one already there with the same key."
             ),
             populate_by_name=True,
         )
@@ -55,6 +74,15 @@ class Plugin(PluginBase):
             description="Name of the schema to create records under. Workflow "
             "YAML sets this via the `schema:` key (the Python field is "
             "`schema_name`).",
+        )
+        match_on: list[str] = Field(
+            title="Match rows by",
+            json_schema_extra=hint("field", of="schema", many=True),
+            default_factory=list,
+            description="The fields (after Columns to fields) a row and a "
+            "record must agree on to be the same record. Empty: the kind's "
+            "first unique key, or, when it has none, every row makes a new "
+            "record.",
         )
         dataset: str = Field(
             title="Collection",
@@ -74,56 +102,20 @@ class Plugin(PluginBase):
             title="Inside record",
             json_schema_extra=advanced(hint("record")),
             default="",
-            description="Parent record ID to attach created records to. Empty "
-            "string falls back to the workflow's context record.",
+            description="Parent record ID to match within and attach created "
+            "records to. Empty string falls back to the workflow's context "
+            "record.",
         )
 
     def invoke(
         self, inputs: dict[str, Any], config: Config, ctx: Ctx
     ) -> dict[str, Any]:
-        try:
-            import pandas as pd
-        except ImportError:
-            raise ImportError(
-                "civex.rows_to_records requires pandas: pip install 'civex[workflows]'"
-            )
-
-        df = inputs["table"]
-        dataset_name = config.dataset or ctx.get_context_dataset()["name"]
-        log.info(
-            "Creating %d records → dataset '%s', schema '%s'",
-            len(df),
-            dataset_name,
-            config.schema_name,
+        return save_rows(
+            ctx,
+            inputs["table"],
+            schema_name=config.schema_name,
+            dataset=config.dataset,
+            match_on=config.match_on,
+            mapping=config.field_mapping,
+            parent_record_id=config.context_record_id,
         )
-        created = skipped = 0
-        for _, row in df.iterrows():
-            if config.field_mapping:
-                raw = {
-                    schema_field: row[csv_col]
-                    for csv_col, schema_field in config.field_mapping.items()
-                    if csv_col in row
-                }
-            else:
-                raw = {col: row[col] for col in df.columns}
-            data = {
-                k: (v.item() if hasattr(v, "item") else v)
-                for k, v in raw.items()
-                if not pd.isna(v)
-            }
-            try:
-                ctx.create_record(
-                    dataset_name,
-                    config.schema_name,
-                    data,
-                    context_record_id=config.context_record_id or None,
-                )
-                created += 1
-            except RpcError as e:
-                if not refused(e):
-                    raise
-                log.warning("  ✗ skipped row %s: %s", data, e)
-                skipped += 1
-
-        log.info("Done: %d created, %d skipped", created, skipped)
-        return {"created": created, "skipped": skipped}

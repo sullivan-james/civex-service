@@ -1,6 +1,10 @@
 # `civex.upsert_records`
 
-Create or update records from a DataFrame, matching existing records by a key field. If a record with the same key exists in the collection, it is updated; otherwise a new record is created. Reach for this over `civex.rows_to_records` when the same source table gets re-imported over time, e.g. a sample sheet that grows across a field season.
+The older name of [`civex.rows_to_records`](rows_to_records.md) matching on one
+field: `key_field: number` is `match_on: [number]`. It is kept so workflows saved
+with it run as they did, and runs the same code; new workflows use
+`civex.rows_to_records`, which also takes several key fields and **Columns to
+fields**.
 
 > Uses pandas, which ships with civex — see `civex.parse_table`.
 
@@ -16,10 +20,8 @@ Create or update records from a DataFrame, matching existing records by a key fi
     table: parse.table
 ```
 
-## What an update keeps
-
-An update changes **only the columns in the table**. Every other field on the
-matched record (a file, values computed by another workflow) is left exactly as it
-is, and an empty cell leaves its field alone instead of clearing it. A row whose
-values are already on the record changes nothing: no history entry, and no
-workflow triggered. Only a cell with a value is ever written.
+How rows are matched, what an update keeps and which rows are left out are as
+described for [`civex.rows_to_records`](rows_to_records.md). A row with no value
+for the key field is now counted in `skipped` and named in `skipped_rows`; it
+used to be dropped without a word, and a key repeated in the table used to
+overwrite the earlier row's record.

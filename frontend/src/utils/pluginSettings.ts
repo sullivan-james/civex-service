@@ -25,6 +25,8 @@ export interface SettingHint {
   date_format?: string
   read_as?: string
   keys?: boolean
+  /** A list of fields rather than one (`field` only). */
+  many?: boolean
   pattern?: string
   choices?: { value: string; label: string }[]
   advanced?: boolean
