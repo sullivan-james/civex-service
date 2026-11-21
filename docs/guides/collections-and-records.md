@@ -169,7 +169,8 @@ same kind, place, search and filters.
   nothing lit.
 - **Which charts.** A kind of record says which charts its lists open with
   (its **Charts** tab on the schema page). A kind with none set gets suggested
-  ones, chosen from the records listed: a field with about 2 to 20 different
+  ones, chosen from its records here before any filter or search (so they
+  stay put as you filter): a field with about 2 to 20 different
   values (dates by month, or by year over a long span), shown columns first,
   and a map where there is a location. Suggestions are not saved.
 - **Add chart** asks two things: **One bar for each** (a field; a date by

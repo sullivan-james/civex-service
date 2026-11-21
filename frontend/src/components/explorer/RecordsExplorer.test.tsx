@@ -1607,6 +1607,27 @@ describe('charts beside the records', () => {
     expect(put).toBeNull()
   })
 
+  it('keeps the suggested charts as the list is filtered', async () => {
+    const user = userEvent.setup()
+    kindCharts = []
+    renderExplorer({}, '/collections/hb?schema=recording&q=9')
+    await user.click(await bar(/96/))
+    await waitFor(() => expect(search().get('filter')).not.toBeNull())
+    // The chart clicked is still there, its bar lit.
+    expect(await bar(/96/)).toHaveAttribute('aria-pressed', 'true')
+    // Which charts to suggest is asked of the kind here, never of the
+    // filtered or searched list.
+    const picking = calls.filter(
+      (c) =>
+        c.path === '/api/records/summary' &&
+        (c.body!.group_by as string[]).length === 0 &&
+        (c.body!.measures as string[]).includes('distinct:rate'),
+    )
+    expect(picking.length).toBeGreaterThan(0)
+    for (const c of picking)
+      expect(c.body).toMatchObject({ filter: null, search: null })
+  })
+
   it('opens a chart large from the address, with its numbers, and Back closes it', async () => {
     const user = userEvent.setup()
     renderExplorer({}, '/collections/hb?schema=recording')

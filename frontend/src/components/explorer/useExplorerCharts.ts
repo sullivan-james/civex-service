@@ -78,7 +78,11 @@ export function useExplorerCharts(
     listed,
     fields,
     shownColumns,
-    records,
+    // Chosen from everything of the kind here, before the filter and the
+    // search: which charts there are must not change as a person filters
+    // (a bar clicked would leave its own field with one value, and its
+    // chart would go).
+    { ...records, filter: null, where: [], search: null, search_fields: null },
     suggesting && enabled,
   )
   const base = kinds.length > 0 ? kinds : suggested
