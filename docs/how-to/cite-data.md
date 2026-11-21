@@ -9,8 +9,11 @@ used, and a way to get that data back later.
 
     ```bash
     civex release create v1 --title "Grey seal survey 2026" \
-        --author "Ada Lovelace" --licence CC-BY-4.0
+        --author "Ada Lovelace|0000-0002-1825-0097" --licence CC-BY-4.0
     ```
+
+    The files the records cite are kept where they are, not copied, so this
+    is quick however much data there is.
 
 3. Copy the citation from the release's page (text or BibTeX), or
 
@@ -21,11 +24,14 @@ used, and a way to get that data back later.
     It names the version and the content hash, so a reader can tell whether
     the data they have is the data you used.
 
-4. If you deposit the data (Zenodo, a university repository), upload the
-   release's bundle (**Download**) and, once you have a DOI, add it:
+4. If you deposit the data (Zenodo, a university repository), make a folder
+   of it (**Open as a folder**, or `civex release export v1`): the files laid
+   out by record, with `manifest-sha256.txt`, `release.json` and
+   `CITATION.cff`. Upload that and the release's bundle (**Download**) and,
+   once you have a DOI, add it:
    `civex release correct v1 --doi 10.5281/zenodo.123456`.
 
-Later, `civex release verify v1` checks the kept bundle still holds exactly
-that data, and `civex release diff v1` says what has changed since. To work
+Later, `civex release verify v1` checks the release still holds exactly that
+data (`--deep` reads every file back too), and `civex release diff v1` says what has changed since. To work
 with the data as it was, import the bundle into a new project
 (`civex bundle import release-v1.civex.zip`). See [Releases](../guides/releases.md).

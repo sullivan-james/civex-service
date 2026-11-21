@@ -2,38 +2,57 @@
 
 A **release** is a frozen, citable copy of a project's data. A paper, a thesis
 or a data deposit can say exactly which data it used ("release `v1`, content
-hash `sha256:4f1c…`"), and that data can be got back later, however much the
+hash `sha256:4f1c…`"), and that data can be had back later, however much the
 project has changed since.
 
 A release has:
 
 - a **version** you choose (`v1`, `2026-thesis`): letters, digits, `.`, `_`
   and `-`; it can't be changed later;
-- **citation details**: a title, a description, the authors in citation
-  order, a licence (for example `CC-BY-4.0`) and, if it has one, a DOI;
-- what it **covers**: the whole project, some collections, or the records a
-  query lists (with the records above them, so it reads back whole);
-- a **bundle**: the same file `civex bundle export` writes (schemas,
-  collections, records with their ids, optionally the stored files, workflows
-  and plugins), plus a `release.json` manifest and a `CITATION.cff`;
-- a **manifest**: the content hash, what it holds, where history was when it
-  was made, and the civex that made it.
+- **citation details**: a title, a description, the authors in citation order
+  (each with an ORCID and an affiliation if they have them), a licence (an
+  SPDX id such as `CC-BY-4.0`, or any other), keywords and, if it has one, a
+  DOI;
+- what it **covers**: the whole project, some collections, a saved list, or
+  records chosen in the explorer (each with the records above it, so it reads
+  back whole);
+- a small **bundle of records**: schemas, collections and records with their
+  ids, workflows and plugins, plus a `release.json` manifest and a
+  `CITATION.cff`;
+- the **files** its records cite, which it keeps where they are. Nothing is
+  copied: the release becomes one more owner of each file, like the records
+  that use it.
+
+Because only the records are written, making a release of a project with
+terabytes of files across many drives takes moments, and needs none of those
+drives plugged in.
 
 ## Making one
 
-In the app: **Releases → New release**. The dialog asks for the version and
-citation details, what it covers and whether to include the files, and shows
-what the release will hold (records, collections, files and their size)
-before anything is made.
+In the app: **Releases → New release**, or tick records in a collection's
+explorer and press **Release these…**. The page has three steps:
+
+1. **What**: the whole project, some collections, a saved list, or the
+   records chosen, with how many records and files that is.
+2. **Citation**: the version, title, description, authors, licence, DOI and
+   keywords, with the citation shown as it will read (text, BibTeX or
+   `CITATION.cff`) as you type.
+3. **Review**: the records per collection, the files by drive, and where
+   history is.
 
 From the command line:
 
 ```bash
 civex release create v1 --title "Grey seal survey 2026" \
-    --author "Ada Lovelace" --author "Grace Hopper" --licence CC-BY-4.0
-civex release create north-only --title "North sites" -c north --no-files
+    --author "Ada Lovelace|0000-0002-1825-0097|Analytical Society" \
+    --author "Grace Hopper" --licence CC-BY-4.0 -k seals -k acoustics
+civex release create north-only --title "North sites" -c north
+civex release create picked --title "…" -r <record id> -r <record id>
 civex release create v1 --title "…" --dry-run     # what it would hold
 ```
+
+An author is `Name`, or `Name|ORCID|Affiliation` with either part left
+blank.
 
 Making a release needs permission to change the project's structure, as a
 schema does: others depend on it.
@@ -44,20 +63,57 @@ project shares (the server's feed number is recorded with it).
 
 ## The content hash
 
-The content hash is a sha256 over what the bundle **holds**, not over the zip
-file's bytes (a zip records the time it was written, so two exports of the
-same data are different files). It covers, in a fixed order: the schemas and
-collections, every record line (by record id), the stored files carried (each
-also checked against its own hash) and the workflows and plugins. Exporting
-the same data again gives the same hash; changing one value gives a different
-one.
+The content hash is a sha256 over what the release **holds**, not over the
+zip's bytes (a zip records the time it was written). It covers, in a fixed
+order: the schemas and collections, every record line (by record id), the
+sha256 of every file the records cite (sorted), and the workflows and
+plugins. A file is covered by its own hash, so no file is read to make or
+check it. Making a release of the same data again gives the same hash;
+changing one value, or the file a record cites, gives a different one.
+
+## Its files
+
+A release keeps every file its records cite, so a clean-up never removes one
+while the release exists, even after the records have let it go. A file's
+details (**More details** on a file, or `civex store where`) name the
+releases keeping it, and permanently deleting a record says which releases
+keep its files.
+
+When files move between drives, a release goes with its records: emptying a
+drive moves everything on it, and gathering a collection onto another drive
+moves the release's copy too once every record using that copy has moved. A
+release never holds a copy back on its own; if some record still uses the
+copy where it was, the release stays with that one.
+
+To get the files out, the release's page has the same ways as any export:
+
+- **Open as a folder**: a folder on the drive holding most of the files,
+  laid out as the records were (a folder per record);
+- **Put on a drive…**: a folder of copies on the drive you choose;
+- **Move to drive…**: put all the release's files on one drive (only the
+  release's own copies move; records that use a file elsewhere keep theirs);
+- **Download as a zip**: offered only while the release is small enough
+  (2000 files, 500 MB); a larger one is made into a folder instead.
+
+Each folder and zip also holds `manifest-sha256.txt` (BagIt: each file's
+sha256 and its path), `release.json` and `CITATION.cff`, so it stands alone.
+
+```bash
+civex release export v1                       # a folder to open
+civex release export v1 --mode copy --volume archive
+civex release gather v1 --to archive
+```
 
 ## Checking a release
 
-**Verify** (on the release's page, or `civex release verify v1`) reads the
-stored bundle back, recomputes the content hash and checks each file against
-its own hash. It says whether the bundle still holds exactly what the release
-was made with.
+**Verify** (on the release's page, or `civex release verify v1`) reads its
+records back, recomputes the content hash and checks that every file it
+cites is recorded on a drive here. It reads no file, so it is quick however
+large the release.
+
+**Read every file back** (`civex release verify v1 --deep`) also reads every
+file against its hash, with its progress in the status bar. A copy whose
+bytes don't match is reported and removed, as a clean-up's check does.
 
 ## Citing it
 
@@ -76,32 +132,43 @@ civex release cite v1 -f cff > CITATION.cff
 changed and deleted per collection after the release was made, and any changes
 to schemas, fields or collections, from the project's history.
 
-## Correcting and withdrawing
+## Correcting, withdrawing and yanking
 
-A release's content never changes and a release is never deleted. Its citation
-details can be corrected (a typo in the title, a DOI issued later: **Edit
-details…** or `civex release correct v1 --doi 10.1234/abcd`), and it can be
-withdrawn with a reason (**Withdraw…** or `civex release withdraw v1 -r
-"calibration error"`). Both are recorded in history, so what it said before
-stays on record; a withdrawn release keeps its bundle, so work that cited it
-can still be checked.
+A release's content never changes. Its citation details can be corrected (a
+typo in the title, a DOI issued later: **Edit details…** or
+`civex release correct v1 --doi 10.1234/abcd`).
 
-## Getting the data back
+It can be **withdrawn** with a reason (**Withdraw…** or
+`civex release withdraw v1 -r "calibration error"`): it says so wherever it
+is shown, and keeps its data, so work that cited it can still be checked.
 
-Download the bundle (**Download**, or `civex release download v1`) and read it
-into a **new** project with `civex bundle import` (or **Collections → Import
-bundle…**). That is the whole restore: records keep their ids, and files come
-with them if the release included them.
+It can be **yanked** with a reason (**Yank…** or
+`civex release yank v1 -r "consent withdrawn"`) when its data must go. It
+stops keeping its files and its bundle, so the next clean-up removes whatever
+nothing else uses. You are told first how many files that is, and how many
+stay for the records that still use them. What is left is the release's
+record: its name, content hash, citation, and who yanked it, when and why, so
+a citation still finds it. A yank can't be undone.
+
+Corrections, withdrawals and yanks are recorded in history, and on a project
+that syncs they reach every copy.
+
+## Getting the records back
+
+Download the bundle (**Download**, or `civex release download v1`) and read
+it into a **new** project with `civex bundle import` (or **Collections →
+Import bundle…**). Records keep their ids and still name their files; put the
+files beside them with the release's folder export.
 
 ```bash
 mkdir restored && cd restored && civex init
 civex bundle import ../release-v1.civex.zip
 ```
 
-## Where releases are kept
+## On a project that syncs
 
-The bundle is kept in the project's storage like any file (on a drive, or in
-the bucket), under its own sha256; clean-ups never remove it. On a project
-that syncs, the release itself syncs to every copy and the bundle is sent to
-the server like a record's file; another computer downloads the bundle when
-it is first verified or downloaded there.
+The release syncs to every copy, and its bundle is sent to the server like a
+record's file. The server keeps the files the release cites once the bundle
+has arrived. Another computer keeps only the bundle (the server keeps the
+files), and downloads it when the release is first verified or downloaded
+there.
