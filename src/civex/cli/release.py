@@ -162,7 +162,9 @@ def _fail(e: Exception) -> None:
 def create(
     name: str = typer.Argument(..., help="The version, e.g. v1 or 2026-thesis"),
     title: str = typer.Option(..., "--title", "-t", help="What the data is"),
-    description: Optional[str] = typer.Option(None, "--description", "-d"),
+    description: Optional[str] = typer.Option(
+        None, "--description", "-d", help="A longer account of the data"
+    ),
     author: Optional[list[str]] = typer.Option(
         None,
         "--author",
@@ -439,16 +441,20 @@ def gather(
 @app.command("correct")
 def correct(
     name: str = typer.Argument(..., help="The release's name or id"),
-    title: Optional[str] = typer.Option(None, "--title", "-t"),
-    description: Optional[str] = typer.Option(None, "--description", "-d"),
+    title: Optional[str] = typer.Option(None, "--title", "-t", help="The new title"),
+    description: Optional[str] = typer.Option(
+        None, "--description", "-d", help="A longer account of the data"
+    ),
     author: Optional[list[str]] = typer.Option(
         None,
         "--author",
         "-a",
         help="The authors, all of them, as Name or Name|ORCID|Affiliation (repeatable)",
     ),
-    licence: Optional[str] = typer.Option(None, "--licence", "--license"),
-    doi: Optional[str] = typer.Option(None, "--doi"),
+    licence: Optional[str] = typer.Option(
+        None, "--licence", "--license", help="An SPDX id (e.g. CC-BY-4.0) or a name"
+    ),
+    doi: Optional[str] = typer.Option(None, "--doi", help="The DOI it was given"),
     keyword: Optional[list[str]] = typer.Option(
         None, "--keyword", "-k", help="The keywords, all of them (repeatable)"
     ),

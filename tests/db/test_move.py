@@ -105,6 +105,11 @@ def populated(ctx: AppContext, make_schema, make_collection) -> Engine:
     )
     _add_storage_transfer(ctx)
     _add_sync_state(ctx)
+    ctx.dashboard_svc.add(widget="storage")
+    ctx.note_svc.add(str(patients[0]), "a note")
+    # A release, which owns its bundle and the scan's file (a third owner of
+    # file_references).
+    ctx.release_svc.create("v1", "A release", authors=[{"name": "A. Person"}])
     ctx.commit()
     return ctx._session.get_bind()  # type: ignore[return-value]
 
