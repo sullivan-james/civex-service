@@ -67,6 +67,9 @@ import {
 import { Slot } from '../components/host/Slot'
 import { NotesPanel } from '../components/notes/NotesPanel'
 
+/** How many fields a record with things inside it shows before "Show all". */
+const FIELDS_FIRST = 6
+
 const RECORD_TABS = [
   { id: 'fields' },
   { id: 'resolve' },
@@ -82,6 +85,7 @@ export default function RecordDetailPage() {
   const navigate = useNavigate()
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [showDeleted, setShowDeleted] = useState(false)
+  const [allFieldsShown, setAllFieldsShown] = useState(false)
   const [tab, setTab] = useTabParam(RECORD_TABS, 'fields')
 
   const { data: record, isLoading, error } = useRecord(id, 3000)
@@ -169,6 +173,27 @@ export default function RecordDetailPage() {
   // old `?tab=contains` link lands there.
   const shownTab =
     tab === 'contains' || (tab === 'resolve' && !showResolve) ? 'fields' : tab
+  // A record with things inside it is mostly visited to reach them: its
+  // fields fold to the first few, with the rest one click away. Never
+  // while a field needs attention (a clash to settle, a save refused).
+  const allFields: SchemaField[] =
+    schema?.fields ??
+    Object.keys(record.data).map(
+      (name) =>
+        ({
+          name,
+          label: null,
+          type: 'string',
+          required: false,
+          id: name,
+        }) as SchemaField,
+    )
+  const canFold =
+    showContains &&
+    allFields.length > FIELDS_FIRST + 2 &&
+    conflictsAbout.length === 0 &&
+    !updateRecord.error
+  const foldFields = canFold && !allFieldsShown
   // A failed save is shown under the field it was for.
   const saveErrors = fieldSaveErrors(
     updateRecord.error,
@@ -212,6 +237,7 @@ export default function RecordDetailPage() {
         collection={collection?.name}
         collectionId={record.dataset_id}
         recordId={record.id}
+        hierarchy={false}
         path={record.ancestors ?? []}
         current={record.natural_name ?? record.id.slice(0, 8)}
         currentSchema={record.schema_name}
@@ -316,7 +342,7 @@ export default function RecordDetailPage() {
                   ? `Notes (${record.open_notes})`
                   : 'Notes',
               },
-              { id: 'referenced' as const, label: 'Referenced by' },
+              { id: 'referenced' as const, label: 'Linked from' },
               { id: 'runs' as const, label: 'Runs' },
               { id: 'history' as const, label: 'History' },
             ]}
@@ -360,19 +386,7 @@ export default function RecordDetailPage() {
               />
             </div>
             <RecordFieldGrid
-              fields={
-                schema?.fields ??
-                Object.keys(record.data).map(
-                  (name) =>
-                    ({
-                      name,
-                      label: null,
-                      type: 'string',
-                      required: false,
-                      id: name,
-                    }) as SchemaField,
-                )
-              }
+              fields={foldFields ? allFields.slice(0, FIELDS_FIRST) : allFields}
               data={record.data}
               computed={{
                 values: record.derived,
@@ -394,6 +408,19 @@ export default function RecordDetailPage() {
                 schema && <AddFieldRow schema={schema} allSchemas={schemas} />
               }
             />
+            {canFold && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="mt-2"
+                aria-expanded={allFieldsShown}
+                onClick={() => setAllFieldsShown((on) => !on)}
+              >
+                {allFieldsShown
+                  ? 'Show fewer'
+                  : `Show all ${allFields.length} fields`}
+              </Button>
+            )}
             {showDeleted && (
               <DeletedFieldValues fields={record.deleted_fields ?? []} />
             )}

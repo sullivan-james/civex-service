@@ -707,7 +707,7 @@ export function RecordsExplorer({
 
         {/* The view's own controls: which rows (saved filters and the conditions
             below), which columns, and Export of what that leaves. Inside a
-            record's page they are a step away (Open as a list). */}
+            record's page they are a step away (the link under the count). */}
         <div
           className={`flex flex-wrap items-start gap-2 ${inside ? 'hidden' : ''}`}
         >
@@ -947,7 +947,7 @@ export function RecordsExplorer({
                               },
                             )}`}
                           >
-                            Open as a list
+                            Filter and chart these
                           </Button>
                         )}
                       </div>
