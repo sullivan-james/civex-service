@@ -20,6 +20,39 @@ import type { FilterableField } from '../../utils/hierarchy'
 import { summaryFields } from '../../utils/summary'
 import { mapFields } from './MapView'
 
+/** The charts suggested for a kind that has none set, chosen from the
+ * records given: one ungrouped summary says how many different values each
+ * candidate field holds (`utils/charts.suggestCharts`). The one rule behind
+ * the explorer's column and a kind's Charts tab, so both show the same. */
+export function useSuggestedCharts(
+  listed: Schema | null,
+  fields: FilterableField[],
+  shownColumns: string[],
+  records: RecordSelectionBody,
+  enabled: boolean,
+) {
+  const types = useFieldTypes()
+  const usable = useMemo(
+    () => summaryFields(fields, types?.types ?? []),
+    [fields, types],
+  )
+  const candidates = suggestionCandidates(usable, shownColumns)
+  const asking = suggestionMeasures(candidates)
+  const wanted = !!listed && enabled
+  const answer = useRecordSummary(
+    wanted && asking.length > 0
+      ? { ...records, group_by: [], measures: asking }
+      : null,
+  )
+  return {
+    usable,
+    charts: wanted
+      ? suggestCharts(candidates, answer.data, mapFields(fields)[0])
+      : [],
+    loading: wanted && answer.isLoading,
+  }
+}
+
 /** The charts beside a list of one kind: the kind's own (`schemas.charts`),
  * or, when it has none set, ones suggested from the listed records; and the
  * person's changes to them, held in the address (`charts`) until they are
@@ -33,26 +66,21 @@ export function useExplorerCharts(
   enabled: boolean,
 ) {
   const [sp, setSp] = useSearchParams()
-  const types = useFieldTypes()
-  const usable = useMemo(
-    () => summaryFields(fields, types?.types ?? []),
-    [fields, types],
-  )
   const own = listed ? chartsFromParam(sp.get(CHARTS_PARAM)) : null
   const kinds = listed?.charts ?? []
-
   // Suggestions are asked for only while they would be shown.
-  const candidates = suggestionCandidates(usable, shownColumns)
-  const asking = suggestionMeasures(candidates)
   const suggesting = !!listed && kinds.length === 0 && own === null
-  const answer = useRecordSummary(
-    suggesting && enabled && asking.length > 0
-      ? { ...records, group_by: [], measures: asking }
-      : null,
+  const {
+    usable,
+    charts: suggested,
+    loading,
+  } = useSuggestedCharts(
+    listed,
+    fields,
+    shownColumns,
+    records,
+    suggesting && enabled,
   )
-  const suggested = suggesting
-    ? suggestCharts(candidates, answer.data, mapFields(fields)[0])
-    : []
   const base = kinds.length > 0 ? kinds : suggested
   const charts = own ?? base
 
@@ -73,7 +101,7 @@ export function useExplorerCharts(
     usable,
     /** The charts on screen are the person's own, not the kind's. */
     changed: own !== null,
-    loading: suggesting && answer.isLoading,
+    loading,
     set: (next: Chart[]) =>
       change((out) => {
         if (sameCharts(next, base)) out.delete(CHARTS_PARAM)
