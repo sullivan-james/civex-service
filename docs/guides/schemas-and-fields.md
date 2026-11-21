@@ -302,6 +302,30 @@ In the app: the record type's **Uniqueness** tab.
 - A deleted record frees its values. Restoring it is refused if another record
   took them.
 
+## Charts for a kind
+
+A kind of record says which charts its lists open with, on its **Charts** tab:
+the same chart cards as beside any list of records (see
+[Charts](collections-and-records.md#charts)), drawn here over every record of
+the kind. Add, reorder or remove them; each change is saved for everyone, is
+in the kind's history and syncs. A kind with none set shows suggested charts
+in its lists instead. From a list, **Use for every … list** saves the charts
+on screen for the kind.
+
+A chart follows a field that is renamed, and goes when a field it uses is
+deleted.
+
+```bash
+civex schema charts list sample
+civex schema charts add sample --by site --measure mean:depth
+civex schema charts add sample --by taken:month
+civex schema charts add sample --map position --title "Where they are"
+civex schema charts remove sample <id>
+civex schema charts clear sample        # back to the suggested ones
+```
+
+The API is `PUT /api/schemas/{schema}/charts` with the whole list.
+
 ## Changing and deleting fields and types
 
 ```bash

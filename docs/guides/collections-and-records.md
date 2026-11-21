@@ -95,7 +95,13 @@ any unique prefix of it works wherever an id is asked for.
 
 ### The explorer
 
-A collection's page (and a record's **Contains** tab) is one explorer:
+A collection's page is its records, in one explorer. The same explorer is on
+a record's page, under its fields, as **Inside this …**. Exports, Activity and
+the collection's details are in the **⋯** menu at the top of the page.
+
+The explorer has three ideas. **Records** are the rows: each row is one
+record. **Filters** say which rows you see. **Charts** count the rows you see.
+
 
 - **Levels:** the collection's schemas top-down (Site → Visit → Sample),
   with counts. A row shows its children ("3 visits →"). Click to go down, and
@@ -104,8 +110,8 @@ A collection's page (and a record's **Contains** tab) is one explorer:
   (in the collection, in every collection on **All records**, or inside the
   record you are in), with its name, kind, collection and when it was last
   edited. It can be searched, filtered by open notes, sorted by those columns,
-  moved and deleted; filtering by a field, **Summary**, **Check data**,
-  **Edit…** and **Run workflow** need one kind, so pick one first.
+  moved and deleted; filtering by a field, **Edit…** and **Run workflow** need
+  one kind, so pick one first. Its chart counts each kind.
 - **Search** is scoped to where you are. It looks, ignoring case, in what the
   records hold: text, numbers, the items of a list (tags, choices) and the
   names of files. It never matches a file's hash, a reference or a location,
@@ -116,18 +122,22 @@ A collection's page (and a record's **Contains** tab) is one explorer:
 - **+ Filter** builds AND/OR conditions on this level's fields, a parent's, or
   any child's: "Visits that have a Sample whose `depth` is empty" is one
   condition. Reference values are picked by name.
-- **Saved filters** are the schema's [views](views.md). **Save as view…** saves
-  yours, and everyone sees it.
+- **Saved filters** keep a filter to come back to: see
+  [Saved filters](views.md). **Save this filter** saves yours, and everyone
+  sees it.
 - **Columns** include parents' fields and fields through a reference. Click a
   header to sort.
 - **Export** takes exactly the rows listed or ticked. See
   [Get files out](../how-to/export-files.md).
-- **Records | Their files** switches to the files of what's listed. See
-  [Files](files.md#working-on-many-files-their-files). **Summary** counts and
-  averages them by group, as a table or a chart: see [Summaries](#summaries).
-  **Map** shows them on a map: see [On a map](#on-a-map). **Check data**
-  beside them says what in them needs a look: see
-  [Checking the data](#checking-the-data).
+- **Records | Their files** switches the rows to the files of what's listed.
+  See [Files](files.md#working-on-many-files-their-files).
+- **Charts** sit beside the records and count exactly what is listed: see
+  [Charts](#charts).
+- Under the table, a last row gives, for every record listed (not just the
+  page), the average, smallest and largest of each number column and how many
+  different values each choice column holds.
+- A count such as **3 problems** beside the number of records appears only
+  when something needs a look: see [Checking the data](#checking-the-data).
 - Tick rows (shift-click for a range) to **Delete** or **Run workflow on N**.
   Ticking a whole page offers **Select all N matching**.
 
@@ -140,86 +150,74 @@ to search in), and from `civex record find --in <collection> --schema <kind>
 A record's **Referenced by** section counts the records linking to it, per
 collection, schema and field (`GET /api/records/{id}/referrers`).
 
-### Summaries
+### Charts
 
-**Records | Their files | Summary** switches the explorer to a summary of
-exactly what it lists (the same level, filters, search and saved filter). The
-choices read as one sentence, **Work out** [what] **of the Sample records
-listed, grouped by** [field] **then by** [field], each slot a dropdown with a
-tip beside it. With nothing chosen yet it starts grouped by a sensible field
-(a field with choices, else a yes/no field, else a date by month), so the
-screen is never blank; choose **nothing (one total)** for a single row.
+Charts are a column beside the records. Drag the line between them to make it
+wider (the cards then sit in two columns), or **Hide charts**; both are
+remembered in this browser. Every chart counts exactly the records listed: the
+same kind, place, search and filters.
 
-- **Grouped by** a field of the kind listed, or of a kind above it ("Samples
-  by Site › Region"), up to three at once (**then by…** adds another). A date groups by each value or by
-  year, month, week (starting Monday) or day; a date and time does the same
-  in its field's time zone, else the collection's, else UTC. A number groups
-  by each value or into ranges of a width you choose ("0 to under 5 m"). A
-  list (tags, links to records) puts a record in a group for each item, so
-  the groups can add up to more than the total.
-- **Work out** what: **Records** (how many), and per field what its
-  type allows: **Filled** (how many have a value), **Different values**,
-  **Smallest** and **Largest** (for text, dates and numbers), **Average** and
-  **Total** (numbers). A field with a unit gives its results in that unit.
-  There is no median.
-- A date is kept at the precision it was written, so grouped by month a
-  sample dated only `2019` sits in its own group, **2019, month not known**,
-  rather than being guessed into January.
-- The last row is the totals over every record listed, each counted once.
-- Click a group to list its records: its condition is added to the filter.
-- To download it, use **Export**: in Summary it offers **This summary as a
-  table** (CSV, Excel, TSV, JSON) and **Export these records…** (their files,
-  a table of them, or both). There is no other download button.
-- **Save analysis…** keeps the summary as a saved analysis: see
-  [Saved analyses](views.md#saved-analyses).
-- **Table | Chart** draws the same summary. The first grouping decides the
-  chart: dates by period are a line over time, numbers in ranges a histogram,
-  anything else bars. Periods and ranges with no records between the first
-  and the last are drawn as 0 (or as a gap, for an average). A second
-  grouping becomes the series: the five largest are drawn (stacked for
-  counts and totals, side by side otherwise) and the table has the rest.
-  When several things are shown, pick which one the chart plots. Records
-  with no value, and dates less precise than the period, are named under
-  the chart with their numbers instead of being placed on the axis. Click a
-  bar or a point to list its records, as with a row of the table.
+- **Click a bar** to filter by its value. The table and the other charts
+  follow, a chip appears above, and clicking the bar again takes it out.
+  Several bars of one chart are "is any of". The chart you clicked keeps all
+  its bars, with the chosen ones lit, so you can pick another.
+- A filter made from bars is the ordinary filter: it can be changed with
+  **+ Filter**, saved with **Save this filter**, and shared as a link. When a
+  filter uses a chart's field in a way bars can't show (inside an "or" with
+  another field, or "is not"), the chart counts the filtered records with
+  nothing lit.
+- **Which charts.** A kind of record says which charts its lists open with
+  (its **Charts** tab on the schema page). A kind with none set gets suggested
+  ones, chosen from the records listed: a field with about 2 to 20 different
+  values (dates by month, or by year over a long span), shown columns first,
+  and a map where there is a location. Suggestions are not saved.
+- **Add chart** asks two things: **One bar for each** (a field; a date by
+  year, month, week or day; a number in steps you choose) and **Each bar
+  shows** (how many records, or the average, total, smallest or largest of a
+  number, how many have a field filled in, or how many records of a kind
+  beneath are inside them). The title it will get is shown before you add it.
+  **A map** is a chart too.
+- When the charts on screen differ from the kind's, **Use for every … list**
+  saves them for the kind (it needs the right to change the structure) and
+  **Put back** returns to the kind's. Until then they are in the address.
+- **Open** shows a chart large, above the records, with its table of numbers
+  and **Download numbers** (CSV, Excel, TSV, JSON). It is in the address, so
+  it is a link and Back closes it.
+- **Add to Analytics page**, in a chart's menu, puts it on the
+  [Analytics page](views.md#the-analytics-page) with the records it counts now.
+- A very large list (over 200,000 records) waits for **Show charts**.
 
-The choices are in the address (`show=summary&sum.by=site.region,taken:month&sum.m=count,mean:depth`),
-so a summary can be bookmarked or pinned, and older links keep working. Scripts get the same from
-`POST /api/records/summary` (the list's selectors plus `group_by` and
-`measures`, written the same way; `?format=csv` for a file) and from
-`civex record summarise --in <collection> -s <kind> --by <field>[:month|:5]
--m count -m mean:<field> [--csv]`. Which measures and groupings each type
-allows is in `GET /api/schemas/field-types`.
+How values are grouped: a date is kept at the precision it was written, so by
+month a sample dated only `2019` is its own bar, **2019, month not known**. A
+date and time is grouped in its field's time zone, else the collection's,
+else UTC. A list (tags, links) puts a record in a bar for each item. There is
+no median.
 
-### On a map
+A **map** chart shows the listed records by a location field of their kind or
+of a kind above it (each record is drawn where that record is). Points that
+crowd together are one circle with a number; click a record for its name and
+a link to its page. Opened large it is the full map, and with several
+location fields one can be picked. It shows the first 10,000 and says so.
+The base map is the location editor's: coastlines that work offline, plus
+street detail when a tile address is set in **Settings → Map**. Narrowing the
+records by drawing an area is not possible yet.
 
-**Map** appears beside **Summary** when the kind listed, or a kind above it,
-has a location field. It shows exactly the records the list shows (the same
-level, filters, search and saved filter); when the location belongs to a kind
-above ("Samples placed by their Site"), each record is drawn where that
-record is. With several location fields, **Place by** picks one.
-
-- Points that crowd together are drawn as one circle with a number. Click it
-  to zoom in, or, when they are all at one place, to see their names.
-- Lines and areas are drawn as they are.
-- Click a record to see its name, a link to its page.
-- The map frames the records each time the list changes. It shows the first
-  10,000 and says so when there are more.
-
-The base map is the same as the location editor's: coastlines that work
-offline, plus street detail when a tile address is set in
-**Settings → Map**. Scripts get the points from `POST /api/records/points`
-(the list's selectors plus `field`, and `field_schema` for a kind above).
-Drawing a box on the map to filter is not possible yet.
+Scripts get the same numbers from `POST /api/records/summary` (the list's
+selectors plus `group_by` and `measures`, e.g. `site`, `taken:month`,
+`depth:5`; `count`, `mean:depth`, `inside:reading`; `?format=csv` for a file)
+and from `civex record summarise --in <collection> -s <kind> --by
+<field>[:month|:5] -m count -m mean:<field> [--csv]`; a map's points from
+`POST /api/records/points`. Which of these each field type allows is in
+`GET /api/schemas/field-types`.
 
 ### Checking the data
 
-**Check data**, beside the ways of showing the records, looks through exactly
-the records the list shows (the same level, filters, search and saved filter)
-for what needs a look, and counts it per field. Its badge says how many records
-have something to look at; for a list of more than 5,000 records it is counted
-only once you open the checks, since that reads every record. **Back to
-records** returns to the list.
+Beside the number of records, a count such as **3 problems** appears when
+something in exactly the records listed (the same level, filters and search)
+needs a look. Nothing is shown when all is well. Click it for the list, counted
+per field; **Back to records** returns. For a list of more than 5,000 records
+the count is not worked out by itself, since that reads every record: open
+`?show=checks` or use the command below.
 
 - **Breaks a rule**: a value its field's rules refuse now. Rules are checked
   when a value is saved, so tightening one later (a lower maximum, fewer
@@ -238,8 +236,7 @@ Each line gives the count and a few of the records. Click it to list them all:
 open one, or tick them and choose **Edit…** to put them right in one go (see
 [Changing many records at once](#changing-many-records-at-once)). A required
 field left empty has **Show in the list**, which adds the condition to the
-explorer's filter. Below, **How full each field is** counts the empty values
-of every field; click one to list them. Unusual numbers are not looked for.
+explorer's filter. Unusual numbers are not looked for.
 
 From the command line, with the same options as `record find`:
 

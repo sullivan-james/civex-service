@@ -106,7 +106,7 @@ nav:
       - Data:
           - Schemas & fields: guides/schemas-and-fields.md
           - Collections & records: guides/collections-and-records.md
-          - Views: guides/views.md
+          - Saved filters: guides/views.md
           - Deleting & restoring: guides/deleting-and-restoring.md
           - Releases: guides/releases.md
       - Files:

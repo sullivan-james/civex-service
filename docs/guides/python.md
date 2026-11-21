@@ -134,7 +134,7 @@ start of a record's id. `search_fields=["site"]` looks only in those fields of
 
 `record_svc.summarise(query, request)` groups the records a `RecordQuery`
 lists and works out measures over each group, in the database (one query,
-however many records). It is what the explorer's **Summary** and
+however many records). It is what the explorer's charts and
 `civex record summarise` use:
 
 ```python
