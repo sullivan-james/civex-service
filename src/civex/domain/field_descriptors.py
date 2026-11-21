@@ -32,6 +32,10 @@ descriptors later; nothing here assumes they live in `restrictions`.
     from_filename        a file field of the schema and a pattern that reads
                          this field's value out of the file's name
                          (`domain/filename_extract.py`)
+    formula              an expression over the record's fields
+                         (`domain/formulas.py`), previewed by the server
+    formula_result       what kind of value a formula gives
+    decimals             0 to 10 decimal places
 """
 
 from __future__ import annotations
@@ -75,6 +79,10 @@ class FieldTypeDescriptor:
     grouping: str | None = None
     #: The periods a "bucket" grouping offers, coarsest first.
     buckets: tuple[str, ...] = ()
+    #: Worked out when read, never stored (a formula): nothing can be typed
+    #: into it, and lists can't be filtered or sorted by it, since the
+    #: database holds no value to test.
+    computed: bool = False
 
 
 #: What a summary works out per type (see FieldTypeDescriptor.measures).
@@ -355,6 +363,44 @@ FIELD_TYPES: dict[str, FieldTypeDescriptor] = {
             supports_default=False,
         ),
         FieldTypeDescriptor(
+            "formula",
+            "Formula",
+            "Worked out from the record's other fields each time it is read, "
+            "such as a duration, a ratio or a label made of two codes.",
+            "Not stored: worked out from the other fields whenever it is read",
+            "Worked out from other fields; it can't be typed in.",
+            "mass / height ** 2",
+            (
+                _R(
+                    "expression",
+                    "Formula",
+                    "formula",
+                    'Field names, numbers, "text", + - * / // % **, '
+                    "comparisons, and/or/not, a if condition else b, and "
+                    "functions such as round(x, 2), days_between(start, end) "
+                    'and concat(a, "-", b). A blank value gives a blank '
+                    "result unless coalesce(value, fallback) supplies one.",
+                ),
+                _R(
+                    "result",
+                    "Gives",
+                    "formula_result",
+                    "Worked out from the formula when left empty.",
+                ),
+                _R(
+                    "unit",
+                    "Unit",
+                    "unit",
+                    "For a decimal result: the unit the formula gives its value in.",
+                ),
+                _R("decimals", "Decimal places", "decimals"),
+            ),
+            supports_default=False,
+            searchable=False,
+            measures=(),
+            computed=True,
+        ),
+        FieldTypeDescriptor(
             "tags",
             "Tags",
             "A list of short labels.",
@@ -433,7 +479,17 @@ FIELD_KINDS: tuple[FieldKind, ...] = (
     FieldKind("textbox", "Text box", "longtext", "Several lines of text."),
     FieldKind("tags", "Tags", "tags", "A list of short labels."),
     FieldKind("url", "Web address", "url", "A link."),
+    FieldKind(
+        "formula",
+        "Formula",
+        "formula",
+        "Worked out from other fields, such as days_between(start, end).",
+        focus="expression",
+    ),
 )
+
+#: Types worked out when read, never stored (see `FieldTypeDescriptor.computed`).
+COMPUTED_DTYPES = frozenset(t for t, d in FIELD_TYPES.items() if d.computed)
 
 
 def restriction_keys() -> dict[str, frozenset[str]]:
@@ -442,6 +498,7 @@ def restriction_keys() -> dict[str, frozenset[str]]:
 
 
 __all__ = [
+    "COMPUTED_DTYPES",
     "FIELD_KINDS",
     "FIELD_TYPES",
     "FieldKind",

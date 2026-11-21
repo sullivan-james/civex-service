@@ -773,6 +773,22 @@ class RecordPoints:
 
 
 @dataclass
+class FormulaPreviewDTO:
+    """What a formula would give, without saving it (`RecordService.
+    preview_formula`): the value, or why it can't be worked out for that
+    record (`error`), or why the formula itself can't be saved (`problem`)."""
+
+    value: Any = None
+    error: str | None = None
+    problem: str | None = None
+    #: The result type it gives (worked out when none was given).
+    result: str | None = None
+    #: The record it was worked out for, if any.
+    record_id: uuid.UUID | None = None
+    record_name: str | None = None
+
+
+@dataclass
 class RecordDTO:
     id: uuid.UUID
     dataset_id: uuid.UUID
@@ -800,8 +816,11 @@ class RecordDTO:
     # Response-only, like reference_labels: live child counts per child schema
     # name, and the requested columns the record's own data can't answer
     # (inherited fields, `ref.field` joins). See RecordService.query_records.
+    # Formula fields (worked out when read, never stored) are in `derived`
+    # too; `formula_errors` says why one is blank when it can't be worked out.
     child_counts: dict[str, int] | None = None
     derived: dict[str, Any] | None = None
+    formula_errors: dict[str, str] | None = None
     # Response-only: values this record still holds for fields that have been
     # deleted from its schema, each with when it was deleted and the schema to
     # restore it on. Nothing in `data` is lost; a restore brings them back.

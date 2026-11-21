@@ -8,6 +8,7 @@ from rich.table import Table
 from civex.cli.utils import drain_jobs, get_ctx as _ctx
 from civex.console import console
 from civex.domain.dtos import FileRef
+from civex.domain.field_descriptors import COMPUTED_DTYPES
 from civex.domain.exceptions import CoercionError, NotFoundError, ValidationError
 
 app = typer.Typer(help="Manage records")
@@ -58,6 +59,8 @@ def record_add(
     collection_timezone = dataset.timezone
     data: dict = {}
     for rf in fields:
+        if rf.field.dtype in COMPUTED_DTYPES:
+            continue  # a formula is worked out, never typed in
         dtype_label = rf.field.dtype
         if rf.field.dtype == "reference" and rf.field.restrictions.get("schema"):
             dtype_label = f"reference → {rf.field.restrictions['schema']}"
@@ -124,6 +127,12 @@ def record_show(
             else:
                 display = str(v)
             table.add_row(k, display)
+        for k, v in (record.derived or {}).items():
+            problem = (record.formula_errors or {}).get(k)
+            table.add_row(
+                k,
+                f"[dim](can't be worked out: {problem})[/dim]" if problem else str(v),
+            )
         console.print(table)
     else:
         console.print("  (no field values)")
@@ -149,6 +158,8 @@ def record_update(
     )
     data = dict(record.data)
     for rf in fields:
+        if rf.field.dtype in COMPUTED_DTYPES:
+            continue  # a formula is worked out, never typed in
         current = data.get(rf.field.name, "")
         dtype_label = rf.field.dtype
         if rf.field.dtype == "reference" and rf.field.restrictions.get("schema"):
@@ -232,7 +243,7 @@ def record_find(
         for r in records:
             row_vals = []
             for f in field_names:
-                v = r.data.get(f, "")
+                v = r.data.get(f, (r.derived or {}).get(f, ""))
                 if isinstance(v, dict) and "sha256" in v:
                     row_vals.append(FileRef.from_dict(v).filename)
                 else:

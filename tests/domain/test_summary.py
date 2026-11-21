@@ -26,7 +26,8 @@ from civex.domain.timezones import offset_changes
 def test_each_type_allows_known_measures_and_groupings() -> None:
     for d in FIELD_TYPES.values():
         assert set(d.measures) <= set(MEASURES) - {"count"}, d.type
-        assert "filled" in d.measures, d.type
+        # A formula holds nothing the database can count (not summarised yet).
+        assert ("filled" in d.measures) != d.computed, d.type
         assert d.grouping in (None, "value", "bin", "bucket", "each"), d.type
         assert bool(d.buckets) == (d.grouping == "bucket"), d.type
     numbers = {"filled", "distinct", "min", "max", "mean", "sum"}
@@ -34,6 +35,7 @@ def test_each_type_allows_known_measures_and_groupings() -> None:
     assert set(FIELD_TYPES["integer"].measures) == numbers
     assert {"mean", "sum"}.isdisjoint(FIELD_TYPES["date"].measures)
     assert {"min", "max"} <= set(FIELD_TYPES["datetime"].measures)
+    assert FIELD_TYPES["formula"].grouping is None
     for t in ("geo", "file", "file_list", "longtext"):
         assert FIELD_TYPES[t].measures == ("filled",)
         assert FIELD_TYPES[t].grouping is None
