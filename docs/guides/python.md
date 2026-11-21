@@ -212,6 +212,26 @@ with civex.open() as project:
 `quality_svc.check_field(schema, field, restrictions={...})` counts what a
 rule would leave behind before you change it.
 
+## Review status and notes
+
+`record_svc.set_review(status, ids=... | query=...)` marks records as
+`needs_check`, `checked` or `none`, as you, now (`dry_run=True` only counts);
+`note_svc` adds, lists, resolves and deletes the notes left on a record, and
+counts the open ones among the records a query lists:
+
+```python
+with civex.open() as project:
+    query = RecordQuery(dataset="survey-2024", schema="sample")
+    project.record_svc.set_review("needs_check", query=query)
+    project.note_svc.add("f623", "depth looks off, re-check the calibration")
+    print(project.note_svc.open_notes(query).notes)
+    waiting = RecordQuery(
+        dataset="survey-2024",
+        schema="sample",
+        filter_tree={"field": "@review", "op": "eq", "value": "needs_check"},
+    )
+```
+
 ## Writing results back
 
 - `record_svc.add(collection, schema, data, parent_record_id=...)` adds a

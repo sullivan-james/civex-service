@@ -259,7 +259,8 @@ first**, then the devices. A device that can't sync says which side to update.
 
 ## What doesn't sync
 
-Schemas, fields, collections, saved views, records and their files sync. These
+Schemas, fields, collections, saved views, the Analytics page, records (with
+their review status), the notes left on them and their files sync. These
 stay on each computer:
 
 - saved exports, and workflows and plugins (use the library);

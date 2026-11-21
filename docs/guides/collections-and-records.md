@@ -304,6 +304,40 @@ taken where the records would land, or the kind of record can't sit where it
 would go. The move is one event in Activity, and a record's history reads it
 as a change of collection.
 
+## Reviewing records as a team
+
+Two things help a team go over its data: a **review status** on each record
+and **notes** left on it.
+
+A record is **Not reviewed**, **Needs a check** or **Checked**. On a record's
+page the status is beside its name; open it to change it. In the explorer, tick
+records (or **all matching**) and choose **Review** on the selection bar. The
+status says who set it and when; it is not an edit of the record's values, so
+its *Updated* date stays and no workflow starts. Show it as a column with
+**Columns › Review**, and find what is waiting with the filter **Review is
+Needs a check** (or **Has open notes**).
+
+A note is a short text about a record, "value looks off, re-check the
+calibration". The record's **Notes** tab lists them oldest first with who wrote
+them and when, and anyone who may change records in the collection can add one,
+**Resolve** it once dealt with (or **Reopen** it), or delete it; only its author
+can change its words. A record's tab shows how many notes are still open.
+
+```bash
+civex record review needs_check --in survey -s sample -w site=reef   # all that match
+civex record review checked --id f623 --id a91c
+civex record note add f623 "depth looks off, re-check the calibration"
+civex record note list f623 --open
+civex record note resolve 3c1d
+```
+
+Both are in history (a review over many records is one event in Activity) and
+sync to the other computers following the project. Two people marking the same
+record at once is not a conflict: the later mark stays. Deleting a record
+hides its notes until it is restored; deleting it permanently removes them,
+history and all. Scripts use `POST /api/records/review` (the list's selectors
+or `ids`, and `status`) and `/api/records/{id}/notes`.
+
 ## Deleting and undoing
 
 ```bash
