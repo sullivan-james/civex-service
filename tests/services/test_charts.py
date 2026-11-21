@@ -48,7 +48,7 @@ def test_a_kind_keeps_its_charts_as_the_server_writes_them(ctx: AppContext, stud
                 "sort": {"column": "mean:depth", "direction": "desc"},
                 "chart_measure": "mean:depth",
             },
-            {"id": "b", "map": "where"},
+            {"id": "b", "map": "where", "size": "large"},
         ],
     )
     ctx.commit()
@@ -61,7 +61,7 @@ def test_a_kind_keeps_its_charts_as_the_server_writes_them(ctx: AppContext, stud
             "sort": {"column": "mean:depth", "direction": "desc"},
             "chart_measure": "mean:depth",
         },
-        {"id": "b", "map": "where"},
+        {"id": "b", "map": "where", "size": "large"},
     ]
     assert ctx.schema_svc.get("sample").charts == saved.charts
     assert ctx.schema_svc.set_charts("sample", []).charts == []
@@ -75,6 +75,7 @@ def test_a_kind_keeps_its_charts_as_the_server_writes_them(ctx: AppContext, stud
         ({"group_by": ["site:month"]}, "not a date"),
         ({"measures": ["count"], "sort": {"column": "mean:depth"}}, "sorted by"),
         ({"show": "pie"}, "opens as"),
+        ({"size": "huge"}, "size is one of"),
         ({"measures": ["count"], "chart_measure": "sum:depth"}, "chart draws"),
         ({"colour": "red"}, "no colour"),
         ({"group_by": ["site", "taken:year", "depth:1", "taken"]}, "at most"),

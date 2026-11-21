@@ -17,6 +17,7 @@ import {
   barFields,
   barHow,
   buildChart,
+  chartPick,
   chartTitle,
   kindsBeneath,
   mapChart,
@@ -33,13 +34,15 @@ import { ChartView } from './ChartView'
  * make bars: **One bar for each** (a field; a date's period, a number's
  * steps) and **Each bar shows** (how many, or a number worked out). **A
  * map** needs none. Ready-made charts for the kind fill the choices in with
- * one click. Nothing is added until **Add chart**. */
+ * one click. Nothing is added until **Add chart**. With `initial` it changes
+ * that chart instead (**Save**). */
 export function NewChart({
   listed,
   schemas,
   usable,
   kind,
   records,
+  initial,
   onAdd,
   onCancel,
 }: {
@@ -50,21 +53,31 @@ export function NewChart({
   kind: string
   /** The records the preview counts: the ones the chart will be beside. */
   records: RecordSelectionBody
+  /** A chart to change (its id, size and place are kept); none: a new one. */
+  initial?: Chart
   onAdd: (chart: Chart) => void
   onCancel: () => void
 }) {
+  const from = initial ? chartPick(initial) : null
   const bars = barFields(usable)
   const fields = usable.map((u) => u.field)
   const geo = mapFields(fields)
   const below = kindsBeneath(listed, schemas)
   const recommended = recommendedCharts(usable)
-  const [what, setWhat] = useState<'bars' | 'map'>('bars')
-  const [by, setBy] = useState(bars[0]?.value ?? '')
-  const [period, setPeriod] = useState('month')
-  const [steps, setSteps] = useState('10')
-  const [show, setShow] = useState('count')
-  const [of, setOf] = useState('')
-  const [title, setTitle] = useState('')
+  const [what, setWhat] = useState<'bars' | 'map'>(
+    initial?.map ? 'map' : 'bars',
+  )
+  const [by, setBy] = useState(from?.by || (bars[0]?.value ?? ''))
+  const startsAs = barHow(usable, from?.by ?? '')
+  const [period, setPeriod] = useState(
+    (startsAs === 'period' && from?.how) || 'month',
+  )
+  const [steps, setSteps] = useState(
+    (startsAs === 'steps' && from?.how) || '10',
+  )
+  const [show, setShow] = useState(from?.show ?? 'count')
+  const [of, setOf] = useState(from?.of ?? '')
+  const [title, setTitle] = useState(initial?.title ?? '')
 
   const how = barHow(usable, by)
   const shows = SHOWS.filter((s) =>
@@ -93,7 +106,13 @@ export function NewChart({
           of: ofValue,
         })
   const named = chartTitle(drawn, usable, kind, schemas)
-  const chart: Chart = { ...drawn, title: title.trim() || null }
+  // Changed, a chart keeps its id (so its place) and its size.
+  const chart: Chart = {
+    ...drawn,
+    id: initial?.id ?? drawn.id,
+    size: initial?.size,
+    title: title.trim() || null,
+  }
   // The preview follows the choices, a moment behind while typing.
   const previewed = useDeferredValue(
     JSON.stringify({ ...drawn, id: 'preview' }),
@@ -109,28 +128,10 @@ export function NewChart({
   }
 
   return (
-    <Card
-      title="New chart"
-      selected
-      action={
-        <div className="flex gap-2">
-          <Button size="sm" variant="ghost" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button
-            size="sm"
-            variant="primary"
-            disabled={!valid}
-            onClick={() => onAdd(chart)}
-          >
-            Add chart
-          </Button>
-        </div>
-      }
-    >
-      <div className="grid gap-6 lg:grid-cols-[20rem_1fr]">
-        <div className="space-y-4">
-          {recommended.length > 0 && (
+    <Card title={initial ? 'Edit chart' : 'New chart'} selected>
+      <div className="grid gap-8 lg:grid-cols-[22rem_1fr]">
+        <div className="space-y-5">
+          {!initial && recommended.length > 0 && (
             <div className="space-y-2">
               <Subheading>Quick picks</Subheading>
               <div className="flex flex-wrap gap-2">
@@ -238,8 +239,23 @@ export function NewChart({
               onChange={(e) => setTitle(e.target.value)}
             />
           </Field>
+          <div className="flex gap-2 border-t border-border pt-4">
+            <Button
+              variant="primary"
+              disabled={!valid}
+              onClick={() => onAdd(chart)}
+            >
+              {initial ? 'Save' : 'Add chart'}
+            </Button>
+            <Button variant="ghost" onClick={onCancel}>
+              Cancel
+            </Button>
+          </div>
         </div>
-        <section aria-label="Preview" className="min-w-0 space-y-2">
+        <section
+          aria-label="Preview"
+          className="min-w-0 space-y-3 rounded-md border border-border bg-canvas-subtle p-4"
+        >
           <Subheading as="h3">{chart.title ?? named}</Subheading>
           {valid && (
             <ChartView

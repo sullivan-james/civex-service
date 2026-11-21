@@ -8,6 +8,7 @@ import { NewChart } from '../charts/NewChart'
 import { EmptyState } from '../ui'
 import { useFieldTypes } from '../../hooks/useFieldTypes'
 import {
+  EDIT_CHART,
   NEW_CHART,
   OPEN_CHART_PARAM,
   chartTitle,
@@ -50,19 +51,30 @@ export function KindCharts({
       else out.delete(OPEN_CHART_PARAM)
       return out
     })
-  const open = charts.find((c) => c.id === sp.get(OPEN_CHART_PARAM))
-  const building = sp.get(OPEN_CHART_PARAM) === NEW_CHART && mayChange
+  const at = sp.get(OPEN_CHART_PARAM) ?? ''
+  const open = charts.find((c) => c.id === at)
+  const building = at === NEW_CHART && mayChange
+  const editing = mayChange
+    ? charts.find((c) => EDIT_CHART + c.id === at)
+    : undefined
   return (
     <div className="space-y-4">
-      {building && (
+      {(building || editing) && (
         <NewChart
+          key={editing?.id ?? 'new'}
           listed={schema}
           schemas={schemas}
           usable={usable}
           kind={kind}
           records={records}
+          initial={editing}
           onAdd={(chart) => {
-            save.mutate([...charts, chart].map(storedChart))
+            save.mutate(
+              (charts.some((c) => c.id === chart.id)
+                ? charts.map((c) => (c.id === chart.id ? chart : c))
+                : [...charts, chart]
+              ).map(storedChart),
+            )
             setOpen(null)
           }}
           onCancel={() => setOpen(null)}
@@ -86,7 +98,8 @@ export function KindCharts({
           usable={usable}
           kind={kind}
           schemas={schemas}
-          onBuild={building ? undefined : () => setOpen(NEW_CHART)}
+          onBuild={building || editing ? undefined : () => setOpen(NEW_CHART)}
+          onEdit={(c) => setOpen(EDIT_CHART + c.id)}
           onChange={
             mayChange ? (next) => save.mutate(next.map(storedChart)) : undefined
           }

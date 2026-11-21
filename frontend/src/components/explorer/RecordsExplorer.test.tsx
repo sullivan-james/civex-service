@@ -1556,17 +1556,62 @@ describe('charts beside the records', () => {
     expect(await bar(/96/)).toBeInTheDocument()
   })
 
-  it('removing a chart takes it off the kind', async () => {
+  const menu = async (
+    user: ReturnType<typeof userEvent.setup>,
+    item: string,
+  ) => {
+    await user.click(
+      screen.getByRole('button', {
+        name: 'More for How many recordings per rate',
+      }),
+    )
+    await user.click(await screen.findByRole('menuitem', { name: item }))
+  }
+
+  it('removes a chart from its menu, not with a button on the card', async () => {
     const user = userEvent.setup()
     renderExplorer({}, '/collections/hb?schema=recording')
     await bar(/Georges/)
-    await user.click(
-      screen.getByRole('button', {
-        name: 'Remove How many recordings per rate',
-      }),
-    )
+    expect(screen.queryByRole('button', { name: /^Remove/ })).toBeNull()
+    await menu(user, 'Remove')
     await waitFor(() => expect(put).toHaveLength(1))
     expect(put![0]).toMatchObject({ group_by: ['encounter.site'] })
+  })
+
+  it('edits a chart from its menu: its choices and a name of its own', async () => {
+    const user = userEvent.setup()
+    renderExplorer({}, '/collections/hb?schema=recording')
+    await bar(/Georges/)
+    await menu(user, 'Edit…')
+    await waitFor(() => expect(search().get('chart')).toBe('edit-b'))
+    expect(
+      screen.getByRole('heading', { name: 'Edit chart' }),
+    ).toBeInTheDocument()
+    // It opens on the chart as it is.
+    expect(screen.getByLabelText('One bar for each')).toHaveValue('rate')
+    await user.type(screen.getByLabelText('Title'), 'Sample rates')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(put).toHaveLength(2))
+    // Changed in place: the same chart, the same position.
+    expect(put![1]).toMatchObject({
+      id: 'b',
+      title: 'Sample rates',
+      group_by: ['rate'],
+    })
+    await waitFor(() => expect(search().get('chart')).toBeNull())
+    expect(await screen.findByText('Sample rates')).toBeInTheDocument()
+  })
+
+  it('makes a chart larger and smaller from its menu', async () => {
+    const user = userEvent.setup()
+    renderExplorer({}, '/collections/hb?schema=recording')
+    await bar(/Georges/)
+    await menu(user, 'Larger')
+    await waitFor(() =>
+      expect(put![1]).toMatchObject({ id: 'b', size: 'large' }),
+    )
+    await menu(user, 'Smaller')
+    await waitFor(() => expect(put![1]).not.toHaveProperty('size'))
   })
 
   it('shows the charts to someone who may only read, with no way to change them', async () => {
@@ -1579,9 +1624,13 @@ describe('charts beside the records', () => {
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: /Add chart/ })).toBeNull(),
     )
-    expect(
-      screen.queryByRole('button', { name: /^Remove How many/ }),
-    ).toBeNull()
+    await userEvent.click(
+      screen.getByRole('button', {
+        name: 'More for How many recordings per rate',
+      }),
+    )
+    expect(screen.queryByRole('menuitem', { name: 'Remove' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Edit…' })).toBeNull()
   })
 
   it('shows no charts for a kind with none set: only a way to add one', async () => {
@@ -1601,11 +1650,11 @@ describe('charts beside the records', () => {
     expect(put).toHaveLength(1)
   })
 
-  it('opens a chart large from the address, with its numbers, and Back closes it', async () => {
+  it('enlarges a chart, in the address, with its numbers, and closes it', async () => {
     const user = userEvent.setup()
     renderExplorer({}, '/collections/hb?schema=recording')
     await bar(/Georges/)
-    await user.click(screen.getAllByRole('button', { name: 'Open' })[0])
+    await user.click(screen.getAllByRole('button', { name: /^Enlarge/ })[0])
     await waitFor(() => expect(search().get('chart')).toBe('a'))
     expect(
       await screen.findByRole('button', { name: /Download numbers/ }),

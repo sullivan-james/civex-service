@@ -3,7 +3,12 @@ import { useSearchParams } from 'react-router'
 import type { Chart, Schema } from '../../api/schemas'
 import { useFieldTypes } from '../../hooks/useFieldTypes'
 import { useSetCharts } from '../../hooks/useSchemas'
-import { NEW_CHART, OPEN_CHART_PARAM, storedChart } from '../../utils/charts'
+import {
+  EDIT_CHART,
+  NEW_CHART,
+  OPEN_CHART_PARAM,
+  storedChart,
+} from '../../utils/charts'
 import type { FilterableField } from '../../utils/hierarchy'
 import { summaryFields } from '../../utils/summary'
 
@@ -33,19 +38,32 @@ export function useExplorerCharts(
     })
   const set = (next: Chart[]) => save.mutate(next.map(storedChart))
 
+  const at = sp.get(OPEN_CHART_PARAM) ?? ''
+  const byId = (id: string) => charts.find((c) => c.id === id) ?? null
+
   return {
     charts,
     usable,
     set,
     /** A chart is being built (`chart=new`). */
-    building: sp.get(OPEN_CHART_PARAM) === NEW_CHART,
+    building: at === NEW_CHART,
     build: () => show(NEW_CHART),
-    /** The chart built joins the kind's, and the builder closes. */
-    add: (chart: Chart) => {
-      set([...charts, chart])
+    /** The chart being changed (`chart=edit-<id>`). */
+    editing: at.startsWith(EDIT_CHART)
+      ? byId(at.slice(EDIT_CHART.length))
+      : null,
+    edit: (chart: Chart) => show(EDIT_CHART + chart.id),
+    /** The chart built or changed joins the kind's (in its place when it
+     * was there), and the builder closes. */
+    keep: (chart: Chart) => {
+      set(
+        charts.some((c) => c.id === chart.id)
+          ? charts.map((c) => (c.id === chart.id ? chart : c))
+          : [...charts, chart],
+      )
       show(null)
     },
-    open: charts.find((c) => c.id === sp.get(OPEN_CHART_PARAM)) ?? null,
+    open: byId(at),
     setOpen: (chart: Chart | null) => show(chart?.id ?? null),
   }
 }

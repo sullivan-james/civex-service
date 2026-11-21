@@ -89,6 +89,11 @@ class ChartModel(BaseModel):
     title: str | None = Field(
         default=None, description="Its title; None names it for what it shows."
     )
+    size: Literal["small", "large"] = Field(
+        default="small",
+        description="How big its card is: the usual size, or large (the full "
+        "width of where it is shown, and taller).",
+    )
     map: str | None = Field(
         default=None,
         description="A map: the location field ('field', or 'kind.field' for "
@@ -128,6 +133,8 @@ class ChartModel(BaseModel):
             out: dict[str, Any] = {"id": self.id, "map": self.map}
             if self.title:
                 out["title"] = self.title
+            if self.size != "small":
+                out["size"] = self.size
             return out
         return self.model_dump(exclude_none=True, exclude={"map"})
 

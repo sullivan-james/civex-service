@@ -780,14 +780,17 @@ export function RecordsExplorer({
           </p>
         )}
 
-        {charts.building && listed && !aside && (
+        {(charts.building || charts.editing) && listed && !aside && (
           <NewChart
+            // A fresh builder for each chart it is opened on.
+            key={charts.editing?.id ?? 'new'}
             listed={listed}
             schemas={x.schemas}
             usable={charts.usable}
             kind={listedLabel}
             records={records}
-            onAdd={charts.add}
+            initial={charts.editing ?? undefined}
+            onAdd={charts.keep}
             onCancel={() => charts.setOpen(null)}
           />
         )}

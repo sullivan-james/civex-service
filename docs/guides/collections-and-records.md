@@ -182,11 +182,14 @@ are no charts until someone adds one.
   of a kind beneath are inside them. **A map** is a chart too. **Quick
   picks** fill the choices in for the kind's fields of choices and its first
   date. Give it a title of your own if you like, then **Add chart**.
-- A chart you add, remove or move is saved for the kind at once, for
-  everyone, like a saved filter (it takes the right to write records).
-- **Open** shows a chart large, above the records, with its table of numbers
-  and **Download numbers** (CSV, Excel, TSV, JSON). It is in the address, so
-  it is a link and Back closes it.
+- A chart's **⋮** menu has **Edit…** (the builder again, on that chart, where
+  you can also give it a title of your own), **Larger** / **Smaller**, **Move
+  up** / **Move down** and **Remove**. Every change is saved for the kind at
+  once, for everyone, like a saved filter (it takes the right to write
+  records).
+- The arrows button on a card enlarges it: the chart above the records with
+  its table of numbers and **Download numbers** (CSV, Excel, TSV, JSON). It
+  is in the address, so it is a link and Back closes it.
 - **Add to Analytics page**, in a chart's menu, puts it on the
   [Analytics page](views.md#the-analytics-page) with the records it counts now.
 - A very large list (over 200,000 records) waits for **Show charts**.

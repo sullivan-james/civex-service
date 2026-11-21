@@ -21,6 +21,9 @@ from civex.domain.summary import SavedSummary
 
 MAX_CHARTS = 24
 MAX_TITLE = 200
+#: How big a chart's card is: the usual size, or large (the full width of
+#: where it is shown, and taller).
+SIZES = ("small", "large")
 _SUMMARY_KEYS = ("group_by", "measures", "sort", "show", "chart_measure")
 
 
@@ -32,11 +35,14 @@ class Chart:
     # A map: the location field, as a grouping writes one (`field`, or
     # `kind.field` for a kind above).
     map: str | None = None
+    size: str = "small"
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"id": self.id}
         if self.title:
             out["title"] = self.title
+        if self.size != "small":
+            out["size"] = self.size
         if self.map is not None:
             out["map"] = self.map
         elif self.summary is not None:
@@ -55,7 +61,7 @@ def parse_chart(raw: Any) -> Chart:
     field or a summary (`SavedSummary.from_dict`)."""
     if not isinstance(raw, dict):
         raise ValidationError("A chart is an object")
-    unknown = set(raw) - {"id", "title", "map", *_SUMMARY_KEYS}
+    unknown = set(raw) - {"id", "title", "size", "map", *_SUMMARY_KEYS}
     if unknown:
         raise ValidationError("A chart has no " + ", ".join(sorted(unknown)))
     chart_id = raw.get("id")
@@ -64,15 +70,18 @@ def parse_chart(raw: Any) -> Chart:
     title = raw.get("title") or None
     if title is not None and (not isinstance(title, str) or len(title) > MAX_TITLE):
         raise ValidationError(f"A chart's title is text of up to {MAX_TITLE}")
+    size = raw.get("size") or "small"
+    if size not in SIZES:
+        raise ValidationError(f"A chart's size is one of: {', '.join(SIZES)}")
     where = raw.get("map")
     if where is not None:
         if not isinstance(where, str) or not where.rpartition(".")[2]:
             raise ValidationError("A map names a location field")
         if any(raw.get(k) for k in _SUMMARY_KEYS):
             raise ValidationError("A map has no bars")
-        return Chart(chart_id, title, map=where)
+        return Chart(chart_id, title, map=where, size=size)
     summary = SavedSummary.from_dict({k: raw[k] for k in _SUMMARY_KEYS if k in raw})
-    return Chart(chart_id, title, summary=summary)
+    return Chart(chart_id, title, summary=summary, size=size)
 
 
 def parse_charts(raw: Any) -> list[Chart]:

@@ -52,6 +52,8 @@ export function ChartView({
   download: offerDownload = true,
 }: ChartViewProps) {
   const toast = useToast()
+  // A card draws small unless the chart is set large; opened, it is large.
+  const small = !large && chart.size !== 'large'
   const listed = records.schema_name ?? ''
   const of = barFieldOf(chart.group_by, listed)
   const filter = records.filter as FilterTreeWire | null
@@ -64,7 +66,7 @@ export function ChartView({
         records={records}
         fields={fields}
         field={chart.map}
-        compact={!large}
+        compact={small}
       />
     ) : null
   if (error) return <ErrorState message={errorMessage(error)} />
@@ -79,7 +81,7 @@ export function ChartView({
       summary={data}
       measureKey={chart.chart_measure ?? null}
       onDrill={onDrill}
-      compact={!large}
+      compact={small}
       lit={lit}
     />
   )

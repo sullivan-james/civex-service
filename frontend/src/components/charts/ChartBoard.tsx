@@ -1,7 +1,7 @@
 import type { RecordSelectionBody } from '../../api/records'
 import type { Chart, Schema } from '../../api/schemas'
 import { Button, Card, IconButton, Menu, type MenuEntry } from '../ui'
-import { MoreVertical, Plus, X } from '../ui/icons'
+import { Maximize2, MoreVertical, Plus } from '../ui/icons'
 import { chartTitle, type Usable } from '../../utils/charts'
 import type { FilterTreeWire } from '../../utils/filterTree'
 import { ChartView } from './ChartView'
@@ -22,14 +22,17 @@ export interface ChartBoardProps {
   onFilter?: (filter: FilterTreeWire | null) => void
   /** Open a chart large. */
   onOpen?: (chart: Chart) => void
+  /** Change a chart (the host opens the builder on it). */
+  onEdit?: (chart: Chart) => void
   /** More to do with a chart, in its menu (Add to Analytics page). */
   more?: (chart: Chart, title: string) => MenuEntry[]
   enabled?: boolean
 }
 
 /** Chart cards: the one board behind a kind's Charts tab and the
- * explorer's charts column. Each card can be opened large; where the charts
- * may change, a card can be moved or removed and **Add chart** asks the
+ * explorer's charts column. Each card can be enlarged; where the charts may
+ * change, a card's menu edits it, makes it larger or smaller, moves or
+ * removes it, and **Add chart** asks the
  * host to open the builder (`NewChart`, at full width).
  * Cards flow into as many columns as the width holds. */
 export function ChartBoard({
@@ -42,6 +45,7 @@ export function ChartBoard({
   onChange,
   onFilter,
   onOpen,
+  onEdit,
   more,
   enabled = true,
 }: ChartBoardProps) {
@@ -59,7 +63,26 @@ export function ChartBoard({
     >
       {charts.map((chart, i) => {
         const title = chartTitle(chart, usable, kind, schemas)
+        const large = chart.size === 'large'
         const items: MenuEntry[] = [
+          ...(onChange && onEdit
+            ? [{ label: 'Edit…', onClick: () => onEdit(chart) }]
+            : []),
+          ...(onChange
+            ? [
+                {
+                  label: large ? 'Smaller' : 'Larger',
+                  onClick: () =>
+                    onChange(
+                      charts.map((c) =>
+                        c.id === chart.id
+                          ? { ...c, size: large ? 'small' : 'large' }
+                          : c,
+                      ),
+                    ),
+                },
+              ]
+            : []),
           ...(more?.(chart, title) ?? []),
           ...(onChange && i > 0
             ? [{ label: 'Move up', onClick: () => move(i, i - 1) }]
@@ -67,21 +90,33 @@ export function ChartBoard({
           ...(onChange && i < charts.length - 1
             ? [{ label: 'Move down', onClick: () => move(i, i + 1) }]
             : []),
+          ...(onChange
+            ? [
+                {
+                  label: 'Remove',
+                  variant: 'danger' as const,
+                  onClick: () =>
+                    onChange(charts.filter((c) => c.id !== chart.id)),
+                },
+              ]
+            : []),
         ]
         return (
           <Card
             key={chart.id}
+            // A large chart takes the whole width of the board.
+            className={large ? 'col-span-full' : undefined}
             title={<span className="text-sm">{title}</span>}
             action={
               <div className="flex items-center">
                 {onOpen && (
-                  <Button
+                  <IconButton
+                    icon={Maximize2}
                     size="sm"
-                    variant="ghost"
+                    variant="subtle"
+                    aria-label={`Enlarge ${title}`}
                     onClick={() => onOpen(chart)}
-                  >
-                    Open
-                  </Button>
+                  />
                 )}
                 {items.length > 0 && (
                   <Menu
@@ -97,17 +132,6 @@ export function ChartBoard({
                         onClick={toggle}
                       />
                     )}
-                  />
-                )}
-                {onChange && (
-                  <IconButton
-                    icon={X}
-                    size="sm"
-                    variant="subtle"
-                    aria-label={`Remove ${title}`}
-                    onClick={() =>
-                      onChange(charts.filter((c) => c.id !== chart.id))
-                    }
                   />
                 )}
               </div>

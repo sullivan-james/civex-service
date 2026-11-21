@@ -91,11 +91,14 @@ export function ChartsColumn({
           kind={kind}
           schemas={schemas}
           // One way to add at a time: not while the builder is open.
-          onBuild={model.building || !mayAdd ? undefined : model.build}
+          onBuild={
+            model.building || model.editing || !mayAdd ? undefined : model.build
+          }
           // Shared like a saved filter: whoever may write records may.
           onChange={mayAdd ? model.set : undefined}
           onFilter={onFilter}
           onOpen={model.setOpen}
+          onEdit={model.edit}
           more={(chart, title) => [
             {
               label: 'Add to Analytics page',

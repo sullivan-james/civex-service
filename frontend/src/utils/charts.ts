@@ -106,6 +106,7 @@ export function chartTitle(
 export function storedChart(chart: Chart): Chart {
   const out: Chart = { id: chart.id, group_by: [], measures: [] }
   if (chart.title) out.title = chart.title
+  if (chart.size === 'large') out.size = 'large'
   if (chart.map) return { ...out, map: chart.map }
   out.group_by = chart.group_by
   out.measures = chart.measures.length ? chart.measures : ['count']
@@ -117,9 +118,11 @@ export function storedChart(chart: Chart): Chart {
 
 // --- the address
 
-/** The chart opened large, or `NEW_CHART` while one is being built. */
+/** The chart opened large; `NEW_CHART` while one is being built; or
+ * `EDIT_CHART` + its id while one is being changed. */
 export const OPEN_CHART_PARAM = 'chart'
 export const NEW_CHART = 'new'
+export const EDIT_CHART = 'edit-'
 
 // --- what the "New chart" panel offers
 
@@ -222,6 +225,25 @@ export function buildChart(pick: {
   const group = pick.by ? [pick.how ? `${pick.by}:${pick.how}` : pick.by] : []
   const measure = pick.show === 'count' ? 'count' : `${pick.show}:${pick.of}`
   return { id: newChartId(), group_by: group, measures: [measure] }
+}
+
+/** A chart as the builder's choices, to change it: the reverse of
+ * `buildChart`. */
+export function chartPick(chart: Chart): {
+  by: string
+  how: string
+  show: string
+  of: string
+} {
+  const { field, how } = splitGroupKey(chart.group_by[0] ?? '')
+  const measure = chart.chart_measure ?? chart.measures[0] ?? 'count'
+  const at = measure.indexOf(':')
+  return {
+    by: field,
+    how,
+    show: at < 0 ? measure : measure.slice(0, at),
+    of: at < 0 ? '' : measure.slice(at + 1),
+  }
 }
 
 export function mapChart(field: FilterableField): Chart {

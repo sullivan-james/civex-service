@@ -16,7 +16,7 @@ import {
   SortableList,
   type MenuEntry,
 } from '../components/ui'
-import { Plus, Trash2 } from '../components/ui/icons'
+import { Maximize2, Plus, Trash2 } from '../components/ui/icons'
 import {
   AnalyticsFilterBar,
   JobSuccessRateWidget,
@@ -106,7 +106,7 @@ const FOR_PARAM = 'for'
  * with the records it counts (the one chart definition and renderer,
  * `ChartView`) or a built-in widget, small (half the page) or wide. A chart
  * is put here from a list of records (**Add to Analytics page**). **For**
- * narrows every chart to one collection; a card opens large (`?chart=`).
+ * narrows every chart to one collection; a card is enlarged (`?chart=`).
  * Anyone who may change records somewhere may edit the page (**Edit page**:
  * reorder, resize, retitle, remove, add a built-in chart, then **Done**,
  * saved as one change); it syncs and is in Activity. The filter bar governs
@@ -378,9 +378,13 @@ function ChartCard({
           >
             Records
           </Button>
-          <Button size="sm" variant="ghost" onClick={onOpen}>
-            Open
-          </Button>
+          <IconButton
+            icon={Maximize2}
+            size="sm"
+            variant="subtle"
+            aria-label={`Enlarge ${title}`}
+            onClick={onOpen}
+          />
         </div>
       }
     >

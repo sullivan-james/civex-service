@@ -20,6 +20,8 @@ export interface Field {
 export interface Chart {
   id: string
   title?: string | null
+  /** How big its card is: the usual size, or large (full width, taller). */
+  size?: 'small' | 'large'
   /** A map: the location field (`field`, or `kind.field` for a kind above). */
   map?: string | null
   group_by: string[]
