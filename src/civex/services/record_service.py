@@ -30,6 +30,7 @@ from civex.domain.dtos import (
     RecordMoveResultDTO,
     RecordPoint,
     RecordPoints,
+    FormulaPreviewDTO,
     POINTS_DEFAULT_LIMIT,
     POINTS_MAX_LIMIT,
     ReferrerGroupDTO,
@@ -44,7 +45,8 @@ from civex.domain.dtos import (
 from civex.domain import filename_extract
 from civex.domain import geo as geo_domain
 from civex.domain.audit_diff import tombstone
-from civex.domain import partial_dates, templating, units
+from civex.domain import formulas, partial_dates, templating, units
+from civex.domain.field_descriptors import COMPUTED_DTYPES
 from civex.domain.exceptions import (
     FieldValueError,
     CoercionError,
@@ -397,6 +399,9 @@ def _bulk_edit_problem(shape: ResolvedSchema | None, fields: list[str]) -> str |
     own = {f.name for f in shape.schema.fields}
     kind = shape.schema.display_name
     for name in fields:
+        found = shape.by_name.get(name)
+        if found is not None and found.dtype in COMPUTED_DTYPES:
+            return f"'{name}' is a formula: it is worked out, never set"
         if name in own:
             continue
         if name in shape.by_name:
@@ -453,7 +458,9 @@ def _changed_values(
 def _strip_derived_file_keys(
     data: dict[str, Any], fields: list[ResolvedField]
 ) -> dict[str, Any]:
-    """`data` without the response-only keys on its file values."""
+    """`data` without what reads add and a client may echo back: the
+    response-only keys on its file values, and any value for a formula
+    (worked out when read, never stored)."""
 
     def clean(item: Any) -> Any:
         if isinstance(item, dict):
@@ -462,6 +469,9 @@ def _strip_derived_file_keys(
 
     result = dict(data)
     for rf in fields:
+        if rf.field.dtype in COMPUTED_DTYPES:
+            result.pop(rf.field.name, None)
+            continue
         if rf.field.dtype not in ("file", "file_list"):
             continue
         value = result.get(rf.field.name)
@@ -778,12 +788,127 @@ class RecordService:
         (`_attach_file_locations`). Audit snapshots use `_with_names` alone, so
         none of this -- all of it momentary -- is ever frozen into the log."""
         shapes = shapes or self._schema_svc.resolver()
-        return self._attach_file_locations(
-            self._label_references(
-                self._name_files_from_relatives(records, shapes), shapes
+        return self._attach_formulas(
+            self._attach_file_locations(
+                self._label_references(
+                    self._name_files_from_relatives(records, shapes), shapes
+                ),
+                shapes,
             ),
             shapes,
         )
+
+    def _attach_formulas(
+        self, records: list[RecordDTO], shapes: SchemaResolver
+    ) -> list[RecordDTO]:
+        """Each record's own formula fields worked out, in `derived` (never in
+        `data`, so nothing that stores or sends a record's values can carry
+        one), with `formula_errors` saying why one is blank when it can't be.
+        Per schema, the values it reads from the records above and through
+        links are fetched in one batch (`_derived_values`); a schema with no
+        formulas costs nothing."""
+        groups: dict[uuid.UUID, list[int]] = {}
+        for i, r in enumerate(records):
+            shape = shapes(r.schema_id)
+            if shape is not None and any(
+                f.dtype in COMPUTED_DTYPES for f in shape.schema.fields
+            ):
+                groups.setdefault(r.schema_id, []).append(i)
+        if not groups:
+            return records
+        out = list(records)
+        for schema_id, indexes in groups.items():
+            shape = shapes(schema_id)
+            assert shape is not None
+            names = [f.name for f in shape.schema.fields if f.dtype in COMPUTED_DTYPES]
+            results = self._formula_results(
+                shape.schema, [records[i] for i in indexes], names
+            )
+            for i, found in zip(indexes, results):
+                r = records[i]
+                errors = {n: e for n, (_, e) in found.items() if e}
+                out[i] = dataclasses.replace(
+                    r,
+                    derived={
+                        **(r.derived or {}),
+                        **{n: v for n, (v, _) in found.items()},
+                    },
+                    formula_errors=errors or None,
+                )
+        return out
+
+    def _formula_results(
+        self, schema: SchemaDTO, records: list[RecordDTO], names: list[str]
+    ) -> list[dict[str, tuple[Any, str | None]]]:
+        """Per record (all of `schema`, name-keyed), each of the formula fields
+        `names` worked out: (value, None), or (None, why) when it can't be.
+        The one place a formula is worked out for records. A formula may read
+        another of the schema's formulas (worked out first), a field of a
+        record above (its formula too) or `link.field`; those are fetched for
+        the whole batch, one lookup per level, never per record."""
+        own = {f.name: f for f in schema.fields}
+        compiled: dict[str, tuple[formulas.Formula | None, str | None]] = {}
+        pending = list(names)
+        while pending:
+            name = pending.pop()
+            f = own.get(name)
+            if name in compiled or f is None or f.dtype not in COMPUTED_DTYPES:
+                continue
+            try:
+                formula = formulas.parse((f.restrictions or {}).get("expression", ""))
+            except ValidationError as e:
+                compiled[name] = (None, str(e))
+                continue
+            compiled[name] = (formula, None)
+            pending.extend(n for n in formula.names if n in own)
+        outside = list(
+            dict.fromkeys(
+                n
+                for formula, _ in compiled.values()
+                if formula is not None
+                for n in formula.names
+                if n not in own
+            )
+        )
+        extra = (
+            self._derived_values(schema.name, records, outside)
+            if outside and records
+            else [{} for _ in records]
+        )
+        _, dtypes = self._schema_svc.formula_kinds(schema)
+
+        out: list[dict[str, tuple[Any, str | None]]] = []
+        for record, more in zip(records, extra):
+            values = {**record.data, **more}
+            done: dict[str, tuple[Any, str | None]] = {}
+
+            def work(name: str, seen: frozenset[str]) -> None:
+                formula, problem = compiled[name]
+                if formula is None:
+                    done[name] = (None, problem)
+                    return
+                if name in seen:
+                    done[name] = (None, "it reads itself through other formulas")
+                    return
+                for used in formula.names:
+                    if used in compiled and used not in done:
+                        work(used, seen | {name})
+                    if used in compiled:
+                        values[used] = done[used][0]
+                rules = own[name].restrictions or {}
+                done[name] = formulas.compute(
+                    formula,
+                    values,
+                    dtypes,
+                    rules.get("result") or "string",
+                    rules.get("decimals"),
+                )
+
+            for name in names:
+                if name in compiled and name not in done:
+                    work(name, frozenset())
+            out.append({n: done[n] for n in names if n in done})
+        return out
 
     def _name_files_from_relatives(
         self, records: list[RecordDTO], shapes: SchemaResolver
@@ -1271,6 +1396,11 @@ class RecordService:
         """`collection_id` steers where a new file is stored (placement).
         `timezone` is the collection's zone, used to read an offset-less
         datetime; the field's own `timezone` restriction takes precedence."""
+        if dtype in COMPUTED_DTYPES:
+            raise ValidationError(
+                f"Field '{field_name}' is a formula: it is worked out from the "
+                "other fields, never set"
+            )
         if dtype == "datetime":
             try:
                 parsed = _parse_datetime(
@@ -2264,7 +2394,24 @@ class RecordService:
         """The field a condition/sort names, and its relation to `schema`.
         Unqualified names resolve on `schema` itself, else on the nearest
         ancestor that owns them (an inherited field lives on the parent
-        record, not the child's own data)."""
+        record, not the child's own data). A formula can't be filtered or
+        sorted by: the database holds no value for it to test."""
+        f, rel = self._locate_field(schema, related, field_name, schema_name, what)
+        if f.dtype in COMPUTED_DTYPES and what in ("filter", "sort"):
+            raise ValidationError(
+                f"'{f.name}' is a formula, worked out when read: a list can't be "
+                f"{'filtered' if what == 'filter' else 'sorted'} by it"
+            )
+        return f, rel
+
+    def _locate_field(
+        self,
+        schema: SchemaDTO,
+        related: dict[str, tuple[SchemaDTO, Relation]],
+        field_name: str,
+        schema_name: str | None,
+        what: str,
+    ) -> tuple[FieldDTO, Relation]:
         if schema_name is None:
             for owner, rel in related.values():
                 if rel.direction == "down":
@@ -2347,6 +2494,71 @@ class RecordService:
                 )
             )
         return keys
+
+    def preview_formula(
+        self,
+        schema_name: str,
+        expression: str,
+        *,
+        result: str | None = None,
+        decimals: int | None = None,
+        field: str | None = None,
+        record_id: str | None = None,
+        values: dict[str, Any] | None = None,
+    ) -> FormulaPreviewDTO:
+        """What a formula on `schema_name` would give, saving nothing: checked
+        as saving the field would (`SchemaService.check_formula`; `field` is the
+        formula being edited, which can't read itself), then worked out for the
+        record `record_id` (of that kind; fields above it and links are read as
+        for any formula), or over `values` (by field name, as stored), or, with
+        neither, the kind's most recently changed record. A formula that can't
+        be saved comes back as `problem`, one that can't be worked out for that
+        record as `error`: neither raises."""
+        self._permissions.require(permissions.READ)
+        schema = self._schema_svc.get(schema_name)
+        rules: dict[str, Any] = {"expression": expression}
+        if result:
+            rules["result"] = result
+        if decimals is not None:
+            rules["decimals"] = decimals
+        try:
+            rules = self._schema_svc.check_formula(schema_name, rules, field)
+        except ValidationError as e:
+            return FormulaPreviewDTO(problem=str(e))
+        formula = formulas.parse(rules["expression"])
+        record: RecordDTO | None = None
+        if values is None:
+            if record_id:
+                record = self.get(record_id)
+                if record.schema_id != schema.id:
+                    raise ValidationError(
+                        f"That record is a {record.schema_name}, not a {schema.name}"
+                    )
+            else:
+                latest = self.recently_changed(schema_name, limit=1)
+                record = latest[0] if latest else None
+            if record is not None:
+                values = {**record.data, **(record.derived or {})}
+                outside = [n for n in formula.names if n not in values]
+                if outside:
+                    values.update(
+                        self._derived_values(schema.name, [record], outside)[0]
+                    )
+        _, dtypes = self._schema_svc.formula_kinds(schema, leave_out=field)
+        value, error = formulas.compute(
+            formula,
+            values or {},
+            dtypes,
+            rules["result"],
+            rules.get("decimals"),
+        )
+        return FormulaPreviewDTO(
+            value=value,
+            error=error,
+            result=rules["result"],
+            record_id=record.id if record else None,
+            record_name=record.natural_name if record else None,
+        )
 
     def points(
         self,
@@ -2905,11 +3117,15 @@ class RecordService:
     ) -> list[RecordDTO]:
         """Fill `derived` with the requested columns a record's own data
         can't answer (see `_derived_values`)."""
+        # A record read for the API already has its own formulas worked out.
+        columns = [
+            c for c in columns if not all(c in (r.derived or {}) for r in records)
+        ]
         values = self._derived_values(schema_name, records, columns)
         if not any(values):
             return records
         return [
-            dataclasses.replace(record, derived=derived)
+            dataclasses.replace(record, derived={**(record.derived or {}), **derived})
             for record, derived in zip(records, values)
         ]
 
@@ -2929,6 +3145,14 @@ class RecordService:
             return [{} for _ in records]
         related = self._relations(schema)
         own = {f.name for f in schema.fields}
+        own_formulas = [
+            c
+            for c in columns
+            if any(f.name == c and f.dtype in COMPUTED_DTYPES for f in schema.fields)
+        ]
+        # Formulas of the records above, by the schema that has them.
+        above: dict[uuid.UUID, list[tuple[str, FieldDTO, int]]] = {}
+        located_fields: dict[str, FieldDTO] = {}
 
         def plain(name: str) -> tuple[str, int] | None:
             """(field id, hops up) for a non-dotted column, None if unknown."""
@@ -2936,6 +3160,7 @@ class RecordService:
                 f, rel = self._locate(schema, related, name, None, "column")
             except ValidationError:
                 return None
+            located_fields[name] = f
             return str(f.id), rel.hops
 
         plans: dict[str, Any] = {}
@@ -2968,19 +3193,62 @@ class RecordService:
                 if target_id is not None:
                     plans[col] = ("join", ref, target_id)
             elif col not in own and (located := plain(col)) is not None:
+                f = located_fields[col]
+                if f.dtype in COMPUTED_DTYPES:
+                    above.setdefault(f.schema_id, []).append((col, f, located[1]))
                 plans[col] = ("inherited", located)
+        computed = (
+            dict(
+                zip(
+                    (str(r.id) for r in records),
+                    self._formula_results(schema, records, own_formulas),
+                )
+            )
+            if own_formulas and records
+            else {}
+        )
         if not plans:
-            return [{} for _ in records]
+            return [
+                {c: v for c, (v, _) in computed.get(str(r.id), {}).items()}
+                for r in records
+            ]
 
         chains = self._ancestor_chains(records, max(p[1][1] for p in plans.values()))
+        # An inherited formula is worked out on the record above that has it.
+        worked_above: dict[tuple[str, uuid.UUID], Any] = {}
+        for owner_id, wanted in above.items():
+            owner = self._schema_svc.get_by_id(owner_id)
+            if owner is None:
+                continue
+            holders: dict[uuid.UUID, RecordDTO] = {}
+            for col, f, hops in wanted:
+                for r in records:
+                    a = chains[r.id][hops - 1] if hops else None
+                    if a is not None and a.schema_id == owner_id:
+                        holders.setdefault(a.id, a)
+            named = self._with_names_many(list(holders.values()))
+            results = self._formula_results(
+                owner, named, list(dict.fromkeys(f.name for _, f, _ in wanted))
+            )
+            for a, found in zip(named, results):
+                for name, (worked, _) in found.items():
+                    worked_above[(name, a.id)] = worked
         id_to_name = self._schema_svc.id_to_name_map(schema)
+
+        formula_names = {
+            str(f.id): f.name for wanted in above.values() for _, f, _ in wanted
+        }
 
         def value(record: RecordDTO, located: tuple[str, int]) -> Any:
             field_id, hops = located
             if hops == 0:
                 return record.data.get(id_to_name[field_id])
             ancestor = chains[record.id][hops - 1]
-            return ancestor.data.get(field_id) if ancestor else None
+            if ancestor is None:
+                return None
+            if field_id in formula_names:
+                return worked_above.get((formula_names[field_id], ancestor.id))
+            return ancestor.data.get(field_id)
 
         ref_values: dict[str, list[Any]] = {}
         for col, plan in plans.items():
@@ -2996,7 +3264,9 @@ class RecordService:
 
         out = []
         for i, record in enumerate(records):
-            derived: dict[str, Any] = {}
+            derived: dict[str, Any] = {
+                c: v for c, (v, _) in computed.get(str(record.id), {}).items()
+            }
             for col, plan in plans.items():
                 if plan[0] == "inherited":
                     derived[col] = value(record, plan[1])

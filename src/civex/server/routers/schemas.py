@@ -19,6 +19,8 @@ from civex.server.models import (
     FromFilenamePreviewResponse,
     FromFilenameResult,
     NameIssueResponse,
+    PreviewFormulaRequest,
+    PreviewFormulaResponse,
     PreviewNameRequest,
     PreviewNameResponse,
     ReorderFieldsRequest,
@@ -100,6 +102,40 @@ def preview_name(
     except ValidationError as e:
         return PreviewNameResponse(name=None, error=str(e))
     return PreviewNameResponse(name=rendered)
+
+
+@router.post("/{name}/fields/preview-formula", response_model=PreviewFormulaResponse)
+def preview_formula(
+    name: str, body: PreviewFormulaRequest, ctx: AppContext = Depends(get_ctx)
+):
+    """What a formula field would give, saving nothing: checked as saving it
+    would be, then worked out for a record of the schema (`record_id`, or the
+    most recently changed one) or over `values`. A formula that can't be saved
+    is answered with `problem`, and one that can't be worked out for that
+    record with `error`, not an HTTP error, so the field editor can show
+    either as the person types."""
+    try:
+        dto = ctx.record_svc.preview_formula(
+            name,
+            body.expression,
+            result=body.result,
+            decimals=body.decimals,
+            field=body.field,
+            record_id=body.record_id,
+            values=body.values,
+        )
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    return PreviewFormulaResponse(
+        value=dto.value,
+        error=dto.error,
+        problem=dto.problem,
+        result=dto.result,
+        record_id=str(dto.record_id) if dto.record_id else None,
+        record_name=dto.record_name,
+    )
 
 
 @router.post("", response_model=SchemaResponse, status_code=201)

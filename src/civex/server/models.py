@@ -213,6 +213,59 @@ class PreviewNameResponse(BaseModel):
     )
 
 
+class PreviewFormulaRequest(BaseModel):
+    expression: str = Field(
+        description="The formula to try, e.g. 'mass / height ** 2' or "
+        "'days_between(start, end)'."
+    )
+    result: (
+        Literal["float", "integer", "string", "boolean", "date", "datetime"] | None
+    ) = Field(
+        default=None,
+        description="What it gives; null works it out from the formula.",
+    )
+    decimals: int | None = Field(
+        default=None, description="Decimal places for a decimal result."
+    )
+    field: str | None = Field(
+        default=None,
+        description="The formula field being edited, if it exists already (a "
+        "formula can't read itself).",
+    )
+    record_id: str | None = Field(
+        default=None,
+        description="Work it out for this record (of the schema). With neither "
+        "this nor 'values', the schema's most recently changed record.",
+    )
+    values: dict[str, Any] | None = Field(
+        default=None,
+        description="Or work it out over these values (by field name, as stored).",
+    )
+
+
+class PreviewFormulaResponse(BaseModel):
+    value: Any = Field(
+        default=None,
+        description="What the formula gives, as a field of its result type holds "
+        "it; null when blank or when it can't be worked out.",
+    )
+    error: str | None = Field(
+        default=None,
+        description="Why it can't be worked out for that record (divided by "
+        "zero, a value of the wrong kind), if so.",
+    )
+    problem: str | None = Field(
+        default=None,
+        description="Why the formula can't be saved (an unknown field, kinds "
+        "that don't fit, a circle of formulas), if so.",
+    )
+    result: str | None = Field(default=None, description="The result type it gives.")
+    record_id: str | None = Field(
+        default=None, description="The record it was worked out for, if any."
+    )
+    record_name: str | None = Field(default=None, description="That record's name.")
+
+
 class SchemaDeleteImpactResponse(BaseModel):
     child_schema_count: int = Field(
         description="Schemas that inherit from this one, directly or transitively — informational only, they are not deleted along with it, but their presence blocks a later purge."
@@ -1275,10 +1328,16 @@ class RecordResponse(BaseModel):
     )
     derived: dict[str, Any] | None = Field(
         default=None,
-        description="Only when 'columns' were requested: the requested "
-        "columns this record's own 'data' can't answer -- fields inherited "
-        "from an ancestor record, and 'ref_field.target_field' joins -- keyed "
-        "by column.",
+        description="Values this record's own 'data' doesn't hold, keyed by "
+        "column: its formula fields, worked out when read (always), and, "
+        "when 'columns' were requested, fields inherited from an ancestor "
+        "record and 'ref_field.target_field' joins.",
+    )
+    formula_errors: dict[str, str] | None = Field(
+        default=None,
+        description="For a formula field left blank because it can't be worked "
+        "out for this record (divided by zero, a value of the wrong kind), "
+        "why, by field name. Null when every formula worked.",
     )
     ancestors: list[RecordRef] | None = Field(
         default=None,
@@ -1319,6 +1378,7 @@ class RecordResponse(BaseModel):
             reference_collections=dto.reference_collections,
             child_counts=dto.child_counts,
             derived=dto.derived,
+            formula_errors=dto.formula_errors,
             deleted_fields=[DeletedFieldValue(**d) for d in dto.deleted_fields]
             if dto.deleted_fields
             else None,
@@ -3009,7 +3069,8 @@ class RestrictionDescriptorResponse(BaseModel):
         description=(
             "Which editor to show: number, integer, bytes, choices, accept, "
             "filename_template, schema, timezone, date_bound, datetime_bound, "
-            "unit, precision, geometry_types or bbox."
+            "unit, precision, geometry_types, bbox, from_filename, formula "
+            "(an expression), formula_result (what it gives) or decimals."
         )
     )
     help: str = Field(description="One sentence of guidance; may be empty.")
@@ -3043,6 +3104,11 @@ class FieldTypeDescriptorResponse(BaseModel):
         "(each item of a list), or null (it can't)."
     )
     buckets: list[str] = Field(description="The periods a 'bucket' grouping offers.")
+    computed: bool = Field(
+        default=False,
+        description="Worked out from other fields when read, never stored (a "
+        "formula): it can't be typed in, filtered or sorted by.",
+    )
 
 
 class FieldKindResponse(BaseModel):

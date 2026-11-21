@@ -245,12 +245,20 @@ export function RecordsExplorer({
   const items = x.page.data?.items ?? []
   const total = x.page.data?.total ?? 0
   const rows = toTableRows(items)
-  const columns = x.columnNames.map((name) => ({
-    name,
-    label: columnLabel(name, x.baseFields, x.joinable),
-    type: x.baseFields.find((f) => f.name === name)?.type,
-    sortable: !name.includes('.'),
-  }))
+  const columns = x.columnNames.map((name) => {
+    const field = x.baseFields.find((f) => f.name === name)
+    return {
+      name,
+      label: columnLabel(name, x.baseFields, x.joinable),
+      // A formula's cells are of the type it gives; a list can't be sorted
+      // by it (worked out when read, so the database holds nothing to order).
+      type:
+        field?.type === 'formula'
+          ? String(field.restrictions?.result ?? 'string')
+          : field?.type,
+      sortable: !name.includes('.') && field?.type !== 'formula',
+    }
+  })
   const sort: RecordsTableSort | undefined = x.sort[0]
     ? { key: x.sort[0].field, direction: x.sort[0].direction }
     : undefined

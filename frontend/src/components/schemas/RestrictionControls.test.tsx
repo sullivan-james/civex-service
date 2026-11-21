@@ -483,3 +483,103 @@ describe('fill from a file name', () => {
     })
   })
 })
+
+describe('formula controls', () => {
+  const formulaCtx: ControlContext = {
+    schemaName: 'patient',
+    fields: [
+      { name: 'mass', label: 'Mass', dtype: 'float' },
+      { name: 'height', label: 'Height', dtype: 'float' },
+      { name: 'scan', label: 'Scan', dtype: 'file' },
+      {
+        name: 'site',
+        label: 'Site',
+        dtype: 'reference',
+        reach: [
+          { name: 'area', label: 'Area', dtype: 'float' },
+          { name: 'half', label: 'Half', dtype: 'formula' },
+        ],
+      },
+    ],
+    schemas: [],
+  }
+
+  it('puts field names and functions in at the cursor', async () => {
+    vi.spyOn(schemasApi, 'previewFormula').mockResolvedValue({
+      value: 25,
+      error: null,
+      problem: null,
+      result: 'float',
+      record_id: 'r1',
+      record_name: 'Patient 1',
+    })
+    render(
+      <Harness
+        d={desc('expression', 'formula', 'Formula')}
+        context={formulaCtx}
+      />,
+    )
+    // A file can't be read by a formula, nor a linked record's formula.
+    expect(screen.queryByRole('button', { name: 'Scan' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Half' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Mass' }))
+    await userEvent.type(screen.getByLabelText('Formula'), ' / ')
+    await userEvent.click(screen.getByRole('button', { name: 'Area' }))
+    expect(screen.getByTestId('rules').textContent).toBe(
+      JSON.stringify({ expression: 'mass / site.area' }),
+    )
+    await userEvent.selectOptions(
+      screen.getByLabelText('Insert a function'),
+      'round',
+    )
+    expect(screen.getByTestId('rules').textContent).toBe(
+      JSON.stringify({ expression: 'mass / site.arearound(, 2)' }),
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId('formula-preview').textContent).toContain(
+        'Patient 1',
+      ),
+    )
+    expect(screen.getByTestId('formula-preview').textContent).toContain('25')
+  })
+
+  it("shows the server's problem and blocks saving", async () => {
+    vi.spyOn(schemasApi, 'previewFormula').mockResolvedValue({
+      value: null,
+      error: null,
+      problem: "There is no field 'nope'",
+      result: null,
+      record_id: null,
+      record_name: null,
+    })
+    render(
+      <Harness
+        d={desc('expression', 'formula', 'Formula')}
+        context={formulaCtx}
+        initial={{ expression: 'nope + 1' }}
+      />,
+    )
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).toContain('nope'),
+    )
+    expect(screen.getByTestId('problems').textContent).toContain('nope')
+  })
+
+  it('picks a result type and decimal places', async () => {
+    render(<Harness d={desc('result', 'formula_result', 'Gives')} />)
+    await userEvent.selectOptions(screen.getByLabelText('Gives'), 'integer')
+    expect(screen.getByTestId('rules').textContent).toBe(
+      JSON.stringify({ result: 'integer' }),
+    )
+    await userEvent.selectOptions(screen.getByLabelText('Gives'), '')
+    expect(screen.getByTestId('rules').textContent).toBe('{}')
+  })
+
+  it('stores decimal places as a whole number', async () => {
+    render(<Harness d={desc('decimals', 'decimals', 'Places')} />)
+    await userEvent.type(screen.getByLabelText('Places'), '2')
+    expect(screen.getByTestId('rules').textContent).toBe(
+      JSON.stringify({ decimals: 2 }),
+    )
+  })
+})

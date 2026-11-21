@@ -28,6 +28,7 @@ from typing import Any, Callable, Iterator
 from civex import __version__, file_modes
 from civex.domain.dtos import FileRef, RecordDTO
 from civex.domain import features
+from civex.domain.field_descriptors import COMPUTED_DTYPES
 from civex.domain.exceptions import (
     FeatureUnavailableError,
     NotFoundError,
@@ -910,7 +911,15 @@ class FileAccessService:
                         "one kind of record that has a field "
                         f"'{target_name}'."
                     )
-            out[c] = (found.dtype, dict(found.restrictions or {}))
+            rules = dict(found.restrictions or {})
+            if found.dtype in COMPUTED_DTYPES:
+                # A formula's column is of the type it gives, with its unit.
+                out[c] = (
+                    rules.get("result") or "string",
+                    {"unit": rules["unit"]} if rules.get("unit") else {},
+                )
+                continue
+            out[c] = (found.dtype, rules)
         return out
 
     def _typed_pages(

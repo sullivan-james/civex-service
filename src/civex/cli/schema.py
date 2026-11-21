@@ -213,7 +213,7 @@ def _typed_restrictions(
     wrong type the way the older flags do."""
     out: dict = {}
     for flag, value, types, key in (
-        ("--unit", unit, ("float",), "unit"),
+        ("--unit", unit, ("float", "formula"), "unit"),
         ("--precision", precision, ("date",), "precision"),
         ("--geometry-types", geometry_types, ("geo",), "geometry_types"),
         ("--bbox", bbox, ("geo",), "bbox"),
@@ -234,6 +234,39 @@ def _typed_restrictions(
     return out
 
 
+_EXPRESSION_HELP = (
+    'The formula (--type formula): field names, numbers, "text", '
+    "+ - * / // % **, comparisons, and/or/not, a if condition else b, and "
+    "functions such as round(x, 2), days_between(start, end) and "
+    'concat(a, "-", b). Worked out when a record is read, never stored.'
+)
+
+
+def _formula_restrictions(
+    dtype: str,
+    expression: Optional[str],
+    result: Optional[str],
+    decimals: Optional[int],
+) -> dict:
+    """Restrictions for the formula flags, refusing them on another type."""
+    given = {
+        k: v
+        for k, v in (
+            ("expression", expression),
+            ("result", result),
+            ("decimals", decimals),
+        )
+        if v is not None
+    }
+    if given and dtype != "formula":
+        console.print(
+            "[error]--expression/--result/--decimals are only valid for "
+            "--type formula.[/error]"
+        )
+        raise typer.Exit(1)
+    return given
+
+
 @app.command("add-field")
 def schema_add_field(
     schema_name: str = typer.Argument(..., help="Schema to add the field to"),
@@ -252,7 +285,9 @@ def schema_add_field(
         ...,
         "--type",
         "-t",
-        help="Field type: integer | float | string | boolean | date | datetime | geo | file | file_list | reference",
+        help="Field type: integer | float | string | longtext | boolean | date | "
+        "datetime | geo | file | file_list | reference | reference_list | tags | "
+        "url | formula",
     ),
     required: bool = typer.Option(
         False, "--required/--optional", help="Whether the field is required"
@@ -325,6 +360,18 @@ def schema_add_field(
         "capture group is the value. Give it more than once to try several "
         "patterns in order.",
     ),
+    expression: Optional[str] = typer.Option(
+        None, "--expression", "-e", help=_EXPRESSION_HELP
+    ),
+    result: Optional[str] = typer.Option(
+        None,
+        "--result",
+        help="What a formula gives: float | integer | string | boolean | date | "
+        "datetime. Left out, it is worked out from the formula.",
+    ),
+    decimals: Optional[int] = typer.Option(
+        None, "--decimals", help="Decimal places for a formula giving a float"
+    ),
 ) -> None:
     """Add a field to a schema.
 
@@ -341,6 +388,7 @@ def schema_add_field(
       --type date --precision month
       --type geo --geometry-types Point --bbox "-12,48,4,62"
       --type datetime --from-file audio --filename-pattern "YYYYMMDD[-_]HHmmSS"
+      --type formula --expression "mass / height ** 2" --decimals 1
     """
     restrictions: dict = {}
 
@@ -400,6 +448,7 @@ def schema_add_field(
     restrictions.update(
         _typed_restrictions(dtype, unit, precision, geometry_types, bbox)
     )
+    restrictions.update(_formula_restrictions(dtype, expression, result, decimals))
     if from_file is not None or filename_pattern is not None:
         if not (from_file and filename_pattern):
             console.print(
@@ -572,6 +621,18 @@ def schema_update_field(
         "regular expression whose first capture group is the value. Give it "
         "more than once to try several patterns in order.",
     ),
+    expression: Optional[str] = typer.Option(
+        None, "--expression", "-e", help=_EXPRESSION_HELP
+    ),
+    result: Optional[str] = typer.Option(
+        None,
+        "--result",
+        help="What a formula gives: float | integer | string | boolean | date | "
+        "datetime.",
+    ),
+    decimals: Optional[int] = typer.Option(
+        None, "--decimals", help="Decimal places for a formula giving a float"
+    ),
     clear_restrictions: bool = typer.Option(
         False, "--clear-restrictions", help="Remove all restrictions"
     ),
@@ -592,6 +653,9 @@ def schema_update_field(
             bbox,
             from_file,
             filename_pattern,
+            expression,
+            result,
+            decimals,
         ]
     )
 
@@ -676,6 +740,9 @@ def schema_update_field(
             new_restrictions.update(
                 _typed_restrictions(dtype, unit, precision, geometry_types, bbox)
             )
+            new_restrictions.update(
+                _formula_restrictions(dtype, expression, result, decimals)
+            )
             if from_file is not None or filename_pattern is not None:
                 # Either flag alone changes that part of the rule already
                 # there; the service refuses a rule left incomplete.
@@ -734,6 +801,67 @@ def schema_update_field(
     except (NotFoundError, AlreadyExistsError, ValidationError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
+
+
+@app.command("preview-formula")
+def schema_preview_formula(
+    schema_name: str = typer.Argument(..., help="Schema the formula is on"),
+    expression: str = typer.Argument(..., help=_EXPRESSION_HELP),
+    record: Optional[str] = typer.Option(
+        None,
+        "--record",
+        "-r",
+        help="Work it out for this record (its id or the start of it). Left "
+        "out, the schema's most recently changed record.",
+    ),
+    result: Optional[str] = typer.Option(
+        None,
+        "--result",
+        help="What it gives: float | integer | string | boolean | date | datetime",
+    ),
+    decimals: Optional[int] = typer.Option(
+        None, "--decimals", help="Decimal places for a float"
+    ),
+    field: Optional[str] = typer.Option(
+        None,
+        "--field",
+        help="The formula field being changed, if it exists already",
+    ),
+) -> None:
+    """Try a formula without saving it.
+
+    Checks it as adding the field would (the fields it reads exist, their
+    kinds fit, no formulas read each other in a circle), then works it out
+    for one record and prints what it gives. Exits 1 when the formula can't
+    be saved.
+    """
+    ctx = _ctx()
+    try:
+        preview = ctx.record_svc.preview_formula(
+            schema_name,
+            expression,
+            result=result,
+            decimals=decimals,
+            field=field,
+            record_id=record,
+        )
+    except (NotFoundError, ValidationError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+    if preview.problem:
+        console.print(f"[error]{preview.problem}[/error]")
+        raise typer.Exit(1)
+    where = (
+        f"For {preview.record_name or str(preview.record_id)[:8]}"
+        if preview.record_id
+        else "With no record to try it on"
+    )
+    shown = "(blank)" if preview.value is None else repr(preview.value)
+    console.print(f"{where}: {shown}  [dim]({preview.result})[/dim]")
+    if preview.error:
+        console.print(f"[warning]Can't be worked out: {preview.error}[/warning]")
 
 
 @app.command("remove-field")

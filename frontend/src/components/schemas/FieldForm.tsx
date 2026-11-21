@@ -248,13 +248,15 @@ export function FieldForm(props: FieldFormProps) {
             autoFocus
           />
         </FormGrid>
-        <CheckRow
-          compact
-          title="Required"
-          description="Every record must have a value here."
-          checked={required}
-          onChange={setRequired}
-        />
+        {!descriptor?.computed && (
+          <CheckRow
+            compact
+            title="Required"
+            description="Every record must have a value here."
+            checked={required}
+            onChange={setRequired}
+          />
+        )}
         {mode === 'create' && descriptor?.supports_default !== false && (
           <Field label="Default value" span={6}>
             <Input

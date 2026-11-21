@@ -296,9 +296,12 @@ export interface CivexRecord {
   reference_collections?: Record<string, string> | null
   /** Only when requested: live child count per child schema name. */
   child_counts?: Record<string, number> | null
-  /** Only when `columns` were requested: the columns this record's own
-   * `data` can't answer (inherited fields, `ref.field` joins). */
+  /** Values this record's own `data` doesn't hold: its formula fields
+   * (always), and, when `columns` were requested, inherited fields and
+   * `ref.field` joins. */
   derived?: Record<string, unknown> | null
+  /** Why a formula is blank for this record, by field name. */
+  formula_errors?: Record<string, string> | null
   /** Only on a single-record fetch: the parent chain, root first. */
   ancestors?: RecordRef[] | null
   /** Only on a single-record fetch of a live record: the deleted records

@@ -189,4 +189,6 @@ export const NON_NAMEABLE = new Set([
   'reference_list',
   'tags',
   'longtext',
+  // Worked out on read, after a record's name is (`templating.UNNAMEABLE_DTYPES`).
+  'formula',
 ])

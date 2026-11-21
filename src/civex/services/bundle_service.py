@@ -31,6 +31,7 @@ from typing import Any, Callable, Iterator
 
 from civex import __version__
 from civex.domain import bundle as spec
+from civex.domain.field_descriptors import COMPUTED_DTYPES
 from civex.domain.bundle import (
     BundleError,
     BundleFiles,
@@ -419,6 +420,36 @@ class BundleService:
             self._import_records(zf, manifest, result, progress)
         self._import_members(zf, result)
 
+    def _import_formulas(self, fields: list[tuple[str, dict[str, Any]]]) -> None:
+        """Add formula fields once every other field exists: a round adds each
+        whose fields are all there now (one may read another formula), and a
+        round that adds none raises the first one's reason."""
+        waiting = list(fields)
+        while waiting:
+            left: list[tuple[str, dict[str, Any]]] = []
+            problem: ValidationError | None = None
+            for schema_name, f in waiting:
+                try:
+                    self._schemas.add_field(
+                        schema_name,
+                        f["name"],
+                        f["type"],
+                        restrictions=f.get("restrictions") or {},
+                        label=f.get("label"),
+                        allow_legacy_name=True,
+                        auto_name=False,
+                    )
+                    self._commit()
+                except AlreadyExistsError:
+                    continue
+                except ValidationError as e:
+                    left.append((schema_name, f))
+                    problem = problem or e
+            if len(left) == len(waiting):
+                assert problem is not None
+                raise problem
+            waiting = left
+
     def _import_schemas(
         self, schemas: list[dict[str, Any]], result: ImportResult
     ) -> None:
@@ -426,8 +457,12 @@ class BundleService:
         One already here is reported and only gains fields it lacks. Name
         templates, and a file field's `filename_template`, can name fields
         defined later (or, through a reference, on another schema), so they are
-        set once every schema and field exists."""
+        set once every schema and field exists. So are formula fields, which
+        can read fields of the records above and of linked records, and each
+        other: they are added last, in rounds, until every one that can be
+        has been."""
         created: set[str] = set()
+        formula_fields: list[tuple[str, dict[str, Any]]] = []
         for s in spec.sort_schemas(schemas):
             try:
                 self._schemas.create(
@@ -443,6 +478,9 @@ class BundleService:
             except AlreadyExistsError:
                 result.schemas_existing.append(s["name"])
             for f in s.get("fields", []):
+                if f["type"] in COMPUTED_DTYPES:
+                    formula_fields.append((s["name"], f))
+                    continue
                 restrictions = {
                     k: v
                     for k, v in (f.get("restrictions") or {}).items()
@@ -468,6 +506,7 @@ class BundleService:
                         s["name"], f["name"], restrictions=f["restrictions"]
                     )
                     self._commit()
+        self._import_formulas(formula_fields)
         for s in schemas:
             if s["name"] in created and s.get("display_template"):
                 self._schemas.update(s["name"], display_template=s["display_template"])

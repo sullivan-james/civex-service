@@ -126,7 +126,10 @@ export function filterableFields(
       relation: 'descendant',
     })),
   )
-  return [...own, ...ancestors, ...descendants]
+  // A formula is worked out when read: the database holds nothing to test.
+  return [...own, ...ancestors, ...descendants].filter(
+    (f) => f.type !== 'formula',
+  )
 }
 
 /** Names of the schemas a condition may name when listing `schema`: itself,
