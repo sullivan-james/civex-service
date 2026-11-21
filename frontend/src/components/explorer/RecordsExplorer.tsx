@@ -722,6 +722,7 @@ export function RecordsExplorer({
             wire={x.filter}
             fields={x.filterFields}
             listedSchema={listed?.name ?? ''}
+            records={listed ? records : undefined}
             onChange={(filter) => patch({ filter })}
           />
         )}

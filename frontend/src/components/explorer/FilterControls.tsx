@@ -1,5 +1,8 @@
 import { useState } from 'react'
-import { Button, IconButton, InfoTip } from '../ui'
+import { Button, Disclosure, IconButton } from '../ui'
+import type { RecordSelectionBody } from '../../api/records'
+import { ChartView } from '../charts/ChartView'
+import { fieldKey } from '../../utils/summary'
 import { Plus, X } from '../ui/icons'
 import { FilterBuilder } from '../views/FilterBuilder'
 import {
@@ -38,10 +41,12 @@ function editableRoot(wire: FilterTreeWire | null): FilterGroupNode {
 function FilterEditor({
   wire,
   fields,
+  records,
   onChange,
 }: {
   wire: FilterTreeWire | null
   fields: FilterableField[]
+  records?: RecordSelectionBody
   onChange: (wire: FilterTreeWire | null) => void
 }) {
   const [root, setRoot] = useState<FilterGroupNode>(() => editableRoot(wire))
@@ -58,16 +63,31 @@ function FilterEditor({
   }
   return (
     <div className="space-y-2">
-      <p className="flex items-center gap-1 text-sm font-medium text-fg">
-        Filters
-        <InfoTip>
-          Match on this level, on a parent record, or on any child record — for
-          example selections in a recording whose selection_table is empty.
-        </InfoTip>
-      </p>
       <FilterBuilder
         root={root}
         fields={fields}
+        // A field's values with how many of the listed records hold each:
+        // the charts' own view, asked for only once it is opened, and its
+        // rows pick values in this same filter.
+        values={
+          records &&
+          ((field) => (
+            <Disclosure summary="Values">
+              <div className="p-2">
+                <ChartView
+                  chart={{
+                    id: `values-${fieldKey(field)}`,
+                    group_by: [fieldKey(field)],
+                    measures: ['count'],
+                  }}
+                  records={records}
+                  fields={fields}
+                  onFilter={onChange}
+                />
+              </div>
+            </Disclosure>
+          ))
+        }
         onChange={(next) => {
           const emitted = toWireFilterTree(next)
           setRoot(next)
@@ -86,11 +106,15 @@ export function FilterControls({
   wire,
   fields,
   listedSchema,
+  records,
   onChange,
 }: {
   wire: FilterTreeWire | null
   fields: FilterableField[]
   listedSchema: string
+  /** The records listed: with it, a condition on a field of choices shows
+   * how many of them hold each value. */
+  records?: RecordSelectionBody
   onChange: (wire: FilterTreeWire | null) => void
 }) {
   const [open, setOpen] = useState(false)
@@ -139,7 +163,12 @@ export function FilterControls({
           aria-label="Edit filters"
           className="rounded-md border border-border bg-canvas-subtle p-3"
         >
-          <FilterEditor wire={wire} fields={fields} onChange={onChange} />
+          <FilterEditor
+            wire={wire}
+            fields={fields}
+            records={records}
+            onChange={onChange}
+          />
         </section>
       )}
     </div>
