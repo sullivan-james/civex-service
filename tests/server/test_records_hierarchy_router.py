@@ -130,12 +130,16 @@ def test_bad_query_is_422_not_an_empty_list(client: TestClient, seeded):
     )
     assert resp.status_code == 422
     assert "Unknown filter field" in resp.json()["detail"]
-    assert (
-        client.get(
-            "/api/collections/hb/records", params={"within": seeded["e1"]}
-        ).status_code
-        == 422
+    # With no kind, a field condition needs one (within alone lists every kind beneath).
+    resp = client.get(
+        "/api/collections/hb/records",
+        params={
+            "within": seeded["e1"],
+            "filter": json.dumps({"field": "selection_table", "op": "is_null"}),
+        },
     )
+    assert resp.status_code == 422
+    assert "kind of record" in resp.json()["detail"]
 
 
 def test_delete_with_a_filter_deletes_only_what_matches(client: TestClient, seeded):
