@@ -16,14 +16,10 @@ from typing import Any
 from sqlalchemy import (
     BigInteger,
     and_,
-    cast,
     delete,
     func,
-    null,
     or_,
     select,
-    union,
-    union_all,
     update,
 )
 from sqlalchemy.exc import DataError, IntegrityError
@@ -90,7 +86,7 @@ _MODELS: dict[str, Any] = {
 }
 # A column PostgreSQL maintains itself (a trigger), or one that is this copy's
 # own (a release's place in this copy's history); never written from a snapshot.
-_NOT_WRITTEN = frozenset({"search_vector", "local_seq"})
+_NOT_WRITTEN = frozenset({"search_vector", "local_seq", "indexed"})
 
 
 # The order changes were made in here: the number the database gave each entry
@@ -113,6 +109,14 @@ def _parse(value: str | None) -> datetime | None:
         return None
     parsed = datetime.fromisoformat(value)
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _kept_owner():  # type: ignore[no-untyped-def]
+    """A file_references row whose owner keeps the file on the authority: a
+    live record or a release (with `Record` outer-joined)."""
+    return (
+        FileReference.record_id.is_not(None) & Record.deleted_at.is_(None)
+    ) | FileReference.release_id.is_not(None)
 
 
 class LocalSyncRepository:
@@ -197,14 +201,15 @@ class LocalSyncRepository:
 
     def _referenced(self):  # type: ignore[no-untyped-def]
         """The column of every file this project needs the authority to hold:
-        those live records cite, and every release's bundle."""
-        refs = (
+        those its live records and its releases own."""
+        return (
             select(FileReference.sha256.label("sha256"))
-            .join(Record, Record.id == FileReference.record_id)
-            .where(Record.deleted_at.is_(None))
+            .outerjoin(Record, Record.id == FileReference.record_id)
+            .where(_kept_owner())
+            .distinct()
+            .subquery()
+            .c.sha256
         )
-        bundles = select(Release.bundle_sha256.label("sha256"))
-        return union(refs, bundles).subquery().c.sha256
 
     def count_unconfirmed(self) -> int:
         """How many files live records cite (or releases keep) that the
@@ -297,39 +302,29 @@ class LocalSyncRepository:
             )
 
     def _not_here(self, collections: set[uuid.UUID] | None = None):  # type: ignore[no-untyped-def]
-        """Files live records here cite that no drive here is recorded to hold
-        (a deleted record's files are fetched if it comes back and is opened,
-        not in the background), each with a collection that uses it; with
-        `collections`, only files records in those use. Without, releases'
-        bundles not here too (with no collection)."""
+        """Files live records or releases here own that no drive here is
+        recorded to hold (a deleted record's files are fetched if it comes back
+        and is opened, not in the background), each with a collection that
+        uses it (none for a release's); with `collections`, only files records
+        in those use, and releases'. A release that came from another device
+        owns only its bundle here, so that is what it brings."""
         stored = stored_files()
-        refs = (
+        record = Record.deleted_at.is_(None) & FileReference.record_id.is_not(None)
+        if collections is not None:
+            record = record & Record.dataset_id.in_(collections)
+        return (
             select(
                 FileReference.sha256.label("sha"),
                 func.min(Record.dataset_id).label("cid"),
             )
-            .join(Record, Record.id == FileReference.record_id)
+            .outerjoin(Record, Record.id == FileReference.record_id)
             .outerjoin(stored, stored.c.sha == FileReference.sha256)
-            .where(stored.c.sha.is_(None), Record.deleted_at.is_(None))
-        )
-        if collections is not None:
-            refs = refs.where(Record.dataset_id.in_(collections))
-        refs = refs.group_by(FileReference.sha256)
-        if collections is not None:
-            return refs.subquery()
-        held = stored_files()
-        bundles = (
-            select(
-                Release.bundle_sha256.label("sha"),
-                cast(null(), Record.dataset_id.type).label("cid"),
-            )
-            .outerjoin(held, held.c.sha == Release.bundle_sha256)
             .where(
-                held.c.sha.is_(None),
-                Release.bundle_sha256.not_in(select(FileReference.sha256)),
+                stored.c.sha.is_(None), record | FileReference.release_id.is_not(None)
             )
+            .group_by(FileReference.sha256)
+            .subquery()
         )
-        return union_all(refs, bundles).subquery()
 
     def files_not_here(
         self,
@@ -1064,6 +1059,21 @@ class LocalSyncRepository:
                 # it with this machine's clock, and the copies drift apart.
                 flag_modified(row, "updated_at")
         self._s.flush()
+        if kind == "release":
+            self._own_release(row)
+
+    def _own_release(self, row: Release) -> None:
+        """A release from the feed owns its bundle here (so it is fetched and
+        kept), until it is yanked: then it owns nothing. The files it cites are
+        owned once its bundle is read (`ReleaseService.index_waiting`), on the
+        copy that keeps everyone's files."""
+        from civex.repositories.local.release_repo import LocalReleaseRepository
+
+        releases = LocalReleaseRepository(self._s)
+        if row.yanked_at is not None:
+            releases.disown(row.id)
+        else:
+            releases.own(row.id, [row.bundle_sha256])
 
     def soft_delete(self, kind: str, id: uuid.UUID, stamp: datetime) -> None:
         """Delete as a person's delete does, but stamped `stamp`: a schema or

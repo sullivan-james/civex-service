@@ -655,9 +655,17 @@ def build_context(
         collections=lambda: {
             d.id: d.name for d in dataset_svc.list_all(with_count=False)
         },
+        refs=LocalFileReferenceRepository(session),
     )
     release_svc.position = lambda: _sync().history_position()
     release_svc.fetch = lambda sha: _sync().fetch_file(sha)
+    release_svc.keeps_files = lambda: not _sync().fetches_files
+    release_svc.files = file_access_svc
+    release_svc.locate = record_svc.locate_pointed
+    release_svc.savepoint = lambda: ctx.all_or_nothing()
+    release_svc.read_back = lambda shas, progress=None: file_store.verify(
+        shas, progress
+    )
 
     from civex.repositories.local.library_repo import LocalLibraryRepository
     from civex.services.library_service import LibraryService

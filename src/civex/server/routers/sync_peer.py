@@ -536,6 +536,7 @@ async def upload_file(sha256: str, request: Request, call: Peer = Depends(peer))
         raise HTTPException(507, detail=str(e))
     if ref.sha256 != sha256:
         raise HTTPException(422, detail="The content does not match that hash")
+    call.ctx.authority_svc.received_file(sha256)
 
 
 @router.post(
@@ -582,6 +583,7 @@ def complete_upload(
         raise HTTPException(422, detail=str(e))
     except VolumeUnavailableError as e:
         raise HTTPException(507, detail=str(e))
+    call.ctx.authority_svc.received_file(sha256)
     return Response(status_code=204)
 
 

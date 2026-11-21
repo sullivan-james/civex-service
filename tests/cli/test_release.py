@@ -1,4 +1,4 @@
-"""`civex release create|list|show|verify|withdraw|correct|cite|diff|download`."""
+"""`civex release create|list|show|verify|withdraw|yank|export|correct|cite|diff|download`."""
 
 from __future__ import annotations
 
@@ -14,9 +14,10 @@ runner = CliRunner()
 def test_releases_from_the_cli(
     project_dir: Path, ctx, make_schema, make_collection, make_record, tmp_path
 ):
-    make_schema("sample", fields=[("site", "string")])
+    make_schema("sample", fields=[("site", "string"), ("photo", "file")])
     make_collection("survey")
-    make_record("survey", "sample", {"site": "a"})
+    photo = ctx.file_svc.store_bytes(b"a photo", "p.jpg")
+    make_record("survey", "sample", {"site": "a", "photo": photo.to_dict()})
     ctx.commit()
 
     dry = runner.invoke(app, ["release", "create", "v1", "-t", "Survey", "--dry-run"])
@@ -32,7 +33,9 @@ def test_releases_from_the_cli(
             "-t",
             "Survey",
             "-a",
-            "Ada Lovelace",
+            "Ada Lovelace|0000-0002-1825-0097|Analytical Society",
+            "-k",
+            "seals",
             "--doi",
             "10.1234/x",
         ],
@@ -44,9 +47,17 @@ def test_releases_from_the_cli(
     assert listed.exit_code == 0 and "v1" in listed.output
     shown = runner.invoke(app, ["release", "show", "v1"])
     assert shown.exit_code == 0 and "sha256:" in shown.output
+    assert "0000-0002-1825-0097" in shown.output and "seals" in shown.output
 
     verified = runner.invoke(app, ["release", "verify", "v1"])
     assert verified.exit_code == 0 and "intact" in verified.output
+    deep = runner.invoke(app, ["release", "verify", "v1", "--deep"])
+    assert deep.exit_code == 0 and "1 read back" in deep.output, deep.output
+
+    exported = runner.invoke(app, ["release", "export", "v1", "--mode", "copy"])
+    assert exported.exit_code == 0, exported.output
+    (made_at,) = (project_dir / "_civex" / "exports").iterdir()
+    assert (made_at / "manifest-sha256.txt").read_text().startswith(photo.sha256)
 
     cited = runner.invoke(app, ["release", "cite", "v1", "-f", "bibtex"])
     assert cited.exit_code == 0 and cited.output.startswith("@misc{")
@@ -69,3 +80,9 @@ def test_releases_from_the_cli(
 
     taken = runner.invoke(app, ["release", "create", "v1", "-t", "Again"])
     assert taken.exit_code == 1
+
+    kept = runner.invoke(app, ["release", "yank", "v1", "-r", "consent"], input="n\n")
+    assert kept.exit_code == 1 and "gives up 2 files" in kept.output
+    yanked = runner.invoke(app, ["release", "yank", "v1", "-r", "consent", "--yes"])
+    assert yanked.exit_code == 0 and "Yanked" in yanked.output
+    assert "yanked" in runner.invoke(app, ["release", "list"]).output

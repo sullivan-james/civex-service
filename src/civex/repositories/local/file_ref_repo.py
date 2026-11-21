@@ -32,16 +32,7 @@ class LocalFileReferenceRepository:
             .where(FileReference.sha256.in_(wanted))
             .distinct()
         )
-        return {sha for (sha,) in rows} | self._release_bundles(wanted)
-
-    def _release_bundles(self, shas: list[str]) -> set[str]:
-        """Which of these are a release's bundle: kept as long as the release
-        exists, which is always (releases are withdrawn, never deleted)."""
-        return set(
-            self._s.scalars(
-                select(Release.bundle_sha256).where(Release.bundle_sha256.in_(shas))
-            )
-        )
+        return {sha for (sha,) in rows}
 
     def copies_in_use(self, copies: Iterable[tuple[str, str]]) -> set[tuple[str, str]]:
         """Which of these copies (sha256, volume) are in use: something points
@@ -78,12 +69,45 @@ class LocalFileReferenceRepository:
             for sha in chunk:
                 if sha in pointed and not (pointed[sha] & present.get(sha, set())):
                     keep_all.add(sha)
-            keep_all |= self._release_bundles(chunk)
         return {
             (sha, volume)
             for sha, volume in wanted
             if sha in keep_all or volume in pointed.get(sha, set())
         }
+
+    def releases_using(self, shas: Iterable[str]) -> dict[str, list[str]]:
+        """For each file, the names of the releases that keep it (not yanked:
+        a yanked release owns nothing)."""
+        wanted = list(dict.fromkeys(shas))
+        out: dict[str, list[str]] = {}
+        for i in range(0, len(wanted), 500):
+            for sha, name in self._s.execute(
+                select(FileReference.sha256, Release.name)
+                .join(Release, Release.id == FileReference.release_id)
+                .where(FileReference.sha256.in_(wanted[i : i + 500]))
+                .order_by(Release.created_at)
+            ):
+                out.setdefault(sha, []).append(name)
+        return out
+
+    def releases_keeping(self, record_ids: Iterable[uuid.UUID]) -> dict[str, int]:
+        """Of the files these records cite, how many each release keeps (by
+        name). One join per 500 records."""
+        from sqlalchemy.orm import aliased
+
+        theirs = aliased(FileReference)
+        wanted = list(dict.fromkeys(record_ids))
+        seen: dict[str, set[str]] = {}
+        for i in range(0, len(wanted), 500):
+            for name, sha in self._s.execute(
+                select(Release.name, FileReference.sha256)
+                .join(theirs, theirs.sha256 == FileReference.sha256)
+                .join(Release, Release.id == theirs.release_id)
+                .where(FileReference.record_id.in_(wanted[i : i + 500]))
+                .distinct()
+            ):
+                seen.setdefault(name, set()).add(sha)
+        return {name: len(shas) for name, shas in sorted(seen.items())}
 
     def usage(self, sha256: str) -> tuple[dict[uuid.UUID | None, int], int, int]:
         """What uses a blob: the number of live records that reference it in
@@ -150,7 +174,7 @@ class LocalFileReferenceRepository:
         )
         by_record = (
             select(FileReference.id)
-            .where(here, FileReference.record_id.is_not(None))
+            .where(here, FileReference.job_id.is_(None))  # a record or a release
             .exists()
         )
         by_job = (
@@ -315,7 +339,7 @@ class LocalFileReferenceRepository:
 
     def pointers(self, shas: Iterable[str]) -> dict[str, list[Pointer]]:
         """Every owner of each file and the copy it points at: live and deleted
-        records (with their collection) and workflow runs. Found from the
+        records (with their collection), workflow runs and releases. Found from the
         files' side, a query per 500 files."""
         wanted = list(dict.fromkeys(shas))
         out: dict[str, list[Pointer]] = {}
@@ -328,11 +352,12 @@ class LocalFileReferenceRepository:
                     FileReference.record_id,
                     Record.dataset_id,
                     Record.deleted_at,
+                    FileReference.release_id,
                 )
                 .outerjoin(Record, Record.id == FileReference.record_id)
                 .where(FileReference.sha256.in_(wanted[i : i + 500]))
             )
-            for ref_id, sha, volume, record_id, dataset_id, deleted_at in rows:
+            for ref_id, sha, volume, record_id, dataset_id, deleted_at, rel in rows:
                 out.setdefault(sha, []).append(
                     Pointer(
                         id=ref_id,
@@ -341,6 +366,7 @@ class LocalFileReferenceRepository:
                         record_id=record_id,
                         collection_id=str(dataset_id) if dataset_id else None,
                         live=record_id is not None and deleted_at is None,
+                        release_id=rel,
                     )
                 )
         return out
@@ -424,7 +450,9 @@ class LocalFileReferenceRepository:
                 )
             )
         }
-        self._s.execute(delete(FileReference))
+        # A release's rows come from what it cites, not from any record's data
+        # now: they are left as they are.
+        self._s.execute(delete(FileReference).where(FileReference.release_id.is_(None)))
         total = 0
         for model, col, owner in (
             (Record, Record.data, "record_id"),

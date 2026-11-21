@@ -633,6 +633,9 @@ class FileInfo:
     # Deleted records that still reference it: they keep it while they can be
     # restored, but don't count as using it until they are.
     deleted_records: int = 0
+    # The releases that keep it (by name): it stays while any of them does,
+    # and yanking them gives it up.
+    releases: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -911,13 +914,14 @@ class ReleaseDTO:
     bundle_size: int
     created_at: datetime
     description: str | None = None
-    authors: list[str] = field(default_factory=list)
+    # {name, orcid?, affiliation?} each.
+    authors: list[dict[str, str]] = field(default_factory=list)
     licence: str | None = None
     doi: str | None = None
+    keywords: list[str] = field(default_factory=list)
     # What it covers: {} the whole project, {"collections": [names]}, or
-    # {"query": RecordQuery fields}.
+    # {"query": RecordQuery fields}, or {"records": [ids]}.
     scope: dict[str, Any] = field(default_factory=dict)
-    include_files: bool = True
     counts: dict[str, Any] = field(default_factory=dict)
     # The history position it was taken at: this copy's audit_log.local_seq
     # (local only: another copy's numbers mean nothing here, so it never
@@ -930,6 +934,10 @@ class ReleaseDTO:
     withdrawn_at: datetime | None = None
     withdrawn_by: str | None = None
     withdrawn_reason: str | None = None
+    # Yanked: its data given up for good; what is left is this tombstone.
+    yanked_at: datetime | None = None
+    yanked_by: str | None = None
+    yanked_reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         def iso(v: datetime | None) -> str | None:
@@ -940,11 +948,11 @@ class ReleaseDTO:
             "name": self.name,
             "title": self.title,
             "description": self.description,
-            "authors": list(self.authors),
+            "authors": [dict(a) for a in self.authors],
             "licence": self.licence,
             "doi": self.doi,
+            "keywords": list(self.keywords),
             "scope": self.scope,
-            "include_files": self.include_files,
             "content_hash": self.content_hash,
             "bundle_sha256": self.bundle_sha256,
             "bundle_size": self.bundle_size,
@@ -957,6 +965,9 @@ class ReleaseDTO:
             "withdrawn_at": iso(self.withdrawn_at),
             "withdrawn_by": self.withdrawn_by,
             "withdrawn_reason": self.withdrawn_reason,
+            "yanked_at": iso(self.yanked_at),
+            "yanked_by": self.yanked_by,
+            "yanked_reason": self.yanked_reason,
         }
         if self.local_seq is not None:
             out["local_seq"] = self.local_seq

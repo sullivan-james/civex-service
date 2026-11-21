@@ -45,6 +45,7 @@ from civex.domain.exceptions import (
     ValidationError,
     VolumeUnavailableError,
 )
+from civex.domain.query import RecordQuery
 from civex.services.dataset_service import DatasetService
 from civex.services.file_service import FileService
 from civex.services.progress import Progress
@@ -160,6 +161,10 @@ class BundleService:
         self._civex_dir = civex_dir
         # `history_svc.batch`: everything an import writes is one event.
         self._batch = batch
+        # The ids of the records the last walk chose (a query's or exactly
+        # some), None when it took whole collections.
+        self.written_ids: list[uuid.UUID] | None = None
+        self._cited: dict[str, int] = {}
 
     # -- export ------------------------------------------------------------
 
@@ -240,10 +245,12 @@ class BundleService:
         schemas = self._export_schemas()
         plan.schemas = len(schemas)
         chosen = (
-            self._chosen_records(options.query)
-            if options.include_records and options.query is not None
+            self._chosen_records(options.query, options.record_ids)
+            if options.include_records
+            and (options.query is not None or options.record_ids is not None)
             else None
         )
+        self.written_ids = [r.id for r in chosen] if chosen is not None else None
         datasets = (
             self._selected_collections(options, chosen)
             if options.include_records
@@ -318,13 +325,25 @@ class BundleService:
                 yield chosen[at : at + 500]
             return
         for dataset in datasets:
-            yield from self._records.iter_find(dataset.name)
+            # As kept: the bundle holds the records, and asks no drive where
+            # a file is.
+            yield from self._records.stream_records(
+                RecordQuery(dataset=dataset.name), as_stored=True
+            )
 
-    def _chosen_records(self, query: Any) -> list[Any]:
-        """The records a query lists, with every record above them (so each
-        has its parent in the bundle), parents first. A few queries per page
-        of records and one per level above them."""
-        listed = [r for page in self._records.stream_records(query) for r in page]
+    def _chosen_records(self, query: Any, record_ids: list[str] | None) -> list[Any]:
+        """The records a query lists (or exactly these), with every record
+        above them (so each has its parent in the bundle), parents first. A
+        few queries per page of records and one per level above them."""
+        listed = (
+            self._records.get_many(record_ids, as_stored=True)
+            if record_ids is not None
+            else [
+                r
+                for page in self._records.stream_records(query, as_stored=True)
+                for r in page
+            ]
+        )
         trails = self._records.ancestor_trails(listed)
         seen: set[Any] = set()
         out: list[Any] = []

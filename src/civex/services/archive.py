@@ -64,18 +64,21 @@ def build_download(
     scratch: Path,
     name: str | None = None,
     dest: Path | None = None,
+    beside: list[tuple[str, Path]] | None = None,
 ) -> Download:
     """The selection as one thing to hand over, with the same paths and the same
     tables as a folder export: a zip of the files, their tables and (if some
     couldn't be reached) a MISSING.txt, or -- when the selection is one table and
     nothing else -- just that table. Built in `scratch`, or at `dest` when given.
-    Raises FileNotFoundError for a blob that is not stored locally."""
+    `beside` are more files to put at the top of the zip (a release's
+    manifest and citation). Raises FileNotFoundError for a blob that is not
+    stored locally."""
     made = access.write_tables(selection, plan, scratch)
     entries = access.zip_entries(plan)
     note = access.missing_note(plan)
-    if not entries and not note and not made:
+    if not entries and not note and not made and not beside:
         raise ValidationError("There is nothing to export.")
-    if not entries and not note and len(made) == 1:
+    if not entries and not note and not beside and len(made) == 1:
         path = made[0][1]
         planned = plan.tables[0]
         fmt = planned.format
@@ -86,7 +89,7 @@ def build_download(
             path.replace(dest)
             path = dest
         return Download(path, filename, tables.media_type(fmt))
-    extra = list(made)
+    extra = list(made) + list(beside or [])
     if note:
         note_path = scratch / MISSING_NOTE
         note_path.write_text(note, "utf-8")

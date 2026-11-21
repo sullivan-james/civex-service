@@ -141,7 +141,8 @@ WIRE_FIELDS: dict[str, frozenset[str]] = {
         }
     ),
     # A release's manifest and citation (`domain/release`); its bundle travels
-    # as a file. `local_seq` is this copy's own and stays here.
+    # as a file, and the files it cites are the records' own. `local_seq` and
+    # `indexed` are this copy's own and stay here.
     "release": frozenset(
         {
             "id",
@@ -151,8 +152,8 @@ WIRE_FIELDS: dict[str, frozenset[str]] = {
             "authors",
             "licence",
             "doi",
+            "keywords",
             "scope",
-            "include_files",
             "content_hash",
             "bundle_sha256",
             "bundle_size",
@@ -165,6 +166,9 @@ WIRE_FIELDS: dict[str, frozenset[str]] = {
             "withdrawn_at",
             "withdrawn_by",
             "withdrawn_reason",
+            "yanked_at",
+            "yanked_by",
+            "yanked_reason",
         }
     ),
 }

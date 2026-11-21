@@ -1612,6 +1612,11 @@ class FileInfoResponse(BaseModel):
         "while they can be restored, but don't count as using it.",
     )
     jobs: int = Field(description="Workflow runs that took it as an input.")
+    releases: list[str] = Field(
+        default_factory=list,
+        description="The releases that keep it, by name: it stays while any "
+        "of them does, and yanking them gives it up.",
+    )
     collections: list[CollectionUseResponse]
     uses: list[RecordUseResponse] = Field(
         default_factory=list,

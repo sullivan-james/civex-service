@@ -1,7 +1,9 @@
-"""Releases (`civex.domain.release`): making one from the bundle exporter, the
-content hash (the same for the same data, whatever the zip's bytes), verify,
-citations, corrections and withdrawal in history, what changed since, who may,
-and that GC keeps a release's bundle."""
+"""Releases (`civex.domain.release`): a small bundle of records whose files are
+referenced, never copied (the release owns them in `file_references`); the
+content hash; verify and deep verify; citations; corrections, withdrawal and
+yank in history; what clean-up keeps and frees; file moves carrying a
+release's pointers; getting the files out through FileAccessService; what
+changed since; who may; and what it costs."""
 
 from __future__ import annotations
 
@@ -12,11 +14,11 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
-from sqlalchemy import event
+from sqlalchemy import event, select
 
 from civex.config import FileConfigStore, load_config_at
 from civex.context import AppContext, build_context, build_local_context
-from civex.db.models import AuditLog
+from civex.db.models import AuditLog, FileReference
 from civex.domain import permissions as p
 from civex.domain import release as rules
 from civex.domain.exceptions import (
@@ -26,8 +28,11 @@ from civex.domain.exceptions import (
 )
 from civex.domain.permissions import Permissions
 from civex.domain.query import RecordQuery
+from civex.domain.transfers import KIND_CONSOLIDATE, TransferSpec
 from civex.project import Project, scaffold_project
-from civex.services.release_service import ReleaseScope
+from civex.repositories.local.file_ref_repo import LocalFileReferenceRepository
+from civex.services.release_service import BAG_MANIFEST, ReleaseScope
+from civex.services.transfer_engine import run_transfer
 
 
 @pytest.fixture()
@@ -50,7 +55,10 @@ def study(ctx: AppContext):
 
 def _make(ctx: AppContext, name: str = "v1", **kw):
     made = ctx.release_svc.create(
-        name, kw.pop("title", "Seal survey"), authors=["Ada Lovelace"], **kw
+        name,
+        kw.pop("title", "Seal survey"),
+        authors=kw.pop("authors", [{"name": "Ada Lovelace"}]),
+        **kw,
     )
     ctx.commit()
     return made
@@ -62,15 +70,23 @@ def _members(ctx: AppContext, release) -> dict[str, bytes]:
             return {n: zf.read(n) for n in zf.namelist()}
 
 
-def test_a_release_is_a_bundle_kept_in_the_store_with_its_manifest(ctx, study):
+def _owned(ctx: AppContext, release) -> dict[str, str | None]:
+    return {
+        sha: volume
+        for sha, volume in ctx._session.execute(
+            select(FileReference.sha256, FileReference.volume).where(
+                FileReference.release_id == release.id
+            )
+        )
+    }
+
+
+def test_a_release_holds_records_and_owns_the_files_where_they_are(ctx, study):
     made = _make(ctx, licence="CC-BY-4.0", doi="https://doi.org/10.1234/abcd")
     assert made.content_hash.startswith(rules.HASH_PREFIX)
     assert made.doi == "10.1234/abcd"
-    assert made.counts["records"] == 4
-    assert made.counts["files_carried"] == 1
-    assert made.scope == {}
-    assert made.local_seq and made.feed_seq is None
-    assert ctx.file_svc.exists(made.bundle_sha256)
+    assert made.counts["records"] == 4 and made.counts["files"] == 1
+    assert made.scope == {} and made.local_seq and made.feed_seq is None
     members = _members(ctx, made)
     assert {
         "bundle.json",
@@ -78,30 +94,46 @@ def test_a_release_is_a_bundle_kept_in_the_store_with_its_manifest(ctx, study):
         rules.RELEASE_JSON,
         rules.CITATION_CFF,
     } <= set(members)
-    assert f"files/{study['photo'].sha256}" in members
-    manifest = json.loads(members[rules.RELEASE_JSON])
-    assert manifest["content_hash"] == made.content_hash
-    assert 'title: "Seal survey"' in members[rules.CITATION_CFF].decode()
-    # Where a file is stored here is never frozen into the bundle.
+    # No file is copied into it: it owns them where they are, and its bundle.
+    assert not any(n.startswith("files/") for n in members)
+    owned = _owned(ctx, made)
+    photo = study["photo"].sha256
+    assert set(owned) == {photo, made.bundle_sha256}
+    # Each points at the copy its records point at.
+    used = ctx.file_svc._store.copies_used([study["a"].id])
+    assert owned[photo] == used[(study["a"].id, photo)]
     assert b"location" not in members["records.jsonl"]
-    assert ctx.release_svc.get("v1").id == made.id
-    assert [r.name for r in ctx.release_svc.list_all()] == ["v1"]
+    assert ctx.file_info_svc.info(photo).releases == ["v1"]
 
 
-def test_the_same_data_hashes_the_same_however_often_it_is_frozen(ctx, study):
+def test_making_a_release_asks_no_drive_where_a_file_is(ctx, study, monkeypatch):
+    store = ctx.file_svc._store
+
+    def refuse(*_, **__):
+        raise AssertionError("a drive was asked about a file")
+
+    for name in ("locate_volumes", "copies_used", "open", "get"):
+        monkeypatch.setattr(store, name, refuse)
+    made = _make(ctx)
+    assert made.counts["files"] == 1
+
+
+def test_the_hash_covers_records_and_the_files_they_cite(ctx, study):
     first = _make(ctx, "v1")
     second = _make(ctx, "v2", title="Another title")
     assert first.content_hash == second.content_hash
-    # The zips differ (they carry the time they were written, and the name).
-    assert first.bundle_sha256 != second.bundle_sha256
-    ctx.record_svc.add("south", "site", {"name": "C"})
+    assert first.bundle_sha256 != second.bundle_sha256  # the zips differ
+    # Another file under the same name changes the hash; no bytes are read.
+    other = ctx.file_svc.store_bytes(b"another photo", "p.jpg")
+    ctx.record_svc.update(str(study["a"].id), {"photo": other.to_dict()})
     ctx.commit()
     assert _make(ctx, "v3").content_hash != first.content_hash
 
 
-def test_scope_collections_or_a_query(ctx, study):
+def test_scope_collections_a_query_or_chosen_records(ctx, study):
     north = _make(ctx, "north", scope=ReleaseScope(collections=["north"]))
     assert north.counts["records"] == 3 and north.scope == {"collections": ["north"]}
+    assert set(_owned(ctx, north)) == {study["photo"].sha256, north.bundle_sha256}
     deep = _make(
         ctx,
         "deep",
@@ -114,17 +146,22 @@ def test_scope_collections_or_a_query(ctx, study):
         ),
     )
     # The one sample listed, and the site above it so it reads back whole.
-    assert deep.counts["records"] == 2
-    assert deep.scope["query"]["schema"] == "sample"
-    plan = ctx.release_svc.plan(
-        ReleaseScope(collections=["south"]), include_files=False
-    )
-    assert plan.records == 1 and not plan.include_files
+    assert deep.counts["records"] == 2 and deep.scope["query"]["schema"] == "sample"
+    assert study["photo"].sha256 in _owned(ctx, deep)
+    b = ctx.record_svc.find("south", "site", filters=["name=B"])[0]
+    picked = _make(ctx, "picked", scope=ReleaseScope(records=[str(b.id)]))
+    assert picked.counts["records"] == 1
+    assert set(_owned(ctx, picked)) == {picked.bundle_sha256}
+    plan = ctx.release_svc.plan(ReleaseScope(collections=["north"]))
+    assert plan.records == 3 and plan.collections == {"north": 3}
+    assert plan.files == 1 and sum(d["files"] for d in plan.by_drive) == 1
     with pytest.raises(ValidationError):
         ReleaseScope(collections=["north"], query=RecordQuery(dataset="north"))
+    with pytest.raises(ValidationError):
+        ReleaseScope(records=[])
 
 
-def test_a_release_reads_back_into_a_new_project(ctx, study, tmp_path):
+def test_its_records_read_back_into_a_new_project(ctx, study, tmp_path):
     made = _make(ctx)
     path = tmp_path / "r.zip"
     with ctx.release_svc.open_bundle(made.name) as (_, f):
@@ -135,17 +172,26 @@ def test_a_release_reads_back_into_a_new_project(ctx, study, tmp_path):
     try:
         result = other.bundle_svc.import_bundle(path)
         other.commit()
-        assert result.records_added == 4 and result.files_added == 1
+        assert result.records_added == 4 and result.files_added == 0
     finally:
         other.close()
 
 
-def test_verify_says_whether_the_bundle_still_holds_what_it_was_made_with(ctx, study):
+def test_verify_checks_the_records_and_that_every_file_is_recorded(ctx, study):
     made = _make(ctx)
     good = ctx.release_svc.verify("v1")
     assert good.matches and good.bundle_intact and good.actual == made.content_hash
+    assert good.files == 1 and good.files_not_here == 0
 
-    # Tamper with the stored bundle: change one record's value.
+    # A cited file the inventory no longer has is a problem (nothing is read).
+    ctx.file_svc._store.delete(study["photo"].sha256)
+    ctx.commit()
+    lost = ctx.release_svc.verify("v1")
+    assert not lost.matches and lost.files_not_here == 1
+
+
+def test_verify_finds_a_tampered_bundle(ctx, study):
+    made = _make(ctx)
     path = ctx.file_svc.object_path(made.bundle_sha256)
     rebuilt = io.BytesIO()
     with zipfile.ZipFile(path) as old, zipfile.ZipFile(rebuilt, "w") as new:
@@ -161,15 +207,45 @@ def test_verify_says_whether_the_bundle_still_holds_what_it_was_made_with(ctx, s
     assert bad.actual != made.content_hash and bad.problems
 
 
+def test_a_deep_verify_reads_every_file_back(ctx, study):
+    _make(ctx)
+    good = ctx.release_svc.verify("v1", deep=True)
+    assert good.matches and good.files_read == 1 and not good.files_bad
+    sha = study["photo"].sha256
+    disk = ctx.file_svc.object_path(sha)
+    disk.chmod(0o644)
+    disk.write_bytes(b"rotted")
+    bad = ctx.release_svc.verify("v1", deep=True)
+    assert not bad.matches and bad.files_bad == [sha]
+
+
 def test_citations(ctx, study):
-    _make(ctx, licence="CC-BY-4.0", doi="10.1234/abcd")
+    _make(
+        ctx,
+        licence="CC-BY-4.0",
+        doi="10.1234/abcd",
+        keywords=["seals", "acoustics"],
+        authors=[
+            {
+                "name": "Ada Lovelace",
+                "orcid": "https://orcid.org/0000-0002-1825-0097",
+                "affiliation": "Analytical Society",
+            }
+        ],
+    )
     text = ctx.release_svc.cite("v1")
     assert text.startswith("Ada Lovelace (") and "(Version v1) [Data set]." in text
     assert "https://doi.org/10.1234/abcd" in text and "sha256:" in text
     bib = ctx.release_svc.cite("v1", "bibtex")
-    assert bib.startswith("@misc{Lovelace") and "doi = {10.1234/abcd}" in bib
+    assert bib.startswith("@misc{Lovelace") and "keywords = {seals, acoustics}" in bib
     cff = ctx.release_svc.cite("v1", "cff")
-    assert 'family-names: "Lovelace"' in cff and 'given-names: "Ada"' in cff
+    assert 'family-names: "Lovelace"' in cff
+    assert 'orcid: "https://orcid.org/0000-0002-1825-0097"' in cff
+    assert 'affiliation: "Analytical Society"' in cff and '- "seals"' in cff
+    preview = ctx.release_svc.preview(
+        {"title": "Draft", "authors": [{"name": "Bo Li"}]}, "v2", "text"
+    )
+    assert preview.startswith("Bo Li (") and "Draft (Version v2)" in preview
     with pytest.raises(ValidationError):
         ctx.release_svc.cite("v1", "rtf")
 
@@ -185,33 +261,190 @@ def test_names_metadata_and_immutability(ctx, study):
         ctx.release_svc.create("v9", "  ")
     with pytest.raises(ValidationError):
         ctx.release_svc.create("v9", "t", doi="not a doi")
+    with pytest.raises(ValidationError, match="ORCID"):
+        ctx.release_svc.create("v9", "t", authors=[{"name": "A", "orcid": "123"}])
     with pytest.raises(ValidationError):
         ctx.release_svc.correct("v1", content_hash="sha256:00")
 
 
-def test_corrections_and_withdrawal_are_in_history(ctx, study):
+def test_corrections_withdrawal_and_yank_are_in_history(ctx, study):
     made = _make(ctx)
     fixed = ctx.release_svc.correct("v1", title="Seal survey 2026", doi="10.5555/x")
     ctx.commit()
     assert fixed.title == "Seal survey 2026" and fixed.content_hash == made.content_hash
     gone = ctx.release_svc.withdraw("v1", "Calibration error in north")
     ctx.commit()
-    assert gone.withdrawn_at and gone.withdrawn_reason == "Calibration error in north"
+    assert gone.withdrawn_reason == "Calibration error in north"
     with pytest.raises(ValidationError):
         ctx.release_svc.withdraw("v1", "again")
+    # Withdrawn releases keep their data, and still verify.
+    assert ctx.release_svc.verify("v1").matches
+    yanked = ctx.release_svc.yank("v1", "Consent withdrawn")
+    ctx.commit()
+    assert yanked.yanked_at and yanked.yanked_reason == "Consent withdrawn"
+    assert yanked.withdrawn_reason == "Calibration error in north"
     with pytest.raises(ValidationError):
-        ctx.release_svc.withdraw("v1", "")
+        ctx.release_svc.yank("v1", "again")
+    with pytest.raises(ValidationError):
+        ctx.release_svc.correct("v1", title="x")
+    # The tombstone still answers a citation; the data is gone from it.
+    assert "sha256:" in ctx.release_svc.cite("v1")
+    assert not ctx.release_svc.verify("v1").matches
     entries = (
         ctx._session.query(AuditLog)
         .filter(AuditLog.entity_type == "release")
         .order_by(AuditLog.local_seq)
         .all()
     )
-    assert [e.action for e in entries] == ["create", "update", "update"]
+    assert [e.action for e in entries] == ["create", "update", "update", "update"]
     changes = ctx.history_svc.get(str(entries[1].id)).changes
     assert {c["field"] for c in changes} >= {"title", "doi"}
-    # Withdrawn releases still verify: the bundle is kept.
+
+
+def test_clean_up_keeps_a_release_files_and_frees_them_after_a_yank(ctx, study):
+    made = _make(ctx)
+    photo = study["photo"].sha256
+    # The record lets the photo go: only the release keeps it now.
+    ctx.record_svc.update(str(study["a"].id), {"photo": None})
+    ctx.commit()
+    report = ctx.gc_svc.run(dry_run=False, grace_days=0)
+    assert {photo, made.bundle_sha256}.isdisjoint(o.sha256 for o in report.deleted)
     assert ctx.release_svc.verify("v1").matches
+
+    plan = ctx.release_svc.plan_yank("v1")
+    assert (plan.files, plan.unused_files, plan.kept_files) == (2, 2, 0)
+    assert plan.unused_bytes == len(b"a photo") + made.bundle_size
+    assert set(_owned(ctx, made)) == {photo, made.bundle_sha256}  # nothing changed
+
+    ctx.release_svc.yank("v1", "Not ours to share")
+    ctx.commit()
+    assert _owned(ctx, made) == {}
+    report = ctx.gc_svc.run(dry_run=False, grace_days=0)
+    assert {photo, made.bundle_sha256} <= {o.sha256 for o in report.deleted}
+
+
+def test_a_yank_counts_files_others_still_use_as_kept(ctx, study):
+    _make(ctx)
+    plan = ctx.release_svc.plan_yank("v1")
+    # The photo is still the record's; only the bundle would go.
+    assert (plan.unused_files, plan.kept_files) == (1, 1)
+
+
+def test_a_permanent_delete_says_which_release_keeps_the_files(ctx, study):
+    _make(ctx)
+    a = study["a"]
+    ctx.record_svc.delete(str(a.id))
+    ctx.commit()
+    ids = ctx.record_svc.purge_set(str(a.id))
+    assert len(ids) == 3
+    assert ctx.release_svc.kept_for(ids) == {"v1": 1}
+
+
+# -- moving files -------------------------------------------------------------
+
+
+def _drives(ctx: AppContext, tmp_path: Path, *names: str) -> None:
+    for name in names:
+        path = tmp_path / "mnt" / name
+        path.mkdir(parents=True)
+        ctx.store_svc.add_volume(name, str(path))
+    ctx.store_svc.set_queue([names[0]])
+    ctx.commit()
+
+
+def _move(ctx: AppContext, spec: TransferSpec) -> None:
+    run_transfer(
+        ctx.file_svc._store,
+        LocalFileReferenceRepository(ctx._session),
+        spec,
+        progress=lambda _: None,
+        commit=ctx.commit,
+    )
+
+
+def _consolidate(ctx: AppContext, collection: str, target: str) -> None:
+    cid = str(ctx.dataset_svc.get(collection).id)
+    _move(
+        ctx,
+        TransferSpec(kind=KIND_CONSOLIDATE, collection_ids=[cid], targets=[target]),
+    )
+
+
+def _on(ctx: AppContext, sha: str) -> list[str]:
+    return sorted(v for v, _ in ctx.file_svc._store.copies([sha]).get(sha, []))
+
+
+def _one_photo(ctx: AppContext, *collections: str):
+    ctx.schema_svc.create("site")
+    ctx.schema_svc.add_field("site", "photo", "file")
+    photo = ctx.file_svc.store_bytes(b"photo", "p.jpg")
+    made = []
+    for c in collections:
+        ctx.dataset_svc.create(c)
+        made.append(ctx.record_svc.add(c, "site", {"photo": photo.to_dict()}))
+    ctx.commit()
+    return photo, made
+
+
+def test_a_release_pointer_moves_with_its_records(ctx, tmp_path):
+    _drives(ctx, tmp_path, "a", "b")
+    photo, _ = _one_photo(ctx, "north")
+    made = _make(ctx)
+    assert _owned(ctx, made)[photo.sha256] == "a"
+    _consolidate(ctx, "north", "b")
+    # Every record at the copy on a moved, so the release went with them and
+    # the copy on a was freed (it didn't keep it behind by itself).
+    assert _owned(ctx, made)[photo.sha256] == "b"
+    assert _on(ctx, photo.sha256) == ["b"]
+
+
+def test_a_release_pointer_stays_with_the_records_that_stay(ctx, tmp_path):
+    _drives(ctx, tmp_path, "a", "b")
+    photo, _ = _one_photo(ctx, "north", "south")
+    made = _make(ctx)
+    _consolidate(ctx, "north", "b")
+    # South still points at the copy on a, so it stays, and the release too.
+    assert _owned(ctx, made)[photo.sha256] == "a"
+    assert _on(ctx, photo.sha256) == ["a", "b"]
+
+
+def test_gathering_a_release_moves_only_its_own_pointers(ctx, tmp_path):
+    _drives(ctx, tmp_path, "a", "b")
+    photo, (rec,) = _one_photo(ctx, "north")
+    made = _make(ctx)
+    spec = ctx.release_svc.gather_spec("v1", "b")
+    assert spec.shas == [photo.sha256] and spec.release_ids == [str(made.id)]
+    _move(ctx, spec)
+    assert _owned(ctx, made)[photo.sha256] == "b"
+    # The record's copy stays where it was: copied for the release, not moved.
+    assert ctx.file_svc._store.copies_used([rec.id])[(rec.id, photo.sha256)] == "a"
+    assert _on(ctx, photo.sha256) == ["a", "b"]
+
+
+# -- getting the data out -----------------------------------------------------
+
+
+def test_the_files_come_out_as_any_export_with_a_bagit_manifest(ctx, study):
+    _make(ctx)
+    plan = ctx.release_svc.file_plan("v1")
+    assert [i.path for i in plan.items] == ["A/p.jpg"]
+    assert plan.complete
+    with ctx.release_svc.file_access("v1") as (access, selection):
+        result = access.export_managed(selection, "release-v1", "copy")
+    dest = Path(result.dest)
+    ctx.release_svc.write_bag("v1", dest, plan)
+    assert (dest / "A" / "p.jpg").read_bytes() == b"a photo"
+    manifest = (dest / BAG_MANIFEST).read_text().splitlines()
+    assert manifest == [f"{study['photo'].sha256}  A/p.jpg"]
+    assert json.loads((dest / rules.RELEASE_JSON).read_text())["name"] == "v1"
+    assert (dest / rules.CITATION_CFF).exists()
+
+
+def test_the_files_are_laid_out_as_frozen_even_after_edits(ctx, study):
+    _make(ctx)
+    ctx.record_svc.update(str(study["a"].id), {"name": "Renamed"})
+    ctx.commit()
+    assert [i.path for i in ctx.release_svc.file_plan("v1").items] == ["A/p.jpg"]
 
 
 def test_changes_since_a_release(ctx, study):
@@ -267,6 +500,24 @@ def test_changes_since_costs_the_same_however_much_changed(ctx, study):
     assert cost() == few
 
 
+def test_owning_the_files_costs_the_same_however_many_there_are(ctx, study):
+    """The files are owned in one INSERT ... SELECT: making a release of a
+    collection asks the same few questions of file_references whether its
+    records cite one file or a hundred."""
+
+    def cost(name: str) -> int:
+        with _statements(ctx) as seen:
+            _make(ctx, name, scope=ReleaseScope(collections=["south"]))
+        return len([s for s in seen if "file_references" in s])
+
+    few = cost("few")
+    for i in range(100):
+        ref = ctx.file_svc.store_bytes(f"photo {i}".encode(), f"p{i}.jpg")
+        ctx.record_svc.add("south", "site", {"name": f"s{i}", "photo": ref.to_dict()})
+    ctx.commit()
+    assert cost("many") == few
+
+
 def test_a_synced_copy_with_unsent_changes_must_sync_first(ctx, study):
     ctx.release_svc.position = lambda: (7, 2)
     with pytest.raises(ValidationError, match="sync first"):
@@ -277,14 +528,7 @@ def test_a_synced_copy_with_unsent_changes_must_sync_first(ctx, study):
     assert ctx.release_svc.changes_since("v1").by == "feed"
 
 
-def test_garbage_collection_keeps_a_release_bundle(ctx, study):
-    made = _make(ctx)
-    report = ctx.gc_svc.run(dry_run=False, grace_days=0)
-    assert made.bundle_sha256 not in {o.sha256 for o in report.deleted}
-    assert ctx.release_svc.verify("v1").matches
-
-
-def test_who_may_make_and_withdraw_releases(tmp_path: Path):
+def test_who_may_make_withdraw_and_yank_releases(tmp_path: Path):
     root = tmp_path / "study"
     scaffold_project(root)
     owner = build_local_context(load_config_at(root))
@@ -308,12 +552,14 @@ def test_who_may_make_and_withdraw_releases(tmp_path: Path):
     try:
         assert [r.name for r in writer.release_svc.list_all()] == ["v1"]
         assert writer.release_svc.verify("v1").matches
-        with pytest.raises(NotAllowedError):
-            writer.release_svc.create("v2", "t")
-        with pytest.raises(NotAllowedError):
-            writer.release_svc.withdraw("v1", "no")
-        with pytest.raises(NotAllowedError):
-            writer.release_svc.correct("v1", title="x")
+        for attempt in (
+            lambda: writer.release_svc.create("v2", "t"),
+            lambda: writer.release_svc.withdraw("v1", "no"),
+            lambda: writer.release_svc.yank("v1", "no"),
+            lambda: writer.release_svc.correct("v1", title="x"),
+        ):
+            with pytest.raises(NotAllowedError):
+                attempt()
     finally:
         writer.close()
         owner.close()

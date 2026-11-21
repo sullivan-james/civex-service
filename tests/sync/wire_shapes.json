@@ -174,7 +174,7 @@
    "doi",
    "feed_seq",
    "id",
-   "include_files",
+   "keywords",
    "licence",
    "name",
    "scope",
@@ -182,7 +182,10 @@
    "updated_at",
    "withdrawn_at",
    "withdrawn_by",
-   "withdrawn_reason"
+   "withdrawn_reason",
+   "yanked_at",
+   "yanked_by",
+   "yanked_reason"
   ],
   "schema": [
    "created_at",

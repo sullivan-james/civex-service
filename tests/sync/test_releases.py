@@ -14,6 +14,10 @@ def test_a_release_and_its_bundle_travel(project, authority):
     assert releases.travels(project, authority) == []
 
 
+def test_a_yank_reaches_the_authority_and_its_files_are_given_up(project, authority):
+    assert releases.yanks(project, authority) == []
+
+
 def test_a_release_content_can_not_be_changed_over_sync(project, authority):
     assert releases.content_is_fixed(project, authority) == []
 

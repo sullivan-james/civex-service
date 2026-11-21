@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections import Counter
 
+import copy
 import dataclasses
 import json
 import os
@@ -155,6 +156,17 @@ class FileAccessService:
         self.why_not_here: Callable[[list[str]], dict[str, tuple[str, str]]] | None = (
             None
         )
+
+    def with_records(self, records: Any) -> "FileAccessService":
+        """This service reading its records from `records` instead of the live
+        ones: anything with the record calls it makes (`get_many`, `get`,
+        `file_values`, `ancestor_trails`, `stream_records`, `count_records`,
+        `beneath`, `with_derived`), such as a release's frozen records
+        (`release_records.FrozenRecords`). Everything else (the path rule,
+        plans, folders, zips, the drives) is the same."""
+        other = copy.copy(self)
+        other._records = records
+        return other
 
     def _drives(self) -> VolumeStore:
         """The drives files can be laid out on; a host without any answers

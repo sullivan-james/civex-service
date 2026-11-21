@@ -473,11 +473,12 @@ class RecordNote(Base):
 
 class Release(Base):
     """A frozen, citable copy of the data (`civex.domain.release`): citation
-    metadata, what it covers, and the manifest of the bundle made for it,
-    which is kept in the object store under `bundle_sha256` (a GC root, and
-    sent to the authority like a record's file). Never deleted and never
-    changed in content; the metadata may be corrected and the release
-    withdrawn, each a history entry. Synced and audited as kind `release`."""
+    metadata, what it covers, and the manifest of the small bundle of its
+    records, kept in the object store under `bundle_sha256`. The files it
+    cites are not copied: the release owns them (and its bundle) through
+    `file_references.release_id`. Never changed in content; the metadata may
+    be corrected, the release withdrawn, or yanked (its data given up, a
+    tombstone kept), each a history entry. Synced and audited as `release`."""
 
     __tablename__ = "releases"
     __table_args__ = (Index("ux_releases_name", "name", unique=True),)
@@ -490,7 +491,7 @@ class Release(Base):
     licence: Mapped[str | None] = mapped_column(String(200), nullable=True)
     doi: Mapped[str | None] = mapped_column(String(300), nullable=True)
     scope: Mapped[dict[str, Any]] = mapped_column(_JSON, nullable=False, default=dict)
-    include_files: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    keywords: Mapped[list[Any]] = mapped_column(_JSON, nullable=False, default=list)
     content_hash: Mapped[str] = mapped_column(String(80), nullable=False)
     bundle_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     bundle_size: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
@@ -506,6 +507,14 @@ class Release(Base):
     withdrawn_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
     withdrawn_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
     withdrawn_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Yanked: its data given up (its file_references rows removed; clean-up
+    # decides what goes); the row stays as the tombstone a citation finds.
+    yanked_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+    yanked_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    yanked_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Whether this copy has written the release's file_references rows (from
+    # its records, or from its bundle once that is here). Local, never sent.
+    indexed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class AuditBatch(Base):
@@ -867,9 +876,9 @@ class RecordReference(Base):
 
 
 class FileReference(Base):
-    """A live reference from a record (or a workflow job's input) to a blob.
-    Maintained by ORM events in `civex.db.file_refs` whenever a record's
-    `data` or a job's `input_data` is written, and removed by ON DELETE
+    """A live reference from a record, a workflow job's input or a release to
+    a blob. Maintained by ORM events whenever a record's `data` or a job's
+    `input_data` is written (a release's rows by its repository), and removed by ON DELETE
     CASCADE when the owner is purged. GC collects blobs with no row here.
     `sha256` is deliberately not a FK to `stored_objects`: a record may
     reference a blob that hasn't been fetched from the remote yet."""
@@ -877,12 +886,14 @@ class FileReference(Base):
     __tablename__ = "file_references"
     __table_args__ = (
         CheckConstraint(
-            "(record_id IS NOT NULL AND job_id IS NULL) "
-            "OR (record_id IS NULL AND job_id IS NOT NULL)",
+            "(CASE WHEN record_id IS NULL THEN 0 ELSE 1 END"
+            " + CASE WHEN job_id IS NULL THEN 0 ELSE 1 END"
+            " + CASE WHEN release_id IS NULL THEN 0 ELSE 1 END) = 1",
             name="ck_file_references_one_owner",
         ),
         UniqueConstraint("record_id", "sha256", name="uq_file_refs_record_sha"),
         UniqueConstraint("job_id", "sha256", name="uq_file_refs_job_sha"),
+        UniqueConstraint("release_id", "sha256", name="uq_file_refs_release_sha"),
         Index("ix_file_references_sha256", "sha256"),
         Index("ix_file_references_sha_volume", "sha256", "volume"),
     )
@@ -894,6 +905,14 @@ class FileReference(Base):
     )
     job_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("workflow_jobs.id", ondelete="CASCADE"), nullable=True
+    )
+    # A release keeps the files it cites (and its own bundle) as long as it
+    # isn't yanked: written by `LocalReleaseRepository`, never by an ORM event.
+    release_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey(
+            "releases.id", ondelete="CASCADE", name="fk_file_references_release"
+        ),
+        nullable=True,
     )
     # The copy this owner uses: the volume holding it, on this computer. One
     # file can be stored on several drives; each record points at exactly one

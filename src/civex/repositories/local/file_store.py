@@ -600,8 +600,44 @@ class VolumeAwareFileObjectStore:
     def download_url(self, sha256: str, filename: str | None = None) -> str | None:
         return None
 
-    def verify(self) -> list[str]:
-        return []
+    def verify(
+        self,
+        shas: Iterable[str] | None = None,
+        progress: Callable[[int], None] | None = None,
+    ) -> list[str]:
+        """Every file written to a drive was hashed on the way in, so nothing
+        is waiting to be checked. With `shas`, read back exactly those files'
+        copies on drives that answer and hash them: a match is marked
+        verified, a copy that doesn't match is removed (it isn't the file) and
+        the file returned. `progress` is told how many have been read."""
+        if shas is None or self._session is None:
+            return []
+        bad: list[str] = []
+        wanted = list(dict.fromkeys(shas))
+        done = 0
+        for i in range(0, len(wanted), 100):
+            page = wanted[i : i + 100]
+            good: dict[str, list[str]] = {}
+            for sha, rows in self.copies(page).items():
+                for volume, _ in rows:
+                    if not self.volume_status(volume).reachable:
+                        continue
+                    try:
+                        same = _hash_file(self.path_on(sha, volume)) == sha
+                    except FileNotFoundError:
+                        continue
+                    if same:
+                        good.setdefault(volume, []).append(sha)
+                    else:
+                        log.warning("%s on %s does not hash to its name", sha, volume)
+                        self.delete(sha, volume=volume)
+                        bad.append(sha)
+                done += 1
+                if progress:
+                    progress(done)
+            for volume, ok in good.items():
+                inventory.mark_verified(self._session, volume, ok)
+        return sorted(set(bad))
 
     # -- where is it? -------------------------------------------------------
 

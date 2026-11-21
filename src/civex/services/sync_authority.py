@@ -181,6 +181,12 @@ class SyncAuthorityService:
     # Accepting changes
     # ------------------------------------------------------------------
 
+    def received_file(self, sha256: str) -> None:
+        """A file a device sent has been stored here: if it is a release's
+        bundle, the release owns the files it cites from now on."""
+        if self._releases is not None:
+            self._releases().index_waiting(sha256)
+
     def push(self, who: Principal, entries: list[SyncEntry]) -> PushResult:
         """Settle each change, in the order sent. Stops at the first that has
         to wait (later ones may depend on it); those are simply not answered.
@@ -419,7 +425,9 @@ class SyncAuthorityService:
         """Merge the change into what is held, write it, and record it."""
         kind, eid = entry.entity_type, entry.entity_id
         if kind == "release" and entry.action in ("delete", "purge"):
-            raise ValidationError("A release is never deleted: it can be withdrawn")
+            raise ValidationError(
+                "A release is never deleted: it can be withdrawn, or yanked"
+            )
         head = self._applier.head(kind, eid)
         cascade = self._cascade_before(entry, head)
         conflicts: list[dict[str, Any]] = []
@@ -482,6 +490,9 @@ class SyncAuthorityService:
             elif kind == "release" and self._releases is not None:
                 self._releases().check_incoming(final, head)
             self._applier.apply_state(kind, eid, final)
+            if kind == "release" and self._releases is not None:
+                # Its bundle may be here already (files go on their own).
+                self._releases().index_waiting(str(final.get("bundle_sha256")))
         elif entry.action == "delete":
             if head is not None and head.get("deleted_at"):
                 # Already deleted (another device got there first). Both are

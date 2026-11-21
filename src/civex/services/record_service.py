@@ -1046,6 +1046,50 @@ class RecordService:
             for ref in _file_dicts(r.data.get(name))
             if ref.get("sha256") and (r.id, ref["sha256"]) not in used
         }
+        location = self._locator(wanted, used, unpointed)
+
+        def decorate(record_id: uuid.UUID, value: Any) -> Any:
+            if isinstance(value, dict):
+                return {
+                    **value,
+                    "location": location(record_id, value.get("sha256")),
+                }
+            if isinstance(value, list):
+                return [decorate(record_id, item) for item in value]
+            return value
+
+        return [
+            dataclasses.replace(
+                r,
+                data={
+                    **r.data,
+                    **{n: decorate(r.id, r.data.get(n)) for n in names if n in r.data},
+                },
+            )
+            if names
+            else r
+            for r, names in zip(records, file_fields)
+        ]
+
+    def locate_pointed(
+        self, pointed: dict[str, str | None]
+    ) -> Callable[[str], dict[str, Any]]:
+        """Where files are for an owner that isn't a live record (a release):
+        `pointed` is each file's copy as that owner points at it (None: none
+        yet). The same `location` a record's file value carries, worked out the
+        same way (one status check per drive)."""
+        nobody = uuid.UUID(int=0)
+        used = {(nobody, sha): v for sha, v in pointed.items() if v}
+        unpointed = {sha for sha, v in pointed.items() if not v}
+        location = self._locator(set(pointed), used, unpointed)
+        return lambda sha: location(nobody, sha)
+
+    def _locator(
+        self,
+        wanted: set[str],
+        used: dict[tuple[uuid.UUID, str], str],
+        unpointed: set[str],
+    ) -> Callable[[uuid.UUID, str | None], dict[str, Any]]:
         volume_of = self._files.locate_volumes(unpointed) if unpointed else {}
         following = self.files_from_server()
         from_server = None in volume_of.values() and following
@@ -1114,28 +1158,7 @@ class RecordService:
                 **({"sent": sha not in unsent} if following else {}),
             }
 
-        def decorate(record_id: uuid.UUID, value: Any) -> Any:
-            if isinstance(value, dict):
-                return {
-                    **value,
-                    "location": location(record_id, value.get("sha256")),
-                }
-            if isinstance(value, list):
-                return [decorate(record_id, item) for item in value]
-            return value
-
-        return [
-            dataclasses.replace(
-                r,
-                data={
-                    **r.data,
-                    **{n: decorate(r.id, r.data.get(n)) for n in names if n in r.data},
-                },
-            )
-            if names
-            else r
-            for r, names in zip(records, file_fields)
-        ]
+        return location
 
     def _label_references(
         self, records: list[RecordDTO], shapes: SchemaResolver | None = None
@@ -2891,14 +2914,19 @@ class RecordService:
         columns: list[str] | None = None,
         child_counts: bool = False,
         after: tuple[_dt, uuid.UUID] | None = None,
+        as_stored: bool = False,
     ) -> list[RecordDTO]:
         """One page of `query`. `columns` asks for values that aren't in a
         record's own data (an inherited field, a `ref.field` join), attached
         as `derived`; `child_counts` attaches per-child-schema counts. `after`
-        continues an unsorted listing past a record (see `stream_records`)."""
+        continues an unsorted listing past a record (see `stream_records`).
+        `as_stored`: the records as they are kept (name-keyed), with none of
+        the momentary extras, so reading them asks no drive where a file is."""
         records = self._records.list_filtered(
             self.resolve(query), offset, limit, after=after
         )
+        if as_stored:
+            return self._with_names_many(records)
         named = self._attach_open_notes(
             self._attach_reference_labels(self._with_names_many(records))
         )
@@ -2919,9 +2947,11 @@ class RecordService:
         query: RecordQuery,
         page_size: int = 500,
         columns: list[str] | None = None,
+        as_stored: bool = False,
     ) -> Iterator[list[RecordDTO]]:
         """Every matching record, one page at a time -- for exports, which
-        must not hold the whole result set in memory.
+        must not hold the whole result set in memory (`as_stored`: see
+        `query_records`).
 
         An unsorted walk continues from the last record's (created_at, id)
         rather than an ever-growing OFFSET, which would re-read every row it
@@ -2936,6 +2966,7 @@ class RecordService:
                 offset=0 if after else offset,
                 columns=columns,
                 after=after,
+                as_stored=as_stored,
             )
             if not page:
                 return
@@ -3455,10 +3486,13 @@ class RecordService:
         schema = self._schema_svc.get(schema_name)
         return self.get_many(self._records.recently_changed(schema.id, limit))
 
-    def get_many(self, record_ids: list[str]) -> list[RecordDTO]:
+    def get_many(
+        self, record_ids: list[str], as_stored: bool = False
+    ) -> list[RecordDTO]:
         """These live records in the order asked, in the full response form
         (names, reference labels, where each file is stored), in a fixed number
-        of queries. Ids that aren't live records are left out."""
+        of queries. Ids that aren't live records are left out. `as_stored`: as
+        they are kept (see `query_records`)."""
         ids: list[uuid.UUID] = []
         for raw in dict.fromkeys(record_ids):
             try:
@@ -3468,6 +3502,8 @@ class RecordService:
         found = {r.id: r for r in self._records.list_by_ids(ids) if not r.deleted_at}
         shapes = self._schema_svc.resolver()
         named = [self._with_names(found[i], shapes) for i in ids if i in found]
+        if as_stored:
+            return named
         return self._attach_reference_labels(named, shapes)
 
     def file_values(
@@ -4695,9 +4731,16 @@ class RecordService:
             raise ValidationError(
                 f"Record '{record_id}' must be deleted before it can be purged"
             )
+        self.purge_records(self.purge_set(record_id))
+
+    def purge_set(self, record_id: str) -> list[uuid.UUID]:
+        """The records a permanent delete of this deleted record removes: it and
+        everything beneath it."""
+        record = self._records.get_by_prefix(record_id, include_deleted=True)
+        if record is None:
+            raise NotFoundError(f"Record '{record_id}' not found")
         levels = self._records.subtree_levels([record.id], deleted=None)
-        every = [rid for level in levels for rid in level]
-        self.purge_records(every)
+        return [rid for level in levels for rid in level]
 
     def _reference_field_map(
         self, target_schema: str | None = None

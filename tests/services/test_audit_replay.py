@@ -213,9 +213,11 @@ def test_history_describes_everything_a_person_can_do(ctx: AppContext) -> None:
     ctx.commit()
 
     # Releases: made, their citation corrected, withdrawn.
-    ctx.release_svc.create("v1", "Study", authors=["A. Person"])
+    ctx.release_svc.create("v1", "Study", authors=[{"name": "A. Person"}])
     ctx.release_svc.correct("v1", title="The study", doi="10.1234/abc")
     ctx.release_svc.withdraw("v1", "superseded")
+    ctx.release_svc.create("v2", "Study again", keywords=["seals"])
+    ctx.release_svc.yank("v2", "consent withdrawn")
     ctx.commit()
 
     # Deleting and bringing back.

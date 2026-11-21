@@ -10,7 +10,14 @@ move changes pointers: the ones it covers (`Scope`) are pointed at the target,
 the file is copied there if it isn't already, and a copy the move leaves with
 nothing pointing at it is removed. So a copy other records still point at
 stays (the file is copied, not moved), and moving onto a drive that already
-has the content copies nothing (de-duplication)."""
+has the content copies nothing (de-duplication).
+
+A release owns the files it cites too, pointing at the copy its records used
+when it was made. A release never holds a copy in place by itself during a
+move: its pointer goes with the records it shares the copy with once every
+record pointing at that copy is moving (`moving`), and stays with those that
+stay otherwise. Emptying a drive takes every pointer at it, releases'
+included."""
 
 from __future__ import annotations
 
@@ -36,7 +43,8 @@ STEP_NOWHERE = "nowhere"  # no copy is recorded here
 @dataclass(frozen=True)
 class Pointer:
     """One row of `file_references`: which copy (`volume`, None when there is
-    none here) an owner (a record, live or deleted, or a workflow run) uses."""
+    none here) an owner (a record, live or deleted, a workflow run or a
+    release) uses."""
 
     id: uuid.UUID
     sha256: str
@@ -44,32 +52,57 @@ class Pointer:
     record_id: uuid.UUID | None
     collection_id: str | None
     live: bool
+    release_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True)
 class Scope:
     """Which pointers a move covers: those on drives being emptied (`drives`),
     or the live records of some collections (`collections`), or some records
-    (`records`), or, with none of those, every owner of the files."""
+    (`records`) and releases (`releases`), or, with none of those, every owner
+    of the files."""
 
     drives: frozenset[str] = frozenset()
     collections: frozenset[str] = frozenset()
     records: frozenset[str] = frozenset()
+    releases: frozenset[str] = frozenset()
 
     def covers(self, p: Pointer) -> bool:
         if self.drives:
             return p.volume in self.drives
+        if not (self.collections or self.records or self.releases):
+            return True
+        if p.release_id is not None:
+            return str(p.release_id) in self.releases
         if self.collections:
             return p.live and p.collection_id in self.collections
-        if self.records:
-            return p.record_id is not None and str(p.record_id) in self.records
-        return True
+        return p.record_id is not None and str(p.record_id) in self.records
+
+
+def moving(pointers: Iterable[Pointer], scope: Scope) -> list[Pointer]:
+    """The pointers (of one file) a move points at its target: those the scope
+    covers, and a release's pointer at a copy that every other owner pointing
+    at it is leaving (so the release follows its records, and never keeps a
+    copy behind by itself). A release's pointer at a copy some record stays
+    on stays too."""
+    owners = list(pointers)
+    covered = [p for p in owners if scope.covers(p)]
+    ids = {p.id for p in covered}
+    left = {p.volume for p in owners if p.release_id is None and p.id not in ids}
+    vacated = {p.volume for p in covered if p.volume} - left
+    return covered + [
+        p
+        for p in owners
+        if p.release_id is not None and p.id not in ids and p.volume in vacated
+    ]
 
 
 def keeping(pointers: Iterable[Pointer], scope: Scope) -> set[str]:
-    """The drives whose copy must stay: those an owner the move doesn't cover
-    points at. A deleted record counts (it can be restored)."""
-    return {p.volume for p in pointers if p.volume and not scope.covers(p)}
+    """The drives whose copy must stay: those an owner the move doesn't move
+    (`moving`) points at. A deleted record counts (it can be restored)."""
+    owners = list(pointers)
+    moved = {p.id for p in moving(owners, scope)}
+    return {p.volume for p in owners if p.volume and p.id not in moved}
 
 
 def file_step(

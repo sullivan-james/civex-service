@@ -56,6 +56,8 @@ class ExportOptions:
     # Only the records this query lists (and the records above them, so the
     # bundle reads in whole); None = every record of the collections.
     query: RecordQuery | None = None
+    # Or exactly these records (by id), with the records above them.
+    record_ids: list[str] | None = None
 
 
 @dataclass

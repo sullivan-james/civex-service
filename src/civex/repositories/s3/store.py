@@ -29,7 +29,7 @@ import tempfile
 import threading
 import time
 import uuid
-from collections.abc import AsyncIterable, Iterable, Iterator
+from collections.abc import AsyncIterable, Callable, Iterable, Iterator
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any, BinaryIO, cast
 
@@ -536,20 +536,22 @@ class S3ObjectStore:
         finally:
             self._gc.release()
 
-    def verify(self) -> list[str]:
+    def verify(
+        self,
+        shas: Iterable[str] | None = None,
+        progress: Callable[[int], None] | None = None,
+    ) -> list[str]:
         """Read back every copy recorded unverified (one that went in by parts,
-        or that a reconcile found) and hash it: a match is marked verified; a
-        mismatch is removed from the bucket and the inventory, and returned,
-        so the records citing it show the file as missing rather than serve
-        the wrong bytes."""
+        or that a reconcile found), or exactly `shas`, and hash it: a match is
+        marked verified; a mismatch is removed from the bucket and the
+        inventory, and returned, so the records citing it show the file as
+        missing rather than serve the wrong bytes. `progress` is told how many
+        have been read."""
         if self._session is None:
             return []
         bad: list[str] = []
-        after = ""
-        while True:
-            page = inventory.unverified(self._session, self.name, after, 100)
-            if not page:
-                return bad
+        done = 0
+        for page in self._verify_pages(shas):
             good: list[str] = []
             for sha in page:
                 hasher = hashlib.sha256()
@@ -560,6 +562,10 @@ class S3ObjectStore:
                 except FileNotFoundError:
                     self._unregister(sha)
                     continue
+                finally:
+                    done += 1
+                    if progress:
+                        progress(done)
                 if hasher.hexdigest() == sha:
                     good.append(sha)
                 else:
@@ -567,6 +573,18 @@ class S3ObjectStore:
                     self.delete(sha)
                     bad.append(sha)
             inventory.mark_verified(self._session, self.name, good)
+        return bad
+
+    def _verify_pages(self, shas: Iterable[str] | None) -> Iterator[list[str]]:
+        if shas is not None:
+            wanted = list(dict.fromkeys(shas))
+            for i in range(0, len(wanted), 100):
+                yield wanted[i : i + 100]
+            return
+        after = ""
+        assert self._session is not None
+        while page := inventory.unverified(self._session, self.name, after, 100):
+            yield page
             after = page[-1]
 
     # -- straight to the bucket (`direct_files`) -----------------------------

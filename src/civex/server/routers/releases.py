@@ -1,29 +1,42 @@
 """Releases: frozen, citable copies of the data (`domain/release.py`).
 
 Make one (after a plan of what it would hold), list them, read one's manifest
-and citation, check its bundle still holds what it was made with, see what
-changed since, correct its citation details, withdraw it, and download its
-bundle (read into a new project with `POST /bundle/import` to get the data
-back as it was)."""
+and citation, check it still holds what it was made with, see what changed
+since, correct its citation details, withdraw it or yank it (give its data
+up), get its files out the way any selection's are (a folder on a drive, a
+move onto one drive, a zip while it is small), and download its bundle of
+records (read into a new project with `POST /bundle/import`)."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
+from civex import fs_open
 from civex.context import AppContext
 from civex.domain import release as rules
 from civex.domain.dtos import ReleaseDTO
+from civex.domain.exceptions import CivexError, NotFoundError
+from civex.domain.file_access import FilesUnavailableError, LinksNotPossibleError
+from civex.domain.features import OPEN_FOLDER
 from civex.server.deps import get_ctx
+from civex.server.downloads import new_temp_dir, serve, temp_paths
 from civex.server.models import RecordQueryRequest
-from civex.server.routers.bundle import BundlePlanResponse
-from civex.server.routers.file_access import report_progress
+from civex.server.routers.file_access import (
+    _from_this_machine,
+    _unreachable,
+    report_progress,
+)
+from civex.services.archive import build_download
 from civex.services.progress import Progress
+from civex.services.record_service import MAX_ZIP_FILE_COUNT, MAX_ZIP_TOTAL_SIZE
 from civex.services.release_service import ReleaseScope
+from civex.services.transfer_jobs import jobs
 
 router = APIRouter(tags=["releases"])
 
@@ -37,8 +50,9 @@ class ReleaseScopeRequest(BaseModel):
         default=None,
         description="Only the records this query lists, and the records above them.",
     )
-    include_files: bool = Field(
-        default=True, description="Carry the stored files the records cite."
+    records: list[str] | None = Field(
+        default=None,
+        description="Exactly these records (by id), and the records above them.",
     )
     include_workflows: bool = Field(
         default=True, description="Carry the project's workflows and plugins."
@@ -48,32 +62,46 @@ class ReleaseScopeRequest(BaseModel):
         return ReleaseScope(
             collections=self.collections or None,
             query=self.query.to_query() if self.query else None,
+            records=self.records or None,
         )
+
+
+class AuthorModel(BaseModel):
+    name: str = Field(description="As it is cited, e.g. 'Ada Lovelace'.")
+    orcid: str | None = Field(default=None, description="e.g. 0000-0002-1825-0097.")
+    affiliation: str | None = Field(default=None, description="Where they work.")
 
 
 class ReleaseMetadata(BaseModel):
     title: str | None = Field(default=None, description="What the data is.")
     description: str | None = Field(default=None, description="A longer account.")
-    authors: list[str] | None = Field(
-        default=None, description="Authors' names, in citation order."
+    authors: list[AuthorModel] | None = Field(
+        default=None, description="The authors, in citation order."
     )
-    licence: str | None = Field(default=None, description="e.g. CC-BY-4.0.")
+    licence: str | None = Field(
+        default=None, description="An SPDX id (e.g. CC-BY-4.0) or the licence's name."
+    )
     doi: str | None = Field(default=None, description="A DOI, e.g. 10.1234/abcd.")
+    keywords: list[str] | None = Field(default=None, description="Words to find it by.")
+
+    def values(self) -> dict[str, Any]:
+        out = self.model_dump(exclude_unset=True)
+        if "authors" in out and out["authors"] is not None:
+            out["authors"] = [{k: v for k, v in a.items() if v} for a in out["authors"]]
+        return out
 
 
-class ReleaseCreateRequest(ReleaseScopeRequest):
+class ReleaseCreateRequest(ReleaseScopeRequest, ReleaseMetadata):
     name: str = Field(description="The version people cite, e.g. v1 or 2026-thesis.")
     title: str = Field(description="What the data is.")
-    description: str | None = Field(default=None, description="A longer account.")
-    authors: list[str] = Field(
-        default_factory=list, description="Authors' names, in citation order."
-    )
-    licence: str | None = Field(default=None, description="e.g. CC-BY-4.0.")
-    doi: str | None = Field(default=None, description="A DOI, if it has one.")
 
 
-class WithdrawRequest(BaseModel):
-    reason: str = Field(description="Why the release is withdrawn, in plain words.")
+class CitationPreviewRequest(ReleaseMetadata):
+    name: str = Field(default="", description="The version it would have.")
+
+
+class ReasonRequest(BaseModel):
+    reason: str = Field(description="Why, in plain words.")
 
 
 class ReleaseResponse(BaseModel):
@@ -81,18 +109,20 @@ class ReleaseResponse(BaseModel):
     name: str = Field(description="The version, e.g. v1.")
     title: str
     description: str | None
-    authors: list[str]
+    authors: list[dict[str, str]] = Field(
+        description="{name, orcid?, affiliation?} each, in citation order."
+    )
     licence: str | None
     doi: str | None
+    keywords: list[str]
     scope: dict[str, Any] = Field(
-        description="{} the whole project, {collections: [...]}, or {query: {...}}."
+        description="{} the whole project, {collections: [...]}, {query: {...}} or {records: [...]}."
     )
-    include_files: bool
     content_hash: str = Field(
-        description="sha256 over the bundle's contents (not its zip bytes): identical data, identical hash."
+        description="sha256 over the records and the hashes of the files they cite (no file is read): identical data, identical hash."
     )
     bundle_sha256: str = Field(
-        description="The bundle file's own hash: where it is kept, and its download address under /files/."
+        description="The bundle of records' own hash: where it is kept, and its download address under /files/."
     )
     bundle_size: int
     counts: dict[str, Any] = Field(
@@ -111,7 +141,12 @@ class ReleaseResponse(BaseModel):
     withdrawn_at: str | None
     withdrawn_by: str | None
     withdrawn_reason: str | None
-    file_name: str = Field(description="The name a download is saved under.")
+    yanked_at: str | None = Field(
+        description="When its data was given up; what is left is this record of it."
+    )
+    yanked_by: str | None
+    yanked_reason: str | None
+    file_name: str = Field(description="The name the bundle is saved under.")
 
     @classmethod
     def from_dto(cls, r: ReleaseDTO) -> "ReleaseResponse":
@@ -128,13 +163,67 @@ class CitationResponse(BaseModel):
 
 class VerifyResponse(BaseModel):
     name: str
-    matches: bool = Field(description="The bundle holds exactly what it was made with.")
+    matches: bool = Field(description="It holds exactly what it was made with.")
     expected: str = Field(description="The content hash recorded when it was made.")
     actual: str | None = Field(description="The content hash found now.")
     bundle_intact: bool = Field(
         description="The bundle's bytes match the hash it is kept under."
     )
+    files: int = Field(description="Files its records cite.")
+    files_not_here: int = Field(description="Of those, recorded on no drive here.")
+    files_unchecked: int = Field(
+        description="Of those here, never read back against their hash."
+    )
+    files_read: int = Field(description="Deep: files read back.")
+    files_bad: list[str] = Field(description="Deep: files whose bytes didn't match.")
+    deep: bool
     problems: list[str] = Field(description="What is wrong, in plain words.")
+    notes: list[str] = Field(description="What is worth knowing, in plain words.")
+
+
+class ReleasePlanResponse(BaseModel):
+    records: int
+    collections: dict[str, int] = Field(description="Records per collection.")
+    schemas: int
+    files: int = Field(description="Files the records cite (not copied: owned).")
+    file_bytes: int
+    by_drive: list[dict[str, Any]] = Field(
+        description="Where those files are: {volume (None: not here), files, bytes}."
+    )
+    workflows: int
+    plugins: int
+    feed_seq: int | None = Field(description="The server's feed number now.")
+    local_seq: int = Field(description="This copy's history position now.")
+    unsent: int = Field(
+        description="Changes the server hasn't got: a release waits for none."
+    )
+
+
+class YankPlanResponse(BaseModel):
+    name: str
+    files: int = Field(description="Files the release keeps now.")
+    unused_files: int = Field(
+        description="Of those, used by nothing else: a clean-up then removes them."
+    )
+    unused_bytes: int
+    kept_files: int = Field(description="Of those, still used by something else.")
+
+
+class ReleaseExportRequest(BaseModel):
+    mode: str = Field(
+        default="link",
+        description="link: a folder on the drive holding most of the files; copy: copies on `volume`.",
+    )
+    volume: str | None = Field(default=None, description="Where copies go (copy).")
+    name: str | None = Field(default=None, description="The folder's name.")
+    allow_partial: bool = Field(
+        default=False, description="Make it with what can be reached."
+    )
+    open: bool = Field(default=False, description="Open the folder when made.")
+
+
+class ReleaseGatherRequest(BaseModel):
+    volume: str = Field(description="The drive to put the release's files on.")
 
 
 class CollectionChangesResponse(BaseModel):
@@ -170,14 +259,25 @@ def list_releases(ctx: AppContext = Depends(get_ctx)):
     return [ReleaseResponse.from_dto(r) for r in ctx.release_svc.list_all()]
 
 
-@router.post("/releases/plan", response_model=BundlePlanResponse)
+@router.post("/releases/plan", response_model=ReleasePlanResponse)
 def plan_release(body: ReleaseScopeRequest, ctx: AppContext = Depends(get_ctx)):
-    """What a release of this scope would hold, without making it: the
-    bundle's own plan (counts, file sizes, files out of reach)."""
-    plan = ctx.release_svc.plan(
-        body.scope(), body.include_files, body.include_workflows
+    """What a release of this scope would hold, without making it, from the
+    catalog: records per collection, the files they cite by drive, and the
+    history position it would be taken at."""
+    plan = ctx.release_svc.plan(body.scope(), body.include_workflows)
+    return ReleasePlanResponse(**plan.to_dict())
+
+
+@router.post("/releases/citation-preview", response_model=CitationResponse)
+def preview_citation(body: CitationPreviewRequest, ctx: AppContext = Depends(get_ctx)):
+    """How a release with these details would be cited, before it is made."""
+    values = body.values()
+    return CitationResponse(
+        **{
+            form: ctx.release_svc.preview(values, body.name, form)
+            for form in rules.CITATION_FORMATS
+        }
     )
-    return BundlePlanResponse(**plan.to_dict())
 
 
 @router.post("/releases", response_model=ReleaseResponse, status_code=201)
@@ -186,19 +286,22 @@ def create_release(
     progress: Progress | None = Depends(report_progress),
     ctx: AppContext = Depends(get_ctx),
 ):
-    """Freeze the scope as a release: write its bundle, hash its contents, add
-    a CITATION.cff, keep it in the project's storage and record the manifest.
-    Needs permission to change the project's structure. Refused on a synced
-    copy with changes the server hasn't got yet (sync first)."""
+    """Freeze the scope as a release: write the bundle of its records, hash
+    it (the hash covers each cited file by its sha256), add a CITATION.cff,
+    keep it in the project's storage and own the files the records cite
+    (where they are: nothing is copied, and no drive is asked). Needs
+    permission to change the project's structure. Refused on a synced copy
+    with changes the server hasn't got yet (sync first)."""
+    values = body.values()
     made = ctx.release_svc.create(
         body.name,
         body.title,
         body.scope(),
-        description=body.description,
-        authors=body.authors,
-        licence=body.licence,
-        doi=body.doi,
-        include_files=body.include_files,
+        description=values.get("description"),
+        authors=values.get("authors"),
+        licence=values.get("licence"),
+        doi=values.get("doi"),
+        keywords=values.get("keywords"),
         include_workflows=body.include_workflows,
         progress=progress,
     )
@@ -217,19 +320,39 @@ def correct_release(
     name: str, body: ReleaseMetadata, ctx: AppContext = Depends(get_ctx)
 ):
     """Correct a release's citation details (title, description, authors,
-    licence, DOI). Its content never changes; the correction is in history."""
-    values = body.model_dump(exclude_unset=True)
-    release = ctx.release_svc.correct(name, **values)
+    licence, DOI, keywords). Its content never changes; the correction is in
+    history."""
+    release = ctx.release_svc.correct(name, **body.values())
     ctx.commit()
     return ReleaseResponse.from_dto(release)
 
 
 @router.post("/releases/{name}/withdraw", response_model=ReleaseResponse)
 def withdraw_release(
-    name: str, body: WithdrawRequest, ctx: AppContext = Depends(get_ctx)
+    name: str, body: ReasonRequest, ctx: AppContext = Depends(get_ctx)
 ):
-    """Mark a release withdrawn, saying why. It and its bundle are kept."""
+    """Mark a release withdrawn, saying why. It keeps its data."""
     release = ctx.release_svc.withdraw(name, body.reason)
+    ctx.commit()
+    return ReleaseResponse.from_dto(release)
+
+
+@router.get("/releases/{name}/yank", response_model=YankPlanResponse)
+def plan_yank(name: str, ctx: AppContext = Depends(get_ctx)):
+    """What yanking the release would give up: how many of its files (and
+    bytes) nothing else uses, so a clean-up then removes them, and how many
+    stay for their other users. Counted from the catalog by the clean-up's
+    own rule; nothing changes."""
+    return YankPlanResponse(**ctx.release_svc.plan_yank(name).to_dict())
+
+
+@router.post("/releases/{name}/yank", response_model=ReleaseResponse)
+def yank_release(name: str, body: ReasonRequest, ctx: AppContext = Depends(get_ctx)):
+    """Give the release's data up for good, saying why: it stops keeping its
+    files and its bundle (a clean-up removes what nothing else uses), and what
+    is left is a record of it (name, hash, citation, who, when and why) that a
+    citation still finds. It is withdrawn too. Can't be undone."""
+    release = ctx.release_svc.yank(name, body.reason)
     ctx.commit()
     return ReleaseResponse.from_dto(release)
 
@@ -246,12 +369,147 @@ def cite_release(name: str, ctx: AppContext = Depends(get_ctx)):
 
 
 @router.post("/releases/{name}/verify", response_model=VerifyResponse)
-def verify_release(name: str, ctx: AppContext = Depends(get_ctx)):
-    """Read the stored bundle back and recompute its content hash (and every
-    carried file's against its own): whether it still holds exactly what the
-    release was made with. Fetches the bundle from the server first on a copy
-    that hasn't got it."""
-    return VerifyResponse(**ctx.release_svc.verify(name).to_dict())
+def verify_release(
+    name: str,
+    deep: bool = False,
+    progress: Progress | None = Depends(report_progress),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Whether the release still holds what it was made with: its bundle read
+    back and its content hash recomputed, and every file it cites recorded on
+    a drive here (no file is read). With `deep`, every file here is read back
+    against its hash too: a long job for a large release, reporting its
+    progress like an export (`X-Civex-Progress`)."""
+    result = ctx.release_svc.verify(name, deep=deep, progress=progress)
+    if deep:
+        ctx.commit()  # the copies read back are marked checked
+    return VerifyResponse(**result.to_dict())
+
+
+@router.post("/releases/{name}/files/plan")
+def plan_release_files(
+    name: str,
+    progress: Progress | None = Depends(report_progress),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Every file the release cites at its path in the record hierarchy (the
+    same paths as any export), whether each can be reached now (what can't,
+    grouped by drive, with what to do), and whether it is small enough to
+    download as a zip (`zip_allowed`)."""
+    plan = ctx.release_svc.file_plan(name, progress)
+    out = plan.to_dict(False)
+    out["zip_allowed"] = _zip_allowed(plan)
+    return out
+
+
+@router.post("/releases/{name}/files/export")
+def export_release_files(
+    name: str,
+    body: ReleaseExportRequest,
+    request: Request,
+    progress: Progress | None = Depends(report_progress),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Make a folder of the release's files, as any export makes one (`link`:
+    on the drive holding most of them, hard links where it can; `copy`: copies
+    on `volume`), with `manifest-sha256.txt` (BagIt: each file's hash and
+    path), `release.json` and `CITATION.cff`. 409 as an export when files are
+    out of reach or the drive can't be written to."""
+    try:
+        with ctx.release_svc.file_access(name) as (access, selection):
+            result = access.export_managed(
+                selection,
+                body.name or f"release-{name}",
+                body.mode,
+                body.volume,
+                allow_partial=body.allow_partial,
+                progress=progress,
+            )
+            plan = access.plan(selection)
+    except FilesUnavailableError as e:
+        return _unreachable(e)
+    except LinksNotPossibleError as e:
+        return JSONResponse(
+            status_code=409, content={"detail": str(e), "code": "links_not_possible"}
+        )
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except CivexError as e:
+        raise HTTPException(422, detail=str(e))
+    ctx.release_svc.write_bag(name, Path(result.dest), plan)
+    opened = (
+        body.open
+        and OPEN_FOLDER in ctx.features
+        and _from_this_machine(request)
+        and fs_open.open_folder(Path(result.dest))
+    )
+    return {**result.to_dict(), "opened": bool(opened)}
+
+
+@router.post("/releases/{name}/files/zip")
+def zip_release_files(
+    name: str,
+    allow_partial: bool = False,
+    progress: Progress | None = Depends(report_progress),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """The release's files (with its manifest and citation) as one zip, for a
+    release small enough to download (at most the zip limit); a larger one is
+    made into a folder on a drive instead (422)."""
+    with ctx.release_svc.file_access(name) as (access, selection):
+        plan = access.plan(selection, progress=progress, fetch=True)
+        if not _zip_allowed(plan):
+            raise HTTPException(
+                422,
+                detail="This release is too large to download as one zip: make "
+                "a folder of it on a drive instead.",
+            )
+        if not plan.complete and not allow_partial:
+            return _unreachable(FilesUnavailableError(plan))
+        with temp_paths() as tmp:
+            scratch = new_temp_dir()
+            tmp.append(scratch)
+            bag = scratch / "bag"
+            bag.mkdir()
+            beside = ctx.release_svc.write_bag(name, bag, plan)
+            try:
+                download = build_download(
+                    access,
+                    ctx.file_svc,
+                    selection,
+                    plan,
+                    scratch,
+                    name=f"release-{name}",
+                    beside=beside,
+                )
+            except FileNotFoundError as e:
+                raise HTTPException(404, detail=f"A file is no longer stored: {e}")
+            tmp.remove(scratch)
+            return serve(download.path, download.media_type, download.filename, scratch)
+
+
+@router.post("/releases/{name}/files/gather", status_code=202)
+def gather_release_files(
+    name: str, body: ReleaseGatherRequest, ctx: AppContext = Depends(get_ctx)
+):
+    """Put the release's files on one drive, as any move does (one at a time,
+    safe to pause, cancel or lose power; see /store/transfers). Only the
+    release's own copies move: a copy its records use elsewhere stays, so it
+    is copied."""
+    record = jobs.start(ctx.release_svc.gather_spec(name, body.volume))
+    return {
+        "transfer_id": record.id,
+        "volume": body.volume,
+        "files": record.plan.files if record.plan else 0,
+        "bytes": record.plan.bytes if record.plan else 0,
+    }
+
+
+def _zip_allowed(plan: Any) -> bool:
+    return (
+        len(plan.items) <= MAX_ZIP_FILE_COUNT
+        and sum(i.size for i in plan.items) <= MAX_ZIP_TOTAL_SIZE
+    )
 
 
 @router.get("/releases/{name}/changes", response_model=ChangesSinceResponse)
@@ -268,9 +526,10 @@ def release_changes(name: str, ctx: AppContext = Depends(get_ctx)):
     responses={307: {"description": "Where the bundle is downloaded from."}},
 )
 def download_release(name: str, ctx: AppContext = Depends(get_ctx)):
-    """Download a release's bundle: answered with where it is
+    """Download a release's bundle of records: answered with where it is
     (`/files/{bundle_sha256}`, named for the release), after fetching it from
-    the server on a copy that hasn't got it. 404 when it can't be had."""
+    the server on a copy that hasn't got it. 404 when it can't be had (or it
+    was yanked)."""
     release, here = ctx.release_svc.bundle_here(name)
     if not here:
         raise HTTPException(

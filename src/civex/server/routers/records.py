@@ -498,6 +498,19 @@ def restore_selected_records(
     )
 
 
+@router.get("/records/{record_id}/purge-plan")
+def purge_plan(record_id: str, ctx: AppContext = Depends(get_ctx)):
+    """What permanently deleting this record removes: how many records (it and
+    everything beneath it), and, of the files they cite, how many each release
+    keeps (`kept_by_releases`, by release name): those stay on the drives
+    until the release is yanked."""
+    try:
+        ids = ctx.record_svc.purge_set(record_id)
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    return {"records": len(ids), "kept_by_releases": ctx.release_svc.kept_for(ids)}
+
+
 @router.delete("/records/{record_id}/purge", status_code=204)
 def purge_record(record_id: str, ctx: AppContext = Depends(get_ctx)):
     try:
