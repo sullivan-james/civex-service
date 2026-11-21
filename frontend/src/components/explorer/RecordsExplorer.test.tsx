@@ -902,6 +902,40 @@ describe('RecordsExplorer', () => {
     expect(within(rail).getByText('Selection')).toBeInTheDocument()
   })
 
+  it('inside a record it is just the rows, with its tools opened in place', async () => {
+    const user = userEvent.setup()
+    renderExplorer({ root: { id: 'e1' }, scopeLabel: 'E1' }, '/records/e1')
+    await screen.findByText('96')
+    // The kinds inside are a click each.
+    const kinds = screen.getByLabelText('Kinds inside')
+    expect(
+      within(kinds).getByRole('button', { name: /Recording/ }),
+    ).toHaveAttribute('aria-pressed', 'true')
+    expect(
+      within(kinds).getByRole('button', { name: /Selection/ }),
+    ).toBeInTheDocument()
+    // The page's own heading says where we are: no trail repeating it.
+    expect(screen.queryByRole('heading', { name: 'Recording' })).toBeNull()
+    // Charts are a button away, as on any list.
+    expect(screen.getByRole('button', { name: 'Charts' })).toBeInTheDocument()
+    // No tools until asked for; and no second place to go for them.
+    expect(screen.getByRole('searchbox')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Filter$/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Export/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Columns/ })).toBeNull()
+    expect(screen.queryByRole('checkbox')).toBeNull()
+    expect(screen.queryByRole('link', { name: /Filter and chart/ })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Filter and chart' }))
+    expect(screen.getByRole('button', { name: /Filter$/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Export/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Columns/ })).toBeInTheDocument()
+    expect(screen.getAllByRole('checkbox').length).toBeGreaterThan(0)
+    // Still the same list, inside the same record.
+    expect(lastRecordCall().params.get('within')).toBe('e1')
+    await user.click(screen.getByRole('button', { name: 'Fewer tools' }))
+    expect(screen.queryByRole('button', { name: /^Export/ })).toBeNull()
+  })
+
   it('moving up a level sets aside a sort and a bare filter that only fit the level below', async () => {
     const user = userEvent.setup()
     const bare = JSON.stringify({ field: 'selection_table', op: 'is_null' })

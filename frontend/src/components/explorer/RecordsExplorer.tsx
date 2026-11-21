@@ -141,6 +141,11 @@ export function RecordsExplorer({
   const dataset = scope.dataset
   // Shown under a record's fields ("Inside this …"): a quieter explorer.
   const inside = !!scope.root
+  // There it starts as just the rows. Its tools (filters, saved filters,
+  // columns, charts, export, ticking rows) open in place, in this same list,
+  // so there is one place for a record's contents, not two.
+  const [tools, setTools] = useState(false)
+  const quiet = inside && !tools && !x.filter
   const { data: collection } = useCollection(dataset ?? '')
   const location = useLocation()
 
@@ -205,7 +210,7 @@ export function RecordsExplorer({
       !x.page.error &&
       x.page.data !== undefined &&
       // Not counted under a record's fields, where it isn't shown.
-      (showChecks || (!inside && listedTotal <= CHECK_COUNT_UP_TO))
+      (showChecks || (!quiet && listedTotal <= CHECK_COUNT_UP_TO))
       ? queryBody({ ...x.query, sort: undefined }, dataset)
       : null,
   )
@@ -217,14 +222,15 @@ export function RecordsExplorer({
   // this project (not, to start with, on a narrow screen). `charts` is the
   // charts at full width: a screen over the same records, with a way back.
   const [layout, setLayout] = useStored<ExplorerLayout>(
-    'explorer.layout',
-    typeof window !== 'undefined' && window.innerWidth < 1024
+    // Under a record's fields charts start folded, remembered apart from a
+    // collection's list.
+    inside ? 'explorer.layout.inside' : 'explorer.layout',
+    inside || (typeof window !== 'undefined' && window.innerWidth < 1024)
       ? 'records'
       : 'both',
   )
-  // Under a record's own fields the page is just the rows: no charts there.
-  const chartsHidden = inside || layout === 'records'
-  const chartsOnly = !inside && layout === 'charts' && !!listed
+  const chartsHidden = layout === 'records'
+  const chartsOnly = layout === 'charts' && !!listed
   const [chartsAsked, setChartsAsked] = useState(false)
   // Problems and files are screens of their own over the same records:
   // the charts, which count records, step aside.
@@ -267,7 +273,7 @@ export function RecordsExplorer({
   // --- totals under the table, for every record listed.
   const totalsAsk = listed ? totalsMeasures(x.columnNames, listed.fields) : []
   const totals = useRecordSummary(
-    rowsIn && !inside && totalsAsk.length > 0 && listedTotal > 0
+    rowsIn && !quiet && totalsAsk.length > 0 && listedTotal > 0
       ? { ...records, group_by: [], measures: totalsAsk }
       : null,
   )
@@ -635,8 +641,12 @@ export function RecordsExplorer({
   return (
     <div>
       <div className="min-w-0 space-y-3">
-        <ScopeTrail items={trail} heading={listedLabel} />
-        {inside && kindsInside.length > 1 && (
+        {/* Under a record's own heading ("Inside this …") its name and the
+            kind listed would only repeat it: the chips say the kind. */}
+        {(!inside || !!state.within) && (
+          <ScopeTrail items={trail} heading={listedLabel} />
+        )}
+        {inside && kindsInside.length > 0 && (
           // What is inside, a kind at a time: one click each.
           <div className="flex flex-wrap gap-2" aria-label="Kinds inside">
             {kindsInside.map((l) => (
@@ -670,7 +680,7 @@ export function RecordsExplorer({
               />
             </Field>
           </div>
-          {!inside && !showFiles && x.searchFields.length > 1 && (
+          {!quiet && !showFiles && x.searchFields.length > 1 && (
             // Which field the search looks in: every one, or just one.
             <Field label="Search in" hideLabel>
               <Select
@@ -707,9 +717,10 @@ export function RecordsExplorer({
 
         {/* The view's own controls: which rows (saved filters and the conditions
             below), which columns, and Export of what that leaves. Inside a
-            record's page they are a step away (the link under the count). */}
+            record's page they open with the list's other tools. */}
         <div
-          className={`flex flex-wrap items-start gap-2 ${inside ? 'hidden' : ''}`}
+          hidden={quiet}
+          className={`flex flex-wrap items-start gap-2 ${quiet ? 'hidden' : ''}`}
         >
           <div className="min-w-0 flex-1">
             {/* A saved filter belongs to one kind of record. */}
@@ -793,7 +804,7 @@ export function RecordsExplorer({
           </div>
         </div>
 
-        {(listed || allKinds) && (!inside || x.filter) && (
+        {(listed || allKinds) && (!quiet || x.filter) && (
           <FilterControls
             wire={x.filter}
             fields={x.filterFields}
@@ -896,7 +907,7 @@ export function RecordsExplorer({
                         </p>
                       )}
                       {listed &&
-                        !inside &&
+                        !quiet &&
                         !!issuesFound &&
                         !showChecks &&
                         !showFiles && (
@@ -915,7 +926,7 @@ export function RecordsExplorer({
                           </Button>
                         )}
                       {/* Beside the count of the records whose columns they are. */}
-                      {!inside && !aside && !chartsOnly && columnsButton}
+                      {!quiet && !aside && !chartsOnly && columnsButton}
                       {(showChecks || showFiles) && (
                         <Button
                           size="sm"
@@ -926,28 +937,22 @@ export function RecordsExplorer({
                         </Button>
                       )}
                       <div className="ml-auto flex items-center gap-2">
-                        {chartsHidden && listed && !aside && !inside && (
+                        {chartsHidden && listed && !aside && (
                           // Folded away: the way back says what it opens, at
                           // the right-hand edge of the table.
                           <Button size="sm" onClick={() => setLayout('both')}>
                             <PanelRightOpen size={14} /> Charts
                           </Button>
                         )}
-                        {inside && listed && collection && !aside && (
-                          // Everything else a list can do (filters, charts,
-                          // columns, export, ticking rows) is one step away,
-                          // on the same records.
+                        {inside && listed && !aside && !x.filter && (
+                          // The list's own tools, opened here.
                           <Button
                             size="sm"
                             variant="ghost"
-                            to={`/collections/${collection.id}?${new URLSearchParams(
-                              {
-                                schema: listed.name,
-                                ...(x.rootId ? { within: x.rootId } : {}),
-                              },
-                            )}`}
+                            aria-expanded={tools}
+                            onClick={() => setTools((on) => !on)}
                           >
-                            Filter and chart these
+                            {tools ? 'Fewer tools' : 'Filter and chart'}
                           </Button>
                         )}
                       </div>
@@ -1184,10 +1189,10 @@ export function RecordsExplorer({
                             sort={sort}
                             onSortChange={toggleSort}
                             selection={
-                              dataset && !inside ? picked.table : undefined
+                              dataset && !quiet ? picked.table : undefined
                             }
                             totals={
-                              !inside && totalsAsk.length > 0 && totals.data
+                              !quiet && totalsAsk.length > 0 && totals.data
                                 ? {
                                     label: `All ${total.toLocaleString()}`,
                                     cells: totalsCells(

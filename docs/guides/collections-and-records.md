@@ -98,8 +98,9 @@ any unique prefix of it works wherever an id is asked for.
 A collection's page is its records, in one explorer. A record's page shows
 its fields (the first few, with **Show all**, when it has records inside it)
 and then **Inside this …**: a chip for each kind inside with its count, a
-search, and the rows, each a link to that record. **Filter and chart these**
-opens the same records in the full explorer. Files, Exports, Activity and
+search, and the rows, each a link to that record. **Charts** opens the
+charts beside them, and **Filter and chart** opens the list's other tools
+(filters, saved filters, columns, export, ticking rows) right there. Files, Exports, Activity and
 the collection's details are in the **⋯** menu at the top of the page.
 
 The explorer has three ideas. **Records** are the rows: each row is one
