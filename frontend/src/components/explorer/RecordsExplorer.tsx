@@ -17,7 +17,6 @@ import {
   ConfirmDialog,
   EmptyState,
   ErrorState,
-  IconButton,
   Input,
   Pagination,
   Menu,
@@ -781,61 +780,6 @@ export function RecordsExplorer({
           </p>
         )}
 
-        {!x.page.error && (
-          // The results: which records the filters above found, and whether
-          // to see them or their files. A rule sets them apart from the
-          // filters.
-          <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
-            {showFiles ? (
-              // The files of what is listed: an occasional job (moving,
-              // downloading), reached from the page's menu, not a peer of
-              // the records.
-              <Subheading as="h2">Files</Subheading>
-            ) : (
-              <p className="text-base" aria-live="polite">
-                <span className="font-semibold text-fg">
-                  {total.toLocaleString()}
-                </span>{' '}
-                {inScope !== null && inScope !== total && (
-                  <>of {inScope.toLocaleString()} </>
-                )}
-                {total === 1 ? listedLabel.toLowerCase() : plural(listedLabel)}
-              </p>
-            )}
-            {listed && !!issuesFound && !showChecks && !showFiles && (
-              // A fact beside the count: nothing is shown when all is well.
-              <Button
-                size="sm"
-                variant="link"
-                onClick={() => setShow('checks')}
-              >
-                <AlertTriangle size={14} className="text-attention" />
-                {issuesFound.toLocaleString()}{' '}
-                {issuesFound === 1 ? 'problem' : 'problems'}
-              </Button>
-            )}
-            {/* Beside the count of the records whose columns they are. */}
-            {!aside && !chartsOnly && columnsButton}
-            {(showChecks || showFiles) && (
-              <Button size="sm" variant="link" onClick={() => setShow(null)}>
-                Back to records
-              </Button>
-            )}
-            {chartsOnly && !aside && (
-              // The charts at full width are a screen over the same
-              // records, like their files and their problems.
-              <Button
-                size="sm"
-                variant="link"
-                onClick={() => setLayout('both')}
-              >
-                Back to records
-              </Button>
-            )}
-            <div className="ml-auto flex items-center gap-2"></div>
-          </div>
-        )}
-
         {charts.building && listed && !aside && (
           <NewChart
             listed={listed}
@@ -863,7 +807,8 @@ export function RecordsExplorer({
           />
         )}
 
-        <div className="flex items-start gap-2">
+        {/* A rule sets the results apart from the filters above. */}
+        <div className="flex items-start gap-2 border-t border-border pt-4">
           <div className="min-w-0 flex-1">
             <SplitPane
               storageKey="explorer.charts.width"
@@ -891,11 +836,61 @@ export function RecordsExplorer({
                     onCollapse={
                       chartsOnly ? undefined : () => setLayout('records')
                     }
+                    onBack={chartsOnly ? () => setLayout('both') : undefined}
                   />
                 ) : undefined
               }
               main={
                 <div className="min-w-0 space-y-3">
+                  {!x.page.error && (
+                    // The records' own heading: how many, and what is about them. It
+                    // is level with the charts panel's heading beside it.
+                    <div className="flex min-h-9 flex-wrap items-center gap-3">
+                      {showFiles ? (
+                        // The files of what is listed: an occasional job (moving,
+                        // downloading), reached from the page's menu, not a peer of
+                        // the records.
+                        <Subheading as="h2">Files</Subheading>
+                      ) : (
+                        <p className="text-base" aria-live="polite">
+                          <span className="font-semibold text-fg">
+                            {total.toLocaleString()}
+                          </span>{' '}
+                          {inScope !== null && inScope !== total && (
+                            <>of {inScope.toLocaleString()} </>
+                          )}
+                          {total === 1
+                            ? listedLabel.toLowerCase()
+                            : plural(listedLabel)}
+                        </p>
+                      )}
+                      {listed && !!issuesFound && !showChecks && !showFiles && (
+                        // A fact beside the count: nothing is shown when all is well.
+                        <Button
+                          size="sm"
+                          variant="link"
+                          onClick={() => setShow('checks')}
+                        >
+                          <AlertTriangle size={14} className="text-attention" />
+                          {issuesFound.toLocaleString()}{' '}
+                          {issuesFound === 1 ? 'problem' : 'problems'}
+                        </Button>
+                      )}
+                      {/* Beside the count of the records whose columns they are. */}
+                      {!aside && !chartsOnly && columnsButton}
+                      {(showChecks || showFiles) && (
+                        <Button
+                          size="sm"
+                          variant="link"
+                          onClick={() => setShow(null)}
+                        >
+                          Back to records
+                        </Button>
+                      )}
+                      <div className="ml-auto flex items-center gap-2"></div>
+                    </div>
+                  )}
+
                   {showChecks && listed ? (
                     <ChecksView
                       query={x.query}
@@ -1164,14 +1159,11 @@ export function RecordsExplorer({
             />
           </div>
           {chartsHidden && listed && !aside && !x.page.error && (
-            // Folded away: a strip with the way back, as the navigation's.
-            <div className="hidden shrink-0 border-l border-border pl-1 lg:block">
-              <IconButton
-                icon={PanelRightOpen}
-                size="sm"
-                aria-label="Expand charts"
-                onClick={() => setLayout('both')}
-              />
+            // Folded away: the way back says what it opens.
+            <div className="hidden shrink-0 lg:block">
+              <Button size="sm" onClick={() => setLayout('both')}>
+                <PanelRightOpen size={14} /> Charts
+              </Button>
             </div>
           )}
         </div>

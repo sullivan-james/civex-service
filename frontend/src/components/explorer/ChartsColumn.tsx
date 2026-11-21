@@ -24,6 +24,7 @@ export function ChartsColumn({
   onShow,
   onExpand,
   onCollapse,
+  onBack,
 }: {
   model: ExplorerCharts
   listed: Schema
@@ -41,14 +42,24 @@ export function ChartsColumn({
   onExpand?: () => void
   /** Fold the panel away to its strip. */
   onCollapse?: () => void
+  /** At full width: the way back to the records. */
+  onBack?: () => void
 }) {
   const { can, canSomewhere, why } = usePermissions()
   const addToAnalytics = useAddToAnalytics()
   const mayAdd = canSomewhere('write_records')
   return (
     <section aria-label="Charts" className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <Subheading as="h2">Charts</Subheading>
+      {/* Level with the records' heading beside it. */}
+      <div className="flex min-h-9 flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-3">
+          <Subheading as="h2">Charts</Subheading>
+          {onBack && (
+            <Button size="sm" variant="link" onClick={onBack}>
+              Back to records
+            </Button>
+          )}
+        </div>
         {/* The panel's own controls, as the navigation's on the left. */}
         <div className="flex items-center">
           {onExpand && (

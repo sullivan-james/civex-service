@@ -155,8 +155,8 @@ collection, schema and field (`GET /api/records/{id}/referrers`).
 ### Charts
 
 Charts are a panel beside the records. Like the navigation on the left, it
-folds away to a strip with the button at its top and opens again from the
-strip; another button shows the charts at full width, with **Back to
+folds away with the button at its top and opens again from the **Charts**
+button it leaves; another button shows the charts at full width, with **Back to
 records**. Drag the line between the records and the charts to make the panel
 wider (the cards then sit in two columns). These choices are remembered in
 this browser. Every chart counts

@@ -1638,7 +1638,7 @@ describe('charts beside the records', () => {
     const second = renderExplorer({}, '/collections/hb?schema=recording')
     await screen.findByRole('table')
     expect(screen.queryByRole('region', { name: 'Charts' })).toBeNull()
-    await user.click(screen.getByRole('button', { name: 'Expand charts' }))
+    await user.click(screen.getByRole('button', { name: 'Charts' }))
     // Full width is a screen over the same records, with a way back.
     await user.click(
       within(await charts()).getByRole('button', {
