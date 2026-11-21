@@ -100,6 +100,12 @@ A collection's page (and a record's **Contains** tab) is one explorer:
 - **Levels:** the collection's schemas top-down (Site → Visit → Sample),
   with counts. A row shows its children ("3 visits →"). Click to go down, and
   use the trail to go back up.
+- **All kinds**, the first of the levels, lists every kind of record at once
+  (in the collection, in every collection on **All records**, or inside the
+  record you are in), with its name, kind, collection and when it was last
+  edited. It can be searched, filtered by open notes, sorted by those columns,
+  moved and deleted; filtering by a field, **Summary**, **Check data**,
+  **Edit…** and **Run workflow** need one kind, so pick one first.
 - **Search** is scoped to where you are. It looks, ignoring case, in what the
   records hold: text, numbers, the items of a list (tags, choices) and the
   names of files. It never matches a file's hash, a reference or a location,
@@ -317,9 +323,11 @@ its replies too, and restoring it brings them back.
 
 The record's header says how many threads are still open, and links to its
 Notes tab. **Open notes** in the sidebar lists every record with an open
-thread, in every collection: it is the **All records** tab of Collections,
-filtered with **Has open notes**, so the usual search, filters and columns
-work on it, and a record opens on its Notes tab. The **Open notes** column
+thread, of every kind, in every collection: it is the **All records** tab of
+Collections with **All kinds** picked, filtered with **Has open notes**, so
+search and the Open notes filter work on it, and a record opens on its Notes
+tab. Pick a kind to filter by its fields too. **Open notes inside** on a
+record's Notes tab lists the same for everything inside that record. The **Open notes** column
 (**Columns › Open notes**) shows how many threads are open and the first line
 of the latest, in any list.
 

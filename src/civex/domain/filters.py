@@ -139,3 +139,6 @@ class SortKey:
     # An ancestor's field ("up") or the record's own ("self"); sorting by a
     # descendant's field is ill-defined (many per record) and never built.
     rel: Relation = SELF
+    # Or none of its fields: one of `query.META_SORTS` (then `field_id` is
+    # empty), what a list of every kind sorts by.
+    meta: str | None = None

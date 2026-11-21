@@ -20,11 +20,14 @@ export function HierarchyRail({
   levels,
   current,
   onPick,
+  allKinds,
   footer,
 }: {
   levels: RailLevel[]
   current: string | null
   onPick: (schema: Schema) => void
+  /** The first choice, "All kinds": every kind at once (in scope). */
+  allKinds?: { active: boolean; onPick: () => void }
   /** Under the levels: the way to a new schema, kept apart from New. */
   footer?: ReactNode
 }) {
@@ -36,8 +39,20 @@ export function HierarchyRail({
       <h2 className="mb-1 hidden border-b border-border px-2 pb-2 pt-1 text-sm font-semibold text-fg md:block">
         Hierarchy
       </h2>
+      {allKinds && (
+        <ListButton
+          onClick={allKinds.onPick}
+          active={allKinds.active}
+          aria-current={allKinds.active ? 'true' : undefined}
+          className={`whitespace-nowrap rounded-md ${
+            allKinds.active ? 'font-semibold text-accent-emphasis' : 'text-fg'
+          }`}
+        >
+          All kinds
+        </ListButton>
+      )}
       {levels.map(({ schema, depth, count }) => {
-        const active = schema.name === current
+        const active = !allKinds?.active && schema.name === current
         return (
           <ListButton
             key={schema.id}

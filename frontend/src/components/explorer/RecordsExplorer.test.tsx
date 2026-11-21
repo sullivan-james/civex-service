@@ -604,6 +604,84 @@ describe('RecordsExplorer', () => {
     ).toBe(true)
   })
 
+  it('lists every kind at once, with what every record has', async () => {
+    const user = userEvent.setup()
+    override = (url) =>
+      url.pathname === '/api/collections/hb/records' &&
+      !url.searchParams.get('schema')
+        ? json(
+            page([
+              { ...E1, collection: 'hb' },
+              { ...R1, collection: 'hb' },
+              { ...S1, collection: 'hb' },
+            ]),
+          )
+        : undefined
+    renderExplorer({}, '/collections/hb?schema=*')
+    expect(await screen.findByText('E1')).toBeInTheDocument()
+    expect(lastRecordCall().params.get('schema')).toBeNull()
+    for (const kind of ['Encounter', 'Recording', 'Selection'])
+      expect(
+        within(screen.getByRole('table')).getByText(kind),
+      ).toBeInTheDocument()
+    expect(
+      screen.getByRole('columnheader', { name: /Last edited/ }),
+    ).toBeInTheDocument()
+    // The kind list offers All kinds, and it is the one picked.
+    expect(screen.getByRole('button', { name: 'All kinds' })).toHaveAttribute(
+      'aria-current',
+      'true',
+    )
+    // What needs one kind's fields is switched off, saying why.
+    expect(screen.getByRole('radio', { name: 'Summary' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Check data' })).toHaveAttribute(
+      'title',
+      'Pick a kind of record to check their data',
+    )
+    expect(screen.queryByRole('button', { name: 'Choose columns' })).toBeNull()
+    await user.click(screen.getByRole('checkbox', { name: /Select record E1/ }))
+    expect(screen.getByRole('button', { name: 'Edit…' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Run workflow' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Move to…' })).toBeEnabled()
+    // Picking a kind lists that kind as before.
+    await user.click(screen.getByRole('button', { name: /^Recording/ }))
+    await waitFor(() => expect(search().get('schema')).toBe('recording'))
+  })
+
+  it('finds open notes on any kind from All records', async () => {
+    const filter = JSON.stringify({
+      field: '@open_notes',
+      op: 'eq',
+      value: true,
+    })
+    override = (url) =>
+      url.pathname === '/api/records/all'
+        ? json(
+            page([
+              {
+                ...S1,
+                collection: 'hb',
+                open_notes: 1,
+                latest_note: 'wrong table',
+              },
+            ]),
+          )
+        : undefined
+    renderExplorer(
+      { dataset: undefined },
+      `/collections?tab=records&filter=${encodeURIComponent(filter)}`,
+    )
+    expect(await screen.findByText('1 open · wrong table')).toBeInTheDocument()
+    const sent = calls.filter((c) => c.path === '/api/records/all').pop()!
+    expect(sent.params.get('schema')).toBeNull()
+    expect(sent.params.get('filter')).toBe(filter)
+    expect(
+      screen
+        .getAllByRole('link')
+        .some((a) => a.getAttribute('href') === '/records/s1?tab=notes'),
+    ).toBe(true)
+  })
+
   it('keeps the filter as you drill, so the question stays the same', async () => {
     const user = userEvent.setup()
     // "encounters that have a selection with an empty table", then drill in

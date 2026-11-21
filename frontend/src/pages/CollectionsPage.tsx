@@ -14,6 +14,7 @@ import {
   TabPanel,
   useTabParam,
 } from '../components/ui'
+import { HierarchySidebar } from '../components/explorer/HierarchySidebar'
 import { RecordsExplorer } from '../components/explorer/RecordsExplorer'
 import { pluralise } from '../lib/utils'
 import { errorMessage } from '../lib/errors'
@@ -201,7 +202,13 @@ export default function CollectionsPage() {
       </TabPanel>
 
       <TabPanel id="records" value={tab}>
-        <RecordsExplorer scopeLabel="All collections" />
+        {/* The kinds of record in every collection, and All kinds. */}
+        <div className="flex flex-col gap-4 md:flex-row md:items-start">
+          <HierarchySidebar />
+          <div className="min-w-0 flex-1">
+            <RecordsExplorer scopeLabel="All collections" />
+          </div>
+        </div>
       </TabPanel>
     </Page>
   )

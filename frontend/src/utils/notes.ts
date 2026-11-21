@@ -31,11 +31,21 @@ export function noteFilterFields(): FilterableField[] {
 
 const OPEN: FilterTreeWire = { field: OPEN_NOTES_FILTER, op: 'eq', value: true }
 
-/** Every record with an open thread, across every collection: the
- * Collections page's All records, filtered. The one place to see what is
- * open; the same list for everyone. */
+/** Every record with an open thread, of every kind, across every
+ * collection: the Collections page's All records, filtered, listing all
+ * kinds (`schema=*`). The one place to see what is open; the same list for
+ * everyone. */
 export function openNotesHref(): string {
-  return `/collections?tab=records&filter=${encodeURIComponent(JSON.stringify(OPEN))}`
+  return `/collections?tab=records&schema=*&filter=${encodeURIComponent(JSON.stringify(OPEN))}`
+}
+
+/** The records inside one record (of every kind, at any depth) with an open
+ * thread: its collection's explorer, listing all kinds within it. */
+export function openNotesInsideHref(
+  collectionId: string,
+  recordId: string,
+): string {
+  return `/collections/${collectionId}?schema=*&within=${encodeURIComponent(recordId)}&filter=${encodeURIComponent(JSON.stringify(OPEN))}`
 }
 
 /** Whether a filter asks for records with open threads (anywhere in an

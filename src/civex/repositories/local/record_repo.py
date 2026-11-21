@@ -50,6 +50,10 @@ def _order_by(sort: list[SortKey] | None) -> list[Any]:
     on an ancestor's field sorts by that ancestor record's value."""
     terms: list[Any] = []
     for key in sort or []:
+        if key.meta is not None:
+            value = _meta_value(key.meta)
+            terms.append(value.desc() if key.descending else value.asc())
+            continue
         if key.rel.direction == "up":
             value = _up_value(key.rel.hops, key.field_id, key.numeric)
         else:
@@ -58,6 +62,29 @@ def _order_by(sort: list[SortKey] | None) -> list[Any]:
         terms.append(value.is_(None))
         terms.append(value.desc() if key.descending else value.asc())
     return terms
+
+
+def _meta_value(name: str) -> Any:
+    """What a record is sorted by for a `query.META_SORTS` key: its kind's or
+    collection's name (a correlated scalar, so no join changes the rows), or
+    when it was last changed or made."""
+    if name == "@kind":
+        return (
+            select(func.coalesce(Schema.label, Schema.name))
+            .where(Schema.id == Record.schema_id)
+            .correlate(Record)
+            .scalar_subquery()
+        )
+    if name == "@collection":
+        return (
+            select(Dataset.name)
+            .where(Dataset.id == Record.dataset_id)
+            .correlate(Record)
+            .scalar_subquery()
+        )
+    if name == "@updated_at":
+        return Record.updated_at
+    return Record.created_at
 
 
 def _chain(columns: Any, hops: int, link: Any):
@@ -996,6 +1023,13 @@ class LocalRecordRepository:
         self._s.flush()
 
 
+def _descends(ancestor_id: uuid.UUID, hops: int):
+    """The record sits `hops` levels below `ancestor_id` (1: its child)."""
+    if hops == 1:
+        return Record.parent_record_id == ancestor_id
+    return _exists_up(hops - 1, lambda a: a.parent_record_id == ancestor_id)
+
+
 def _base_query(session: Session, query: ResolvedQuery, is_postgres: bool = False):
     q = session.query(Record).filter(Record.deleted_at.is_(None))
     if query.dataset_id is not None:
@@ -1006,12 +1040,16 @@ def _base_query(session: Session, query: ResolvedQuery, is_postgres: bool = Fals
         q = q.filter(Record.parent_record_id == query.parent_record_id)
     if query.within is not None:
         ancestor_id, hops = query.within
-        if hops == 1:
-            q = q.filter(Record.parent_record_id == ancestor_id)
-        else:
-            q = q.filter(
-                _exists_up(hops - 1, lambda a: a.parent_record_id == ancestor_id)
-            )
+        q = q.filter(_descends(ancestor_id, hops))
+    if query.beneath is not None:
+        ancestor_id, deepest = query.beneath
+        # Every kind beneath the record: one level down, two, ... to the
+        # deepest kind there is (a record's kind fixes how far down it sits).
+        q = q.filter(
+            or_(*[_descends(ancestor_id, h) for h in range(1, deepest + 1)])
+            if deepest
+            else false()
+        )
     for key, value in query.field_filters:
         if is_postgres:
             # @> containment uses the GIN index on PostgreSQL.

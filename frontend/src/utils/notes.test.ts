@@ -30,7 +30,9 @@ describe('open notes in the explorer', () => {
 
   it('links to All records filtered to open notes, and knows it there', () => {
     const href = openNotesHref()
-    expect(href.startsWith('/collections?tab=records&filter=')).toBe(true)
+    expect(href.startsWith('/collections?tab=records&schema=*&filter=')).toBe(
+      true,
+    )
     const filter = JSON.parse(
       new URLSearchParams(href.split('?')[1]).get('filter')!,
     )

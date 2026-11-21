@@ -66,6 +66,7 @@ from civex.domain.filters import (
     parse_filter_tree,
 )
 from civex.domain.query import (
+    META_SORTS,
     UNSEARCHED_DTYPES,
     RecordQuery,
     ResolvedQuery,
@@ -2308,13 +2309,17 @@ class RecordService:
                 )
             parent_uuid = parent.id
 
-        within = None
-        if query.within:
-            if schema is None:
-                raise ValidationError("'within' needs a schema to list")
-            ancestor = self._records.get_by_prefix(query.within)
-            if not ancestor:
-                raise NotFoundError(f"Record '{query.within}' not found")
+        within = beneath = None
+        ancestor = self._records.get_by_prefix(query.within) if query.within else None
+        if query.within and ancestor is None:
+            raise NotFoundError(f"Record '{query.within}' not found")
+        if ancestor is not None and schema is None:
+            # Every kind beneath the record: as far down as its kinds go.
+            below = self._schema_svc.descendants(
+                self._schema_svc.get(ancestor.schema_name)
+            )
+            beneath = (ancestor.id, max((d for _, d in below), default=0))
+        elif ancestor is not None and schema is not None:
             chain = self._schema_svc.ancestors(schema)
             hops = next(
                 (i for i, a in enumerate(chain, start=1) if a.id == ancestor.schema_id),
@@ -2347,6 +2352,7 @@ class RecordService:
             schema_id=schema.id if schema else None,
             parent_record_id=parent_uuid,
             within=within,
+            beneath=beneath,
             field_filters=field_filters,
             search=self.text_search(query.search, schema, query.search_fields),
             filter_tree=self._resolve_filter(schema, query.filter_tree),
@@ -2482,12 +2488,15 @@ class RecordService:
             if leaf.field == note_rules.OPEN_NOTES_FILTER:
                 _check_open_notes_leaf(leaf)
         if schema is None:
-            # No schema to resolve names against (a mixed-schema list):
-            # conditions pass through by stored key, as they always have.
-            if any(leaf.schema for leaf in leaves(node)):
-                raise ValidationError(
-                    "A filter condition naming a schema needs a schema to query"
-                )
+            # A list of every kind: a field means something only within its
+            # kind, so only what is about the record itself can be asked.
+            for leaf in leaves(node):
+                if leaf.field != note_rules.OPEN_NOTES_FILTER:
+                    raise ValidationError(
+                        f"To filter by '{leaf.field}', choose a kind of record "
+                        "first: a field belongs to one kind. A list of every "
+                        "kind can be filtered by whether it has open notes."
+                    )
             return node
         related = self._relations(schema)
 
@@ -2504,9 +2513,7 @@ class RecordService:
     ) -> list[SortKey] | None:
         if not sort:
             return None
-        if schema is None:
-            raise ValidationError("Sorting needs a schema to list")
-        related = self._relations(schema)
+        related = self._relations(schema) if schema is not None else None
         keys = []
         for entry in sort:
             if not isinstance(entry, dict) or "field" not in entry:
@@ -2517,6 +2524,20 @@ class RecordService:
             if direction not in ("asc", "desc"):
                 raise ValidationError(
                     f"Invalid sort direction '{direction}': must be 'asc' or 'desc'"
+                )
+            if entry["field"] in META_SORTS and not entry.get("schema"):
+                keys.append(
+                    SortKey(
+                        field_id="",
+                        descending=direction == "desc",
+                        meta=entry["field"],
+                    )
+                )
+                continue
+            if schema is None or related is None:
+                raise ValidationError(
+                    f"To sort by '{entry['field']}', choose a kind of record "
+                    f"first. A list of every kind sorts by {', '.join(META_SORTS)}."
                 )
             f, rel = self._locate(
                 schema, related, entry["field"], entry.get("schema"), "sort"

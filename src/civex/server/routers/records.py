@@ -178,6 +178,24 @@ def list_records(
     return _page(ctx, query, columns, child_counts, limit, offset)
 
 
+@router.get("/records/all", response_model=PaginatedRecordResponse)
+def list_all_records(
+    query: RecordQuery = Depends(record_query),
+    columns: list[str] = _COLUMNS,
+    child_counts: bool = _CHILD_COUNTS,
+    limit: int = Query(default=50, le=1000),
+    offset: int = Query(default=0, ge=0),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """List records in every collection, paginated: of one schema, or with
+    no 'schema' of every kind at once (with 'within', everything beneath that
+    record). A list of every kind can be searched, filtered by '@open_notes'
+    and sorted by '@kind', '@collection', '@updated_at' or '@created_at'; a
+    filter or sort on a field needs a 'schema' and is refused without one."""
+    query.dataset = None
+    return _page(ctx, query, columns, child_counts, limit, offset)
+
+
 @router.get("/records/counts")
 def record_counts_everywhere(
     query: RecordQuery = Depends(record_query),

@@ -42,8 +42,10 @@ export function MoveRecordsDialog({
   selection: MoveSelection
   /** How many records are chosen, for the title. */
   count: number
-  /** The kind of record listed: decides whether they need a record to go inside. */
-  listed: Schema
+  /** The kind of record listed: decides whether they need a record to go
+   * inside. None for a list of every kind: they go to the top of the
+   * collection, and the plan says which can't. */
+  listed: Schema | null
   schemas: Schema[]
   /** The collection the list shows. */
   from: string
@@ -55,8 +57,8 @@ export function MoveRecordsDialog({
     () => (collections ?? []).filter((c) => !c.deleted_at),
     [collections],
   )
-  const holder = listed.parent_id
-    ? schemas.find((s) => s.id === listed.parent_id)
+  const holder = listed?.parent_id
+    ? schemas.find((s) => s.id === listed?.parent_id)
     : undefined
   // Another collection by default (once the list has arrived): that is what
   // the dialog is for. Within the same one, a record can still be moved
@@ -79,7 +81,7 @@ export function MoveRecordsDialog({
         }
       : null
   const plan = useMovePlan(body)
-  const kind = listed.label ?? listed.name
+  const kind = listed ? (listed.label ?? listed.name) : 'record'
   const canMove = !!plan.data?.can_move && !move.isPending
 
   function confirm() {

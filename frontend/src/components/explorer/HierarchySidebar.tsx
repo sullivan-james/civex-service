@@ -8,7 +8,9 @@ import { Button } from '../ui'
 import { Plus } from '../ui/icons'
 import { newSchemaHref } from './EmptyCollectionGuide'
 import {
+  ALL_KINDS,
   applyExplorerPatch,
+  listsAllKinds,
   parseExplorerState,
 } from '../../utils/explorerState'
 import { ancestorSchemas, schemasById } from '../../utils/hierarchy'
@@ -27,10 +29,10 @@ export function HierarchySidebar({
   collectionId,
   recordId,
 }: {
-  /** Collection name, for the record counts. */
-  dataset: string
+  /** Collection name, for the record counts; none for every collection. */
+  dataset?: string
   /** Collection id, for the link back to its list. */
-  collectionId: string
+  collectionId?: string
   /** Set on a record page: that record is the scope. */
   recordId?: string
 }) {
@@ -51,7 +53,7 @@ export function HierarchySidebar({
     ? (byName.get(scopeRecord.schema_name) ?? null)
     : null
   const { data: counts } = useRecordCounts(
-    dataset,
+    dataset ?? null,
     rootId ? { within: rootId } : undefined,
   )
   const levels = useMemo(
@@ -74,6 +76,20 @@ export function HierarchySidebar({
       ? state.schema
       : (levels[0]?.schema.name ?? null)
 
+  // Every kind at once: picked, or the open notes on All records.
+  const allKinds =
+    !recordId &&
+    listsAllKinds(state, { collection: dataset, record: recordId ?? null })
+  function pickAll() {
+    // Everything beneath the record in view (on a record page, that one).
+    const patch = { schema: ALL_KINDS, within: recordId ?? state.within, q: '' }
+    if (recordId && collectionId)
+      navigate(
+        `/collections/${collectionId}?${applyExplorerPatch(new URLSearchParams(), patch)}`,
+      )
+    else setSearchParams((prev) => applyExplorerPatch(prev, patch))
+  }
+
   function pick(target: Schema) {
     // Stay inside the nearest record above the target's level.
     const above = new Set(ancestorSchemas(target, byId).map((s) => s.id))
@@ -84,7 +100,7 @@ export function HierarchySidebar({
       .reverse()
       .find((r) => above.has(byName.get(r.schema_name)?.id ?? ''))
     const patch = { schema: target.name, within: holder?.id ?? null, q: '' }
-    if (recordId)
+    if (recordId && collectionId)
       navigate(
         `/collections/${collectionId}?${applyExplorerPatch(new URLSearchParams(), patch)}`,
       )
@@ -119,6 +135,7 @@ export function HierarchySidebar({
       levels={levels}
       current={current}
       onPick={pick}
+      allKinds={{ active: allKinds, onPick: pickAll }}
       footer={footer}
     />
   )

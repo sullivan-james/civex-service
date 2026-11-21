@@ -410,6 +410,11 @@ export const recordsApi = {
       `/collections/${encodeURIComponent(datasetName)}/records${recordQueryString(params)}`,
     ),
 
+  /** Records across every collection: of one schema (`params.schema`), or
+   * of every kind at once. */
+  listAll: (params?: ListParams) =>
+    api.get<PaginatedRecords>(`/records/all${recordQueryString(params)}`),
+
   /** A schema's records across every collection -- what a saved view browses. */
   listBySchema: (schemaName: string, params?: ListParams) =>
     api.get<PaginatedRecords>(

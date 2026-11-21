@@ -8,6 +8,7 @@
 import { decodeSort, encodeSort, type SortEntry } from '../api/query'
 import type { View } from '../api/views'
 import type { FilterTreeWire } from './filterTree'
+import { asksForOpenNotes } from './notes'
 
 export interface ExplorerState {
   /** Schema whose records are listed; null = the first level with records. */
@@ -29,6 +30,32 @@ export interface ExplorerState {
 }
 
 export const DEFAULT_PAGE_SIZE = 50
+
+/** `schema=*` in the address: every kind of record at once. */
+export const ALL_KINDS = '*'
+
+/** Whether the explorer lists every kind of record at once: chosen
+ * (`schema=*`), or, on the All records tab (no collection, no record) with
+ * no kind chosen, when it asks for records with open notes (they may be on
+ * any kind). A locked kind never is. */
+export function listsAllKinds(
+  state: Pick<ExplorerState, 'schema' | 'within' | 'filter'>,
+  scope: { collection?: string; record?: string | null; locked?: boolean },
+): boolean {
+  if (scope.locked) return false
+  if (state.schema === ALL_KINDS) return true
+  return (
+    !state.schema &&
+    !scope.collection &&
+    !scope.record &&
+    !state.within &&
+    asksForOpenNotes(state.filter)
+  )
+}
+
+/** The columns a list of every kind shows: what every record has (its name
+ * is the first column of every list). */
+export const ALL_KINDS_COLUMNS = ['@kind', '@collection', '@updated_at']
 
 export const EMPTY_EXPLORER_STATE: ExplorerState = {
   schema: null,

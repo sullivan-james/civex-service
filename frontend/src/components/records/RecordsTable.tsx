@@ -25,6 +25,9 @@ export interface RecordsTableRow {
   natural_name?: string | null
   schema_name?: string
   created_at?: string
+  updated_at?: string
+  /** The collection it is in (by name). */
+  collection?: string | null
   reference_labels?: Record<string, string | null> | null
   reference_collections?: Record<string, string> | null
   child_counts?: Record<string, number> | null
@@ -52,6 +55,8 @@ export interface RecordsTableProps {
   schemas?: Schema[]
   showSchemaColumn?: boolean
   showIdColumn?: boolean
+  /** What the first column (the record's name, else its id) is headed. */
+  idHeader?: string
   showAddedColumn?: boolean
   /** Renders the ID cell as a link when provided; plain text otherwise. */
   recordLink?: (row: RecordsTableRow) => string
@@ -74,10 +79,26 @@ function Dash() {
 function CellValue({
   col,
   row,
+  schemas,
 }: {
   col: RecordsTableColumn
   row: RecordsTableRow
+  schemas?: Schema[]
 }) {
+  // What every record has, not one of its values: its kind, its collection,
+  // when it was last changed (a list of every kind shows these).
+  if (col.type === 'kind') {
+    const schema = schemas?.find((s) => s.name === row.schema_name)
+    return (
+      <Badge variant="accent">
+        {displayLabel(row.schema_name ?? '', schema?.label)}
+      </Badge>
+    )
+  }
+  if (col.type === 'collection')
+    return row.collection ? <>{row.collection}</> : <Dash />
+  if (col.type === 'updated')
+    return row.updated_at ? <>{formatDate(row.updated_at)}</> : <Dash />
   // The record's open threads of notes, not one of its values.
   if (col.type === 'notes') {
     const text = openNotesText(row.open_notes, row.latest_note)
@@ -143,6 +164,7 @@ export function RecordsTable({
   schemas,
   showSchemaColumn = false,
   showIdColumn = true,
+  idHeader = 'ID',
   showAddedColumn = true,
   recordLink,
   selection,
@@ -154,7 +176,7 @@ export function RecordsTable({
   if (showIdColumn)
     cols.push({
       key: '__id',
-      header: 'ID',
+      header: idHeader,
       width: '8rem',
       render: (r) =>
         r.natural_name ?? <span className="font-mono">{r.id.slice(0, 8)}</span>,
@@ -184,7 +206,7 @@ export function RecordsTable({
       header: col.label,
       headerTitle: col.name,
       sortable: col.sortable !== false,
-      render: (r) => <CellValue col={col} row={r} />,
+      render: (r) => <CellValue col={col} row={r} schemas={schemas} />,
     })
   if (showAddedColumn)
     cols.push({

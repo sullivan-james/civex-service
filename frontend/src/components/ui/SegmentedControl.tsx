@@ -3,6 +3,9 @@ import { type ReactNode } from 'react'
 export interface SegmentOption<T extends string> {
   value: T
   label: ReactNode
+  /** Why it can't be chosen here (shown on hover); it stays in place,
+   * switched off. */
+  disabled?: string
 }
 
 /** A short single-choice switch (AND / OR, Light / Dark / System). Every
@@ -34,8 +37,10 @@ export function SegmentedControl<T extends string>({
             type="button"
             role="radio"
             aria-checked={selected}
+            disabled={!!opt.disabled}
+            title={opt.disabled}
             onClick={() => onChange(opt.value)}
-            className={`${size === 'sm' ? 'h-8' : 'h-9'} cursor-pointer px-3 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent ${
+            className={`${size === 'sm' ? 'h-8' : 'h-9'} cursor-pointer px-3 disabled:cursor-not-allowed disabled:opacity-50 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent ${
               i > 0 ? 'border-l border-border' : ''
             } ${
               selected

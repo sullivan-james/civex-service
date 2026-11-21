@@ -96,21 +96,30 @@ export function useHasSchemaRecords(schemaName: string | null | undefined) {
 }
 
 /** One page of records -- of a collection, or (no `datasetName`, a
- * `schemaName`) of a schema across every collection. The same query either
- * way, so the explorer doesn't care which it is browsing. */
+ * `schemaName`) of a schema across every collection, or (`allKinds`, no
+ * `schemaName`) of every kind. The same query either way, so the explorer
+ * doesn't care which it is browsing. */
 export function useRecordPage(
-  scope: { datasetName?: string; schemaName?: string },
+  scope: { datasetName?: string; schemaName?: string; allKinds?: boolean },
   params: ListParams,
   options: { enabled?: boolean; refetchInterval?: number | false } = {},
 ) {
   return useQuery({
-    queryKey: ['records', scope.datasetName ?? null, scope.schemaName, params],
+    queryKey: [
+      'records',
+      scope.datasetName ?? null,
+      scope.schemaName ?? (scope.allKinds ? '*' : undefined),
+      params,
+    ],
     queryFn: () =>
       scope.datasetName
         ? recordsApi.list(scope.datasetName, params)
-        : recordsApi.listBySchema(scope.schemaName!, params),
+        : scope.schemaName
+          ? recordsApi.listBySchema(scope.schemaName, params)
+          : recordsApi.listAll(params),
     enabled:
-      (options.enabled ?? true) && !!(scope.datasetName || scope.schemaName),
+      (options.enabled ?? true) &&
+      !!(scope.datasetName || scope.schemaName || scope.allKinds),
     refetchInterval: options.refetchInterval ?? false,
     placeholderData: keepPreviousData,
   })

@@ -59,6 +59,11 @@ UNSEARCHED_DTYPES = frozenset(t.type for t in FIELD_TYPES.values() if not t.sear
 # find one record in 256 for no reason anyone could see.
 ID_PREFIX_MIN = 4
 
+#: What a list may be sorted by besides a kind's fields, and the only sorts a
+#: list of every kind takes (a field means something only within its kind):
+#: the record's kind, its collection, when it was last changed or made.
+META_SORTS = ("@kind", "@collection", "@updated_at", "@created_at")
+
 
 @dataclass(frozen=True)
 class TextSearch:
@@ -81,6 +86,9 @@ class ResolvedQuery:
     parent_record_id: uuid.UUID | None = None
     # (ancestor record id, hops from the queried schema up to that record's)
     within: tuple[uuid.UUID, int] | None = None
+    # Every kind beneath a record (`within` with no kind listed): (that
+    # record's id, how many levels the deepest kind beneath it is down).
+    beneath: tuple[uuid.UUID, int] | None = None
     field_filters: list[tuple[str, str]] = _field(default_factory=list)
     search: TextSearch | None = None
     filter_tree: FilterNode | None = None

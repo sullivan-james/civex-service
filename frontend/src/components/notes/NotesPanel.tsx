@@ -3,7 +3,7 @@ import type { Note } from '../../api/notes'
 import { useNoteActions, useNotes } from '../../hooks/useNotes'
 import { useAccount, usePermissions } from '../../hooks/useMe'
 import { formatDateTime } from '../../utils/dates'
-import { openNotesHref } from '../../utils/notes'
+import { openNotesHref, openNotesInsideHref } from '../../utils/notes'
 import { errorMessage } from '../../lib/errors'
 import {
   Badge,
@@ -237,9 +237,18 @@ export function NotesPanel({
           >
             {actions.add.isPending ? 'Adding…' : 'Add note'}
           </Button>
-          <Button size="sm" variant="ghost" to={openNotesHref()}>
-            All open notes
-          </Button>
+          <span className="flex items-center gap-1">
+            <Button
+              size="sm"
+              variant="ghost"
+              to={openNotesInsideHref(collectionId, recordId)}
+            >
+              Open notes inside
+            </Button>
+            <Button size="sm" variant="ghost" to={openNotesHref()}>
+              All open notes
+            </Button>
+          </span>
         </div>
         <FormError message={failed ? errorMessage(failed) : null} />
       </div>

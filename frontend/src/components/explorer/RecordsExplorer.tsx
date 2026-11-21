@@ -100,13 +100,27 @@ export interface RecordsExplorerProps extends ExplorerScope {
  * picks the level, a trail shows where you are, search + filters + saved
  * filters narrow it, and every row links down to its children. All state is
  * in the URL. */
+/** The columns of what every record has, which a list of every kind shows
+ * (`ALL_KINDS_COLUMNS`) and any list can sort by. */
+const META_COLUMNS: Record<string, { label: string; type: string }> = {
+  '@kind': { label: 'Kind', type: 'kind' },
+  '@collection': { label: 'Collection', type: 'collection' },
+  '@updated_at': { label: 'Last edited', type: 'updated' },
+}
+
+/** Why something about one kind's fields is switched off in a list of every
+ * kind. */
+function pickKind(what: string): string {
+  return `Pick a kind of record to ${what}`
+}
+
 export function RecordsExplorer({
   scopeLabel,
   toolbarActions,
   ...scope
 }: RecordsExplorerProps) {
   const x = useExplorer(scope)
-  const { state, patch, listed, listedName } = x
+  const { state, patch, listed, listedName, allKinds } = x
   const dataset = scope.dataset
   const { data: collection } = useCollection(dataset ?? '')
   const location = useLocation()
@@ -256,6 +270,8 @@ export function RecordsExplorer({
   const columns = columnNames.map((name) => {
     if (name === OPEN_NOTES_FILTER)
       return { name, label: 'Open notes', type: 'notes', sortable: false }
+    const meta = META_COLUMNS[name]
+    if (meta) return { name, label: meta.label, type: meta.type }
     const field = x.baseFields.find((f) => f.name === name)
     return {
       name,
@@ -337,8 +353,9 @@ export function RecordsExplorer({
     tables: [
       {
         format: 'csv' as const,
-        // Open notes are shown, not written in a table.
-        columns: x.columnNames.filter((c) => c !== OPEN_NOTES_FILTER),
+        // What every record has (its kind, open notes) is shown, not
+        // written in a table: a list of every kind writes one per kind.
+        columns: x.columnNames.filter((c) => !c.startsWith('@')),
         kind: x.listed?.name ?? null,
       },
     ],
@@ -357,7 +374,11 @@ export function RecordsExplorer({
   const bulkCount = allMatching ? total : selected.size
   const { data: allWorkflows } = useWorkflows()
   const runnable = listed ? bulkRunnable(allWorkflows, listed.name) : []
-  const listedLabel = listed ? displayLabel(listed.name, listed.label) : ''
+  const listedLabel = listed
+    ? displayLabel(listed.name, listed.label)
+    : allKinds
+      ? 'Record'
+      : ''
 
   // What the star pins: the saved filter when one is applied as saved,
   // otherwise this place in the explorer exactly as the address bar has it.
@@ -490,10 +511,10 @@ export function RecordsExplorer({
 
   // Until the collection and its counts have answered, nothing is listed and
   // there is no New: a menu opened now would be replaced by the loaded one.
-  if (!listed && (!x.countsLoaded || (dataset && !collection)))
+  if (!listed && !allKinds && (!x.countsLoaded || (dataset && !collection)))
     return <Skeleton className="h-32 w-full" />
 
-  if (!listed && !x.page.isLoading && x.levels.length === 0) {
+  if (!listed && !allKinds && !x.page.isLoading && x.levels.length === 0) {
     // Levels come from record counts, so an empty collection has none and the
     // list's own "Add" button never renders -- offer the collection's own
     // top-level schemas here instead, or there is no way to create the first
@@ -574,101 +595,108 @@ export function RecordsExplorer({
             below), which columns, and Export of what that leaves. */}
         <div className="flex flex-wrap items-start gap-2">
           <div className="min-w-0 flex-1">
-            <SavedViewBar
-              views={x.views}
-              activeView={x.activeView}
-              modified={x.modified}
-              hasSelection={x.hasSelection}
-              onApply={openView}
-              onClear={() =>
-                patch({ view: null, filter: null, sort: [], cols: null })
-              }
-              onSave={() =>
-                updateView.mutate({
-                  columns: x.columnNames,
-                  filter_tree: x.filter,
-                  sort: x.sort,
-                })
-              }
-              onSaveAs={(name, done) =>
-                createView.mutate(
-                  {
-                    name,
+            {/* A saved filter belongs to one kind of record. */}
+            {!allKinds && (
+              <SavedViewBar
+                views={x.views}
+                activeView={x.activeView}
+                modified={x.modified}
+                hasSelection={x.hasSelection}
+                onApply={openView}
+                onClear={() =>
+                  patch({ view: null, filter: null, sort: [], cols: null })
+                }
+                onSave={() =>
+                  updateView.mutate({
                     columns: x.columnNames,
                     filter_tree: x.filter,
                     sort: x.sort,
-                  },
-                  {
-                    onSuccess: (created) => {
-                      done()
-                      patch({ view: created.name })
+                  })
+                }
+                onSaveAs={(name, done) =>
+                  createView.mutate(
+                    {
+                      name,
+                      columns: x.columnNames,
+                      filter_tree: x.filter,
+                      sort: x.sort,
                     },
-                  },
-                )
-              }
-              onRename={(name, done) =>
-                updateView.mutate(
-                  { rename: name },
-                  {
-                    onSuccess: (updated) => {
-                      done()
-                      patch({ view: updated.name })
+                    {
+                      onSuccess: (created) => {
+                        done()
+                        patch({ view: created.name })
+                      },
                     },
-                  },
-                )
-              }
-              onDelete={(done) =>
-                deleteView.mutate(x.activeView!.name, {
-                  onSuccess: () => {
-                    done()
-                    patch({ view: null })
-                  },
-                })
-              }
-              filesLayout={hasFiles ? x.activeView?.files_layout : undefined}
-              onFilesLayout={
-                hasFiles && x.activeView
-                  ? (files_layout) => updateView.mutate({ files_layout })
-                  : undefined
-              }
-              pending={
-                createView.isPending ||
-                updateView.isPending ||
-                deleteView.isPending
-              }
-              error={createView.error ?? updateView.error ?? deleteView.error}
-            />
+                  )
+                }
+                onRename={(name, done) =>
+                  updateView.mutate(
+                    { rename: name },
+                    {
+                      onSuccess: (updated) => {
+                        done()
+                        patch({ view: updated.name })
+                      },
+                    },
+                  )
+                }
+                onDelete={(done) =>
+                  deleteView.mutate(x.activeView!.name, {
+                    onSuccess: () => {
+                      done()
+                      patch({ view: null })
+                    },
+                  })
+                }
+                filesLayout={hasFiles ? x.activeView?.files_layout : undefined}
+                onFilesLayout={
+                  hasFiles && x.activeView
+                    ? (files_layout) => updateView.mutate({ files_layout })
+                    : undefined
+                }
+                pending={
+                  createView.isPending ||
+                  updateView.isPending ||
+                  deleteView.isPending
+                }
+                error={createView.error ?? updateView.error ?? deleteView.error}
+              />
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <TriggerPopover
-              label="Choose columns"
-              align="right"
-              panelClassName="w-[28rem] max-w-[90vw]"
-              trigger={({ toggle, open }) => (
-                <Button size="sm" onClick={toggle} aria-expanded={open}>
-                  <Columns3 size={14} /> Columns
-                </Button>
-              )}
-            >
-              <ColumnPicker
-                columns={x.columnNames}
-                onChange={(cols) => patch({ cols })}
-                baseFields={x.baseFields}
-                joinable={x.joinable}
-                extra={[{ name: OPEN_NOTES_FILTER, label: 'Open notes' }]}
-                allowHideAll={false}
-              />
-              {x.cols && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="mt-2"
-                  onClick={() => patch({ cols: null })}
-                >
-                  Reset to default columns
-                </Button>
-              )}
-            </TriggerPopover>
+            {/* A list of every kind shows what every record has; a kind's
+                fields are chosen once a kind is. */}
+            {!allKinds && (
+              <TriggerPopover
+                label="Choose columns"
+                align="right"
+                panelClassName="w-[28rem] max-w-[90vw]"
+                trigger={({ toggle, open }) => (
+                  <Button size="sm" onClick={toggle} aria-expanded={open}>
+                    <Columns3 size={14} /> Columns
+                  </Button>
+                )}
+              >
+                <ColumnPicker
+                  columns={x.columnNames}
+                  onChange={(cols) => patch({ cols })}
+                  baseFields={x.baseFields}
+                  joinable={x.joinable}
+                  extra={[{ name: OPEN_NOTES_FILTER, label: 'Open notes' }]}
+                  allowHideAll={false}
+                />
+                {x.cols && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="mt-2"
+                    onClick={() => patch({ cols: null })}
+                  >
+                    Reset to default columns
+                  </Button>
+                )}
+              </TriggerPopover>
+            )}
             <FileAccessActions
               label="Export"
               selection={exportContext()}
@@ -700,11 +728,11 @@ export function RecordsExplorer({
           </div>
         </div>
 
-        {listed && (
+        {(listed || allKinds) && (
           <FilterControls
             wire={x.filter}
             fields={x.filterFields}
-            listedSchema={listed.name}
+            listedSchema={listed?.name ?? ''}
             onChange={(filter) => patch({ filter })}
           />
         )}
@@ -759,10 +787,27 @@ export function RecordsExplorer({
               options={[
                 { value: 'records', label: 'Records' },
                 { value: 'files', label: 'Their files' },
-                ...(listed ? [{ value: 'summary', label: 'Summary' }] : []),
+                ...(listed
+                  ? [{ value: 'summary', label: 'Summary' }]
+                  : allKinds
+                    ? [
+                        {
+                          value: 'summary',
+                          label: 'Summary',
+                          disabled: pickKind('summarise them'),
+                        },
+                      ]
+                    : []),
                 ...(canMap ? [{ value: 'map', label: 'Map' }] : []),
               ]}
             />
+            {allKinds && (
+              <div className="ml-auto flex items-center gap-2">
+                <Button size="sm" disabled title={pickKind('check their data')}>
+                  Check data
+                </Button>
+              </div>
+            )}
             {listed && (
               <div className="ml-auto flex items-center gap-2">
                 {showChecks ? (
@@ -934,6 +979,25 @@ export function RecordsExplorer({
                         onStarted={picked.clear}
                       />
                     )}
+                    {allKinds && (
+                      // Edits and workflows are about one kind's fields.
+                      <>
+                        <Button
+                          size="sm"
+                          disabled
+                          title={pickKind('run a workflow on them')}
+                        >
+                          Run workflow
+                        </Button>
+                        <Button
+                          size="sm"
+                          disabled
+                          title={pickKind('edit them together')}
+                        >
+                          Edit…
+                        </Button>
+                      </>
+                    )}
                     {!allMatching && (
                       <BulkRunWorkflow
                         workflows={runnable}
@@ -951,7 +1015,7 @@ export function RecordsExplorer({
                         Edit…
                       </Button>
                     )}
-                    {listed && (
+                    {(listed || allKinds) && (
                       // Moving takes the records out of this collection, so
                       // it asks for the same permission as deleting here.
                       <Button
@@ -1015,6 +1079,8 @@ export function RecordsExplorer({
                       ? `/records/${r.id}?tab=notes`
                       : `/records/${r.id}`
                   }
+                  idHeader={allKinds ? 'Name' : undefined}
+                  showAddedColumn={!allKinds}
                   sort={sort}
                   onSortChange={toggleSort}
                   selection={dataset ? picked.table : undefined}
@@ -1054,7 +1120,7 @@ export function RecordsExplorer({
         )}
       </div>
 
-      {moving && dataset && listed && (
+      {moving && dataset && (listed || allKinds) && (
         <MoveRecordsDialog
           selection={
             allMatching
@@ -1095,7 +1161,9 @@ export function RecordsExplorer({
           confirmLabel={`Delete ${bulkCount.toLocaleString()}`}
           variant="danger"
           typedConfirmationValue={
-            bulkCount > HIGH_IMPACT_RECORD_THRESHOLD ? listed?.name : undefined
+            bulkCount > HIGH_IMPACT_RECORD_THRESHOLD
+              ? (listed?.name ?? 'delete')
+              : undefined
           }
           warning={
             deleteMany.error || deleteMatching.error
