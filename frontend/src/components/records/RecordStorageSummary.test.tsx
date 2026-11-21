@@ -61,7 +61,7 @@ describe('RecordStorageSummary', () => {
         place('field', 'unreachable', 2),
       ]),
     })
-    show('?tab=contains&show=files')
+    show('?show=files')
 
     const note = await screen.findByRole('group', {
       name: "Where this record's files are stored",
@@ -71,7 +71,7 @@ describe('RecordStorageSummary', () => {
     )
     expect(
       within(note).getByRole('link', { name: 'Show all files' }),
-    ).toHaveAttribute('href', '/?tab=contains&show=files')
+    ).toHaveAttribute('href', '/?show=files')
     expect(calls[0].body).toMatchObject({ within: 'enc7' })
   })
 

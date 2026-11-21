@@ -26,11 +26,13 @@ import {
   Page,
   ConfirmDialog,
   PinButton,
+  Subheading,
   TabNav,
   TabPanel,
   useTabParam,
 } from '../components/ui'
 import { ReferencedBy } from '../components/records/ReferencedBy'
+import { displayLabel } from '../utils/naming'
 import { RecordsExplorer } from '../components/explorer/RecordsExplorer'
 import { CollectionTimeZone } from '../components/records/CollectionTimeZone'
 import { RecordPageFrame } from '../components/records/RecordPageFrame'
@@ -162,10 +164,10 @@ export default function RecordDetailPage() {
   // the rows just settled are still on screen.
   const showResolve =
     conflictsAbout.length > 0 || (mergeConflicts?.length ?? 0) > 0
+  // What a record contains is under its fields, not a tab of its own; an
+  // old `?tab=contains` link lands there.
   const shownTab =
-    (tab === 'contains' && !showContains) || (tab === 'resolve' && !showResolve)
-      ? 'fields'
-      : tab
+    tab === 'contains' || (tab === 'resolve' && !showResolve) ? 'fields' : tab
   // A failed save is shown under the field it was for.
   const saveErrors = fieldSaveErrors(
     updateRecord.error,
@@ -294,14 +296,6 @@ export default function RecordDetailPage() {
                     },
                   ]
                 : []),
-              ...(showContains
-                ? [
-                    {
-                      id: 'contains' as const,
-                      label: `Contains (${descendantTotal.toLocaleString()})`,
-                    },
-                  ]
-                : []),
               {
                 id: 'notes' as const,
                 label: record.open_notes
@@ -348,9 +342,7 @@ export default function RecordDetailPage() {
               <RecordStorageSummary
                 recordId={record.id}
                 name={record.natural_name ?? record.id.slice(0, 8)}
-                filesHref={
-                  showContains ? '?tab=contains&show=files' : undefined
-                }
+                filesHref={showContains ? '?show=files' : undefined}
               />
             </div>
             <RecordFieldGrid
@@ -390,15 +382,21 @@ export default function RecordDetailPage() {
             />
             <DeletedFieldValues fields={record.deleted_fields ?? []} />
           </UploadCollectionContext.Provider>
-        </TabPanel>
-
-        <TabPanel id="contains" value={shownTab}>
-          {collection && (
-            <RecordsExplorer
-              dataset={collection.name}
-              root={{ id: record.id }}
-              pollMs={hasActiveJobs ? 2000 : 5000}
-            />
+          {showContains && collection && (
+            <section
+              aria-label="Inside this record"
+              className="mt-8 space-y-3 border-t border-border pt-6"
+            >
+              <Subheading as="h2">
+                Inside this{' '}
+                {schema ? displayLabel(schema.name, schema.label) : 'record'}
+              </Subheading>
+              <RecordsExplorer
+                dataset={collection.name}
+                root={{ id: record.id }}
+                pollMs={hasActiveJobs ? 2000 : 5000}
+              />
+            </section>
           )}
         </TabPanel>
 

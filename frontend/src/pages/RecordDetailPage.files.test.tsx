@@ -198,3 +198,17 @@ describe('files on a record page', () => {
     expect(screen.queryByRole('button', { name: /^export$/i })).toBeNull()
   })
 })
+
+describe('what a record contains', () => {
+  it('is under its fields, not a tab of its own', async () => {
+    renderPage(FILES_BELOW)
+    const inside = await screen.findByRole('region', {
+      name: 'Inside this record',
+    })
+    expect(inside).toHaveTextContent('Inside this Encounter')
+    expect(screen.queryByRole('tab', { name: /Contains/ })).toBeNull()
+    // The fields are on the same screen, above it.
+    expect(screen.getByText('Stellwagen')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'History' })).toBeInTheDocument()
+  })
+})
