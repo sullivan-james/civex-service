@@ -79,6 +79,17 @@ from the next tag forward.
   `misses` and `retry_at` to `server_lacks` (applied
   automatically).
 
+### Changes
+
+- A host can draw civex's chrome itself. The boot object (`window.__CIVEX__`,
+  `render_app_page(boot=...)`) accepts `chrome: "embedded"` (no top bar, footer,
+  left rail or Settings item), `theme` (CSS custom properties set on `:root`)
+  and `brand` (`name`, `logo_url`). A new `app.header` extension slot draws the
+  host's header and tabs at the top of every page, and each route change is
+  told to the host as a `civex:navigate` event on `window` (also
+  `window.__CIVEX__.navigate.on(fn)` for extensions). Without these the app
+  looks as before. See `docs/guides/hosting.md`.
+
 ## v2.1.0 — big collections stay fast, hosting hooks, partitioned PostgreSQL (2026-11-22)
 
 ### Breaking

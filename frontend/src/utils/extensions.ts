@@ -9,12 +9,14 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { boot } from './host'
 import { register, SLOTS } from './slots'
+import { currentPath, NAVIGATE_EVENT, onNavigate } from './navigation'
 
 /** What an extension is handed instead of bundling its own: one React (two
  * copies of React in a page break hooks), the router and query client the app
  * uses, civex's own controls so an extension looks like the app, and the API
  * client (under the project's path, with the session handled). An extension is
- * built with these as externals (`window.__CIVEX__.shared.react`, ...). The
+ * built with these as externals (`window.__CIVEX__.shared.react`, ...). `window.__CIVEX__.navigate.on(fn)`
+ * calls `fn` with the app's path now and on each route change. The
  * modules are fetched only when a page has extensions, so a local civex
  * doesn't load them all up front. */
 async function sharedModules() {
@@ -59,6 +61,7 @@ export async function loadExtensions(
     ...(window.__CIVEX__ ?? {}),
     register,
     slots: Object.keys(SLOTS),
+    navigate: { event: NAVIGATE_EVENT, current: currentPath, on: onNavigate },
     shared: await sharedModules(),
   }
   await Promise.all(

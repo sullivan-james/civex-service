@@ -71,3 +71,13 @@ def test_a_base_names_a_folder():
     assert normalise_base("/p/a/b") == "/p/a/b/"
     with pytest.raises(ValueError):
         normalise_base("p/a")
+
+
+def test_chrome_theme_and_brand_pass_through_to_the_boot_object(dist):
+    boot = {
+        "chrome": "embedded",
+        "theme": {"--color-accent": "#123456"},
+        "brand": {"name": "Acme Hub", "logo_url": "/static/logo.svg"},
+    }
+    page = render_app_page(dist, base="/p/acme/survey", boot=boot)
+    assert _boot(page) == boot

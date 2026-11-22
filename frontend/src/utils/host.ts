@@ -16,6 +16,15 @@ export interface Boot {
   /** ES modules to load; each registers components into named slots
    * (`utils/slots.ts`). */
   extensions?: string[]
+  /** `"embedded"`: the host draws the page's chrome (header, tabs, navigation)
+   * and civex draws only the page: no top bar, footer, left rail or Settings
+   * item. Anything else, or nothing, is civex's own chrome. */
+  chrome?: 'full' | 'embedded'
+  /** CSS custom properties to set on `:root`, by name (`--color-accent`):
+   * the host's colours for the app (see `index.css` for the tokens). */
+  theme?: Record<string, string>
+  /** What to call the app and where its logo is, in place of "civex". */
+  brand?: { name?: string; logo_url?: string }
 }
 
 declare global {
@@ -69,4 +78,38 @@ export function loginRedirect(
   const url = new URL(login, here || 'http://localhost/')
   if (here) url.searchParams.set('next', here)
   return url.toString()
+}
+
+/** Whether the host draws the chrome (`boot().chrome === "embedded"`). */
+export function isEmbedded(): boolean {
+  return boot().chrome === 'embedded'
+}
+
+/** The name and logo the top bar shows: the host's, else civex's. */
+export function brand(): { name: string; logo_url: string | null } {
+  const given = boot().brand
+  const name =
+    typeof given?.name === 'string' && given.name.trim() ? given.name : 'civex'
+  const logo =
+    typeof given?.logo_url === 'string' && given.logo_url
+      ? given.logo_url
+      : null
+  return { name, logo_url: logo }
+}
+
+/** Sets the boot `theme` tokens on `root`. Only custom properties (`--x`) with
+ * string values are applied; anything else is ignored, so a theme can't set
+ * arbitrary style. Returns the names it set. */
+export function applyBootTheme(
+  root: HTMLElement = document.documentElement,
+  theme: Record<string, unknown> | undefined = boot().theme,
+): string[] {
+  if (!theme || typeof theme !== 'object') return []
+  const set: string[] = []
+  for (const [name, value] of Object.entries(theme)) {
+    if (!name.startsWith('--') || typeof value !== 'string') continue
+    root.style.setProperty(name, value)
+    set.push(name)
+  }
+  return set
 }
