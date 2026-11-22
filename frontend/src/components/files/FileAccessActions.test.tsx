@@ -510,6 +510,8 @@ describe('when the folder cannot be made on its drive', () => {
     expect(screen.getByRole('alert').textContent).toMatch(/can’t be written/i)
     // Never a choice of links or copies: only which drive.
     expect(screen.queryByRole('radio')).toBeNull()
+    // The drives arrive after the refusal: wait for the one to pick.
+    await screen.findByRole('option', { name: /default/i })
     await userEvent.selectOptions(
       screen.getByRole('combobox', { name: 'Which drive' }),
       'default',
