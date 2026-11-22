@@ -14,7 +14,7 @@ on:
       - ".github/workflows/ci.yml"
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -82,11 +82,11 @@ jobs:
       # `coverage` job combines it and applies the fail_under floor.
       - name: Run tests
         if: github.event_name == 'pull_request'
-        run: uv run --with pytest-split pytest tests/ -q -n auto --splits 6 --group ${{ matrix.group }} --durations=15
+        run: uv run --with pytest-split==0.11.0 pytest tests/ -q -n auto --splits 6 --group ${{ matrix.group }} --durations=15
 
       - name: Run tests with coverage
         if: github.event_name != 'pull_request'
-        run: uv run --with pytest-split pytest tests/ -q -n auto --splits 6 --group ${{ matrix.group }} --cov=civex --durations=15
+        run: uv run --with pytest-split==0.11.0 pytest tests/ -q -n auto --splits 6 --group ${{ matrix.group }} --cov=civex --cov-fail-under=0 --durations=15
         env:
           COVERAGE_FILE: .coverage.${{ matrix.group }}
 
@@ -100,6 +100,16 @@ jobs:
           name: coverage-${{ matrix.group }}
           path: .coverage.${{ matrix.group }}
           include-hidden-files: true
+
+  test-gate:
+    # Keeps a single check named `test` for branch protection, whatever the
+    # shard count.
+    name: test
+    if: always()
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.test.result }}" = "success"
 
   coverage:
     if: github.event_name != 'pull_request'
@@ -125,7 +135,7 @@ jobs:
       - name: Combine coverage and enforce the fail_under floor
         run: |
           uv run coverage combine .coverage.*
-          uv run coverage report
+          uv run coverage report --show-missing
 
   postgres:
     # An authority on PostgreSQL: the migrations' PostgreSQL parts, settling
