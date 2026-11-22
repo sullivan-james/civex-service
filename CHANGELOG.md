@@ -21,7 +21,7 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
-## Unreleased
+## v2.1.0 — big collections stay fast, hosting hooks, partitioned PostgreSQL (2026-11-22)
 
 ### Breaking
 
@@ -38,7 +38,50 @@ from the next tag forward.
   Hosts should call `civex.db.migrate.ensure_audit_partitions(engine)` daily
   to create upcoming months (civex also does when a database is migrated).
 
+### Upgrading
+
+- On PostgreSQL, migration `b5d8f1a3c6e2` rewrites `records` and `audit_log` in
+  one transaction. Plan for writers to wait about 50 seconds and about 2.5 GB
+  of WAL per million records (and as much free disk again, until the swap);
+  readers are blocked only at the swap. A new or empty database is unaffected.
+  Run `civex db migrate` in a maintenance window for a large database.
+- `CIVEX_RECORDS_PARTITIONS` sets the number of hash partitions of `records`
+  (default 8; `off` keeps one table). `CIVEX_AUDIT_PARTITIONS=off` does the
+  same for `audit_log`. Set them before the migration runs.
+- A host that embeds civex should call `civex.db.migrate.ensure_audit_partitions(engine)`
+  regularly (daily is enough) so the next months' `audit_log` partitions exist.
+- Sorting a field in descending order now lists records that tie on that field
+  newest first (it was oldest first). Ascending sorts are unchanged.
+
 ### Changes
+
+- Lists scale to a million records. Every filter, sort and uniqueness check
+  reads a field's value through one expression, so a per-field index can serve
+  it. civex keeps indexes for fields in a uniqueness key, plus any listed in
+  `[db] indexed_fields`, builds them in the
+  background (never inside a request), refreshes planner statistics, and on
+  PostgreSQL uses a GIN index for equality. `civex db indexes --reconcile`
+  does it in the foreground. Part of this is the visible tie order above.
+- Listing a collection's files, the export preview and plan, and bulk edits no
+  longer load every record: on a 250,000-record project listing files went
+  from minutes to about a second. A bulk edit is planned over the set and saved
+  in chunks, each its own transaction, so the write lock is held for about
+  100 ms at a time instead of the whole edit.
+- Undoing a bulk edit works the same way: over the set, a chunk at a time
+  (200 records in 0.2 s instead of 10 s; 50,000 in about 40 s). Conflicts and
+  refused values are left and reported as before.
+- Dates in the web app follow one pattern, DD/MM/YYYY by default, chosen in
+  Settings, Appearance.
+- Documentation: `CLAUDE.md` is cut to the rules and traps, and there are design
+  and measurement notes for billion-row collections and for the partitioning.
+- `civex.rows_to_records` can match rows to existing records by a key
+  (`match_on`, defaulting to the kind's first unique key), so running a workflow
+  again on the same table updates or leaves records alone instead of making
+  them twice. Outputs are `created`, `updated`, `unchanged` and `skipped`;
+  `civex.upsert_records` runs the same code.
+- Replaying an audit entry whose id already exists (push, feed pull, backfill,
+  concurrent replays) stays idempotent on the partitioned `audit_log`; PostgreSQL
+  tests now cover it. No behaviour change.
 - New records, history entries and file references get time-ordered ids
   instead of random ones, which keeps inserts fast once the id indexes outgrow
   memory (3-4x the insert rate and 3x less WAL at 5M rows, more at larger
@@ -60,6 +103,10 @@ from the next tag forward.
 
 ### Added
 
+- `Permissions.denied` and `Permissions.without(actions, collections)` refuse
+  an action in named collections even where the role allows it project-wide, so
+  a host can say "write everywhere except these" and collections made later are
+  not left out. `can` and `require` honour it.
 - Record lists page by cursor as well as by offset: `cursor` / `next_cursor`
   on every records list, sorted or not, searched or not. A deep page costs what
   the first does, and records added or removed while paging neither repeat nor
