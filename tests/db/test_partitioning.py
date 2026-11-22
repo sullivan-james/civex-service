@@ -725,3 +725,11 @@ def test_the_conversion_api_reports_sqlite_as_unsupported(tmp_path: Path) -> Non
         0,
     )
     assert convert_records_partitions(engine, 8) == status
+
+
+@needs_pg
+def test_converting_before_the_schema_exists_says_so(pg_schema: Engine) -> None:
+    from civex.db.migrate import convert_records_partitions
+
+    with pytest.raises(ValueError, match="ensure_schema_current"):
+        convert_records_partitions(pg_schema, 4)
