@@ -47,16 +47,23 @@ def _alembic() -> Config:
 
 @pytest.fixture()
 def pg_schema():
-    """An engine whose search_path is a fresh, empty schema (dropped after)."""
-    name = f"t_{uuid.uuid4().hex[:12]}"
+    """An engine whose search_path is a fresh schema (as civex-hub lays out one
+    repository), in a database made for the test so nothing here touches the
+    scratch database other tests share."""
+    name = f"civex_part_{uuid.uuid4().hex[:12]}"
     admin = create_engine(_PG_URL, isolation_level="AUTOCOMMIT")
     with admin.connect() as c:
-        c.execute(text(f"CREATE SCHEMA {name}"))
-    engine = create_engine(_PG_URL, connect_args={"options": f"-csearch_path={name}"})
+        c.execute(text(f'CREATE DATABASE "{name}"'))
+    base = _PG_URL.rsplit("/", 1)[0] + f"/{name}"
+    setup = create_engine(base, isolation_level="AUTOCOMMIT")
+    with setup.connect() as c:
+        c.execute(text("CREATE SCHEMA repo_t"))
+    setup.dispose()
+    engine = create_engine(base, connect_args={"options": "-csearch_path=repo_t"})
     yield engine
     engine.dispose()
     with admin.connect() as c:
-        c.execute(text(f"DROP SCHEMA {name} CASCADE"))
+        c.execute(text(f'DROP DATABASE "{name}" WITH (FORCE)'))
     admin.dispose()
 
 
