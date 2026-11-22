@@ -4,7 +4,8 @@ The built frontend is one `index.html` whose assets are addressed from its
 `<base href>`. `civex serve` serves it at `/`; a host serving many projects
 (the hub) serves the same build at `/p/<owner>/<project>/`, and may hand the
 app a boot object (`window.__CIVEX__`: where to sign in again, which
-extensions to load; `frontend/src/utils/host.ts`). Both come through
+extensions to load, `chrome`, `theme`, `brand`; `frontend/src/utils/host.ts`,
+`docs/guides/hosting.md`). Both come through
 `render_app_page`, so the page is made one way.
 """
 
@@ -49,7 +50,7 @@ def render_app_page(
     dist: Path, *, base: str = "/", boot: dict[str, Any] | None = None
 ) -> str:
     """`dist/index.html` served at `base`, with `boot` as `window.__CIVEX__`
-    when given (`login_url`, `extensions`; whatever else a host's extensions
+    when given (`login_url`, `extensions`, `chrome`, `theme`, `brand`; whatever else a host's extensions
     read). The page is read once per build."""
     index = dist / "index.html"
     page = _template(index, index.stat().st_mtime)

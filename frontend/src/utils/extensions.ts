@@ -15,10 +15,10 @@ import { currentPath, NAVIGATE_EVENT, onNavigate } from './navigation'
  * copies of React in a page break hooks), the router and query client the app
  * uses, civex's own controls so an extension looks like the app, and the API
  * client (under the project's path, with the session handled). An extension is
- * built with these as externals (`window.__CIVEX__.shared.react`, ...). `window.__CIVEX__.navigate.on(fn)`
- * calls `fn` with the app's path now and on each route change. The
- * modules are fetched only when a page has extensions, so a local civex
- * doesn't load them all up front. */
+ * built with these as externals (`window.__CIVEX__.shared.react`, ...).
+ * `window.__CIVEX__.navigate.on(fn)` calls `fn` with the app's path now and on
+ * each route change. The modules are fetched only when a page has extensions,
+ * so a local civex doesn't load them all up front. */
 async function sharedModules() {
   const [react, reactDom, jsxRuntime, ui, client] = await Promise.all([
     import('react'),

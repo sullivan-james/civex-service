@@ -89,7 +89,9 @@ export function isEmbedded(): boolean {
 export function brand(): { name: string; logo_url: string | null } {
   const given = boot().brand
   const name =
-    typeof given?.name === 'string' && given.name.trim() ? given.name : 'civex'
+    typeof given?.name === 'string' && given.name.trim()
+      ? given.name.trim()
+      : 'civex'
   const logo =
     typeof given?.logo_url === 'string' && given.logo_url
       ? given.logo_url

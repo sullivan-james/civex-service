@@ -18,6 +18,12 @@ export function currentPath(): string {
 /** Records `path` as where the app is and tells `window`. */
 export function announceNavigation(path: string): void {
   current = path
+  // Always reachable by a host's script, whenever it loads: it can read where
+  // the app is now instead of waiting for the next route change.
+  window.__CIVEX__ = {
+    ...(window.__CIVEX__ ?? {}),
+    navigate: { event: NAVIGATE_EVENT, current: currentPath, on: onNavigate },
+  }
   window.dispatchEvent(
     new CustomEvent<NavigateDetail>(NAVIGATE_EVENT, { detail: { path } }),
   )
