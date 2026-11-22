@@ -4448,7 +4448,7 @@ class RecordService:
 
         The records that couldn't take it, with why (left as they were), and
         how many runs were queued. A record that no longer exists, or is
-        deleted, is left out of both."""
+        deleted, is among those that couldn't."""
         shapes = self._schema_svc.resolver()
         paused = self._job_svc.is_paused() if self._job_svc else True
         datasets: dict[uuid.UUID, DatasetDTO | None] = {}
@@ -4459,6 +4459,8 @@ class RecordService:
         found = [
             r for r in self._records.list_by_ids(list(patches)) if r.deleted_at is None
         ]
+        for gone in set(patches) - {r.id for r in found}:
+            failed[gone] = "This record no longer exists, or is deleted."
         for dataset_id in {r.dataset_id for r in found}:
             self._permissions.require(permissions.WRITE_RECORDS, dataset_id)
         for raw in found:

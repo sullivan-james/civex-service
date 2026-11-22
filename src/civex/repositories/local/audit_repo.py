@@ -275,7 +275,11 @@ class LocalAuditRepository:
             r[0]
             for r in self._s.query(AuditLog.id)
             .filter(AuditLog.batch_id == batch_id)
-            .order_by(AuditLog.timestamp.desc(), AuditLog.id)
+            .order_by(
+                AuditLog.local_seq.desc().nullslast(),
+                AuditLog.timestamp.desc(),
+                AuditLog.id,
+            )
             .all()
         ]
 
