@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import time
 import uuid
+import weakref
 
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -140,6 +141,10 @@ class AppContext:
     # when they are in a bucket (`store_svc`/`transfer_svc` then say so).
     _store_svc: StoreService | None = None
     _transfer_svc: TransferService | None = None
+    # True when this context reads from the project's `read_engine` (a replica):
+    # it was built `read_only=True` and the project offers one and doesn't
+    # need the primary for this request. Such a context refuses writes.
+    on_read_engine: bool = False
 
     @property
     def store_svc(self) -> StoreService:
@@ -439,10 +444,52 @@ def build_local_context(
     return build_context(Project.local(config), file_store)
 
 
+_READ_ONLY_ENGINES: weakref.WeakKeyDictionary[Engine, Engine] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _read_only_engine(engine: Engine) -> Engine:
+    """`engine`, sharing its pool, with every transaction read-only and on one
+    snapshot (REPEATABLE READ, so a streamed export reading twice sees the same
+    rows). Made once per engine."""
+    ro = _READ_ONLY_ENGINES.get(engine)
+    if ro is None:
+        ro = engine.execution_options(
+            postgresql_readonly=True, isolation_level="REPEATABLE READ"
+        )
+        _READ_ONLY_ENGINES[engine] = ro
+    return ro
+
+
+def uses_read_engine(project: Project, read_only: bool) -> bool:
+    """Whether a context built `read_only` for `project` is served by its read
+    engine: only when the project has one, the request doesn't need the
+    primary, and the database is PostgreSQL (SQLite has no replicas)."""
+    replica = project.read_engine
+    return (
+        read_only
+        and replica is not None
+        and not project.needs_primary
+        and replica.dialect.name == "postgresql"
+        # A project following an authority keeps its sync position in the
+        # database, in a row a read may have to create: primary only.
+        and project.config.sync.remote is None
+    )
+
+
 def build_context(
     project: Project,
     file_store: ObjectStore | None = None,
+    *,
+    read_only: bool = False,
 ) -> AppContext:
+    """The services for `project`. `read_only=True` is the caller promising to
+    only read: the context is then served by `project.read_engine` when there
+    is one (see `uses_read_engine`), in a read-only transaction that refuses
+    any write. Only the routes and methods that are replica-safe by design ask
+    for it (`server.deps.get_read_ctx`); everything else, and anything inside a
+    write transaction, gets the primary."""
     from sqlalchemy.orm import Session
 
     from civex.db.migrate import ensure_schema_current
@@ -494,11 +541,28 @@ def build_context(
     engine = project.engine or _get_engine(config.db.url)
     if not project.migrated:
         ensure_schema_current(engine)
-    session = Session(engine)
+    on_read_engine = uses_read_engine(project, read_only)
+    session_engine: Engine
+    if on_read_engine:
+        assert project.read_engine is not None
+        # Never migrated from here (a replica can't be); the read-only
+        # transaction makes a stray write an error rather than a lost update.
+        session_engine = _read_only_engine(project.read_engine)
+    else:
+        session_engine = engine
+    session = Session(session_engine)
+    if on_read_engine:
+        # Connect now, so an unreachable replica fails here, where the host
+        # can fall back to the primary, not at some later query.
+        try:
+            session.connection()
+        except BaseException:
+            session.close()
+            raise
     schema_repo = LocalSchemaRepository(session)
     dataset_repo = LocalDatasetRepository(session)
     record_repo = LocalRecordRepository(
-        session, is_postgres=engine.dialect.name == "postgresql"
+        session, is_postgres=session_engine.dialect.name == "postgresql"
     )
     job_repo = LocalWorkflowJobRepository(session)
     device_id = project.device_id
@@ -797,6 +861,7 @@ def build_context(
         _session=session,
         _store_svc=store_svc,
         _transfer_svc=transfer_svc,
+        on_read_engine=on_read_engine,
     )
     ai_svc._app_ctx = ctx
     return ctx

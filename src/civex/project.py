@@ -33,7 +33,14 @@ class Project:
     follows an authority; None lets the context work it out. `engine` lets a
     host share one connection pool across projects (None: one per database
     URL), and `migrated` says the host already brought the database up to
-    date, so the context needn't check on every request."""
+    date, so the context needn't check on every request.
+
+    `read_engine` is an optional second engine, a read replica's: a context
+    built `read_only=True` (see `build_context`) serves its reads from it, and
+    every other context, and every write, uses `engine`. `needs_primary` makes
+    even those reads use `engine`: a host sets it for a request that follows
+    its own writes (read-your-writes), since a replica may lag the primary.
+    Nothing changes while `read_engine` is None, and on SQLite it is ignored."""
 
     config: Config
     config_store: ConfigStore
@@ -41,6 +48,8 @@ class Project:
     device_id: uuid.UUID | None = None
     engine: Engine | None = None
     migrated: bool = False
+    read_engine: Engine | None = None
+    needs_primary: bool = False
     # What the host offers for this project (`domain.features`): a project in
     # a folder on this machine gets everything a machine can do.
     features: frozenset[str] = LOCAL_FEATURES

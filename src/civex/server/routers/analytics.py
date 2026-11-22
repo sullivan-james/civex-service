@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from civex.context import AppContext
 from civex.domain.dtos import AnalyticsFilters
 from civex.domain.exceptions import NotFoundError
-from civex.server.deps import get_ctx
+from civex.server.deps import get_ctx, get_read_ctx
 from civex.server.models import (
     AiTokenUsageResponse,
     AuditEventCountsResponse,
@@ -93,7 +93,7 @@ def analytics_filters(
 @router.get("/records/counts", response_model=RecordCountsResponse)
 def record_counts(
     filters: AnalyticsFilters = Depends(analytics_filters),
-    ctx: AppContext = Depends(get_ctx),
+    ctx: AppContext = Depends(get_read_ctx),
 ):
     """Current record totals by dataset and schema -- a snapshot, not a time
     series. Applies the `dataset` and `schema` filters; the rest of the
@@ -108,7 +108,7 @@ def record_counts(
 @router.get("/records/growth", response_model=RecordGrowthResponse)
 def record_growth(
     filters: AnalyticsFilters = Depends(analytics_filters),
-    ctx: AppContext = Depends(get_ctx),
+    ctx: AppContext = Depends(get_read_ctx),
 ):
     """Record creation counts over time, broken out by dataset and schema.
     Applies `start`, `end`, `bucket`, `dataset`, `schema`."""
