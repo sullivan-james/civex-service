@@ -15,7 +15,7 @@ from civex.config import load_config
 from civex.context import AppContext, build_local_context
 from civex.domain.audit_diff import entry_snapshots
 from civex.domain.query import RecordQuery
-from civex.services import record_service
+from civex.services import audit_service, record_service
 
 
 @pytest.fixture()
@@ -215,6 +215,137 @@ def test_every_chunk_is_in_one_event_and_is_undone_as_one(
     undone = ctx.history_svc.revert_batch(batch, dry_run=False)
     ctx.commit()
     assert undone.applied == 8 and set(_status(ctx, ids)) == {"new"}
+
+
+# -- undoing at scale -------------------------------------------------------------
+
+
+def _edited(ctx: AppContext, ids: list[str], value: str = "checked", **more):
+    """Bulk edit `ids` and give back the batch it made."""
+    ctx.record_svc.bulk_edit({"status": value, **more}, ids=ids)
+    ctx.commit()
+    events, _ = ctx.history_svc.events(
+        where={"field": "how", "op": "eq", "value": "edit"}, limit=1
+    )
+    return events[0].batch.id
+
+
+def test_undoing_a_chunk_costs_the_same_however_many_records_are_in_it(
+    ctx: AppContext, trials, monkeypatch: pytest.MonkeyPatch
+):
+    """An undo reads a chunk's entries and records as a set and saves them in
+    one statement with one for their history: a fixed number of statements per
+    chunk, not a read, a save, two catalogs and an entry per record."""
+    _, more = trials
+    monkeypatch.setattr(audit_service, "_BATCH_PAGE", 50)
+
+    def cost(n: int) -> int:
+        ids = more(n)
+        batch = _edited(ctx, ids)
+        seen = _statements(
+            ctx, lambda: ctx.history_svc.revert_batch(batch, dry_run=False)
+        )
+        ctx.commit()
+        assert set(_status(ctx, ids)) == {"new"}
+        return len(seen)
+
+    small, full, three = cost(5), cost(50), cost(150)
+    assert full == small  # 5 records or 50: the same statements
+    assert (three - full) / 2 <= 25, (small, full, three)  # per extra chunk
+    # Planning an undo costs the same, and writes nothing.
+    ids = more(150)
+    batch = _edited(ctx, ids)
+    seen = _statements(ctx, lambda: ctx.history_svc.revert_batch(batch))
+    assert not [s for s in seen if s.lstrip().upper().startswith(("UPDATE", "INSERT"))]
+    assert set(_status(ctx, ids)) == {"checked"}
+    assert len(seen) <= three
+
+
+def test_an_undo_is_saved_a_chunk_at_a_time_as_one_event(
+    ctx: AppContext, trials, monkeypatch: pytest.MonkeyPatch
+):
+    _, more = trials
+    monkeypatch.setattr(audit_service, "_BATCH_PAGE", 3)
+    ids = more(8)
+    batch = _edited(ctx, ids)
+
+    with ctx.chunked_writes() as turn:
+        done = []
+        for result in ctx.history_svc.revert_batch_chunks(batch, dry_run=False):
+            turn()
+            done.append(result.applied)
+    assert done == [3, 6, 8]
+    assert set(_status(ctx, ids)) == {"new"}
+    events, _ = ctx.history_svc.events(
+        where={"field": "how", "op": "eq", "value": "edit"}, limit=5
+    )
+    assert len(events) == 2  # the edit, and the undo (every chunk of it)
+    undo = ctx.history_svc.page(batch_id=events[0].batch.id, limit=20)
+    assert {str(e.entity_id) for e in undo} == set(ids)  # an entry per record
+    assert events[0].batch.label == "Undo status"
+    # Run again, it has nothing left to do: how an undo stopped half way ends.
+    again = ctx.history_svc.revert_batch(batch, dry_run=False)
+    assert (again.applied, again.same) == (0, 8)
+
+
+def test_an_undo_keeps_what_was_edited_since_and_leaves_what_it_cannot_undo(
+    ctx: AppContext, trials, monkeypatch: pytest.MonkeyPatch
+):
+    """Judged per field against the record as it is now: a field edited again
+    since is a conflict (left unless forced), one edited since in a field the
+    bulk edit did not touch stays as it is, a deleted record is left."""
+    _, more = trials
+    monkeypatch.setattr(audit_service, "_BATCH_PAGE", 2)
+    a, b, c, d, e = more(5)
+    batch = _edited(ctx, [a, b, c, d, e], "checked", depth=7)
+    ctx.record_svc.patch(b, {"code": "later"})  # another field
+    ctx.record_svc.patch(c, {"status": "redone"})  # the same field
+    ctx.record_svc.patch(d, {"status": "redone", "depth": 9})  # both
+    ctx.record_svc.delete(e)
+    ctx.commit()
+
+    plan = ctx.history_svc.revert_batch(batch)
+    assert (plan.entries, plan.applied, plan.conflicts, plan.left) == (5, 3, 2, 2)
+    # d had both its fields edited since, e is deleted.
+    assert {r["record_id"] for r in plan.reasons} == {d, e}
+
+    result = ctx.history_svc.revert_batch(batch, dry_run=False)
+    ctx.commit()
+    assert (result.applied, result.conflicts, result.left) == (3, 2, 2)
+    data = {i: ctx.record_svc.get(i).data for i in (a, b, c, d)}
+    assert (data[a]["status"], data[a].get("depth")) == ("new", None)
+    assert (data[b]["status"], data[b].get("depth"), data[b]["code"]) == (
+        "new",
+        None,
+        "later",
+    )
+    # c: its status was edited since, so left, but its depth is put back.
+    assert (data[c]["status"], data[c].get("depth")) == ("redone", None)
+    assert (data[d]["status"], data[d].get("depth")) == ("redone", 9)  # left
+
+    forced = ctx.history_svc.revert_batch(batch, force=True, dry_run=False)
+    ctx.commit()
+    assert forced.applied == 2  # c and d: the fields edited since
+    assert forced.left == 1  # e, deleted
+    assert ctx.record_svc.get(c).data["status"] == "new"
+    assert ctx.record_svc.get(d).data["status"] == "new"
+    assert ctx.record_svc.get(d).data.get("depth") is None
+
+
+def test_an_undo_that_a_record_refuses_leaves_it_and_goes_on(
+    ctx: AppContext, trials, monkeypatch: pytest.MonkeyPatch
+):
+    _, more = trials
+    ids = more(3)
+    batch = _edited(ctx, ids, "checked")
+    # The old value is no longer allowed (the field now takes only a short value).
+    ctx.schema_svc.update_field("trial", "status", restrictions={"max_length": 2})
+    ctx.commit()
+    result = ctx.history_svc.revert_batch(batch, dry_run=False)
+    ctx.commit()
+    assert (result.applied, result.left) == (0, 3)
+    assert set(_status(ctx, ids)) == {"checked"}
+    assert all("status" in r["reason"] for r in result.reasons)
 
 
 def test_an_edit_alone_never_waits_for_anyone(

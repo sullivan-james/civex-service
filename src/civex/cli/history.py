@@ -271,7 +271,14 @@ def history_undo_edit(
             raise typer.Exit(1)
         if not yes:
             typer.confirm(f"Undo {plan.applied} changes?", abort=True)
-        result = ctx.history_svc.revert_batch(batch_id, force=force, dry_run=False)
+        # Saved a chunk at a time, so the database is never held for the
+        # whole undo; stopped half way, the same command finishes it.
+        result = plan
+        with ctx.chunked_writes() as turn:
+            for result in ctx.history_svc.revert_batch_chunks(
+                batch_id, force=force, dry_run=False
+            ):
+                turn()
         ctx.commit()
     except CivexError as e:
         console.print(f"[error]{e}[/error]")

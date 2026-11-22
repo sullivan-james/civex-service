@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from civex.context import AppContext
 from civex.domain.audit_filters import AUDIT_FIELDS
+from civex.domain.dtos import BatchRevertDTO
 from civex.domain.exceptions import ValidationError
 from civex.server.deps import get_ctx
 from civex.server.models import (
@@ -258,9 +259,12 @@ def revert_audit_batch(
     record update, as one new event in history (which can itself be undone).
     Changes that can't be undone are left and reported."""
     body = body or BatchRevertRequest()
-    result = ctx.history_svc.revert_batch(
-        _audit_id(batch_id), force=body.force, dry_run=False
-    )
+    result = BatchRevertDTO(_audit_id(batch_id))
+    with ctx.chunked_writes() as turn:
+        for result in ctx.history_svc.revert_batch_chunks(
+            result.batch_id, force=body.force, dry_run=False
+        ):
+            turn()
     ctx.commit()
     return BatchRevertResponse(**result.to_dict())
 

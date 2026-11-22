@@ -184,6 +184,10 @@ def _tree(node: FilterNode):
     return _condition(node)
 
 
+# How many ids one query is asked about (SQLite caps the variables in one).
+_ID_CHUNK = 500
+
+
 class LocalAuditRepository:
     def __init__(
         self,
@@ -265,6 +269,24 @@ class LocalAuditRepository:
     def get_batch(self, batch_id: uuid.UUID) -> AuditBatchDTO | None:
         row = self._s.get(AuditBatch, batch_id)
         return _batch_dto(row) if row else None
+
+    def batch_entry_ids(self, batch_id: uuid.UUID) -> list[uuid.UUID]:
+        return [
+            r[0]
+            for r in self._s.query(AuditLog.id)
+            .filter(AuditLog.batch_id == batch_id)
+            .order_by(AuditLog.timestamp.desc(), AuditLog.id)
+            .all()
+        ]
+
+    def get_audit_many(self, ids: list[uuid.UUID]) -> list[AuditLogDTO]:
+        return [
+            _audit_dto(r)
+            for start in range(0, len(ids), _ID_CHUNK)
+            for r in self._s.query(AuditLog).filter(
+                AuditLog.id.in_(ids[start : start + _ID_CHUNK])
+            )
+        ]
 
     def _next_hlc(self) -> str | None:
         """The clock stamp for the next entry: None until this project syncs."""
