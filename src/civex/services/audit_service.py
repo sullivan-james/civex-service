@@ -542,6 +542,7 @@ class AuditService:
         found = (
             self._records.labels([str(entry.entity_id)])
             if entry.entity_type == "record"
+            and entry.action in ("update", "create", "delete")
             else []
         )
         return self._plan(entry, found[0] if found else None, fields)
@@ -703,6 +704,8 @@ class AuditService:
 
         # Changes to put fields back, waiting to be saved as one set.
         queued: dict[uuid.UUID, dict[str, Any]] = {}
+        # Records already changed by this undo, to be read again if met again.
+        stale: set[uuid.UUID] = set()
 
         def save_queued() -> None:
             if not queued:
@@ -728,7 +731,7 @@ class AuditService:
                     )
                 }
                 for entry in entries:
-                    if entry.entity_id in queued:
+                    if entry.entity_id in queued or entry.entity_id in stale:
                         # A second change to a record: judge it against what
                         # the first leaves.
                         save_queued()
@@ -773,6 +776,7 @@ class AuditService:
                             leave(plan.entity_id, str(e))
                             continue
                         result.applied += 1
+                        stale.add(entry.entity_id)  # judged anew if met again
                 save_queued()
                 yield result
             if not entry_ids:
