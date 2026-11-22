@@ -17,7 +17,7 @@ import dataclasses
 import json
 from dataclasses import replace
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from typing import Any
 
 from civex.domain.audit_filter import AuditFilter
@@ -51,7 +51,7 @@ from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.repositories.protocols import AuditRepository, ObjectStore
 from civex.services.dataset_service import DatasetService
 from civex.services.record_service import MAX_REPORTED, RecordService
-from civex.services.schema_service import SchemaService
+from civex.services.schema_service import SchemaResolver, SchemaService
 
 # Bulk operations whose changes can be undone together (`revert_batch`).
 REVERTIBLE_BATCHES = ("edit",)
@@ -539,6 +539,24 @@ class AuditService:
         Nothing but record changes can be reverted yet, since undoing a
         schema change could destroy data."""
         entry = self.get(audit_id)
+        found = (
+            self._records.labels([str(entry.entity_id)])
+            if entry.entity_type == "record"
+            else []
+        )
+        return self._plan(entry, found[0] if found else None, fields)
+
+    def _plan(
+        self,
+        entry: AuditLogDTO,
+        record: RecordDTO | None,
+        fields: list[str] | None = None,
+        shapes: SchemaResolver | None = None,
+    ) -> RevertPlanDTO:
+        """`plan_revert` for an entry already read (with its `changes`) and the
+        record it is about as `RecordService.labels` gives it (None when it is
+        gone). `shapes` lets a caller planning many entries resolve each
+        schema once."""
         plan = RevertPlanDTO(
             audit_id=entry.id,
             entity_type=entry.entity_type,
@@ -552,8 +570,6 @@ class AuditService:
             plan.blocked = f"A '{entry.action}' entry can't be reverted."
             return plan
 
-        found = self._records.labels([str(entry.entity_id)])
-        record = found[0] if found else None
         if record is None:
             plan.blocked = "This record no longer exists."
             return plan
@@ -576,7 +592,7 @@ class AuditService:
             if deleted:
                 plan.blocked = "This record is deleted. Restore it first."
             else:
-                plan.fields = self._plan_fields(entry, record, fields)
+                plan.fields = self._plan_fields(entry, record, fields, shapes)
         return plan
 
     def revert(
@@ -631,11 +647,42 @@ class AuditService:
         dry_run: bool = True,
     ) -> BatchRevertDTO:
         """Undo a whole bulk edit: every change in it, newest first, each by
-        the one-entry rule (`plan_revert`, then the same apply as `revert`),
-        so nothing about undoing is decided twice. Counts only unless
-        `dry_run` is False. A change that can't be undone (record deleted
-        since, value no longer allowed, every field edited since without
-        `force`) is left and reported; the rest are undone as one event."""
+        the one-entry rule (`plan_revert`), so nothing about undoing is
+        decided twice. Counts only unless `dry_run` is False. A change that
+        can't be undone (record deleted since, value no longer allowed, every
+        field edited since without `force`) is left and reported; the rest are
+        undone as one event, in the caller's one transaction. A host that must
+        not hold the database for the whole undo runs `revert_batch_chunks`
+        and commits after each chunk."""
+        result = BatchRevertDTO(_as_uuid(batch_id, "batch"))
+        for result in self.revert_batch_chunks(batch_id, force, dry_run):
+            pass
+        return result
+
+    def revert_batch_chunks(
+        self,
+        batch_id: uuid.UUID | str,
+        force: bool = False,
+        dry_run: bool = True,
+    ) -> Generator[BatchRevertDTO, None, None]:
+        """`revert_batch` a chunk of `_BATCH_PAGE` changes at a time: after each
+        chunk it yields what has been done so far (the same, growing, result),
+        and the caller commits (`AppContext.chunked_writes`), so the database
+        is held for one chunk and other saves go in between two.
+
+        A chunk is read and planned as a set (its entries, its records, each
+        schema once), then the changes that put fields back are saved as a
+        chunk of a bulk edit is (`RecordService.put_fields_back`): a fixed
+        number of queries per chunk however many records. What a bulk edit
+        left alone is judged per field against the record as it is now, so a
+        field edited again since is a conflict (left unless `force`) and a
+        record edited since in other fields is still put back in the fields
+        the bulk edit changed. A change to anything but a plain field update
+        (a restore, a delete) is applied one at a time, as before.
+
+        Nothing says where it got to: a change already undone is `same`, so
+        an undo stopped half way is finished by running it again. Stop by
+        closing the generator; what was committed stays."""
         batch = self._audit.get_batch(_as_uuid(batch_id, "batch"))
         if batch is None:
             raise NotFoundError(f"Batch '{batch_id}' not found")
@@ -645,46 +692,98 @@ class AuditService:
                 "to undo them one by one."
             )
         result = BatchRevertDTO(batch_id=batch.id)
-        entry_ids: list[uuid.UUID] = []
-        while page := self._audit.list_audit(
-            limit=_BATCH_PAGE, offset=len(entry_ids), batch_id=batch.id
-        ):
-            entry_ids.extend(e.id for e in page)
+        entry_ids = self._audit.batch_entry_ids(batch.id)
         result.entries = len(entry_ids)
+        shapes = self._schema_svc.resolver()
 
         def leave(entity_id: uuid.UUID, reason: str) -> None:
             result.left += 1
             if len(result.reasons) < MAX_REPORTED:
                 result.reasons.append({"record_id": str(entity_id), "reason": reason})
 
+        # Changes to put fields back, waiting to be saved as one set.
+        queued: dict[uuid.UUID, dict[str, Any]] = {}
+
+        def save_queued() -> None:
+            if not queued:
+                return
+            failed, _ = self._records.put_fields_back(queued)
+            for record_id in queued:
+                if record_id in failed:
+                    leave(record_id, failed[record_id])
+                else:
+                    result.applied += 1
+            queued.clear()
+
         label = f"Undo {batch.label}" if batch.label else "Undo a bulk edit"
         with self.batch("edit", label):
-            for entry_id in entry_ids:
-                plan = self.plan_revert(entry_id)
-                if plan.blocked:
-                    leave(plan.entity_id, plan.blocked)
-                    continue
-                if not plan.can_apply:
-                    result.same += 1
-                    continue
-                if plan.has_conflicts:
-                    result.conflicts += 1
-                    if not force and not any(
-                        f.status == REVERT_APPLY for f in plan.fields
-                    ):
-                        leave(plan.entity_id, "Every field was edited since.")
+            for start in range(0, len(entry_ids), _BATCH_PAGE):
+                page = entry_ids[start : start + _BATCH_PAGE]
+                read = {e.id: e for e in self._audit.get_audit_many(page)}
+                entries = self._with_changes([read[i] for i in page if i in read])
+                now = {
+                    r.id: r
+                    for r in self._records.labels(
+                        [str(e.entity_id) for e in entries if e.entity_type == "record"]
+                    )
+                }
+                for entry in entries:
+                    if entry.entity_id in queued:
+                        # A second change to a record: judge it against what
+                        # the first leaves.
+                        save_queued()
+                        again = self._records.labels([str(entry.entity_id)])
+                        if again:
+                            now[entry.entity_id] = again[0]
+                    plan = self._plan(entry, now.get(entry.entity_id), None, shapes)
+                    if plan.blocked:
+                        leave(plan.entity_id, plan.blocked)
                         continue
-                if not dry_run:
-                    try:
-                        self._apply_revert(plan, force)
-                    except ValidationError as e:
-                        leave(plan.entity_id, str(e))
+                    if not plan.can_apply:
+                        result.same += 1
                         continue
-                result.applied += 1
-        return result
+                    if plan.has_conflicts:
+                        result.conflicts += 1
+                        if not force and not any(
+                            f.status == REVERT_APPLY for f in plan.fields
+                        ):
+                            leave(plan.entity_id, "Every field was edited since.")
+                            continue
+                    if dry_run:
+                        result.applied += 1
+                    elif plan.kind == "update":
+                        put_back = {
+                            f.field: f.target
+                            for f in plan.fields
+                            if f.status == REVERT_APPLY
+                            or (force and f.status == REVERT_CONFLICT)
+                        }
+                        if not put_back:
+                            leave(
+                                plan.entity_id,
+                                "Every field was edited since. Revert anyway "
+                                "to overwrite them.",
+                            )
+                            continue
+                        queued[plan.entity_id] = put_back
+                    else:
+                        try:
+                            self._apply_revert(plan, force)
+                        except ValidationError as e:
+                            leave(plan.entity_id, str(e))
+                            continue
+                        result.applied += 1
+                save_queued()
+                yield result
+            if not entry_ids:
+                yield result
 
     def _plan_fields(
-        self, entry: AuditLogDTO, record: RecordDTO, wanted: list[str] | None
+        self,
+        entry: AuditLogDTO,
+        record: RecordDTO,
+        wanted: list[str] | None,
+        shapes: SchemaResolver | None = None,
     ) -> list[RevertFieldDTO]:
         changes = {c["field"]: c for c in entry.changes}
         if wanted is not None:
@@ -694,7 +793,7 @@ class AuditService:
                     f"This entry did not change: {', '.join(unknown)}"
                 )
             changes = {name: changes[name] for name in wanted}
-        shape = self._schema_svc.resolver()(record.schema_id)
+        shape = (shapes or self._schema_svc.resolver())(record.schema_id)
         return [
             self._plan_field(change, record.data, shape) for change in changes.values()
         ]

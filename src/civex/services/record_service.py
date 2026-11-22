@@ -4400,15 +4400,9 @@ class RecordService:
                         )
                     dataset = datasets[raw.dataset_id]
                     try:
-                        if self._edit_is_plain(shape, set(wanted)):
-                            before, id_data = self._checked_update(
-                                raw, merged, shape, dataset
-                            )
-                            if self._stays_plain(shape, raw.data, id_data):
-                                together.append((raw, id_data, before))
-                                counts["changing"] += 1
-                                continue
-                        runs += self._write_update(raw, merged, shapes, dataset)[1]
+                        runs += self._save_checked(
+                            raw, merged, set(wanted), shape, shapes, dataset, together
+                        )
                     except ValidationError as e:
                         skip(raw, str(e))
                         continue
@@ -4419,6 +4413,84 @@ class RecordService:
                 yield so_far()
         if not chosen:
             yield so_far()
+
+    def _save_checked(
+        self,
+        raw: RecordDTO,
+        merged: dict[str, Any],
+        names: set[str],
+        shape: ResolvedSchema,
+        shapes: SchemaResolver,
+        dataset: DatasetDTO | None,
+        together: list[tuple[RecordDTO, dict[str, Any], dict[str, Any]]],
+    ) -> int:
+        """Check `raw` saved as `merged` (its whole data, by name, with only
+        `names` changed). A plain change is added to `together`, for
+        `_write_together` to save with the rest of its chunk; any other is
+        saved now, since it asks the database about this record. How many
+        workflow runs were queued by a save made now. Raises
+        `ValidationError`, writing nothing."""
+        if self._edit_is_plain(shape, names):
+            before, id_data = self._checked_update(raw, merged, shape, dataset)
+            if self._stays_plain(shape, raw.data, id_data):
+                together.append((raw, id_data, before))
+                return 0
+        return self._write_update(raw, merged, shapes, dataset)[1]
+
+    def put_fields_back(
+        self, patches: dict[uuid.UUID, dict[str, Any]]
+    ) -> tuple[dict[uuid.UUID, str], int]:
+        """Set these fields (by name; None clears one) on each of these records,
+        saved as a chunk of a bulk edit is: checked first, then the records in
+        one statement and their history entries in another, with a workflow run
+        only for a change that starts one. For one chunk of an undo, which
+        asks for `write_records` of every collection it touches first.
+
+        The records that couldn't take it, with why (left as they were), and
+        how many runs were queued. A record that no longer exists, or is
+        deleted, is left out of both."""
+        shapes = self._schema_svc.resolver()
+        paused = self._job_svc.is_paused() if self._job_svc else True
+        datasets: dict[uuid.UUID, DatasetDTO | None] = {}
+        starts: dict[tuple[str, frozenset[str]], bool] = {}
+        failed: dict[uuid.UUID, str] = {}
+        together: list[tuple[RecordDTO, dict[str, Any], dict[str, Any]]] = []
+        runs = 0
+        found = [
+            r for r in self._records.list_by_ids(list(patches)) if r.deleted_at is None
+        ]
+        for dataset_id in {r.dataset_id for r in found}:
+            self._permissions.require(permissions.WRITE_RECORDS, dataset_id)
+        for raw in found:
+            shape = shapes(raw.schema_id)
+            if shape is None:
+                failed[raw.id] = "Its schema no longer exists"
+                continue
+            wanted = patches[raw.id]
+            merged = self._ids_to_names(raw.data, shape)
+            for name, value in wanted.items():
+                if value is None:
+                    merged.pop(name, None)
+                else:
+                    merged[name] = value
+            if raw.dataset_id not in datasets:
+                datasets[raw.dataset_id] = self._datasets.get_by_id(
+                    raw.dataset_id, include_deleted=True, with_count=False
+                )
+            try:
+                runs += self._save_checked(
+                    raw,
+                    merged,
+                    set(wanted),
+                    shape,
+                    shapes,
+                    datasets[raw.dataset_id],
+                    together,
+                )
+            except ValidationError as e:
+                failed[raw.id] = str(e)
+        runs += self._write_together(together, shapes, paused, starts)
+        return failed, runs
 
     @staticmethod
     def _stays_plain(
