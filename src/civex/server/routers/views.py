@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from civex.context import AppContext
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
-from civex.server.deps import get_ctx
+from civex.server.deps import get_ctx, get_read_ctx
 from civex.server.downloads import new_temp_dir, serve, temp_paths
 from civex.server.models import (
     CreateViewRequest,
@@ -65,7 +65,7 @@ def create_view(
 
 @router.post("/preview", response_model=PreviewViewResponse)
 def preview_view(
-    schema_name: str, body: PreviewViewRequest, ctx: AppContext = Depends(get_ctx)
+    schema_name: str, body: PreviewViewRequest, ctx: AppContext = Depends(get_read_ctx)
 ):
     """Rows + total count for a column/filter/sort selection without saving
     it as a view -- backs the view builder's live preview."""

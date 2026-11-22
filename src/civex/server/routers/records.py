@@ -16,7 +16,7 @@ from civex.domain.summary import (
 )
 from civex.domain.tables import check_format, extension, media_type
 from civex.server.background import run_pending_jobs
-from civex.server.deps import get_ctx
+from civex.server.deps import get_ctx, get_read_ctx
 from civex.server.downloads import new_temp_path, serve, temp_paths
 from civex.server.models import (
     BulkEditPlanResponse,
@@ -79,7 +79,7 @@ def search_records_global(
         "collection may reference -- its own collection's and those of "
         "global collections. What a reference picker should pass.",
     ),
-    ctx: AppContext = Depends(get_ctx),
+    ctx: AppContext = Depends(get_read_ctx),
 ):
     try:
         items = ctx.record_svc.find_by_schema(
@@ -107,7 +107,7 @@ def search_records(
         description="Collection name: only search records in it. Omitted, "
         "every collection is searched.",
     ),
-    ctx: AppContext = Depends(get_ctx),
+    ctx: AppContext = Depends(get_read_ctx),
 ):
     """Search records of every schema in one query, best match first -- what
     the web UI's jump-to box uses. Each result's `collection` says where it
@@ -205,7 +205,7 @@ def list_records(
     offset: int = Query(default=0, ge=0),
     cursor: Optional[str] = _CURSOR,
     estimate: bool = _ESTIMATE,
-    ctx: AppContext = Depends(get_ctx),
+    ctx: AppContext = Depends(get_read_ctx),
 ):
     """List records in a collection, paginated, filtered and sorted.
 
@@ -225,7 +225,7 @@ def list_all_records(
     offset: int = Query(default=0, ge=0),
     cursor: Optional[str] = _CURSOR,
     estimate: bool = _ESTIMATE,
-    ctx: AppContext = Depends(get_ctx),
+    ctx: AppContext = Depends(get_read_ctx),
 ):
     """List records in every collection, paginated: of one schema, or with
     no 'schema' of every kind at once (with 'within', everything beneath that
@@ -253,7 +253,7 @@ def _count(ctx: AppContext, query: RecordQuery, estimate: bool) -> RecordsCountR
 def count_all_records(
     query: RecordQuery = Depends(record_query),
     estimate: bool = _ESTIMATE,
-    ctx: AppContext = Depends(get_ctx),
+    ctx: AppContext = Depends(get_read_ctx),
 ):
     """How many records match, in every collection. `estimate=true` answers
     from the planner on PostgreSQL (no scan: the same at a billion records as
@@ -270,7 +270,7 @@ def count_collection_records(
     dataset_name: str,
     query: RecordQuery = Depends(record_query),
     estimate: bool = _ESTIMATE,
-    ctx: AppContext = Depends(get_ctx),
+    ctx: AppContext = Depends(get_read_ctx),
 ):
     """How many records of a collection match (see `/records/count`)."""
     query.dataset = dataset_name
@@ -281,7 +281,7 @@ def count_collection_records(
 @router.get("/records/counts")
 def record_counts_everywhere(
     query: RecordQuery = Depends(record_query),
-    ctx: AppContext = Depends(get_ctx),
+    ctx: AppContext = Depends(get_read_ctx),
 ):
     """Record counts grouped by schema name across every collection: a
     collection's `record-counts`, for the explorer browsing all of them."""
@@ -306,7 +306,7 @@ def list_schema_records(
     offset: int = Query(default=0, ge=0),
     cursor: Optional[str] = _CURSOR,
     estimate: bool = _ESTIMATE,
-    ctx: AppContext = Depends(get_ctx),
+    ctx: AppContext = Depends(get_read_ctx),
 ):
     """List a schema's records across every collection -- the same query as
     a collection's list, just not scoped to one collection (what a saved view
@@ -414,7 +414,7 @@ def list_orphans(
 
 
 @router.get("/records/{record_id}", response_model=RecordResponse)
-def get_record(record_id: str, ctx: AppContext = Depends(get_ctx)):
+def get_record(record_id: str, ctx: AppContext = Depends(get_read_ctx)):
     try:
         record = ctx.record_svc.get(record_id)
         ancestors = ctx.record_svc.ancestors(record)
@@ -638,7 +638,7 @@ def summarise_records(
         description="Answer with the summary as a table file instead: csv, tsv, "
         "xlsx, json or jsonl. A last row holds the totals.",
     ),
-    ctx: AppContext = Depends(get_ctx),
+    ctx: AppContext = Depends(get_read_ctx),
 ):
     """Summarise the records a query lists (the same selectors as listing
     them): group them by field values, of their own kind or of a kind above
@@ -728,7 +728,7 @@ def records_with_issue(body: QualityRecordsRequest, ctx: AppContext = Depends(ge
 
 
 @router.post("/records/points", response_model=RecordPointsResponse)
-def record_points(body: RecordPointsRequest, ctx: AppContext = Depends(get_ctx)):
+def record_points(body: RecordPointsRequest, ctx: AppContext = Depends(get_read_ctx)):
     """Where the records a query lists are, for a map (the same selectors as
     listing them): each record with a value in the location field `field`,
     with its id, its name and the geometry. The field may be of a kind above
@@ -875,7 +875,7 @@ def delete_all_records(
 def export_records_csv(
     collection_name: str,
     query: RecordQuery = Depends(record_query),
-    ctx: AppContext = Depends(get_ctx),
+    ctx: AppContext = Depends(get_read_ctx),
 ):
     """Export records in a collection as a CSV file, honoring the same
     filters as the record list endpoint. One table for everything listed; to
