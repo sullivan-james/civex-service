@@ -11,6 +11,7 @@ import {
 import { ArrowRight } from '../components/ui/icons'
 import { HomeShortcuts } from '../components/home/HomeShortcuts'
 import { DesktopShortcut } from '../components/settings/DesktopShortcut'
+import { formatTimestamp } from '../utils/dates'
 
 const ONBOARDING_STEPS = [
   { to: '/collections', title: 'Start a collection' },
@@ -80,7 +81,7 @@ export default function HomePage() {
                     {job.workflow_name}
                   </Link>
                   <span className="ml-2 text-xs text-fg-subtle">
-                    {new Date(job.created_at).toLocaleString()}
+                    {formatTimestamp(job.created_at)}
                   </span>
                 </div>
                 <Badge variant={jobBadgeVariant(job.status)}>

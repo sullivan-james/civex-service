@@ -37,7 +37,7 @@ describe('summarise', () => {
 
   it('formats date restrictions', () => {
     expect(summarise({ min: '2020-01-01', max: '2020-12-31' }, 'date')).toBe(
-      'from 2020-01-01 · until 2020-12-31',
+      'from 01/01/2020 · until 31/12/2020',
     )
   })
 

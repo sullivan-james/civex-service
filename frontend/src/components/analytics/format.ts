@@ -1,3 +1,5 @@
+import { formatDate, formatInstantDate } from '../../utils/dates'
+
 /** Formats a duration given in seconds as a compact human string, e.g. for
  * axis ticks and tooltips on DurationHistogram. */
 export function formatDurationSeconds(seconds: number): string {
@@ -29,4 +31,11 @@ export function formatBytes(bytes: number): string {
     unitIndex++
   }
   return `${value.toFixed(value < 10 ? 1 : 0)} ${BYTE_UNITS[unitIndex]}`
+}
+
+/** A time bucket's start (a day, `2024-06-14`, or an instant) as a date in
+ * the chosen pattern, for the time axis and its tooltip. */
+export function formatBucketLabel(value: string): string {
+  if (/^\d{4}(-\d{2}){0,2}$/.test(value)) return formatDate(value)
+  return formatInstantDate(value) || value
 }

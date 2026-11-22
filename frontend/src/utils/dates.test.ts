@@ -1,12 +1,20 @@
-import { describe, it, expect } from 'vitest'
+import { afterEach, describe, it, expect } from 'vitest'
 import {
   effectiveTimeZone,
   formatDateTime,
+  formatFieldDate,
+  formatInstantDate,
+  formatTime,
+  formatTimestamp,
+  formatWallTime,
+  isWallTime,
   knownTimeZone,
+  parseWallTime,
   parseStoredInstant,
   utcToZonedLocal,
   zonedLocalToUTC,
 } from './dates'
+import { setDateFormat } from './dateFormat'
 
 const CHI = 'America/Chicago'
 
@@ -145,6 +153,11 @@ describe('zonedLocalToUTC', () => {
     const local = '2024-03-01T15:30'
     expect(zonedLocalToUTC(local, null)).toBe(new Date(local).toISOString())
   })
+  it('reads only wall time, never what Date would guess at', () => {
+    // `new Date('01/03/2024 15:3')` is 3 January somewhere: half-typed text
+    // must not become a date.
+    expect(zonedLocalToUTC('01/03/2024 15:3', null)).toBeNull()
+  })
 })
 
 describe('zonedLocalToUTC with seconds', () => {
@@ -168,23 +181,125 @@ describe('zonedLocalToUTC with seconds', () => {
 })
 
 describe('formatDateTime', () => {
-  it('shows wall time with the zone abbreviation', () => {
+  afterEach(() => localStorage.clear())
+
+  it('shows the date in the chosen pattern, 24-hour wall time and the zone', () => {
     expect(formatDateTime('2024-03-01T21:30:00+00:00', CHI, 'en-US')).toBe(
-      'Mar 1, 2024, 3:30 PM CST',
+      '01/03/2024 15:30 CST',
     )
     expect(formatDateTime('2024-07-01T20:30:00+00:00', CHI, 'en-US')).toBe(
-      'Jul 1, 2024, 3:30 PM CDT',
+      '01/07/2024 15:30 CDT',
     )
   })
   it('shows seconds when the value has them, and only then', () => {
     expect(formatDateTime('2024-03-01T21:30:45+00:00', CHI, 'en-US')).toBe(
-      'Mar 1, 2024, 3:30:45 PM CST',
+      '01/03/2024 15:30:45 CST',
     )
     expect(formatDateTime('2024-03-01T21:30:00+00:00', CHI, 'en-US')).toBe(
-      'Mar 1, 2024, 3:30 PM CST',
+      '01/03/2024 15:30 CST',
+    )
+  })
+  it('follows each pattern', () => {
+    const at = '2024-06-14T09:05:00+00:00'
+    expect(formatDateTime(at, 'UTC', 'en-US', 'DD/MM/YYYY')).toBe(
+      '14/06/2024 09:05 UTC',
+    )
+    expect(formatDateTime(at, 'UTC', 'en-US', 'MM/DD/YYYY')).toBe(
+      '06/14/2024 09:05 UTC',
+    )
+    expect(formatDateTime(at, 'UTC', 'en-US', 'YYYY-MM-DD')).toBe(
+      '2024-06-14 09:05 UTC',
+    )
+    expect(formatDateTime(at, 'UTC', 'en-US', 'D MMM YYYY')).toBe(
+      '14 Jun 2024 09:05 UTC',
+    )
+  })
+  it('follows the pattern chosen in settings', () => {
+    setDateFormat('D MMM YYYY')
+    expect(formatDateTime('2024-03-01T21:30:00Z', CHI, 'en-US')).toBe(
+      '1 Mar 2024 15:30 CST',
+    )
+  })
+  it('uses the wall date in the zone, not the UTC one', () => {
+    // 03:30 UTC on 2 March is still 1 March in Chicago.
+    expect(formatDateTime('2024-03-02T03:30:00Z', CHI, 'en-US')).toBe(
+      '01/03/2024 21:30 CST',
     )
   })
   it('falls back to the raw value when unparseable', () => {
     expect(formatDateTime('junk', CHI, 'en-US')).toBe('junk')
+  })
+})
+
+describe('formatTimestamp and friends', () => {
+  afterEach(() => localStorage.clear())
+
+  it('writes an instant in the viewer zone with no zone name', () => {
+    const local = new Date(2024, 5, 14, 9, 5, 30)
+    expect(formatTimestamp(local)).toBe('14/06/2024 09:05:30')
+    expect(formatTimestamp(local, { seconds: false })).toBe('14/06/2024 09:05')
+    expect(formatTimestamp(local.getTime())).toBe('14/06/2024 09:05:30')
+    expect(formatTimestamp(local.toISOString())).toBe('14/06/2024 09:05:30')
+    setDateFormat('MM/DD/YYYY')
+    expect(formatTimestamp(local)).toBe('06/14/2024 09:05:30')
+  })
+  it('gives nothing for nothing, and junk as it is', () => {
+    expect(formatTimestamp(null)).toBe('')
+    expect(formatTimestamp('')).toBe('')
+    expect(formatTimestamp('junk')).toBe('junk')
+  })
+  it('writes only the date, or only the time', () => {
+    const local = new Date(2024, 5, 14, 9, 5)
+    expect(formatInstantDate(local)).toBe('14/06/2024')
+    expect(formatInstantDate('2024-03-02T03:30:00Z', CHI)).toBe('01/03/2024')
+    expect(formatTime(local)).toBe('09:05')
+  })
+  it('writes a stored date or datetime value by its field type', () => {
+    expect(formatFieldDate('2019-06', 'date')).toBe('06/2019')
+    expect(formatFieldDate('2024-03-01T21:30:00Z', 'datetime', 'UTC')).toMatch(
+      /^01\/03\/2024 21:30/,
+    )
+    expect(formatFieldDate('2019-06', 'string')).toBeNull()
+    expect(formatFieldDate(2019, 'date')).toBeNull()
+  })
+})
+
+describe('wall time as text', () => {
+  afterEach(() => localStorage.clear())
+
+  it('writes wall time in the chosen pattern', () => {
+    expect(formatWallTime('2024-03-01T15:30')).toBe('01/03/2024 15:30')
+    expect(formatWallTime('2024-03-01T15:30:45')).toBe('01/03/2024 15:30:45')
+    expect(formatWallTime('2024-03-01T15:30', 'YYYY-MM-DD')).toBe(
+      '2024-03-01 15:30',
+    )
+    expect(formatWallTime('junk')).toBe('')
+  })
+  it('reads typed text in each pattern', () => {
+    expect(parseWallTime('01/03/2024 15:30')).toBe('2024-03-01T15:30')
+    expect(parseWallTime('1/3/2024 9:05:07')).toBe('2024-03-01T09:05:07')
+    expect(parseWallTime('03/01/2024 15:30', 'MM/DD/YYYY')).toBe(
+      '2024-03-01T15:30',
+    )
+    expect(parseWallTime('2024-03-01 15:30', 'YYYY-MM-DD')).toBe(
+      '2024-03-01T15:30',
+    )
+    expect(parseWallTime('1 Mar 2024 15:30', 'D MMM YYYY')).toBe(
+      '2024-03-01T15:30',
+    )
+    // What a datetime input gives reads in every pattern.
+    expect(parseWallTime('2024-03-01T15:30')).toBe('2024-03-01T15:30')
+  })
+  it('refuses a missing time, a bad time or a date short of a day', () => {
+    expect(parseWallTime('01/03/2024')).toBeNull()
+    expect(parseWallTime('01/03/2024 24:00')).toBeNull()
+    expect(parseWallTime('01/03/2024 15:60')).toBeNull()
+    expect(parseWallTime('03/2024 15:30')).toBeNull()
+    expect(parseWallTime('31/02/2024 15:30')).toBeNull()
+  })
+  it('tells wall time from anything else', () => {
+    expect(isWallTime('2024-03-01T15:30')).toBe(true)
+    expect(isWallTime('2024-03-01T15:30:45.5')).toBe(true)
+    expect(isWallTime('01/03/2024 15:30')).toBe(false)
   })
 })

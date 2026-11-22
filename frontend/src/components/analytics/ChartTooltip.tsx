@@ -14,6 +14,7 @@ export interface ChartTooltipProps {
   /** Title the tooltip with this key of the hovered row instead of the axis
    * label (a range's full wording rather than its start). */
   labelKey?: string
+  formatLabel?: (label: string) => string
 }
 
 /** Recharts `content` renderer shared by every primitive in this directory,
@@ -25,10 +26,15 @@ export function ChartTooltip({
   payload,
   formatValue = (value) => String(value),
   labelKey,
+  formatLabel = (label) => label,
 }: ChartTooltipProps) {
   if (!active || !payload?.length) return null
   const row = payload[0].payload as Record<string, unknown> | undefined
-  const title = labelKey ? String(row?.[labelKey] ?? label ?? '') : label
+  const title = labelKey
+    ? String(row?.[labelKey] ?? label ?? '')
+    : label != null
+      ? formatLabel(String(label))
+      : null
 
   return (
     <div className="rounded-md border border-border bg-canvas px-3 py-2 text-xs shadow-sm">

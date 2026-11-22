@@ -32,7 +32,7 @@ import {
   useSyncConflicts,
 } from '../hooks/useRemote'
 import { errorMessage } from '../lib/errors'
-import { formatDate } from '../lib/utils'
+import { formatRecent } from '../lib/utils'
 
 /** What can be taken back: only "keep theirs" changed nothing, so only it. */
 interface Undo {
@@ -360,7 +360,7 @@ export default function SyncReviewPage() {
             {
               key: 'when',
               header: 'When',
-              render: (c) => formatDate(c.created_at),
+              render: (c) => formatRecent(c.created_at),
             },
             {
               key: 'act',

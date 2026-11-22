@@ -9,6 +9,7 @@ import {
   Button,
   Checkbox,
   ConfirmDialog,
+  DateInput,
   Field,
   Input,
   Skeleton,
@@ -161,6 +162,9 @@ function RetentionForm({ settings }: { settings: RetentionSettings }) {
   )
 }
 
+/** A full date as `DateInput` gives it (anything else is still being typed). */
+const isDay = (date: string) => /^\d{4}-\d{2}-\d{2}$/.test(date)
+
 const startOfDay = (date: string) =>
   date ? new Date(`${date}T00:00:00`).toISOString() : null
 
@@ -196,30 +200,21 @@ function CleanUp({ settings }: { settings: RetentionSettings }) {
         <Subheading>Delete everything before a date</Subheading>
         <div className="flex flex-wrap items-end gap-4">
           <Field label="Deleted items, deleted before">
-            <Input
-              type="date"
-              value={deleted}
-              onChange={(e) => setDeleted(e.target.value)}
-            />
+            <DateInput value={deleted} onChange={setDeleted} />
           </Field>
           <Field label="Change history before">
-            <Input
-              type="date"
-              value={history}
-              onChange={(e) => setHistory(e.target.value)}
-            />
+            <DateInput value={history} onChange={setHistory} />
           </Field>
           <Field label="Workflow runs before">
-            <Input
-              type="date"
-              value={runs}
-              onChange={(e) => setRuns(e.target.value)}
-            />
+            <DateInput value={runs} onChange={setRuns} />
           </Field>
           <Button
             size="sm"
             variant="danger"
-            disabled={!deleted && !history && !runs}
+            disabled={
+              (!deleted && !history && !runs) ||
+              [deleted, history, runs].some((d) => d !== '' && !isDay(d))
+            }
             onClick={() =>
               setRequest({
                 deleted_before: startOfDay(deleted),

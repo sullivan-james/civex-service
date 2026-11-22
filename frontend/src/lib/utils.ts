@@ -1,8 +1,13 @@
+import { formatInstantDate } from '../utils/dates'
+
 export function pluralise(count: number, word: string): string {
   return `${count} ${word}${count === 1 ? '' : 's'}`
 }
 
-export function formatDate(iso: string): string {
+/** When something happened, as recently as it reads best: "just now",
+ * "5m ago", "3h ago", "2d ago", then the date in the chosen pattern
+ * (`utils/dates`). */
+export function formatRecent(iso: string): string {
   const d = new Date(iso)
   const now = new Date()
   const diffMs = now.getTime() - d.getTime()
@@ -15,9 +20,5 @@ export function formatDate(iso: string): string {
   if (diffMin < 60) return `${diffMin}m ago`
   if (diffHr < 24) return `${diffHr}h ago`
   if (diffDay < 7) return `${diffDay}d ago`
-  return d.toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
+  return formatInstantDate(d)
 }

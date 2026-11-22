@@ -26,6 +26,7 @@ import {
 import { describeSyncProgress } from '../../utils/syncProgress'
 import { SyncServing } from './SyncServing'
 import { useHasFeature } from '../../hooks/useFeatures'
+import { formatTime, formatTimestamp } from '../../utils/dates'
 
 const INTERVALS = [
   { seconds: 0, label: 'Never' },
@@ -36,7 +37,7 @@ const INTERVALS = [
 ]
 
 function when(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleString() : 'never'
+  return iso ? formatTimestamp(iso) : 'never'
 }
 
 function ConnectForm() {
@@ -147,7 +148,9 @@ function Copying({ s }: { s: RemoteStatus }) {
           </span>{' '}
           (Settings → Sync, or <code>civex sync device approve</code>). It works
           until{' '}
-          {new Date(s.awaiting_approval.expires_at * 1000).toLocaleTimeString()}
+          {formatTime(s.awaiting_approval.expires_at * 1000, {
+            seconds: false,
+          })}
           .
         </p>
         <div className="mt-2">

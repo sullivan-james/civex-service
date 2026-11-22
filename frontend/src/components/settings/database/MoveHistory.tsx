@@ -3,6 +3,7 @@ import { Badge, Button, ConfirmDialog } from '../../ui'
 import { useDbMoves, useRevertMove } from '../../../hooks/useDb'
 import type { MoveRecord } from '../../../api/db'
 import { errorMessage } from '../../../lib/errors'
+import { formatTimestamp } from '../../../utils/dates'
 
 const BADGE = {
   done: 'success',
@@ -35,7 +36,7 @@ export function MoveHistory() {
                 {m.source_label} → {m.target_label}
               </p>
               <p className="text-xs text-fg-muted">
-                {new Date(m.started_at).toLocaleString()}
+                {formatTimestamp(m.started_at)}
                 {m.error && ` · ${m.error}`}
               </p>
             </div>

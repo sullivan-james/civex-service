@@ -1,4 +1,5 @@
 export {
+  CalendarDays,
   Star,
   MessageSquare,
   Plus,

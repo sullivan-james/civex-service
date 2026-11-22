@@ -3,6 +3,7 @@ import type { AuditChange } from '../../api/audit'
 import { changeLabel } from '../../utils/auditValues'
 import { RestoreFieldButton } from '../trash/RestoreFieldButton'
 import { AuditValue } from './AuditValue'
+import { formatInstantDate } from '../../utils/dates'
 
 /** The first few changes on one line: "Age 1 → 2; Note (none) → hello". For a
  * table row; the whole list is `AuditChangeList`. */
@@ -69,8 +70,7 @@ function DeletedFieldNote({ change }: { change: AuditChange }) {
   return (
     <span className="mt-1 flex flex-wrap items-center gap-2 text-xs text-attention">
       Deleted field
-      {gone.deleted_at &&
-        ` · ${new Date(gone.deleted_at).toLocaleDateString()}`}
+      {gone.deleted_at && ` · ${formatInstantDate(gone.deleted_at)}`}
       {gone.schema_name && (
         <RestoreFieldButton fieldId={gone.id} schemaName={gone.schema_name} />
       )}

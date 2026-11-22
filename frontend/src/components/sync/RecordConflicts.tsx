@@ -1,4 +1,4 @@
-import { formatDate } from '../../lib/utils'
+import { formatRecent } from '../../lib/utils'
 import { describeAttempt, type ConflictLayout } from '../../utils/syncConflicts'
 import { Button } from '../ui'
 
@@ -31,7 +31,7 @@ export function RecordConflicts({
       </div>
       {layout.recordLevel.map((c) => (
         <p key={c.id} className="text-sm">
-          {describeAttempt(c, formatDate)}
+          {describeAttempt(c, formatRecent)}
         </p>
       ))}
       {layout.count > layout.recordLevel.length && (

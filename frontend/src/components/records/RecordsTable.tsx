@@ -1,8 +1,10 @@
-import type { ReactNode } from 'react'
+import { useContext, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { DataTable, Badge, type DataTableColumn } from '../ui'
 import { displayLabel } from '../../utils/naming'
-import { formatDate } from '../../lib/utils'
+import { formatRecent } from '../../lib/utils'
+import { formatFieldDate, formatInstantDate } from '../../utils/dates'
+import { TimeZoneContext } from './timeZoneContext'
 import { ReferenceLink } from './ReferenceLink'
 import { FileCell } from './FileCell'
 import { fileRefsIn } from '../../utils/fileRefs'
@@ -88,6 +90,8 @@ function CellValue({
   row: RecordsTableRow
   schemas?: Schema[]
 }) {
+  // The collection's zone: a column carries no field restrictions.
+  const timeZone = useContext(TimeZoneContext)
   // What every record has, not one of its values: its kind, its collection,
   // when it was last changed (a list of every kind shows these).
   if (col.type === 'kind') {
@@ -101,7 +105,7 @@ function CellValue({
   if (col.type === 'collection')
     return row.collection ? <>{row.collection}</> : <Dash />
   if (col.type === 'updated')
-    return row.updated_at ? <>{formatDate(row.updated_at)}</> : <Dash />
+    return row.updated_at ? <>{formatInstantDate(row.updated_at)}</> : <Dash />
   // The record's open threads of notes, not one of its values.
   if (col.type === 'notes') {
     const text = openNotesText(row.open_notes, row.latest_note)
@@ -152,7 +156,9 @@ function CellValue({
         {value.replace(/\s*\n\s*/g, ' ')}
       </span>
     )
-  return <>{formatCellValue(value)}</>
+  return (
+    <>{formatFieldDate(value, col.type, timeZone) ?? formatCellValue(value)}</>
+  )
 }
 
 /** The records table shared by the collection detail page and the view
@@ -218,7 +224,7 @@ export function RecordsTable({
       header: 'Added',
       width: '8rem',
       className: 'text-fg-muted',
-      render: (r) => (r.created_at ? formatDate(r.created_at) : '—'),
+      render: (r) => (r.created_at ? formatRecent(r.created_at) : '—'),
     })
   if (trailing)
     cols.push({

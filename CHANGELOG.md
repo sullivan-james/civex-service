@@ -21,6 +21,40 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
+## v2.0.1 — updating right after a release, a quicker desktop app (2026-11-19)
+
+No database migrations.
+
+### Fixes
+
+- Updating to a release in the first few minutes after it was published
+  failed with "only civex[desktop]<=2.0.0rc15 is available". The update check
+  asks PyPI directly, so it saw the new release at once, but uv installed from
+  its own copy of the package list, which it keeps for up to ten minutes. Both
+  `civex update` and the desktop app now have uv fetch a fresh list for civex
+  before installing.
+- In the desktop app, **Open project** or **New project** from inside a
+  project left the first project's server running. Its background work (sync,
+  file moves) then ran against the folder of the project opened next. The
+  window now runs one project at a time and stops the previous one first.
+- The desktop app's "couldn't open this project" page no longer suggests
+  `pip install`. It names the log file and `civex doctor`, and has a way back
+  to the start screen.
+
+### Changes
+
+- **Back to the start screen.** In the desktop app, **Project ▸ Start screen**
+  returns to opening, creating and recent projects without restarting the app.
+- **A quicker desktop app.** The launcher no longer starts civex just to ask its
+  version each time the app opens (it reads it from the installed package,
+  saving a second or more). Opening a project from the start screen takes about
+  0.4 s instead of 2 s, because the server's code loads while the start screen
+  waits. Switching between projects takes about 0.3 s.
+- Stopping a server (closing the desktop app, switching project, Ctrl+C on
+  `civex serve`) no longer waits up to two seconds for the sync worker.
+- The install guide says `uv tool install --force "civex[desktop]"`, as the
+  command line does, for adding the desktop window to a civex installed with uv.
+
 ## v2.0.0 — sync between machines, a workflow builder, files on drives or in a bucket (2026-11-18)
 
 civex 2.0 lets a project be kept on several computers through one server.
