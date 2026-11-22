@@ -34,7 +34,6 @@ import {
   useToast,
   Button,
   Card,
-  CheckRow,
   DataTable,
   DEFAULT_PAGE_SIZES,
   DetailSkeleton,
@@ -470,14 +469,12 @@ function Files({ release }: { release: Release }) {
   const plan = useReleaseFilePlan(release.name)
   const [exporting, setExporting] = useState(false)
   const [method, setMethod] = useState<Method>('link')
-  const [withCopy, setWithCopy] = useState(true)
   const p = plan.data
   const files = Number(release.counts.files ?? 0)
 
   function go() {
     if (method === 'zip') void zipRelease(flow, release.name)
-    else
-      void exportRelease(flow, release.name, method, undefined, false, withCopy)
+    else void exportRelease(flow, release.name)
     setExporting(false)
   }
 
@@ -518,14 +515,6 @@ function Files({ release }: { release: Release }) {
               setMethod={setMethod}
               zip={!!p?.zip_allowed}
             />
-            {method !== 'zip' && (
-              <CheckRow
-                compact
-                checked={withCopy}
-                onChange={setWithCopy}
-                title="Include a copy civex can read back"
-              />
-            )}
           </ModalBody>
           <ModalFooter>
             <Button onClick={() => setExporting(false)}>Cancel</Button>

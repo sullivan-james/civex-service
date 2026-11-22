@@ -9,7 +9,7 @@ import {
   type FlowContext,
 } from '../files/fileFlows'
 import { reportExport } from '../files/reportExport'
-import { exportFolder } from '../../utils/exportFolder'
+import { exportFolder, folderMode } from '../../utils/exportFolder'
 
 /** Getting a release's files out, as the file flows get any selection's: a
  * job in the status bar with the server's progress, the same report of what
@@ -44,12 +44,9 @@ function offerPartial(
 export function exportRelease(
   ctx: FlowContext,
   name: string,
-  mode: 'link' | 'copy',
-  volume?: string,
   allowPartial = false,
-  /** Also put the records in, in the form civex reads back. */
-  withCopy = true,
 ) {
+  const mode = folderMode()
   return job(
     ctx,
     mode === 'link' ? 'Preparing files…' : 'Copying files…',
@@ -62,9 +59,7 @@ export function exportRelease(
               name,
               {
                 mode,
-                volume,
                 folder: exportFolder() ?? undefined,
-                with_copy: withCopy,
                 allow_partial: allowPartial,
                 open: true,
               },
@@ -73,13 +68,7 @@ export function exportRelease(
           ),
         )
       } catch (err) {
-        if (
-          !offerPartial(
-            ctx,
-            err,
-            () => void exportRelease(ctx, name, mode, volume, true, withCopy),
-          )
-        )
+        if (!offerPartial(ctx, err, () => void exportRelease(ctx, name, true)))
           throw err
       }
     },

@@ -10,7 +10,7 @@ import {
 } from '../../api/fileAccess'
 import { transfersApi } from '../../api/transfers'
 import { runFileJob, type JobHandle } from '../../hooks/fileJobs'
-import { exportDest } from '../../utils/exportFolder'
+import { exportDest, folderMode } from '../../utils/exportFolder'
 import { errorMessage } from '../../lib/errors'
 import { describeAmounts } from '../../utils/amounts'
 import { percentDone } from '../../utils/transfers'
@@ -164,7 +164,7 @@ export function openAsFolder(
       fileAccessApi.tryExport(selection, {
         name,
         dest: exportDest(name),
-        mode: 'link',
+        mode: folderMode(),
         allowPartial: false,
         open: true,
         progressId,
@@ -230,7 +230,7 @@ export function openAvailable(
       fileAccessApi.tryExport(selection, {
         name,
         dest: exportDest(name),
-        mode: 'link',
+        mode: folderMode(),
         allowPartial: true,
         open: true,
         progressId,

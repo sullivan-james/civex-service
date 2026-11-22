@@ -99,10 +99,9 @@ To get a release out, its page has one button, **Export…**, with the same
 two ways as any export:
 
 - **Save to a folder**: any folder of this computer (**Choose…**), with the
-  files laid out as the records were (a folder per record). Leave
-  **Include a copy civex can read back** ticked and the folder also holds the
-  release's records as one file, which **Bring in from another project…**
-  (or `civex bundle import`) reads;
+  files laid out as the records were (a folder per record). The folder also
+  holds the release's records as one file, which **Bring in from another
+  project…** (or `civex bundle import`) reads;
 - **Download a zip**: offered only while the release is small enough
   (2000 files, 500 MB).
 

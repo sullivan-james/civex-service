@@ -13,6 +13,13 @@ export function exportFolder(): string | null {
   return readStored<string | null>(EXPORT_FOLDER_KEY, null)
 }
 
+/** How a folder is made is never asked: one a person chose gets ordinary
+ * files of their own (copies, theirs to change); civex's own exports folder
+ * is a quick look (links to the stored files: instant, no space). */
+export function folderMode(): 'link' | 'copy' {
+  return exportFolder() ? 'copy' : 'link'
+}
+
 /** The folder an export called `name` is made in, inside the chosen folder
  * (so a folder of the person's own files is never written into directly).
  * Undefined when none is chosen. */

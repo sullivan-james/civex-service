@@ -86,7 +86,7 @@ const next = () =>
   userEvent.click(screen.getByRole('button', { name: /^next/i }))
 
 /** Files → Export files… → (what, layout as they are) → pick a method → go. */
-async function exportVia(method: 'folder' | 'copy' | 'zip') {
+async function exportVia(method: 'folder' | 'zip') {
   await choose(/^export…/i)
   await next()
   const zip = method === 'zip'
@@ -95,10 +95,6 @@ async function exportVia(method: 'folder' | 'copy' | 'zip') {
       name: zip ? /download a zip/i : /save to a folder/i,
     }),
   )
-  if (method === 'copy')
-    await userEvent.click(
-      screen.getByRole('checkbox', { name: /make copies i can edit/i }),
-    )
   await userEvent.click(
     screen.getByRole('button', {
       name: zip ? /^download$/i : /^save to folder$/i,
@@ -566,19 +562,37 @@ describe('when the folder cannot be made on its drive', () => {
   })
 })
 
-describe('Copies to edit', () => {
-  it('is a tick on the folder, not a method of its own', async () => {
+describe('a folder of your own', () => {
+  afterEach(() => localStorage.clear())
+
+  it('gets ordinary files, with nothing asked about how', async () => {
+    localStorage.setItem('export.folder', JSON.stringify('/mnt/usb/out'))
     const calls = serve()
     renderIt()
 
-    await exportVia('copy')
+    await exportVia('folder')
 
     await waitFor(() =>
       expect(callPaths(calls)).toContain('/api/file-access/export'),
     )
     const body = calls.find((c) => c.path === '/api/file-access/export')!.body
     expect(body.mode).toBe('copy')
-    expect(body.volume).toBeUndefined()
+    expect(String(body.dest).startsWith('/mnt/usb/out/')).toBe(true)
+    expect(screen.queryByRole('checkbox', { name: /cop/i })).toBeNull()
+  })
+
+  it('is a quick look in civex’s own folder when none is chosen', async () => {
+    const calls = serve()
+    renderIt()
+
+    await exportVia('folder')
+
+    await waitFor(() =>
+      expect(callPaths(calls)).toContain('/api/file-access/export'),
+    )
+    const body = calls.find((c) => c.path === '/api/file-access/export')!.body
+    expect(body.mode).toBe('link')
+    expect(body.dest).toBeUndefined()
   })
 })
 

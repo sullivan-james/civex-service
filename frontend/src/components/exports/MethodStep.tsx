@@ -3,7 +3,7 @@ import { useHasFeature } from '../../hooks/useFeatures'
 import { useStored } from '../../hooks/useStored'
 import { EXPORT_FOLDER_KEY } from '../../utils/exportFolder'
 import { FolderPickerModal } from '../settings/FolderPickerModal'
-import { Button, CheckRow } from '../ui'
+import { Button } from '../ui'
 import { Archive, FolderOpen } from '../ui/icons'
 
 import type { ExportMethod } from '../../api/exportDefinitions'
@@ -11,12 +11,10 @@ import type { ExportMethod } from '../../api/exportDefinitions'
 export type Method = ExportMethod
 
 /** How an export is handed over: **Save to a folder**, or **Download a zip**.
- * A folder is any folder of this computer, chosen with the folder browser and
- * remembered (none chosen: civex's own exports folder). How the folder is
- * made is civex's business: links to the stored files where that is possible
- * there (instant, no extra space, read-only) and copies where it is not;
- * **Make copies I can edit** asks for copies throughout. Those two are the
- * stored methods `link` and `copy`; a table alone is always a copy. */
+ * Nothing else is asked. A folder the person chose (the folder browser,
+ * remembered) gets ordinary files of their own; with none chosen it is a
+ * quick look in civex's own exports folder, read-only because those are the
+ * stored files themselves (`utils/exportFolder.folderMode`). */
 export function MethodStep({
   files = true,
   method,
@@ -59,7 +57,7 @@ export function MethodStep({
                   className="min-w-0 flex-1 truncate font-mono text-xs"
                   title={folder ?? undefined}
                 >
-                  {folder ?? 'civex’s exports folder'}
+                  {folder ?? 'Quick look (read-only)'}
                 </span>
                 <Button size="sm" onClick={() => setBrowsing(true)}>
                   Choose…
@@ -74,14 +72,6 @@ export function MethodStep({
                   </Button>
                 )}
               </div>
-              {files && (
-                <CheckRow
-                  compact
-                  checked={method === 'copy'}
-                  onChange={(on) => setMethod(on ? 'copy' : 'link')}
-                  title="Make copies I can edit"
-                />
-              )}
             </div>
           )}
         </MethodCard>
