@@ -317,7 +317,13 @@ def test_rows_to_records_creates_one_record_per_row(
     df = pd.DataFrame([{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}])
     result = registration.invoke({"table": df}, config, wf_ctx, 60.0)
 
-    assert result.outputs == {"created": 2, "skipped": 0}
+    assert result.outputs == {
+        "created": 2,
+        "updated": 0,
+        "unchanged": 0,
+        "skipped": 0,
+        "skipped_rows": [],
+    }
     created = ctx.record_svc.find("study", schema_name="item")
     assert {r.data["name"] for r in created} == {"Alice", "Bob"}
 
@@ -344,7 +350,8 @@ def test_rows_to_records_counts_validation_failures_as_skipped_and_continues(
     )
     result = registration.invoke({"table": df}, config, wf_ctx, 60.0)
 
-    assert result.outputs == {"created": 1, "skipped": 1}
+    assert result.outputs["created"] == 1 and result.outputs["skipped"] == 1
+    assert result.outputs["skipped_rows"][0].startswith("Row 2: ")
     created = ctx.record_svc.find("study", schema_name="item")
     assert [r.data["name"] for r in created] == ["Alice"]
 
@@ -454,19 +461,31 @@ def test_upsert_records_creates_then_updates_by_key(
     result1 = registration.invoke(
         {"table": pd.DataFrame([{"sku": "A1", "qty": 5}])}, config, wf_ctx, 60.0
     )
-    assert result1.outputs == {"created": 1, "updated": 0, "skipped": 0}
+    assert result1.outputs == {
+        "created": 1,
+        "updated": 0,
+        "unchanged": 0,
+        "skipped": 0,
+        "skipped_rows": [],
+    }
 
     result2 = registration.invoke(
         {"table": pd.DataFrame([{"sku": "A1", "qty": 9}])}, config, wf_ctx, 60.0
     )
-    assert result2.outputs == {"created": 0, "updated": 1, "skipped": 0}
+    assert result2.outputs == {
+        "created": 0,
+        "updated": 1,
+        "unchanged": 0,
+        "skipped": 0,
+        "skipped_rows": [],
+    }
 
     existing = ctx.record_svc.find("study", schema_name="item")
     assert len(existing) == 1
     assert existing[0].data["qty"] == 9
 
 
-def test_upsert_records_skips_rows_with_missing_key_value(
+def test_upsert_records_skips_and_names_rows_with_missing_key_value(
     ctx, make_collection, make_schema, make_record
 ):
     dataset = make_collection("study")
@@ -481,7 +500,14 @@ def test_upsert_records_skips_rows_with_missing_key_value(
         {"table": pd.DataFrame([{"sku": None, "qty": 1}])}, config, wf_ctx, 60.0
     )
 
-    assert result.outputs == {"created": 0, "updated": 0, "skipped": 0}
+    # Counted and named now, not dropped without a word.
+    assert result.outputs == {
+        "created": 0,
+        "updated": 0,
+        "unchanged": 0,
+        "skipped": 1,
+        "skipped_rows": ["Row 1: no sku to match it by"],
+    }
 
 
 def test_upsert_records_counts_validation_failures_as_skipped_and_continues(
@@ -507,6 +533,6 @@ def test_upsert_records_counts_validation_failures_as_skipped_and_continues(
     )
     result = registration.invoke({"table": df}, config, wf_ctx, 60.0)
 
-    assert result.outputs == {"created": 1, "updated": 0, "skipped": 1}
+    assert result.outputs["created"] == 1 and result.outputs["skipped"] == 1
     existing = ctx.record_svc.find("study", schema_name="item")
     assert [r.data["sku"] for r in existing] == ["A1"]

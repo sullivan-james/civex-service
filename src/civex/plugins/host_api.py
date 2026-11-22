@@ -164,13 +164,15 @@ _FNS = [
                     schema_name=a.get("schema_name"),
                     parent_record_id=a.get("parent_record_id"),
                     filters=a.get("filters"),
+                    filter_tree=a.get("filter_tree"),
                     search=a.get("search"),
                     limit=a.get("limit", 50),
                     offset=a.get("offset", 0),
                 )
             ]
         },
-        "Records in a collection, filtered.",
+        "Records in a collection, filtered (`filters` as `field=value` text, "
+        "or `filter_tree`, the explorer's typed filter).",
     ),
     HostFn(
         "get_schema",

@@ -36,8 +36,10 @@ civex workflow run load-samples --record 2d69dc46 --input "files=readings/*.csv"
 Each new sample is created inside that visit. To read values out of the
 file names as well, see [Fill fields from file names](fill-fields-from-filenames.md).
 For tables, the [Read a table from a file](../reference/plugins/parse_table.md) and
-[Add or update records from a table](../reference/plugins/upsert_records.md) plugins do the same for
-CSV and TSV files.
+[Make a record for each row](../reference/plugins/rows_to_records.md) plugins do the same for
+CSV and TSV files; with **Match rows by** (or a unique key on the kind of record) a
+row updates the record already there, so importing the same table again changes
+nothing.
 
 ## See also
 

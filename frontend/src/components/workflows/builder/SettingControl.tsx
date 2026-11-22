@@ -1,7 +1,15 @@
 import { useState } from 'react'
 import type { Schema } from '../../../api/schemas'
 import type { Collection } from '../../../api/collections'
-import { Button, Checkbox, Field, Input, Select, Textarea } from '../../ui'
+import {
+  Button,
+  Checkbox,
+  CheckRow,
+  Field,
+  Input,
+  Select,
+  Textarea,
+} from '../../ui'
 import { PatternFromExampleDialog } from '../../files/PatternFromExample'
 import { useExampleFilenames } from '../../../hooks/useExampleFilenames'
 import { fieldsWithInherited } from '../../../utils/schemaFields'
@@ -92,6 +100,61 @@ function FieldPicker({
   )
 }
 
+/** Several fields of one kind (a `field` setting that is a list, with
+ * `many`): a box per field the kind has of its own, kept in the order ticked. */
+function FieldsPicker({ setting, value, onChange, ctx }: Props) {
+  const name = schemaFor(setting.hint, ctx)
+  const schema = ctx.schemas.find((s) => s.name === name)
+  const chosen = Array.isArray(value) ? value.map(String) : []
+  if (!schema) {
+    return (
+      <Input
+        size="sm"
+        value={chosen.join(', ')}
+        placeholder={
+          setting.hint.of ? 'Choose the kind of record first' : 'Field keys'
+        }
+        onChange={(e) =>
+          onChange(
+            e.target.value
+              .split(',')
+              .map((v) => v.trim())
+              .filter(Boolean),
+          )
+        }
+      />
+    )
+  }
+  const dtypes = setting.hint.dtypes
+  const fields = fieldsWithInherited(schema, ctx.schemas, false).filter(
+    (f) => !f.source && (!dtypes || dtypes.includes(f.dtype ?? '')),
+  )
+  const unknown = chosen.filter((c) => !fields.some((f) => f.name === c))
+  return (
+    <div className="max-h-48 space-y-1 overflow-y-auto">
+      {[
+        ...unknown.map((c) => ({
+          name: c,
+          label: `${c} (not a field of ${name})`,
+        })),
+        ...fields,
+      ].map((f) => (
+        <CheckRow
+          key={f.name}
+          compact
+          title={f.label}
+          checked={chosen.includes(f.name)}
+          onChange={(on) =>
+            onChange(
+              on ? [...chosen, f.name] : chosen.filter((c) => c !== f.name),
+            )
+          }
+        />
+      ))}
+    </div>
+  )
+}
+
 /** The file field the names a pattern reads come from: for a pattern on the
  * names in a field (`on: field`), that field of the workflow's record; for
  * files given at a run (`on: files`), the step's file field, whose existing
@@ -167,7 +230,11 @@ function Control(props: Props & { id?: string }) {
   const { hint } = setting
   switch (hint.kind) {
     case 'field':
-      return <FieldPicker {...props} />
+      return setting.type === 'array' ? (
+        <FieldsPicker {...props} />
+      ) : (
+        <FieldPicker {...props} />
+      )
     case 'schema':
       return (
         <Select

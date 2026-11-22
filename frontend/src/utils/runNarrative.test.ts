@@ -4,6 +4,7 @@ import {
   describeTrigger,
   explainFailure,
   pluginDisplayName,
+  runProblems,
   stepStory,
   summarizeRun,
 } from './runNarrative'
@@ -148,6 +149,56 @@ describe('summarizeRun', () => {
   })
 })
 
+describe('runProblems', () => {
+  it('counts skipped rows once and names each with why', () => {
+    const job = makeJob({
+      step_executions: [
+        makeStep({
+          step_id: 'save',
+          plugin: 'civex.rows_to_records',
+          outputs: {
+            created: 1,
+            unchanged: 3,
+            skipped: 2,
+            skipped_rows: [
+              'Row 2: no number to match it by',
+              'Row 3: number 1 is also row 1, which was saved',
+            ],
+          },
+        }),
+      ],
+    })
+
+    const problems = runProblems(job)
+
+    expect(problems.total).toBe(2)
+    expect(problems.lines).toEqual(['2 rows were skipped'])
+    expect(problems.items).toEqual([
+      {
+        step: 'save',
+        kind: 'skipped_rows',
+        text: 'Row 2: no number to match it by',
+      },
+      {
+        step: 'save',
+        kind: 'skipped_rows',
+        text: 'Row 3: number 1 is also row 1, which was saved',
+      },
+    ])
+  })
+
+  it('a run whose rows all matched has no problems', () => {
+    const job = makeJob({
+      step_executions: [
+        makeStep({
+          outputs: { created: 0, unchanged: 3, skipped: 0, skipped_rows: [] },
+        }),
+      ],
+    })
+    expect(runProblems(job).total).toBe(0)
+  })
+})
+
 describe('stepStory', () => {
   it('describes a skipped step', () => {
     expect(stepStory(makeStep({ status: 'skipped' }))).toMatch(/Skipped/)
@@ -164,6 +215,13 @@ describe('stepStory', () => {
       outputs: { created: 3, updated: 1 },
     })
     expect(stepStory(step)).toBe('Took 4 files in → 3 created, 1 updated.')
+  })
+
+  it('says skipped rows once, by their count', () => {
+    const step = makeStep({
+      outputs: { created: 1, skipped: 1, skipped_rows: ['Row 2: no key'] },
+    })
+    expect(stepStory(step)).toBe('Produced 1 created, 1 skipped.')
   })
 })
 
