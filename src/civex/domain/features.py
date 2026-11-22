@@ -59,16 +59,17 @@ FEATURES: dict[str, str] = {
     REMOTE_DIAL: "connecting out from the server to another civex",
     SETTINGS: "the Settings area",
     SETTINGS_APPEARANCE: "appearance settings",
-    SETTINGS_RETENTION: "retention settings and clean-ups",
+    SETTINGS_RETENTION: "the retention settings",
     SETTINGS_MAP: "map settings",
     SETTINGS_ADVANCED: "advanced settings",
-    SETTINGS_DEVICES: "managing the devices that sync with this project",
+    SETTINGS_DEVICES: "the Devices section of the settings",
     SETTINGS_MEMBERS: "the members and access page",
 }
 
-# The settings surfaces a host that owns all settings turns off. `SETTINGS`
-# hides the whole area in the app; each of the others is one section (and, for
-# all but members, the routes behind it).
+# The settings surfaces a host that owns all settings turns off. `SETTINGS` is
+# the whole area; each of the others is one section of it. A section feature
+# hides that section of the app and refuses only the routes that edit its
+# stored settings, never the operational routes a host drives itself.
 SETTINGS_FEATURES: frozenset[str] = frozenset(
     {
         SETTINGS,
@@ -101,6 +102,25 @@ LOCAL_FEATURES: frozenset[str] = frozenset(
     }
     | SETTINGS_FEATURES
 )
+
+
+def lacks(features: frozenset[str] | set[str], feature: str) -> str | None:
+    """The feature to blame when `feature` is not on, or None when it is: a
+    settings section is off whenever the `SETTINGS` umbrella is, whatever the
+    section's own feature says. The one place that rule is written down (the
+    app's `utils/features.ts` mirrors it)."""
+    if (
+        feature in SETTINGS_FEATURES
+        and feature != SETTINGS
+        and SETTINGS not in features
+    ):
+        return SETTINGS
+    return None if feature in features else feature
+
+
+def enabled(features: frozenset[str] | set[str], feature: str) -> bool:
+    """Whether a host offering `features` offers `feature` (see `lacks`)."""
+    return lacks(features, feature) is None
 
 
 def unavailable_message(feature: str) -> str:

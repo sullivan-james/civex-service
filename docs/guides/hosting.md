@@ -54,23 +54,31 @@ every feature that exists, so a host sees the whole list. A route of a feature
 that is off answers 501; the app shows "Not available here" at its address as
 well as hiding its navigation item.
 
+**The rule for `settings_*` features.** A settings feature hides that section of
+civex's app and refuses only the routes that *edit that section's stored
+settings*. It never refuses an operational route a host's own UI drives (the
+device invites, approvals and revokes under `/remote/authority*`, the retention
+clean-up under `/retention/*`): those stay governed by the host's own gate and
+by permissions. `settings` is the umbrella: with it off, every `settings_*`
+section counts as off, in the server and the app (`features.enabled`), and
+`PATCH /settings/identity` is refused too.
+
 For a hub that owns all settings, leave out of `features`:
 
 | Feature | What goes |
 |---|---|
-| `settings` | The whole Settings area and its navigation item. |
-| `settings_appearance` | Appearance (`/settings/ui`). |
-| `settings_retention` | Retention and its clean-ups (`/settings/retention`, `/retention/*`). |
-| `settings_map` | Map tiles (`/settings/map`). |
-| `settings_advanced` | Advanced (`/settings/command-line`). |
-| `settings_devices` | Devices: invites, login approvals, revoke, publish (`/remote/authority*`). |
-| `settings_members` | Members & access, which the host manages on its own pages. App only: there is no route behind it. |
+| `settings` | The whole Settings area and its navigation item, and every section below. Also refuses editing `/settings/identity`. |
+| `settings_appearance` | Appearance; refuses `/settings/ui`. |
+| `settings_retention` | Retention; refuses `/settings/retention` (the clean-up routes stay). |
+| `settings_map` | Map tiles; refuses `/settings/map`. |
+| `settings_advanced` | Advanced; refuses `/settings/command-line`. |
+| `settings_devices` | Devices: the app's section only (no route is refused). |
+| `settings_members` | Members & access, which the host manages on its own pages. App only. |
 
 Also leave out the features that need a machine: `volumes`, `store_admin`,
 `db_admin`, `local_workflows`, `plugin_editor`, `terminal`, `updates`, `logs`,
 `ai`, `open_folder`, `desktop`, `server_path_export`, `plugin_install` and
-`remote_dial`. `settings` off hides the area in the app only; to refuse the
-routes, leave out the section features as well.
+`remote_dial`.
 
 The top-bar sync button and `/sync/review` need no feature: they appear only
 for a project that follows a remote, never for a hosted authority.

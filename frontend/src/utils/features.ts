@@ -37,7 +37,24 @@ export function offered(
 ): boolean {
   if (item.feature === undefined) return true
   const needed = Array.isArray(item.feature) ? item.feature : [item.feature]
-  return needed.every((f) => features.has(f))
+  return needed.every((f) => featureOn(features, f))
+}
+
+const SETTINGS_SECTIONS = [
+  'settings_appearance',
+  'settings_retention',
+  'settings_map',
+  'settings_advanced',
+  'settings_devices',
+  'settings_members',
+]
+
+/** One feature on a server: a settings section is off whenever the `settings`
+ * umbrella is (`domain/features.py` `enabled`, the same rule). */
+export function featureOn(features: FeatureSet, feature: Feature): boolean {
+  if (SETTINGS_SECTIONS.includes(feature) && !features.has('settings'))
+    return false
+  return features.has(feature)
 }
 
 /** What each Settings section needs, by its address under `/settings`: the

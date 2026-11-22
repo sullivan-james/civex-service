@@ -9,6 +9,7 @@ from sqlalchemy.exc import OperationalError
 
 from civex.config import load_config
 from civex.context import AppContext, build_context
+from civex.domain import features as features_
 from civex.domain.exceptions import (
     ConfigError,
     DatabaseUnavailableError,
@@ -142,8 +143,9 @@ def requires(feature: str):  # noqa: ANN201 - a FastAPI dependency marker
             # No project here: the route says so in its own way, as it did
             # before anything asked about features.
             return
-        if feature not in project.features:
-            raise FeatureUnavailableError(feature)
+        blame = features_.lacks(project.features, feature)
+        if blame is not None:
+            raise FeatureUnavailableError(blame)
 
     return Depends(check)
 

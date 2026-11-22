@@ -63,8 +63,10 @@ from the next tag forward.
 - Settings features a host can switch off, because a host owns all settings:
   `settings` (the whole Settings area), `settings_appearance`,
   `settings_retention`, `settings_map`, `settings_advanced`, `settings_devices`
-  and `settings_members`. A local project keeps all of them. The routes behind
-  a section answer 501 when its feature is off; `GET /api/status/features`
+  and `settings_members`. A local project keeps all of them. A section feature refuses
+  only the routes that edit that section's stored settings (never the operational
+  `/remote/authority*` or `/retention/*` routes a host drives); `settings` off
+  turns every section off and refuses editing the identity; `GET /api/status/features`
   lists them all.
 - A page whose feature is off is blocked, not just hidden from the navigation:
   the terminal, plugins, workflows, runs, AI, database, storage, updates, logs

@@ -3,8 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from civex.context import AppContext
-from civex.domain.features import SETTINGS_RETENTION
-from civex.server.deps import get_ctx, requires
+from civex.server.deps import get_ctx
 from civex.server.models import (
     ForgetPurgedRequest,
     ForgetPurgedResponse,
@@ -12,7 +11,7 @@ from civex.server.models import (
     RetentionRunRequest,
 )
 
-router = APIRouter(tags=["retention"], dependencies=[requires(SETTINGS_RETENTION)])
+router = APIRouter(tags=["retention"])
 
 
 @router.post("/retention/run", response_model=RetentionReportResponse)

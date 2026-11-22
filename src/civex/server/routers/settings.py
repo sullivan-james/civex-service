@@ -9,6 +9,7 @@ from civex.domain.exceptions import ConfigError
 from civex.project import Project
 from civex.domain.features import (
     DESKTOP,
+    SETTINGS,
     SETTINGS_ADVANCED,
     SETTINGS_APPEARANCE,
     SETTINGS_MAP,
@@ -62,7 +63,9 @@ def get_identity(project: Project = Depends(current_project)):
     return _identity(project.config)
 
 
-@router.patch("/identity", response_model=IdentityResponse)
+@router.patch(
+    "/identity", response_model=IdentityResponse, dependencies=[requires(SETTINGS)]
+)
 def update_identity(
     body: UpdateIdentityRequest, project: Project = Depends(current_project)
 ):
