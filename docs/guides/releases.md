@@ -17,7 +17,9 @@ A release has:
   records chosen in the explorer (each with the records above it and everything inside it, so an encounter comes with its recordings and it reads
   back whole);
 - a small **bundle of records**: schemas, collections and records with their
-  ids, workflows and plugins, plus a `release.json` manifest and a
+  ids (and, only if you tick **Include workflows and plugins**, their code:
+  it is left out by default, since code may not be yours to publish), plus a
+  `release.json` manifest and a
   `CITATION.cff`;
 - the **files** its records cite, which it keeps where they are. Nothing is
   copied: the release becomes one more owner of each file, like the records
@@ -73,7 +75,8 @@ and collections with their ids).
 The content hash is a sha256 over what the release **holds**, not over the
 zip's bytes (a zip records the time it was written). It covers, in a fixed
 order: the structure, every record's hash (by record id), the sha256 of
-every file the records cite (sorted), and the workflows and plugins. A file
+every file the records cite (sorted), and any workflows and plugins it
+was made with. A file
 is covered by its own hash, so no file is read to make or check it. Making a
 release of the same data again gives the same hash; changing one value, or
 the file a record cites, gives a different one.

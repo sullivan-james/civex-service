@@ -348,7 +348,7 @@ class ReleaseService:
         return found
 
     def plan(
-        self, scope: ReleaseScope | None = None, include_workflows: bool = True
+        self, scope: ReleaseScope | None = None, include_workflows: bool = False
     ) -> ReleasePlan:
         """What a release of `scope` would hold (the bundle's own walk, so the
         count can't disagree with the release), from the catalog."""
@@ -434,7 +434,7 @@ class ReleaseService:
         licence: str | None = None,
         doi: str | None = None,
         keywords: list[str] | None = None,
-        include_workflows: bool = True,
+        include_workflows: bool = False,
         progress: Progress | None = None,
     ) -> ReleaseDTO:
         """Freeze `scope` as a release named `name`: write the bundle of its

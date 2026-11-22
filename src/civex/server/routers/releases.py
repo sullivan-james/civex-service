@@ -62,7 +62,10 @@ class ReleaseScopeRequest(BaseModel):
         "records chosen and those above them.",
     )
     include_workflows: bool = Field(
-        default=True, description="Carry the project's workflows and plugins."
+        default=False,
+        description="Also carry the project's workflows and plugins (their "
+        "code). Left out unless asked for: a release is of the data, and code "
+        "may not be yours to publish.",
     )
 
     def scope(self) -> ReleaseScope:

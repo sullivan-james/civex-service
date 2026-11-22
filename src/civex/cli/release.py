@@ -208,8 +208,11 @@ def create(
         help="With --record or --query-json: leave out the records inside the "
         "ones chosen (they are taken by default)",
     ),
-    no_workflows: bool = typer.Option(
-        False, "--no-workflows", help="Leave workflows and plugins out"
+    with_workflows: bool = typer.Option(
+        False,
+        "--with-workflows",
+        help="Also carry the project's workflows and plugins (their code); "
+        "left out unless asked for",
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Say what it would hold without making it"
@@ -230,7 +233,7 @@ def create(
         scope = _scope(collection, query_json, record, only_chosen)
         if dry_run:
             _print_plan(
-                ctx.release_svc.plan(scope, not no_workflows),
+                ctx.release_svc.plan(scope, with_workflows),
                 f"Release {name} would hold",
             )
             return
@@ -243,7 +246,7 @@ def create(
             licence=licence,
             doi=doi,
             keywords=keyword or [],
-            include_workflows=not no_workflows,
+            include_workflows=with_workflows,
         )
         ctx.commit()
         _print_release(made)

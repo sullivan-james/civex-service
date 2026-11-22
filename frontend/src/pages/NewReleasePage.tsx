@@ -9,6 +9,7 @@ import type {
 import {
   Button,
   Card,
+  CheckRow,
   DataTable,
   Field,
   FormError,
@@ -119,7 +120,11 @@ export default function NewReleasePage() {
               }
             : null
           : chosen
-  const plan = useReleasePlan(scope ?? {}, !!scope)
+  // Workflows and plugins are code, which may not be the project's to
+  // publish: left out unless ticked.
+  const [withCode, setWithCode] = useState(false)
+  const asked = scope ? { ...scope, include_workflows: withCode } : null
+  const plan = useReleasePlan(asked ?? {}, !!asked)
 
   const metadata: ReleaseMetadata = {
     title: title.trim(),
@@ -143,9 +148,9 @@ export default function NewReleasePage() {
   const citationReady = !!name.trim() && !!title.trim()
 
   function make() {
-    if (!scope) return
+    if (!asked) return
     create.mutate(
-      { ...scope, ...metadata, name: name.trim(), title: title.trim() },
+      { ...asked, ...metadata, name: name.trim(), title: title.trim() },
       {
         onSuccess: (made) => {
           toast.success(`Release ${made.name} made`)
@@ -195,6 +200,8 @@ export default function NewReleasePage() {
               setViewCollection={setViewCollection}
               plan={scope ? plan.data : undefined}
               planError={plan.error}
+              withCode={withCode}
+              setWithCode={setWithCode}
               waiting={!!scope && plan.isLoading}
             />
           )}
@@ -274,6 +281,8 @@ function WhatStep(props: {
   plan: ReleasePlan | undefined
   planError: unknown
   waiting: boolean
+  withCode: boolean
+  setWithCode: (on: boolean) => void
 }) {
   const options: { value: Covers; label: string }[] = [
     { value: 'project', label: 'The whole project' },
@@ -350,6 +359,12 @@ function WhatStep(props: {
           stay where they are.
         </p>
       ) : null}
+      <CheckRow
+        compact
+        checked={props.withCode}
+        onChange={props.setWithCode}
+        title="Include workflows and plugins"
+      />
     </>
   )
 }

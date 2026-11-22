@@ -179,6 +179,23 @@ def test_chosen_records_come_with_what_is_inside_them(ctx, study):
     assert ctx.release_svc.compare("bare").added == 0
 
 
+def test_code_is_left_out_of_a_release_unless_asked_for(ctx, study, project_dir):
+    civex_dir = project_dir / "_civex"
+    (civex_dir / "workflows").mkdir(exist_ok=True)
+    (civex_dir / "plugins").mkdir(exist_ok=True)
+    (civex_dir / "workflows" / "tidy.yaml").write_text("name: tidy\nsteps: []\n")
+    (civex_dir / "plugins" / "mine.py").write_text("class Plugin: ...\n")
+
+    data = _make(ctx, "data")
+    assert (data.counts["workflows"], data.counts["plugins"]) == (0, 0)
+    assert not [n for n in _members(ctx, data) if n.endswith((".yaml", ".py"))]
+    assert ctx.release_svc.plan().workflows == 0
+
+    code = _make(ctx, "code", include_workflows=True)
+    assert (code.counts["workflows"], code.counts["plugins"]) == (1, 1)
+    assert [n for n in _members(ctx, code) if n.endswith(".py")]
+
+
 def test_its_records_read_back_into_a_new_project(ctx, study, tmp_path):
     made = _make(ctx)
     path = tmp_path / "r.zip"
