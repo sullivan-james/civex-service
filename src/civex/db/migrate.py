@@ -39,14 +39,18 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Connection, Engine
 
-from civex.config import PartitionLayout
+from civex.config import DEFAULT_RECORDS_PARTITIONS, PartitionLayout
+from civex.db import partitioning
 from civex.db.partitioning import ensure_audit_partitions, ensure_audit_partitions_daily
 
 __all__ = [
     "PartitionLayout",
+    "RecordsPartitioning",
+    "convert_records_partitions",
     "ensure_audit_partitions",
     "ensure_schema_current",
     "missing_structure",
+    "records_partitioning",
     "too_new_error",
 ]
 
@@ -231,6 +235,57 @@ def schema_status(engine: Engine, *, check_structure: bool = False) -> SchemaSta
         too_new=too_new,
         missing_structure=missing,
     )
+
+
+@dataclass(frozen=True)
+class RecordsPartitioning:
+    """How `records` is laid out. `partitions` is 0 for a plain table (or no
+    table); `supported` is False off PostgreSQL, where it never partitions."""
+
+    supported: bool
+    partitioned: bool
+    partitions: int
+
+
+def records_partitioning(engine: Engine) -> RecordsPartitioning:
+    """Report how `records` is laid out at `engine` (honouring a `search_path`
+    on it), changing nothing."""
+    with engine.connect() as connection:
+        try:
+            if connection.dialect.name != "postgresql":
+                return RecordsPartitioning(False, False, 0)
+            if not partitioning.is_partitioned(connection, "records"):
+                return RecordsPartitioning(True, False, 0)
+            return RecordsPartitioning(
+                True, True, len(partitioning.partitions_of(connection, "records"))
+            )
+        finally:
+            connection.rollback()
+
+
+def convert_records_partitions(
+    engine: Engine, partitions: int = DEFAULT_RECORDS_PARTITIONS
+) -> RecordsPartitioning:
+    """Lay an existing PostgreSQL `records` table out as `partitions` hash
+    partitions on `id`, and report the result (`records_partitioning`).
+
+    For a database created with partitioning off (or before it existed) that a
+    host now wants partitioned. A no-op, returning the current state, when
+    `partitions` < 2, the table is already partitioned (at any count), or the
+    database is not PostgreSQL. A populated table is copied once: writers wait
+    (about 50 s per million records; `docs/contributing/records-partitioning.md`).
+    One process at a time per schema (the migration's advisory lock), and the
+    schema should be current (`ensure_schema_current`) first.
+    """
+    with engine.connect() as connection:
+        with _cross_process_lock(connection):
+            try:
+                if partitioning.partition_records(connection, partitions):
+                    connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+    return records_partitioning(engine)
 
 
 def too_new_error(database: str, revisions: list[str]) -> Exception:

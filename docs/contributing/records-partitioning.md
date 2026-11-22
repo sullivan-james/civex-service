@@ -103,6 +103,15 @@ under one `max_locks_per_transaction` budget; x16 doubles both. Hosts running
 tens of thousands of schemas should raise `max_locks_per_transaction` and
 `shared_buffers` for the relcache, or choose 4.
 
+### Converting an existing table from a host
+
+`civex.db.migrate.convert_records_partitions(engine, partitions=8)` lays an
+existing plain PostgreSQL `records` table out as hash partitions (same cost and
+locking as the migration; a no-op when already partitioned, below 2 partitions,
+or on SQLite) and returns a `RecordsPartitioning(supported, partitioned,
+partitions)`; `records_partitioning(engine)` reports the same without changing
+anything. Hosts use these rather than importing `civex.db.partitioning`.
+
 ## 3. `audit_log`: `PARTITION BY RANGE ("timestamp")`, monthly
 
 - Partitions: `audit_log_y2026m11` ... one per month, from this month to

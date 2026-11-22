@@ -470,7 +470,9 @@ def _refuse(e: SyncError) -> HTTPException:
     return HTTPException(502 if e.retryable else 400, detail=str(e))
 
 
-@router.get("", response_model=RemoteStatusResponse)
+@router.get(
+    "", dependencies=[requires(REMOTE_DIAL)], response_model=RemoteStatusResponse
+)
 def status(ctx: AppContext = Depends(get_ctx)):
     """How this project stands with its authority."""
     return _status(ctx)
@@ -556,7 +558,11 @@ def _missing_response(report) -> MissingFilesResponse:  # noqa: ANN001
     )
 
 
-@router.get("/files/missing", response_model=MissingFilesResponse)
+@router.get(
+    "/files/missing",
+    response_model=MissingFilesResponse,
+    dependencies=[requires(REMOTE_DIAL)],
+)
 def missing_files(ctx: AppContext = Depends(get_ctx)):
     """Files records cite that this project never stored and nothing can supply,
     by collection and field."""
@@ -627,7 +633,9 @@ def remove_missing_files(body: MissingFilesRequest, ctx: AppContext = Depends(ge
     )
 
 
-@router.patch("", response_model=RemoteStatusResponse)
+@router.patch(
+    "", dependencies=[requires(REMOTE_DIAL)], response_model=RemoteStatusResponse
+)
 def update(body: RemoteUpdateRequest, ctx: AppContext = Depends(get_ctx)):
     """Pause or resume the schedule, change how often it looks, or choose which
     files this device keeps a copy of."""
@@ -642,7 +650,11 @@ def update(body: RemoteUpdateRequest, ctx: AppContext = Depends(get_ctx)):
     return _status(ctx)
 
 
-@router.get("/conflicts", response_model=list[ConflictResponse])
+@router.get(
+    "/conflicts",
+    dependencies=[requires(REMOTE_DIAL)],
+    response_model=list[ConflictResponse],
+)
 def conflicts(
     status: str | None = Query(default="open", description="open, resolved, or all."),
     record: str | None = Query(
@@ -658,7 +670,11 @@ def conflicts(
     return [ConflictResponse(**c.to_dict()) for c in found]
 
 
-@router.post("/conflicts/{conflict_id}/resolve", response_model=RemoteStatusResponse)
+@router.post(
+    "/conflicts/{conflict_id}/resolve",
+    dependencies=[requires(REMOTE_DIAL)],
+    response_model=RemoteStatusResponse,
+)
 def resolve(conflict_id: str, body: ResolveRequest, ctx: AppContext = Depends(get_ctx)):
     """Settle a conflict. Putting a value back is an ordinary edit (checked, in the
     history, synced); it answers 409 with what is there now when the record's value
@@ -674,7 +690,11 @@ def resolve(conflict_id: str, body: ResolveRequest, ctx: AppContext = Depends(ge
     return _status(ctx)
 
 
-@router.post("/conflicts/resolve-many", response_model=ResolveManyResponse)
+@router.post(
+    "/conflicts/resolve-many",
+    dependencies=[requires(REMOTE_DIAL)],
+    response_model=ResolveManyResponse,
+)
 def resolve_many(body: ResolveManyRequest, ctx: AppContext = Depends(get_ctx)):
     """Settle every open conflict that matches (the given ids, kind and record; all
     of them if none is given) the same way, in one request. Conflicts that don't
@@ -699,7 +719,11 @@ def resolve_many(body: ResolveManyRequest, ctx: AppContext = Depends(get_ctx)):
     )
 
 
-@router.post("/conflicts/reopen", response_model=ReopenResponse)
+@router.post(
+    "/conflicts/reopen",
+    dependencies=[requires(REMOTE_DIAL)],
+    response_model=ReopenResponse,
+)
 def reopen(body: ReopenRequest, ctx: AppContext = Depends(get_ctx)):
     """Open conflicts again that were settled with `theirs` (an undo: that choice
     changed nothing). Others are ignored; undo those from Activity."""
@@ -1225,14 +1249,22 @@ class FreeUpResponse(BaseModel):
     done: bool = Field(description="False when only counted.")
 
 
-@router.get("/files", response_model=list[CollectionFilesResponse])
+@router.get(
+    "/files",
+    dependencies=[requires(REMOTE_DIAL)],
+    response_model=list[CollectionFilesResponse],
+)
 def collection_files(ctx: AppContext = Depends(get_ctx)):
     """Each collection's files on this computer: how many are here and their
     size, how many are only on the server, and whether it keeps a copy here."""
     return [CollectionFilesResponse(**vars(c)) for c in ctx.sync_svc.collection_files()]
 
 
-@router.patch("/files/{collection}", response_model=list[CollectionFilesResponse])
+@router.patch(
+    "/files/{collection}",
+    dependencies=[requires(REMOTE_DIAL)],
+    response_model=list[CollectionFilesResponse],
+)
 def set_collection_mode(
     collection: str, body: CollectionModeRequest, ctx: AppContext = Depends(get_ctx)
 ):
@@ -1245,7 +1277,11 @@ def set_collection_mode(
     return [CollectionFilesResponse(**vars(c)) for c in ctx.sync_svc.collection_files()]
 
 
-@router.post("/files/{collection}/free-up", response_model=FreeUpResponse)
+@router.post(
+    "/files/{collection}/free-up",
+    dependencies=[requires(REMOTE_DIAL)],
+    response_model=FreeUpResponse,
+)
 def free_up(
     collection: str,
     dry_run: bool = Query(default=True, description="Only count (the default)."),
