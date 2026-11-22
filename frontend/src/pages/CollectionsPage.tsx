@@ -120,9 +120,12 @@ export default function CollectionsPage() {
         </Button>
       }
       secondaryActions={[
-        { label: 'Export bundle…', onClick: () => setShowExport(true) },
         {
-          label: importing ? 'Importing…' : 'Import bundle…',
+          label: 'Copy to another project…',
+          onClick: () => setShowExport(true),
+        },
+        {
+          label: importing ? 'Bringing in…' : 'Bring in from another project…',
           onClick: () => fileInputRef.current?.click(),
           disabled: importing,
         },

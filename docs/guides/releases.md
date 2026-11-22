@@ -189,7 +189,7 @@ that syncs they reach every copy.
 
 Download the bundle (**Download**, or `civex release download v1`) and read
 it into a **new** project with `civex bundle import` (or **Collections →
-Import bundle…**). Records keep their ids and still name their files; put the
+Bring in from another project…**). Records keep their ids and still name their files; put the
 files beside them with the release's folder export.
 
 ```bash

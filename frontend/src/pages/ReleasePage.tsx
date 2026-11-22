@@ -333,7 +333,7 @@ function Manifest({ release }: { release: Release }) {
         <Row label="Content hash">
           <code className="text-xs">{release.content_hash}</code>
         </Row>
-        <Row label="Bundle">
+        <Row label="Project copy">
           {formatBytes(release.bundle_size)} ·{' '}
           <code className="text-xs">{release.bundle_sha256.slice(0, 16)}…</code>
         </Row>
@@ -349,9 +349,7 @@ function Manifest({ release }: { release: Release }) {
       </dl>
       {!release.yanked_at && (
         <p className="mt-3 text-xs text-fg-muted">
-          To get the records back as they were, download the bundle and import
-          it into a new project (Collections → Import bundle…); the files come
-          out below.
+          Collections → Bring in from another project… reads it back.
         </p>
       )}
     </Card>

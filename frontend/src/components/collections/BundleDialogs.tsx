@@ -28,19 +28,14 @@ export function ExportBundleDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal onClose={onClose} size="sm">
-      <ModalHeader onClose={onClose}>Export a bundle</ModalHeader>
+      <ModalHeader onClose={onClose}>Copy to another project</ModalHeader>
       <ModalBody>
         <div className="space-y-3 text-sm">
-          <p className="text-fg-muted">
-            One file another civex can read into a project: every schema, every
-            collection and its records (their ids kept), and the project&apos;s
-            workflows and plugins.
-          </p>
           {plan.error ? (
             <FormError message={errorMessage(plan.error)} />
           ) : !p ? (
             <p className="flex items-center gap-2 text-fg-muted">
-              <Spinner /> Working out what would go in…
+              <Spinner /> Counting…
             </p>
           ) : (
             <dl className="space-y-1" data-testid="bundle-plan">
@@ -106,7 +101,7 @@ export function BundleImportResultModal({
   const and = (n: number, what: string) => (n ? `, ${n} ${what}` : '')
   return (
     <Modal onClose={onClose} size="sm">
-      <ModalHeader onClose={onClose}>Import complete</ModalHeader>
+      <ModalHeader onClose={onClose}>Brought in</ModalHeader>
       <ModalBody>
         <dl className="text-sm space-y-1">
           <Row
@@ -123,7 +118,7 @@ export function BundleImportResultModal({
           />
           <Row
             label="Files"
-            value={`${result.files_added} added${and(result.files_missing, 'not in the bundle or here')}${and(result.files_refused, 'refused')}`}
+            value={`${result.files_added} added${and(result.files_missing, 'not in the copy or here')}${and(result.files_refused, 'refused')}`}
           />
           <Row label="Workflows" value={result.workflows} />
           <Row label="Plugins" value={result.plugins} />
