@@ -161,6 +161,24 @@ def test_scope_collections_a_query_or_chosen_records(ctx, study):
         ReleaseScope(records=[])
 
 
+def test_chosen_records_come_with_what_is_inside_them(ctx, study):
+    a = study["a"]
+    whole = _make(ctx, "whole", scope=ReleaseScope(records=[str(a.id)], below=True))
+    # The site and its two samples.
+    assert whole.counts["records"] == 3 and whole.scope["below"] is True
+    # Nothing has changed since: the samples are part of what it covers.
+    now = ctx.release_svc.compare("whole")
+    assert (now.added, now.changed, now.removed) == (0, 0, 0)
+    # A sample added inside afterwards is new to it.
+    ctx.record_svc.add("north", "sample", {"depth": 9.0}, parent_record_id=str(a.id))
+    ctx.commit()
+    assert ctx.release_svc.compare("whole").added == 1
+    # Without it (as releases made before this were), only the record chosen.
+    bare = _make(ctx, "bare", scope=ReleaseScope(records=[str(a.id)]))
+    assert bare.counts["records"] == 1 and "below" not in bare.scope
+    assert ctx.release_svc.compare("bare").added == 0
+
+
 def test_its_records_read_back_into_a_new_project(ctx, study, tmp_path):
     made = _make(ctx)
     path = tmp_path / "r.zip"

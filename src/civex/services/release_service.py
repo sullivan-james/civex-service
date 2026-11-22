@@ -93,11 +93,14 @@ BAG_MANIFEST = "manifest-sha256.txt"
 class ReleaseScope:
     """What a release covers: the whole project (none set), these collections
     (by name), the records a query lists, or exactly these records (by id);
-    with the records above them, so it reads in whole."""
+    with the records above them, so it reads in whole, and with `below`
+    everything inside them too (a chosen Encounter with its Recordings). A
+    release made before `below` existed has none: it covers what it covered."""
 
     collections: list[str] | None = None
     query: RecordQuery | None = None
     records: list[str] | None = None
+    below: bool = False
 
     def __post_init__(self) -> None:
         if self.collections is not None and not self.collections:
@@ -114,8 +117,9 @@ class ReleaseScope:
     def to_dict(self) -> dict[str, Any]:
         if self.collections:
             return {"collections": list(self.collections)}
+        inside = {"below": True} if self.below else {}
         if self.records:
-            return {"records": list(self.records)}
+            return {"records": list(self.records)} | inside
         if self.query is not None:
             return {
                 "query": {
@@ -123,7 +127,7 @@ class ReleaseScope:
                     for k in _QUERY_FIELDS
                     if (v := getattr(self.query, k)) not in (None, [], "")
                 }
-            }
+            } | inside
         return {}
 
     @classmethod
@@ -131,11 +135,12 @@ class ReleaseScope:
         raw = raw or {}
         if raw.get("collections"):
             return cls(collections=[str(c) for c in raw["collections"]])
+        below = bool(raw.get("below"))
         if raw.get("records"):
-            return cls(records=[str(r) for r in raw["records"]])
+            return cls(records=[str(r) for r in raw["records"]], below=below)
         if isinstance(raw.get("query"), dict):
             q = {k: v for k, v in raw["query"].items() if k in _QUERY_FIELDS}
-            return cls(query=RecordQuery(**q))
+            return cls(query=RecordQuery(**q), below=below)
         return cls()
 
     def options(self, include_workflows: bool) -> ExportOptions:
@@ -146,6 +151,7 @@ class ReleaseScope:
             collections=self.collections,
             query=self.query,
             record_ids=self.records,
+            below=self.below,
         )
 
 

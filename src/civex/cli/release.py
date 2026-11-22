@@ -32,6 +32,7 @@ def _scope(
     collection: Optional[list[str]],
     query_json: Optional[str],
     record: Optional[list[str]] = None,
+    only_chosen: bool = False,
 ) -> ReleaseScope:
     query = None
     if query_json:
@@ -42,7 +43,11 @@ def _scope(
             raise typer.Exit(1)
         query = ReleaseScope.from_dict({"query": raw}).query
     return ReleaseScope(
-        collections=collection or None, query=query, records=record or None
+        collections=collection or None,
+        query=query,
+        records=record or None,
+        # Chosen records come with everything inside them, unless told not to.
+        below=bool(query or record) and not only_chosen,
     )
 
 
@@ -62,7 +67,9 @@ def _describe_scope(scope: dict) -> str:
     if scope.get("collections"):
         return "Collections: " + ", ".join(scope["collections"])
     if scope.get("records"):
-        return f"{len(scope['records'])} chosen records"
+        return f"{len(scope['records'])} chosen records" + (
+            " and what is inside them" if scope.get("below") else ""
+        )
     if scope.get("query"):
         return "Records listed by " + json.dumps(scope["query"])
     return "The whole project"
@@ -195,6 +202,12 @@ def create(
     record: Optional[list[str]] = typer.Option(
         None, "--record", "-r", help="Exactly these records, by id (repeatable)"
     ),
+    only_chosen: bool = typer.Option(
+        False,
+        "--only-chosen",
+        help="With --record or --query-json: leave out the records inside the "
+        "ones chosen (they are taken by default)",
+    ),
     no_workflows: bool = typer.Option(
         False, "--no-workflows", help="Leave workflows and plugins out"
     ),
@@ -214,7 +227,7 @@ def create(
     """
     ctx = get_ctx()
     try:
-        scope = _scope(collection, query_json, record)
+        scope = _scope(collection, query_json, record, only_chosen)
         if dry_run:
             _print_plan(
                 ctx.release_svc.plan(scope, not no_workflows),

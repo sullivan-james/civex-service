@@ -58,6 +58,9 @@ class ExportOptions:
     query: RecordQuery | None = None
     # Or exactly these records (by id), with the records above them.
     record_ids: list[str] | None = None
+    # With a query or record ids: also every record beneath the ones chosen
+    # (an Encounter with its Recordings and Selections).
+    below: bool = False
 
 
 @dataclass

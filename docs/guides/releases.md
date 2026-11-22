@@ -14,7 +14,7 @@ A release has:
   SPDX id such as `CC-BY-4.0`, or any other), keywords and, if it has one, a
   DOI;
 - what it **covers**: the whole project, some collections, a saved list, or
-  records chosen in the explorer (each with the records above it, so it reads
+  records chosen in the explorer (each with the records above it and everything inside it, so an encounter comes with its recordings and it reads
   back whole);
 - a small **bundle of records**: schemas, collections and records with their
   ids, workflows and plugins, plus a `release.json` manifest and a

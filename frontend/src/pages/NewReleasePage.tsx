@@ -332,8 +332,8 @@ function WhatStep(props: {
       {props.covers === 'chosen' && props.chosen && (
         <p className="text-sm text-fg-muted">
           {props.chosen.records
-            ? `The ${pluralise(props.chosen.records.length, 'record')} ticked in the list, with everything above them.`
-            : 'Every record the list showed, with everything above them.'}
+            ? `The ${pluralise(props.chosen.records.length, 'record')} ticked, with what is inside them`
+            : 'The records listed, with what is inside them'}
         </p>
       )}
       {props.planError ? (

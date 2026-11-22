@@ -3488,6 +3488,7 @@ class RecordService:
         records: list[RecordDTO],
         on_level: Callable[[int], None] | None = None,
         keep: Callable[[RecordDTO], bool] | None = None,
+        as_stored: bool = False,
     ) -> list[RecordDTO]:
         """Every live record beneath these (children, their children, and so on),
         in the full response form, found a level at a time: a few queries for the
@@ -3511,7 +3512,10 @@ class RecordService:
             if keep is not None:
                 kids = [k for k in kids if keep(k)]
             named = [self._with_names(k, shapes) for k in kids]
-            found.extend(self._attach_reference_labels(named, shapes))
+            # `as_stored`: as kept (no labels or file locations looked up).
+            found.extend(
+                named if as_stored else self._attach_reference_labels(named, shapes)
+            )
             if on_level:
                 on_level(len(found))
         return found

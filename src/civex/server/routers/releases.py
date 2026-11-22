@@ -55,6 +55,12 @@ class ReleaseScopeRequest(BaseModel):
         default=None,
         description="Exactly these records (by id), and the records above them.",
     )
+    below: bool = Field(
+        default=True,
+        description="With `query` or `records`: also every record inside the "
+        "ones chosen (an encounter with its recordings). False takes only the "
+        "records chosen and those above them.",
+    )
     include_workflows: bool = Field(
         default=True, description="Carry the project's workflows and plugins."
     )
@@ -64,6 +70,7 @@ class ReleaseScopeRequest(BaseModel):
             collections=self.collections or None,
             query=self.query.to_query() if self.query else None,
             records=self.records or None,
+            below=self.below and bool(self.query or self.records),
         )
 
 

@@ -245,7 +245,7 @@ class BundleService:
         schemas = self._export_schemas()
         plan.schemas = len(schemas)
         chosen = (
-            self._chosen_records(options.query, options.record_ids)
+            self._chosen_records(options.query, options.record_ids, options.below)
             if options.include_records
             and (options.query is not None or options.record_ids is not None)
             else None
@@ -331,10 +331,13 @@ class BundleService:
                 RecordQuery(dataset=dataset.name), as_stored=True
             )
 
-    def _chosen_records(self, query: Any, record_ids: list[str] | None) -> list[Any]:
+    def _chosen_records(
+        self, query: Any, record_ids: list[str] | None, below: bool = False
+    ) -> list[Any]:
         """The records a query lists (or exactly these), with every record
-        above them (so each has its parent in the bundle), parents first. A
-        few queries per page of records and one per level above them."""
+        above them (so each has its parent in the bundle), parents first,
+        and with `below` every record beneath them too. A few queries per
+        page of records and one per level above and beneath them."""
         listed = (
             self._records.get_many(record_ids, as_stored=True)
             if record_ids is not None
@@ -356,6 +359,11 @@ class BundleService:
             if record.id not in seen:
                 seen.add(record.id)
                 out.append(record)
+        if below:
+            for record in self._records.beneath(listed, as_stored=True):
+                if record.id not in seen:
+                    seen.add(record.id)
+                    out.append(record)
         return out
 
     def _selected_collections(self, options: ExportOptions, chosen=None):
