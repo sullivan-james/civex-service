@@ -196,6 +196,27 @@ def test_code_is_left_out_of_a_release_unless_asked_for(ctx, study, project_dir)
     assert [n for n in _members(ctx, code) if n.endswith(".py")]
 
 
+def test_a_value_left_under_a_field_that_no_longer_exists_is_not_in_the_way(ctx, study):
+    """A record can still hold a value under the id of a field that is gone
+    for good. It is not a field the record has: reads leave it out, and a
+    release of the record is made and checks out."""
+    from sqlalchemy.orm.attributes import flag_modified
+
+    from civex.db.models import Record
+
+    row = ctx._session.get(Record, study["a"].id)
+    row.data = {**row.data, "c7a87f0d-e9e5-4d42-b298-354addb754e5": "left behind"}
+    flag_modified(row, "data")
+    ctx.commit()
+
+    assert set(ctx.record_svc.get(str(study["a"].id)).data) == {"name", "photo"}
+    made = _make(ctx)
+    assert made.counts["records"] == 4
+    assert ctx.release_svc.verify("v1").matches
+    now = ctx.release_svc.compare("v1")
+    assert (now.added, now.changed, now.removed) == (0, 0, 0)
+
+
 def test_its_records_read_back_into_a_new_project(ctx, study, tmp_path):
     made = _make(ctx)
     path = tmp_path / "r.zip"
