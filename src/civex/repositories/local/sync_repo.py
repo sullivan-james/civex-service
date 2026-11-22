@@ -283,10 +283,12 @@ class LocalSyncRepository:
         self._clear_lacks(wanted)
         self._s.flush()
 
-    def note_server_lacks(self, shas: Iterable[str]) -> None:
+    def note_server_lacks(self, shas: Iterable[str], backoff: bool = True) -> None:
         """The authority has just said it hasn't got these files: noted, and
         not asked about again until later (`LACK_RETRY_FIRST`, doubling each
-        time it says so again, up to `LACK_RETRY_MAX`)."""
+        time a download is refused again, up to `LACK_RETRY_MAX`). With
+        `backoff` false (a look at what it holds, not a download that failed)
+        a file already noted keeps its schedule."""
         listed = sorted(set(shas))
         now = datetime.now(timezone.utc)
         for at in range(0, len(listed), 500):
@@ -302,15 +304,25 @@ class LocalSyncRepository:
                 if row is None:
                     row = ServerLack(sha256=sha, misses=0)
                     self._s.add(row)
-                row.misses += 1
                 row.asked_at = now
-                row.retry_at = now + lack_wait(row.misses)
+                if backoff or row.misses == 0:
+                    row.misses += 1
+                    row.retry_at = now + lack_wait(row.misses)
         self._s.flush()
 
     def forget_lacks(self, shas: Iterable[str]) -> None:
         """Ask the authority about these files again at the next pass (they may
-        have reached it)."""
-        self._clear_lacks(set(shas))
+        have reached it): still noted as missing until one is fetched, and the
+        next wait keeps growing if it hasn't got them."""
+        listed = sorted(set(shas))
+        now = datetime.now(timezone.utc)
+        for at in range(0, len(listed), 500):
+            self._s.execute(
+                update(ServerLack)
+                .where(ServerLack.sha256.in_(listed[at : at + 500]))
+                .values(retry_at=now)
+                .execution_options(synchronize_session=False)
+            )
         self._s.flush()
 
     def forget_record_lacks(self, record_id: uuid.UUID) -> None:

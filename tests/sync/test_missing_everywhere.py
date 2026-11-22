@@ -140,3 +140,40 @@ def test_ignoring_a_file_never_asked_about_leaves_the_download_count(pair):
 
     phone.sync_svc.ignore_missing([ref.sha256])  # asks the server, which lacks it
     assert phone.sync_svc.files_to_fetch() == 0
+
+
+def test_looking_at_the_missing_list_does_not_lengthen_the_wait(pair):
+    laptop, phone, record = pair
+    ref = _cite_unsent(laptop, record)
+    phone.sync_svc.sync()
+    phone.sync_svc.fetch_files()
+    for _ in range(4):
+        phone.sync_svc.missing_files()
+    assert phone.sync_repo._s.get(ServerLack, ref.sha256).misses == 1
+
+
+def test_opening_one_does_not_lengthen_the_background_wait(pair):
+    laptop, phone, record = pair
+    ref = _cite_unsent(laptop, record)
+    phone.sync_svc.sync()
+    phone.sync_svc.fetch_files()
+    assert phone.sync_svc.fetch_file(ref.sha256) is False
+    assert phone.sync_repo._s.get(ServerLack, ref.sha256).misses == 1
+
+
+def test_an_edit_to_the_record_keeps_it_missing_and_its_wait_growing(pair):
+    laptop, phone, record = pair
+    ref = _cite_unsent(laptop, record)
+    phone.sync_svc.sync()
+    phone.sync_svc.fetch_files()
+    laptop.record_svc.update(
+        str(record.id), {"site": "z", "depth": 1.0, "scan": ref.to_dict()}
+    )
+    laptop.commit()
+    laptop.sync_svc.sync()
+    phone.sync_svc.sync()
+
+    assert phone.sync_svc.files_missing() == 1  # not back to "downloading"
+    assert phone.sync_svc.files_to_fetch() == 0
+    assert phone.sync_svc.fetch_files().absent == [ref.sha256]
+    assert phone.sync_repo._s.get(ServerLack, ref.sha256).misses == 2

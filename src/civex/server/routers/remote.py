@@ -638,7 +638,7 @@ def update(body: RemoteUpdateRequest, ctx: AppContext = Depends(get_ctx)):
     if body.download_files is not None:
         ctx.sync_svc.set_download_files(body.download_files)
         if body.download_files == "all" and ctx.sync_svc.fetches_files:
-            sync_jobs.fetch_now(ctx.sync_svc.files_to_fetch())
+            sync_jobs.fetch_now(ctx.sync_svc.files_to_try())
     return _status(ctx)
 
 
@@ -1241,7 +1241,7 @@ def set_collection_mode(
     download of what is missing."""
     mode = ctx.sync_svc.set_collection_mode(collection, body.mode)
     if mode == "keep" and ctx.sync_svc.fetches_files:
-        sync_jobs.fetch_now(ctx.sync_svc.files_to_fetch())
+        sync_jobs.fetch_now(ctx.sync_svc.files_to_try())
     return [CollectionFilesResponse(**vars(c)) for c in ctx.sync_svc.collection_files()]
 
 

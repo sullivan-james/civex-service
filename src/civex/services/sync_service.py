@@ -418,7 +418,7 @@ class SyncService:
                 candidates = [s for s in candidates if s in lacking]
                 # Noted, so they are not counted as downloading or asked for
                 # again until their wait is over.
-                self._repo.note_server_lacks(candidates)
+                self._repo.note_server_lacks(candidates, backoff=False)
                 self._commit()
             except SyncError:
                 report.server_checked = False
@@ -1490,7 +1490,7 @@ class SyncService:
             page = shas[at : at + FILE_CHECK_PAGE]
             missing = set(transport.missing_files(page))
             self._repo.confirm_on_server(set(page) - missing)
-            self._repo.note_server_lacks(missing)
+            self._repo.note_server_lacks(missing, backoff=False)
             lacking.extend(sha for sha in page if sha in missing)
         if not lacking:
             return
@@ -2051,7 +2051,9 @@ class SyncService:
                     chunks = transport.file_chunks(sha)
                 except FileNotFoundError:
                     report.absent.append(sha)
-                    self._repo.note_server_lacks([sha])
+                    # A file asked for by name (opened) doesn't lengthen the
+                    # background wait.
+                    self._repo.note_server_lacks([sha], backoff=shas is None)
                     continue
                 # Straight onto the drive (the one asked for, when it is
                 # fetched to go there, else its collection's): each byte

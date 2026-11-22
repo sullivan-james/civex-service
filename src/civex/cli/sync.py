@@ -459,9 +459,15 @@ def fetch() -> None:
     try:
         if not c.sync_svc.fetches_files:
             raise _fail(ValueError("This project doesn't follow an authority."))
-        total = c.sync_svc.files_to_fetch()
+        total = c.sync_svc.files_to_try()
         if not total:
-            console.print("Every file is here.")
+            missing = c.sync_svc.files_missing()
+            console.print(
+                f"Every file the server has is here. {missing} more are missing "
+                "everywhere (`civex files missing`)."
+                if missing
+                else "Every file is here."
+            )
             return
         with Progress(
             TextColumn("Downloading files"),

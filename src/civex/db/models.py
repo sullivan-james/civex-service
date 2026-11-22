@@ -37,6 +37,7 @@ from sqlalchemy import (
     UniqueConstraint,
     delete,
     event,
+    func,
     inspect,
     insert,
     select,
@@ -1157,9 +1158,12 @@ class ServerLack(Base):
     # How many times in a row it said so, and when it may be asked again (the
     # wait doubles each time: 10 minutes, then 20, up to a day), so a file
     # nobody has is not requested over and over, across restarts.
-    misses: Mapped[int] = mapped_column(nullable=False, default=1)
+    misses: Mapped[int] = mapped_column(nullable=False, default=1, server_default="1")
     retry_at: Mapped[datetime] = mapped_column(
-        _UTCDateTime(), nullable=False, default=_now
+        _UTCDateTime(),
+        nullable=False,
+        default=_now,
+        server_default=func.current_timestamp(),
     )
 
 
