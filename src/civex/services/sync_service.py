@@ -99,11 +99,14 @@ _NOW: Any = object()
 
 TransportFactory = Callable[[str, DeviceCredentials], SyncTransport]
 # The cursor while a copy from the authority is being made (`_join`).
-_T = TypeVar("_T")
 JOINING = -1
 # How long a sync waits for another one on this project to finish before it
 # gives up with `SyncBusy`; and the pauses before it runs again after the
 # database turned out to be busy (see `_with_lock_retries`).
+_T = TypeVar("_T")
+# A refusal for permission is sent again by itself this many times at most
+# (each time is an entry in the history); after that a person decides.
+MAX_AUTO_RETRIES = 6
 LOCK_WAIT_SECONDS = 10.0
 LOCK_RETRY_DELAYS: tuple[float, ...] = (1.0, 3.0, 6.0)
 # Told how far a long step (copying, filling, fetching history) has got.
@@ -913,11 +916,24 @@ class SyncService:
         Returns how many were sent."""
         now = datetime.now(timezone.utc)
         sent = 0
-        for c in self._repo.find_open_conflicts(kind="rejected"):
-            if c.code != REFUSAL_PERMISSION or c.resolution == "retrying":
+        for listed in self._repo.find_open_conflicts(kind="rejected"):
+            # Read again: sending one part of an action again settled the others'
+            # items as "retrying" since the list was made, and sending the action
+            # a second time would duplicate it.
+            c = self._repo.get_conflict(listed.id)
+            if (
+                c is None
+                or c.status != "open"
+                or c.code != REFUSAL_PERMISSION
+                or c.resolution == "retrying"
+            ):
                 continue
-            since = datetime.fromisoformat(c.retried_at or c.created_at)
-            if now - since < _retry_pause(c.retries):
+            # The later of the last automatic try and the latest refusal (a
+            # refusal renewed after a person's own retry starts its pause again).
+            since = max(
+                datetime.fromisoformat(t) for t in (c.retried_at, c.created_at) if t
+            )
+            if c.retries >= MAX_AUTO_RETRIES or now - since < _retry_pause(c.retries):
                 continue
             self._repo.note_auto_retry(c.id)
             try:
@@ -1285,7 +1301,8 @@ class SyncService:
             len(report.owed),
             ", ".join(x[:10] for x in report.owed[:5]),
             f". {len(report.never_stored)} of them were never stored in this "
-            f"project (records cite them without their contents): records {where}"
+            f"project (records cite them without their contents)"
+            + (f": records {where}" if where else "")
             if report.never_stored
             else "",
         )

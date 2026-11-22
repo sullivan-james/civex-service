@@ -779,7 +779,7 @@ def is_lock_contention(error: BaseException) -> bool:
     """Whether a database error only says another process is using the database
     right now (SQLite's "database is locked"/"busy", PostgreSQL's lock and
     deadlock failures): trying again soon is the fix, nothing is wrong with the
-    database. Looks through `__cause__`/`__context__` chains."""
+    database. Looks through the `__cause__` chain."""
     seen = 0
     while error is not None and seen < 8:
         text = str(getattr(error, "orig", None) or error).lower()
@@ -793,7 +793,7 @@ def is_lock_contention(error: BaseException) -> bool:
                 or "lock timeout" in text
             ):
                 return True
-        error = error.__cause__ or error.__context__  # type: ignore[assignment]
+        error = error.__cause__  # type: ignore[assignment]
         seen += 1
     return False
 

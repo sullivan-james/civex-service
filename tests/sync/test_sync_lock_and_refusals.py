@@ -243,3 +243,17 @@ def test_a_validation_refusal_is_not_sent_again(pair, authority):
     _age(laptop, refusal.id, 60 * 48)
     report = laptop.sync_svc.sync()
     assert report.retried == 0 and report.open_rejected == 1
+
+
+def test_a_change_is_not_sent_again_for_ever(pair, authority, monkeypatch):
+    laptop, record = pair
+    monkeypatch.setattr(authority.authority_svc, "_policy", _Policy(False))
+    _edit(laptop, record, "a")
+    laptop.sync_svc.sync()
+    for _ in range(sync_service.MAX_AUTO_RETRIES):
+        (refusal,) = _open_refusals(laptop)
+        _age(laptop, refusal.id, 60 * 24 * 3)
+        assert laptop.sync_svc.sync().retried == 1
+    (refusal,) = _open_refusals(laptop)
+    _age(laptop, refusal.id, 60 * 24 * 3)
+    assert laptop.sync_svc.sync().retried == 0
