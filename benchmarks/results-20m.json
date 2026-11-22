@@ -1,0 +1,1453 @@
+{
+ "rows": 20000000,
+ "postgres": "18.6 (Ubuntu 18.6-0ubuntu0.26.04.1)",
+ "settings": {
+  "shared_buffers": "256MB",
+  "work_mem": "32MB",
+  "maintenance_work_mem": "512MB",
+  "max_wal_size": "1GB",
+  "effective_cache_size": "4GB"
+ },
+ "seed_records_s": 1021.2,
+ "seed_audit_s": 103.1,
+ "index_build_s": {
+  "pk+unique": 77.0,
+  "bm_records_ds_schema": 25.0,
+  "bm_records_ds_created": 22.5,
+  "bm_records_ds_parent": 23.1,
+  "bm_records_deleted": 18.2,
+  "bm_records_parent": 19.5,
+  "bm_records_live_ds_created": 26.4,
+  "bm_records_live_schema_created": 29.3,
+  "bm_records_data_gin": 139.3,
+  "bm_records_sv": 87.9,
+  "bm_audit_entity": 16.8,
+  "bm_audit_ts": 10.4,
+  "bm_audit_batch": 7.0,
+  "bm_audit_hub_seq": 8.5,
+  "bm_audit_unsynced": 3.3
+ },
+ "sizes": {
+  "bm_records": {
+   "rows": 19999988,
+   "heap_mb": 17361.1,
+   "toast_mb": 0.0,
+   "indexes_mb": {
+    "bm_records_data_gin": 3237.5,
+    "bm_records_sv": 2014.2,
+    "bm_records_live_ds_created": 1100.7,
+    "bm_records_live_schema_created": 1100.7,
+    "bm_records_uq": 945.9,
+    "bm_records_ds_created": 774.6,
+    "bm_records_pkey": 601.6,
+    "bm_records_ds_schema": 138.4,
+    "bm_records_ds_parent": 135.8,
+    "bm_records_parent": 132.2,
+    "bm_records_deleted": 132.2
+   },
+   "total_mb": 27679.7
+  },
+  "bm_audit": {
+   "rows": 20000136,
+   "heap_mb": 5387.8,
+   "toast_mb": 0.0,
+   "indexes_mb": {
+    "bm_audit_entity": 773.5,
+    "bm_audit_pkey": 601.6,
+    "bm_audit_ts": 428.4,
+    "bm_audit_hub_seq": 428.4,
+    "bm_audit_batch": 179.1,
+    "bm_audit_unsynced": 0.0
+   },
+   "total_mb": 7800.5
+  },
+  "avg_record_bytes": 891
+ },
+ "reads": {
+  "keyset_first_page_big_dataset": {
+   "median_ms": 0.49,
+   "min_ms": 0.39,
+   "max_ms": 1.18
+  },
+  "keyset_deep_page_big_dataset": {
+   "median_ms": 0.68,
+   "min_ms": 0.49,
+   "max_ms": 0.69
+  },
+  "keyset_first_page_small_dataset": {
+   "median_ms": 0.78,
+   "min_ms": 0.5,
+   "max_ms": 1.03
+  },
+  "keyset_by_schema_first_page": {
+   "median_ms": 0.67,
+   "min_ms": 0.34,
+   "max_ms": 0.87
+  },
+  "offset_1M_big_dataset": {
+   "median_ms": 758.04,
+   "min_ms": 642.72,
+   "max_ms": 873.37
+  },
+  "keyset_deep_plan": [
+   "Limit",
+   "Index Scan on bm_records_live_ds_created"
+  ],
+  "jsonb_contains_2keys_in_dataset": {
+   "median_ms": 187.47,
+   "min_ms": 181.83,
+   "max_ms": 200.3
+  },
+  "jsonb_contains_2keys_in_dataset_count": {
+   "median_ms": 779.53,
+   "min_ms": 779.42,
+   "max_ms": 779.64
+  },
+  "jsonb_contains_2keys_plan": [
+   "Aggregate",
+   "Bitmap Heap Scan",
+   "Bitmap Index Scan on bm_records_data_gin"
+  ],
+  "jsonb_contains_rare_value_whole_table": {
+   "median_ms": 0.16,
+   "min_ms": 0.13,
+   "max_ms": 0.52
+  },
+  "jsonb_contains_rare_plan": [
+   "Bitmap Heap Scan",
+   "Bitmap Index Scan on bm_records_data_gin"
+  ],
+  "jsonb_text_equals_no_index_expr": {
+   "median_ms": 10.47,
+   "min_ms": 9.83,
+   "max_ms": 12.35
+  },
+  "fts_rare_word_in_dataset_limit20": {
+   "median_ms": 6.93,
+   "min_ms": 6.17,
+   "max_ms": 7.32
+  },
+  "fts_rare_word_ranked_whole_table": {
+   "median_ms": 46.12,
+   "min_ms": 28.68,
+   "max_ms": 283.12
+  },
+  "fts_common_word_ranked_whole_table": {
+   "median_ms": 357.92,
+   "min_ms": 329.04,
+   "max_ms": 386.8
+  },
+  "count_exact_big_dataset_live": {
+   "median_ms": 9310.89,
+   "min_ms": 8662.71,
+   "max_ms": 9959.06
+  },
+  "count_exact_small_dataset_live": {
+   "median_ms": 2.84,
+   "min_ms": 2.37,
+   "max_ms": 3.12
+  },
+  "count_exact_whole_table": {
+   "median_ms": 5357.44,
+   "min_ms": 5141.46,
+   "max_ms": 5573.42
+  },
+  "count_estimate_reltuples": {
+   "median_ms": 0.19,
+   "min_ms": 0.09,
+   "max_ms": 0.27
+  },
+  "count_estimate_planner_rows_big_dataset": 11534983,
+  "count_exact_big_dataset_value": 11475480,
+  "count_exact_whole_table_value": 20000000,
+  "audit_history_of_one_entity": {
+   "median_ms": 0.12,
+   "min_ms": 0.1,
+   "max_ms": 0.57
+  },
+  "audit_hub_seq_feed_1000_deep": {
+   "median_ms": 0.59,
+   "min_ms": 0.45,
+   "max_ms": 0.92
+  },
+  "audit_head_seq": {
+   "median_ms": 0.11,
+   "min_ms": 0.11,
+   "max_ms": 0.16
+  },
+  "audit_unsynced_pending": {
+   "median_ms": 0.41,
+   "min_ms": 0.38,
+   "max_ms": 0.8
+  },
+  "audit_time_range_count_1day": {
+   "median_ms": 2.93,
+   "min_ms": 2.84,
+   "max_ms": 4.08
+  }
+ },
+ "inserts": {
+  "records_insert_select_trigger_on": {
+   "rows_per_s": 1278,
+   "wal_bytes_per_row": 27600
+  },
+  "records_insert_select_trigger_off": {
+   "rows_per_s": 2394,
+   "wal_bytes_per_row": 21283
+  },
+  "records_copy_trigger_on": {
+   "rows_per_s": 563
+  },
+  "audit_insert_select": {
+   "rows_per_s": 2571,
+   "wal_bytes_per_row": 12169
+  }
+ },
+ "maintenance": {
+  "update_1pct_s": 433.6,
+  "update_1pct_rows": 200000,
+  "update_1pct_wal_mb": "8817.8",
+  "dead_tuples_before_vacuum": 200000,
+  "vacuum_analyze_after_1pct_update_s": 19.7,
+  "vacuum_analyze_clean_table_s": 11.0,
+  "analyze_s": 2.9,
+  "reindex_live_ds_created_s": 33.3,
+  "reindex_data_gin_s": 157.0,
+  "vacuum_analyze_audit_s": 39.0
+ },
+ "id_order": {
+  "rows_each": 100000,
+  "uuid4_random": {
+   "rows_per_s": 1561,
+   "wal_bytes_per_row": 19809,
+   "full_page_images_per_row": 2.47
+  },
+  "uuidv7_time_ordered": {
+   "rows_per_s": 15357,
+   "wal_bytes_per_row": 2571,
+   "full_page_images_per_row": 0.09
+  }
+ },
+ "catalog": {
+  "unpartitioned": {
+   "pg_class_rows": 800,
+   "pg_attribute_rows": 2880,
+   "pg_index_rows": 680,
+   "create_seconds_per_schema": 0.118,
+   "pg_class_rows_per_schema": 20.0,
+   "pg_attribute_rows_per_schema": 72.0,
+   "catalog_mb_total": "2.7",
+   "drop_one_schema_s": 0.007,
+   "locks_for_unpruned_records_query": 13
+  },
+  "records_hash_8": {
+   "pg_class_rows": 4640,
+   "pg_attribute_rows": 14120,
+   "pg_index_rows": 4200,
+   "create_seconds_per_schema": 0.142,
+   "pg_class_rows_per_schema": 116.0,
+   "pg_attribute_rows_per_schema": 353.0,
+   "catalog_mb_total": "14.4",
+   "drop_one_schema_s": 0.018,
+   "locks_for_unpruned_records_query": 109
+  },
+  "records_hash_16": {
+   "pg_class_rows": 8480,
+   "pg_attribute_rows": 25320,
+   "pg_index_rows": 7720,
+   "create_seconds_per_schema": 0.224,
+   "pg_class_rows_per_schema": 212.0,
+   "pg_attribute_rows_per_schema": 633.0,
+   "catalog_mb_total": "26.0",
+   "drop_one_schema_s": 0.027,
+   "locks_for_unpruned_records_query": 205
+  },
+  "records_hash_16_audit_monthly_24": {
+   "pg_class_rows": 15200,
+   "pg_attribute_rows": 54160,
+   "pg_index_rows": 13480,
+   "create_seconds_per_schema": 0.495,
+   "pg_class_rows_per_schema": 380.0,
+   "pg_attribute_rows_per_schema": 1354.0,
+   "catalog_mb_total": "57.9",
+   "drop_one_schema_s": 0.14,
+   "locks_for_unpruned_records_query": 205
+  },
+  "schemas": 40,
+  "max_locks_per_transaction": "64"
+ },
+ "spike_5m_without_hash_by_id": {
+  "rows": 5000000,
+  "feasibility": {
+   "primary_key_on_id_alone": "ERROR: ERROR:  unique constraint on partitioned table must include all partitioning columns",
+   "unique_id_alone": "ERROR: ERROR:  unique constraint on partitioned table must include all partitioning columns",
+   "primary_key_id_dataset_id": "ok",
+   "unique_id_dataset_id_(uq_records_id_dataset)": "ok",
+   "deferred_composite_self_fk_on_partitioned": "ok",
+   "foreign_key_to_records_id_alone_from_other_tables": "ERROR: ERROR:  there is no unique constraint matching given keys for referenced table \"sp_hash\""
+  },
+  "load_s": {},
+  "index_build_s": {
+   "sp_mono": 158.2,
+   "sp_hash": 110.2,
+   "sp_brin": 125.6
+  },
+  "sizes": {
+   "sp_mono": {
+    "heap_mb": 4340.3,
+    "total_mb": 6960.2,
+    "ds_created_btree_mb": 193.7,
+    "live_ds_created_partial_mb": 275.2,
+    "data_gin_mb": 832.1
+   },
+   "sp_hash": {
+    "heap_mb": "4340.3",
+    "total_mb": "7152.2"
+   },
+   "sp_brin": {
+    "heap_mb": 4340.3,
+    "total_mb": 5980.2,
+    "brin_index_mb": 0.6
+   }
+  },
+  "queries": {
+   "keyset_first_page_small_dataset": {
+    "sp_mono": {
+     "median_ms": 0.41,
+     "min_ms": 0.39,
+     "max_ms": 0.63,
+     "plan": [
+      "Limit",
+      "Index Scan on sp_mono_live_ds_created"
+     ],
+     "planning_ms": 0.09
+    },
+    "sp_hash": {
+     "median_ms": 0.56,
+     "min_ms": 0.41,
+     "max_ms": 2.56,
+     "plan": [
+      "Limit",
+      "Index Scan on sp_hash_p11_dataset_id_created_at_id_idx"
+     ],
+     "planning_ms": 0.1
+    },
+    "sp_brin": {
+     "median_ms": 4.17,
+     "min_ms": 3.98,
+     "max_ms": 5.25,
+     "plan": [
+      "Limit",
+      "Sort",
+      "Index Scan on sp_brin_ds_parent"
+     ],
+     "planning_ms": 0.07
+    }
+   },
+   "keyset_first_page_big_dataset": {
+    "sp_mono": {
+     "median_ms": 1.12,
+     "min_ms": 0.46,
+     "max_ms": 1.24,
+     "plan": [
+      "Limit",
+      "Index Scan on sp_mono_live_ds_created"
+     ],
+     "planning_ms": 0.05
+    },
+    "sp_hash": {
+     "median_ms": 0.44,
+     "min_ms": 0.33,
+     "max_ms": 0.47,
+     "plan": [
+      "Limit",
+      "Index Scan on sp_hash_p0_dataset_id_created_at_id_idx"
+     ],
+     "planning_ms": 0.08
+    },
+    "sp_brin": {
+     "median_ms": 458.86,
+     "min_ms": 457.03,
+     "max_ms": 467.4,
+     "plan": [
+      "Limit",
+      "Gather Merge",
+      "Sort",
+      "Seq Scan"
+     ],
+     "planning_ms": 0.12
+    }
+   },
+   "keyset_by_schema_no_dataset_filter": {
+    "sp_mono": {
+     "median_ms": 0.21,
+     "min_ms": 0.19,
+     "max_ms": 0.53,
+     "plan": [
+      "Limit",
+      "Index Scan on bm_schemas_pkey",
+      "Index Only Scan on sp_mono_live_schema_created"
+     ],
+     "planning_ms": 0.08
+    },
+    "sp_hash": {
+     "median_ms": 1.28,
+     "min_ms": 1.1,
+     "max_ms": 1.38,
+     "plan": [
+      "Limit",
+      "Index Scan on bm_schemas_pkey",
+      "Merge Append",
+      "Index Only Scan on sp_hash_p0_schema_id_created_at_id_idx",
+      "Index Only Scan on sp_hash_p1_schema_id_created_at_id_idx",
+      "Index Only Scan on sp_hash_p2_schema_id_created_at_id_idx"
+     ],
+     "planning_ms": 0.57
+    },
+    "sp_brin": {
+     "median_ms": 694.86,
+     "min_ms": 632.72,
+     "max_ms": 1063.24,
+     "plan": [
+      "Limit",
+      "Index Scan on bm_schemas_pkey",
+      "Gather Merge",
+      "Sort",
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_brin_ds_schema"
+     ],
+     "planning_ms": 0.14
+    }
+   },
+   "jsonb_contains_in_dataset": {
+    "sp_mono": {
+     "median_ms": 216.98,
+     "min_ms": 201.46,
+     "max_ms": 224.85,
+     "plan": [
+      "Aggregate",
+      "Bitmap Heap Scan",
+      "BitmapAnd",
+      "Bitmap Index Scan on sp_mono_data_gin",
+      "Bitmap Index Scan on sp_mono_ds_parent"
+     ],
+     "planning_ms": 0.14
+    },
+    "sp_hash": {
+     "median_ms": 35.97,
+     "min_ms": 34.64,
+     "max_ms": 38.46,
+     "plan": [
+      "Aggregate",
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_hash_p0_data_idx"
+     ],
+     "planning_ms": 0.17
+    },
+    "sp_brin": {
+     "median_ms": 209.15,
+     "min_ms": 206.48,
+     "max_ms": 261.14,
+     "plan": [
+      "Aggregate",
+      "Bitmap Heap Scan",
+      "BitmapAnd",
+      "Bitmap Index Scan on sp_brin_data_gin",
+      "Bitmap Index Scan on sp_brin_ds_parent"
+     ],
+     "planning_ms": 0.12
+    }
+   },
+   "jsonb_contains_rare_whole_table": {
+    "sp_mono": {
+     "median_ms": 0.27,
+     "min_ms": 0.18,
+     "max_ms": 0.31,
+     "plan": [
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_mono_data_gin"
+     ],
+     "planning_ms": 0.06
+    },
+    "sp_hash": {
+     "median_ms": 1.7,
+     "min_ms": 1.46,
+     "max_ms": 2.51,
+     "plan": [
+      "Append",
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_hash_p0_data_idx",
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_hash_p1_data_idx",
+      "Bitmap Heap Scan"
+     ],
+     "planning_ms": 1.51
+    },
+    "sp_brin": {
+     "median_ms": 0.19,
+     "min_ms": 0.17,
+     "max_ms": 0.35,
+     "plan": [
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_brin_data_gin"
+     ],
+     "planning_ms": 0.04
+    }
+   },
+   "fts_rare_word_whole_table": {
+    "sp_mono": {
+     "median_ms": 1.66,
+     "min_ms": 1.46,
+     "max_ms": 1.83,
+     "plan": [
+      "Limit",
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_mono_sv"
+     ],
+     "planning_ms": 0.12
+    },
+    "sp_hash": {
+     "median_ms": 1.55,
+     "min_ms": 1.54,
+     "max_ms": 1.86,
+     "plan": [
+      "Limit",
+      "Append",
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_hash_p0_search_vector_idx",
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_hash_p1_search_vector_idx"
+     ],
+     "planning_ms": 0.51
+    },
+    "sp_brin": {
+     "median_ms": 1.46,
+     "min_ms": 1.43,
+     "max_ms": 1.62,
+     "plan": [
+      "Limit",
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_brin_sv"
+     ],
+     "planning_ms": 0.06
+    }
+   },
+   "count_live_big_dataset": {
+    "sp_mono": {
+     "median_ms": 3479.81,
+     "min_ms": 495.62,
+     "max_ms": 4640.91,
+     "plan": [
+      "Aggregate",
+      "Gather",
+      "Aggregate",
+      "Seq Scan"
+     ],
+     "planning_ms": 0.12
+    },
+    "sp_hash": {
+     "median_ms": 285.44,
+     "min_ms": 244.65,
+     "max_ms": 3733.97,
+     "plan": [
+      "Aggregate",
+      "Gather",
+      "Aggregate",
+      "Seq Scan"
+     ],
+     "planning_ms": 0.14
+    },
+    "sp_brin": {
+     "median_ms": 624.22,
+     "min_ms": 427.75,
+     "max_ms": 6159.87,
+     "plan": [
+      "Aggregate",
+      "Gather",
+      "Aggregate",
+      "Seq Scan"
+     ],
+     "planning_ms": 0.11
+    }
+   },
+   "time_window_whole_table_1day": {
+    "sp_mono": {
+     "median_ms": 2.58,
+     "min_ms": 2.29,
+     "max_ms": 2.61,
+     "plan": [
+      "Aggregate",
+      "Index Only Scan on sp_mono_ds_created"
+     ],
+     "planning_ms": 0.06
+    },
+    "sp_hash": {
+     "median_ms": 3.35,
+     "min_ms": 3.11,
+     "max_ms": 3.78,
+     "plan": [
+      "Aggregate",
+      "Append",
+      "Index Only Scan on sp_hash_p0_dataset_id_created_at_idx",
+      "Index Only Scan on sp_hash_p1_dataset_id_created_at_idx",
+      "Index Only Scan on sp_hash_p2_dataset_id_created_at_idx",
+      "Index Only Scan on sp_hash_p3_dataset_id_created_at_idx"
+     ],
+     "planning_ms": 0.48
+    },
+    "sp_brin": {
+     "median_ms": 4.95,
+     "min_ms": 4.78,
+     "max_ms": 5.38,
+     "plan": [
+      "Aggregate",
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_brin_created"
+     ],
+     "planning_ms": 0.07
+    }
+   },
+   "pk_lookup_by_id_only": {
+    "sp_mono": {
+     "median_ms": 0.12,
+     "min_ms": 0.11,
+     "max_ms": 0.22,
+     "plan": [
+      "Index Only Scan on sp_mono_uq"
+     ],
+     "planning_ms": 0.07
+    },
+    "sp_hash": {
+     "median_ms": 0.69,
+     "min_ms": 0.57,
+     "max_ms": 0.79,
+     "plan": [
+      "Append",
+      "Index Only Scan on sp_hash_p0_id_dataset_id_key",
+      "Index Only Scan on sp_hash_p1_id_dataset_id_key",
+      "Index Only Scan on sp_hash_p2_id_dataset_id_key",
+      "Index Only Scan on sp_hash_p3_id_dataset_id_key",
+      "Index Only Scan on sp_hash_p4_id_dataset_id_key"
+     ],
+     "planning_ms": 0.38
+    },
+    "sp_brin": {
+     "median_ms": 0.21,
+     "min_ms": 0.09,
+     "max_ms": 0.35,
+     "plan": [
+      "Index Only Scan on sp_brin_pkey"
+     ],
+     "planning_ms": 0.03
+    }
+   }
+  },
+  "move_small_collection_hash_s": {
+   "rows": 4175,
+   "seconds": 0.67
+  },
+  "move_small_collection_mono_s": {
+   "rows": 4175,
+   "seconds": 6.92
+  },
+  "insert_rows_per_s_indexes_live": {
+   "sp_mono": 4919,
+   "sp_hash": 4307
+  },
+  "audit_unique_hub_seq_on_time_partitioned": "ERROR: ERROR:  unique constraint on partitioned table must include all partitioning columns",
+  "audit_queries": {
+   "history_of_one_entity": {
+    "sp_aud_mono": {
+     "median_ms": 0.46,
+     "min_ms": 0.13,
+     "max_ms": 0.49,
+     "plan": [
+      "Index Scan on sp_aud_mono_entity"
+     ]
+    },
+    "sp_aud_part": {
+     "median_ms": 0.82,
+     "min_ms": 0.69,
+     "max_ms": 0.9,
+     "plan": [
+      "Sort",
+      "Append",
+      "Index Scan on sp_aud_part_202401_entity_id_timestamp_idx",
+      "Index Scan on sp_aud_part_202402_entity_id_timestamp_idx",
+      "Index Scan on sp_aud_part_202403_entity_id_timestamp_idx"
+     ]
+    }
+   },
+   "hub_seq_feed_1000": {
+    "sp_aud_mono": {
+     "median_ms": 0.45,
+     "min_ms": 0.43,
+     "max_ms": 0.9,
+     "plan": [
+      "Limit",
+      "Index Scan on sp_aud_mono_hub_seq"
+     ]
+    },
+    "sp_aud_part": {
+     "median_ms": 1.09,
+     "min_ms": 0.98,
+     "max_ms": 1.1,
+     "plan": [
+      "Limit",
+      "Merge Append",
+      "Index Scan on sp_aud_part_202401_hub_seq_idx",
+      "Index Scan on sp_aud_part_202402_hub_seq_idx",
+      "Index Scan on sp_aud_part_202403_hub_seq_idx"
+     ]
+    }
+   },
+   "time_range_1day_count": {
+    "sp_aud_mono": {
+     "median_ms": 3.02,
+     "min_ms": 3.02,
+     "max_ms": 3.2,
+     "plan": [
+      "Aggregate",
+      "Index Only Scan on sp_aud_mono_ts"
+     ]
+    },
+    "sp_aud_part": {
+     "median_ms": 3.13,
+     "min_ms": 3.05,
+     "max_ms": 3.36,
+     "plan": [
+      "Aggregate",
+      "Index Only Scan on sp_aud_part_202403_timestamp_idx"
+     ]
+    }
+   },
+   "max_hub_seq": {
+    "sp_aud_mono": {
+     "median_ms": 0.1,
+     "min_ms": 0.1,
+     "max_ms": 0.15,
+     "plan": [
+      "Result",
+      "Limit",
+      "Index Only Scan on sp_aud_mono_hub_seq"
+     ]
+    },
+    "sp_aud_part": {
+     "median_ms": 0.73,
+     "min_ms": 0.69,
+     "max_ms": 0.77,
+     "plan": [
+      "Result",
+      "Limit",
+      "Merge Append",
+      "Index Only Scan on sp_aud_part_202401_hub_seq_idx",
+      "Index Only Scan on sp_aud_part_202402_hub_seq_idx"
+     ]
+    }
+   }
+  },
+  "audit_drop_oldest_month_partition_s": 0.058,
+  "audit_delete_oldest_month_monolithic": {
+   "rows": 849315,
+   "seconds": 1.64
+  },
+  "audit_sizes_mb": {
+   "mono_total": 1950.2,
+   "part_total": "1701.8"
+  },
+  "jsonb_side_table": {
+   "rows": 500000,
+   "inline": {
+    "heap_mb": 40.3,
+    "toast_mb": 3950.3,
+    "gin_mb": 73.6
+   },
+   "split_hot": {
+    "heap_mb": 111.6,
+    "gin_mb": 38.6,
+    "side_total_mb": 4002.0
+   },
+   "list_page_inline": {
+    "median_ms": 33.34,
+    "min_ms": 32.28,
+    "max_ms": 41.44
+   },
+   "list_page_split": {
+    "median_ms": 6.55,
+    "min_ms": 6.05,
+    "max_ms": 6.64
+   },
+   "agg_count_by_status_inline": {
+    "median_ms": 2516.03,
+    "min_ms": 2458.35,
+    "max_ms": 2573.71
+   },
+   "agg_count_by_status_split": {
+    "median_ms": 69.61,
+    "min_ms": 67.75,
+    "max_ms": 71.46
+   },
+   "update_small_field_100k_inline": {
+    "seconds": 26.9,
+    "wal_mb": "1935.9"
+   },
+   "update_small_field_100k_split": {
+    "seconds": 4.2,
+    "wal_mb": "258.9"
+   }
+  }
+ },
+ "spike": {
+  "rows": 3000000,
+  "feasibility": {
+   "primary_key_on_id_alone": "ERROR: ERROR:  unique constraint on partitioned table must include all partitioning columns",
+   "unique_id_alone": "ERROR: ERROR:  unique constraint on partitioned table must include all partitioning columns",
+   "primary_key_id_dataset_id": "ok",
+   "unique_id_dataset_id_(uq_records_id_dataset)": "ok",
+   "deferred_composite_self_fk_on_partitioned": "ok",
+   "foreign_key_to_records_id_alone_from_other_tables": "ERROR: ERROR:  there is no unique constraint matching given keys for referenced table \"sp_hash\"",
+   "hash_by_id_deferred_composite_self_fk": "ok",
+   "hash_by_id_fk_from_other_table_to_id": "ok"
+  },
+  "load_s": {},
+  "index_build_s": {
+   "sp_mono": 77.3,
+   "sp_hash": 66.0,
+   "sp_hashid": 55.1,
+   "sp_brin": 55.6
+  },
+  "sizes": {
+   "sp_mono": {
+    "heap_mb": 2604.2,
+    "total_mb": 4183.3,
+    "ds_created_btree_mb": 116.2,
+    "live_ds_created_partial_mb": 165.1,
+    "data_gin_mb": 501.7
+   },
+   "sp_hash": {
+    "heap_mb": "2604.2",
+    "total_mb": "4284.7"
+   },
+   "sp_hashid": {
+    "heap_mb": "2604.2",
+    "total_mb": "4289.7"
+   },
+   "sp_brin": {
+    "heap_mb": 2604.2,
+    "total_mb": 3595.2,
+    "brin_index_mb": 0.4
+   }
+  },
+  "queries": {
+   "keyset_first_page_small_dataset": {
+    "sp_mono": {
+     "median_ms": 0.38,
+     "min_ms": 0.32,
+     "max_ms": 1.08,
+     "plan": [
+      "Limit",
+      "Index Scan on sp_mono_live_ds_created"
+     ],
+     "planning_ms": 0.06
+    },
+    "sp_hash": {
+     "median_ms": 0.55,
+     "min_ms": 0.35,
+     "max_ms": 1.51,
+     "plan": [
+      "Limit",
+      "Index Scan on sp_hash_p2_dataset_id_created_at_id_idx"
+     ],
+     "planning_ms": 0.09
+    },
+    "sp_hashid": {
+     "median_ms": 1.24,
+     "min_ms": 1.12,
+     "max_ms": 1.43,
+     "plan": [
+      "Limit",
+      "Merge Append",
+      "Index Scan on sp_hashid_p0_dataset_id_created_at_id_idx",
+      "Index Scan on sp_hashid_p1_dataset_id_created_at_id_idx",
+      "Index Scan on sp_hashid_p2_dataset_id_created_at_id_idx",
+      "Index Scan on sp_hashid_p3_dataset_id_created_at_id_idx"
+     ],
+     "planning_ms": 0.57
+    },
+    "sp_brin": {
+     "median_ms": 2.35,
+     "min_ms": 2.25,
+     "max_ms": 2.74,
+     "plan": [
+      "Limit",
+      "Sort",
+      "Index Scan on sp_brin_ds_parent"
+     ],
+     "planning_ms": 0.06
+    }
+   },
+   "keyset_first_page_big_dataset": {
+    "sp_mono": {
+     "median_ms": 0.31,
+     "min_ms": 0.3,
+     "max_ms": 0.37,
+     "plan": [
+      "Limit",
+      "Index Scan on sp_mono_live_ds_created"
+     ],
+     "planning_ms": 0.05
+    },
+    "sp_hash": {
+     "median_ms": 0.42,
+     "min_ms": 0.33,
+     "max_ms": 0.62,
+     "plan": [
+      "Limit",
+      "Index Scan on sp_hash_p0_dataset_id_created_at_id_idx"
+     ],
+     "planning_ms": 0.08
+    },
+    "sp_hashid": {
+     "median_ms": 0.96,
+     "min_ms": 0.83,
+     "max_ms": 1.08,
+     "plan": [
+      "Limit",
+      "Merge Append",
+      "Index Scan on sp_hashid_p0_dataset_id_created_at_id_idx",
+      "Index Scan on sp_hashid_p1_dataset_id_created_at_id_idx",
+      "Index Scan on sp_hashid_p2_dataset_id_created_at_id_idx",
+      "Index Scan on sp_hashid_p3_dataset_id_created_at_id_idx"
+     ],
+     "planning_ms": 0.61
+    },
+    "sp_brin": {
+     "median_ms": 248.75,
+     "min_ms": 245.6,
+     "max_ms": 336.93,
+     "plan": [
+      "Limit",
+      "Gather Merge",
+      "Sort",
+      "Seq Scan"
+     ],
+     "planning_ms": 0.11
+    }
+   },
+   "keyset_by_schema_no_dataset_filter": {
+    "sp_mono": {
+     "median_ms": 0.55,
+     "min_ms": 0.27,
+     "max_ms": 1.2,
+     "plan": [
+      "Limit",
+      "Index Scan on bm_schemas_pkey",
+      "Index Only Scan on sp_mono_live_schema_created"
+     ],
+     "planning_ms": 0.07
+    },
+    "sp_hash": {
+     "median_ms": 1.06,
+     "min_ms": 0.9,
+     "max_ms": 1.36,
+     "plan": [
+      "Limit",
+      "Index Scan on bm_schemas_pkey",
+      "Merge Append",
+      "Index Only Scan on sp_hash_p0_schema_id_created_at_id_idx",
+      "Index Only Scan on sp_hash_p1_schema_id_created_at_id_idx",
+      "Index Only Scan on sp_hash_p2_schema_id_created_at_id_idx"
+     ],
+     "planning_ms": 0.55
+    },
+    "sp_hashid": {
+     "median_ms": 1.56,
+     "min_ms": 0.96,
+     "max_ms": 1.68,
+     "plan": [
+      "Limit",
+      "Index Scan on bm_schemas_pkey",
+      "Merge Append",
+      "Index Only Scan on sp_hashid_p0_schema_id_created_at_id_idx",
+      "Index Only Scan on sp_hashid_p1_schema_id_created_at_id_idx",
+      "Index Only Scan on sp_hashid_p2_schema_id_created_at_id_idx"
+     ],
+     "planning_ms": 0.49
+    },
+    "sp_brin": {
+     "median_ms": 383.37,
+     "min_ms": 321.71,
+     "max_ms": 660.52,
+     "plan": [
+      "Limit",
+      "Index Scan on bm_schemas_pkey",
+      "Gather Merge",
+      "Sort",
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_brin_ds_schema"
+     ],
+     "planning_ms": 0.14
+    }
+   },
+   "jsonb_contains_in_dataset": {
+    "sp_mono": {
+     "median_ms": 86.65,
+     "min_ms": 86.5,
+     "max_ms": 88.94,
+     "plan": [
+      "Aggregate",
+      "Bitmap Heap Scan",
+      "BitmapAnd",
+      "Bitmap Index Scan on sp_mono_data_gin",
+      "Bitmap Index Scan on sp_mono_ds_parent"
+     ],
+     "planning_ms": 0.14
+    },
+    "sp_hash": {
+     "median_ms": 20.63,
+     "min_ms": 20.1,
+     "max_ms": 20.76,
+     "plan": [
+      "Aggregate",
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_hash_p0_data_idx"
+     ],
+     "planning_ms": 0.14
+    },
+    "sp_hashid": {
+     "median_ms": 51.91,
+     "min_ms": 48.83,
+     "max_ms": 56.79,
+     "plan": [
+      "Aggregate",
+      "Append",
+      "Bitmap Heap Scan",
+      "BitmapAnd",
+      "Bitmap Index Scan on sp_hashid_p0_data_idx",
+      "Bitmap Index Scan on sp_hashid_p0_dataset_id_parent_record_id_idx"
+     ],
+     "planning_ms": 0.9
+    },
+    "sp_brin": {
+     "median_ms": 60.52,
+     "min_ms": 32.38,
+     "max_ms": 111.42,
+     "plan": [
+      "Aggregate",
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_brin_data_gin"
+     ],
+     "planning_ms": 0.14
+    }
+   },
+   "jsonb_contains_rare_whole_table": {
+    "sp_mono": {
+     "median_ms": 0.18,
+     "min_ms": 0.16,
+     "max_ms": 0.25,
+     "plan": [
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_mono_data_gin"
+     ],
+     "planning_ms": 0.05
+    },
+    "sp_hash": {
+     "median_ms": 1.73,
+     "min_ms": 1.47,
+     "max_ms": 1.89,
+     "plan": [
+      "Append",
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_hash_p0_data_idx",
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_hash_p1_data_idx",
+      "Bitmap Heap Scan"
+     ],
+     "planning_ms": 0.66
+    },
+    "sp_hashid": {
+     "median_ms": 1.56,
+     "min_ms": 1.47,
+     "max_ms": 1.87,
+     "plan": [
+      "Append",
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_hashid_p0_data_idx",
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_hashid_p1_data_idx",
+      "Bitmap Heap Scan"
+     ],
+     "planning_ms": 0.65
+    },
+    "sp_brin": {
+     "median_ms": 0.16,
+     "min_ms": 0.14,
+     "max_ms": 0.19,
+     "plan": [
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_brin_data_gin"
+     ],
+     "planning_ms": 0.04
+    }
+   },
+   "fts_rare_word_whole_table": {
+    "sp_mono": {
+     "median_ms": 0.95,
+     "min_ms": 0.85,
+     "max_ms": 1.03,
+     "plan": [
+      "Limit",
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_mono_sv"
+     ],
+     "planning_ms": 0.06
+    },
+    "sp_hash": {
+     "median_ms": 1.18,
+     "min_ms": 1.17,
+     "max_ms": 1.25,
+     "plan": [
+      "Limit",
+      "Append",
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_hash_p0_search_vector_idx",
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_hash_p1_search_vector_idx"
+     ],
+     "planning_ms": 0.52
+    },
+    "sp_hashid": {
+     "median_ms": 0.9,
+     "min_ms": 0.72,
+     "max_ms": 1.05,
+     "plan": [
+      "Limit",
+      "Append",
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_hashid_p0_search_vector_idx",
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_hashid_p1_search_vector_idx"
+     ],
+     "planning_ms": 0.53
+    },
+    "sp_brin": {
+     "median_ms": 0.86,
+     "min_ms": 0.8,
+     "max_ms": 0.88,
+     "plan": [
+      "Limit",
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_brin_sv"
+     ],
+     "planning_ms": 0.05
+    }
+   },
+   "count_live_big_dataset": {
+    "sp_mono": {
+     "median_ms": 411.2,
+     "min_ms": 259.77,
+     "max_ms": 1190.46,
+     "plan": [
+      "Aggregate",
+      "Gather",
+      "Aggregate",
+      "Seq Scan"
+     ],
+     "planning_ms": 0.12
+    },
+    "sp_hash": {
+     "median_ms": 158.58,
+     "min_ms": 154.07,
+     "max_ms": 254.13,
+     "plan": [
+      "Aggregate",
+      "Gather",
+      "Aggregate",
+      "Seq Scan"
+     ],
+     "planning_ms": 0.17
+    },
+    "sp_hashid": {
+     "median_ms": 279.94,
+     "min_ms": 255.99,
+     "max_ms": 1040.22,
+     "plan": [
+      "Aggregate",
+      "Gather",
+      "Aggregate",
+      "Append",
+      "Index Only Scan on sp_hashid_p5_dataset_id_created_at_id_idx",
+      "Index Only Scan on sp_hashid_p0_dataset_id_created_at_id_idx"
+     ],
+     "planning_ms": 1.12
+    },
+    "sp_brin": {
+     "median_ms": 251.2,
+     "min_ms": 235.78,
+     "max_ms": 660.09,
+     "plan": [
+      "Aggregate",
+      "Gather",
+      "Aggregate",
+      "Seq Scan"
+     ],
+     "planning_ms": 0.1
+    }
+   },
+   "time_window_whole_table_1day": {
+    "sp_mono": {
+     "median_ms": 1.25,
+     "min_ms": 1.07,
+     "max_ms": 1.49,
+     "plan": [
+      "Aggregate",
+      "Index Only Scan on sp_mono_ds_created"
+     ],
+     "planning_ms": 0.06
+    },
+    "sp_hash": {
+     "median_ms": 1.65,
+     "min_ms": 1.51,
+     "max_ms": 1.98,
+     "plan": [
+      "Aggregate",
+      "Append",
+      "Index Only Scan on sp_hash_p0_dataset_id_created_at_idx",
+      "Index Only Scan on sp_hash_p1_dataset_id_created_at_idx",
+      "Index Only Scan on sp_hash_p2_dataset_id_created_at_idx",
+      "Index Only Scan on sp_hash_p3_dataset_id_created_at_idx"
+     ],
+     "planning_ms": 0.53
+    },
+    "sp_hashid": {
+     "median_ms": 8.83,
+     "min_ms": 8.06,
+     "max_ms": 9.38,
+     "plan": [
+      "Aggregate",
+      "Append",
+      "Index Only Scan on sp_hashid_p0_dataset_id_created_at_idx",
+      "Index Only Scan on sp_hashid_p1_dataset_id_created_at_idx",
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_hashid_p2_dataset_id_created_at_idx"
+     ],
+     "planning_ms": 0.59
+    },
+    "sp_brin": {
+     "median_ms": 1.34,
+     "min_ms": 1.24,
+     "max_ms": 1.38,
+     "plan": [
+      "Aggregate",
+      "Bitmap Heap Scan",
+      "Bitmap Index Scan on sp_brin_created"
+     ],
+     "planning_ms": 0.04
+    }
+   },
+   "pk_lookup_by_id_only": {
+    "sp_mono": {
+     "median_ms": 0.17,
+     "min_ms": 0.15,
+     "max_ms": 0.18,
+     "plan": [
+      "Index Only Scan on sp_mono_uq"
+     ],
+     "planning_ms": 0.03
+    },
+    "sp_hash": {
+     "median_ms": 0.58,
+     "min_ms": 0.52,
+     "max_ms": 0.65,
+     "plan": [
+      "Append",
+      "Index Only Scan on sp_hash_p0_id_dataset_id_key",
+      "Index Only Scan on sp_hash_p1_id_dataset_id_key",
+      "Index Only Scan on sp_hash_p2_id_dataset_id_key",
+      "Index Only Scan on sp_hash_p3_id_dataset_id_key",
+      "Index Only Scan on sp_hash_p4_id_dataset_id_key"
+     ],
+     "planning_ms": 0.31
+    },
+    "sp_hashid": {
+     "median_ms": 0.19,
+     "min_ms": 0.16,
+     "max_ms": 0.2,
+     "plan": [
+      "Index Only Scan on sp_hashid_p10_id_dataset_id_key"
+     ],
+     "planning_ms": 0.06
+    },
+    "sp_brin": {
+     "median_ms": 0.15,
+     "min_ms": 0.12,
+     "max_ms": 0.16,
+     "plan": [
+      "Index Only Scan on sp_brin_pkey"
+     ],
+     "planning_ms": 0.02
+    }
+   }
+  },
+  "move_small_collection_hash_s": {
+   "rows": 2554,
+   "seconds": 0.28
+  },
+  "move_small_collection_mono_s": {
+   "rows": 2554,
+   "seconds": 2.39
+  },
+  "move_small_collection_hash_by_id_s": {
+   "rows": 2554,
+   "seconds": 2.76
+  },
+  "insert_rows_per_s_indexes_live": {
+   "sp_mono": 8095,
+   "sp_hash": 7587,
+   "sp_hashid": 5945
+  },
+  "audit_unique_hub_seq_on_time_partitioned": "ERROR: ERROR:  unique constraint on partitioned table must include all partitioning columns",
+  "audit_queries": {
+   "history_of_one_entity": {
+    "sp_aud_mono": {
+     "median_ms": 0.16,
+     "min_ms": 0.1,
+     "max_ms": 0.96,
+     "plan": [
+      "Index Scan on sp_aud_mono_entity"
+     ]
+    },
+    "sp_aud_part": {
+     "median_ms": 0.82,
+     "min_ms": 0.71,
+     "max_ms": 1.04,
+     "plan": [
+      "Sort",
+      "Append",
+      "Index Scan on sp_aud_part_202401_entity_id_timestamp_idx",
+      "Index Scan on sp_aud_part_202402_entity_id_timestamp_idx",
+      "Index Scan on sp_aud_part_202403_entity_id_timestamp_idx"
+     ]
+    }
+   },
+   "hub_seq_feed_1000": {
+    "sp_aud_mono": {
+     "median_ms": 0.53,
+     "min_ms": 0.42,
+     "max_ms": 0.79,
+     "plan": [
+      "Limit",
+      "Index Scan on sp_aud_mono_hub_seq"
+     ]
+    },
+    "sp_aud_part": {
+     "median_ms": 1.14,
+     "min_ms": 1.01,
+     "max_ms": 1.51,
+     "plan": [
+      "Limit",
+      "Merge Append",
+      "Index Scan on sp_aud_part_202401_hub_seq_idx",
+      "Index Scan on sp_aud_part_202402_hub_seq_idx",
+      "Index Scan on sp_aud_part_202403_hub_seq_idx"
+     ]
+    }
+   },
+   "time_range_1day_count": {
+    "sp_aud_mono": {
+     "median_ms": 0.62,
+     "min_ms": 0.56,
+     "max_ms": 0.64,
+     "plan": [
+      "Aggregate",
+      "Index Only Scan on sp_aud_mono_ts"
+     ]
+    },
+    "sp_aud_part": {
+     "median_ms": 0.65,
+     "min_ms": 0.6,
+     "max_ms": 0.73,
+     "plan": [
+      "Aggregate",
+      "Index Only Scan on sp_aud_part_202403_timestamp_idx"
+     ]
+    }
+   },
+   "max_hub_seq": {
+    "sp_aud_mono": {
+     "median_ms": 0.11,
+     "min_ms": 0.1,
+     "max_ms": 0.14,
+     "plan": [
+      "Result",
+      "Limit",
+      "Index Only Scan on sp_aud_mono_hub_seq"
+     ]
+    },
+    "sp_aud_part": {
+     "median_ms": 0.76,
+     "min_ms": 0.72,
+     "max_ms": 0.79,
+     "plan": [
+      "Result",
+      "Limit",
+      "Merge Append",
+      "Index Only Scan on sp_aud_part_202401_hub_seq_idx",
+      "Index Only Scan on sp_aud_part_202402_hub_seq_idx"
+     ]
+    }
+   }
+  },
+  "audit_drop_oldest_month_partition_s": 0.023,
+  "audit_delete_oldest_month_monolithic": {
+   "rows": 127397,
+   "seconds": 0.19
+  },
+  "audit_sizes_mb": {
+   "mono_total": 1170.1,
+   "part_total": "1181.9"
+  },
+  "jsonb_side_table": {
+   "rows": 500000,
+   "inline": {
+    "heap_mb": 40.3,
+    "toast_mb": 3950.3,
+    "gin_mb": 73.6
+   },
+   "split_hot": {
+    "heap_mb": 111.6,
+    "gin_mb": 38.6,
+    "side_total_mb": 4002.2
+   },
+   "list_page_inline": {
+    "median_ms": 32.11,
+    "min_ms": 30.28,
+    "max_ms": 32.9
+   },
+   "list_page_split": {
+    "median_ms": 5.6,
+    "min_ms": 5.57,
+    "max_ms": 5.77
+   },
+   "agg_count_by_status_inline": {
+    "median_ms": 2843.47,
+    "min_ms": 2668.77,
+    "max_ms": 3018.17
+   },
+   "agg_count_by_status_split": {
+    "median_ms": 74.8,
+    "min_ms": 74.48,
+    "max_ms": 75.13
+   },
+   "update_small_field_100k_inline": {
+    "seconds": 26.5,
+    "wal_mb": "1809.2"
+   },
+   "update_small_field_100k_split": {
+    "seconds": 3.6,
+    "wal_mb": "290.4"
+   }
+  }
+ },
+ "note": "seed/measure/ids/catalog: one clean 20M-row run. spike: separate 3M-row run (adds the hash-by-id variant); spike_5m_without_hash_by_id is the 5M-row spike from the 20M run."
+}
