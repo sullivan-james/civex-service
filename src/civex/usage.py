@@ -103,6 +103,9 @@ def _attempt(
                 conn.execute(
                     text(f"SET LOCAL statement_timeout = {STATEMENT_TIMEOUT_MS}")
                 )
+                if schema:
+                    quoted = engine.dialect.identifier_preparer.quote_schema(schema)
+                    conn.execute(text(f"SET LOCAL search_path = {quoted}"))
             result = fn(conn)
             conn.rollback()
             return result
