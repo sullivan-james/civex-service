@@ -496,6 +496,18 @@ describe('when files are spread over several drives', () => {
   })
 })
 
+/** Choose a drive once the list of drives has loaded (it arrives after the
+ * refusal that offers it). */
+async function pickDrive(name: string) {
+  const select = await screen.findByRole('combobox', { name: 'Which drive' })
+  await waitFor(() =>
+    expect(
+      Array.from((select as HTMLSelectElement).options).map((o) => o.value),
+    ).toContain(name),
+  )
+  await userEvent.selectOptions(select, name)
+}
+
 describe('when the folder cannot be made on its drive', () => {
   it('says why, and offers to put the files on another drive', async () => {
     answer = () =>
@@ -510,12 +522,7 @@ describe('when the folder cannot be made on its drive', () => {
     expect(screen.getByRole('alert').textContent).toMatch(/can’t be written/i)
     // Never a choice of links or copies: only which drive.
     expect(screen.queryByRole('radio')).toBeNull()
-    // The drives arrive after the refusal: wait for the one to pick.
-    await screen.findByRole('option', { name: /default/i })
-    await userEvent.selectOptions(
-      screen.getByRole('combobox', { name: 'Which drive' }),
-      'default',
-    )
+    await pickDrive('default')
     answer = () => json(exported({ location: 'default', linked: 0, copied: 4 }))
     await userEvent.click(
       screen.getByRole('button', { name: /put 4 files on default/i }),
@@ -544,10 +551,7 @@ describe('when the folder cannot be made on its drive', () => {
     })
     renderIt()
     await exportVia('folder')
-    await userEvent.selectOptions(
-      await screen.findByRole('combobox', { name: 'Which drive' }),
-      'archive',
-    )
+    await pickDrive('archive')
 
     const alerts = await screen.findAllByRole('alert')
 
