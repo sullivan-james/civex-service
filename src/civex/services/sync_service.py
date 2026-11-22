@@ -246,6 +246,20 @@ class MissingFilesReport:
         }
 
 
+@dataclass(frozen=True)
+class DeviceIdentity:
+    """Who this computer is to the authority of the current project."""
+
+    remote: str | None
+    device_id: str | None  # None until there is an authority: none is made before
+    joined: bool  # this computer holds the authority's key: it was let in
+    device_name: (
+        str | None
+    )  # what the authority calls it; None when unasked/unreachable
+    last_error: str | None
+    last_error_at: str | None
+
+
 @dataclass
 class FilesWaiting:
     """Why files records here cite aren't on the server: what sending can
@@ -299,6 +313,34 @@ class SyncService:
     @property
     def configured(self) -> bool:
         return bool(self._config.sync.remote)
+
+    def identity(self, *, ask: bool = True) -> DeviceIdentity:
+        """This computer's standing with the authority. `ask` lets it say its
+        name for the device (one request); an authority that can't be reached
+        leaves the name `None`."""
+        meta = self._repo.meta()
+        remote = self._config.sync.remote
+        joined = bool(remote and user_state.authority_for(remote))
+        name: str | None = None
+        if ask and joined and remote:
+            try:
+                name = (
+                    self._make_transport(remote, self._credentials(remote))
+                    .hello()
+                    .device_name
+                )
+            except SyncError:
+                name = None
+        return DeviceIdentity(
+            remote=remote,
+            device_id=(
+                str(user_state.device_id_for(meta.project_id)) if remote else None
+            ),
+            joined=joined,
+            device_name=name,
+            last_error=meta.last_error,
+            last_error_at=meta.last_error_at,
+        )
 
     def status(self) -> SyncStatus:
         meta = self._repo.meta()

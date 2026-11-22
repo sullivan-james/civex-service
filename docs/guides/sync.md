@@ -34,7 +34,11 @@ civex sync connect https://… --invite civex_inv_…   # an existing project
   (`ABCD-2345`) and waits. On the authority, `civex sync device approve
   ABCD-2345 laptop` (or Settings → Sync → *Asking to join*) lets it in by name,
   `civex sync device deny` turns it away, and a code nobody approves in 15
-  minutes lapses. The device is then a device like any invited one.
+  minutes lapses. The device is then a device like any invited one. When the
+  server has a page for it (the hub does), the device shows that address with
+  the code instead: open it and enter the code. `civex clone <address>` does
+  the same without `--invite`, and `civex auth status` shows this device's
+  name, id, whether it has joined, and the last sync error.
 - **Keys:** joining makes the device a key pair. It then signs in with its key for
   short sessions, and checks the authority's key, so a different server at the
   same address gets nothing. `civex sync device revoke <name>` stops a device at

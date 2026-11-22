@@ -73,6 +73,13 @@ from the next tag forward.
   and each settings section show "Not available here". The top-bar sync button
   and `/sync/review` appear only for a project that follows a remote, which a
   hosted authority does not.
+- **Device sign-in from the CLI.** When the authority sends a `verify_url`, `civex
+  sync connect` shows "Open <url> and enter the code XXXX-XXXX" instead of only
+  `civex sync device approve`; authorities without a page keep the old hint.
+- **`civex clone <url>` needs no `--invite`.** Without one it signs in as a
+  device (shows the code, waits for approval, then copies).
+- **`civex auth status`** shows the authority, this device's name and id, whether
+  it has joined, and the last sync error.
 
 ### Fixed
 

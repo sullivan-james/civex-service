@@ -158,5 +158,23 @@ def test_the_app_asks_first_and_waits_in_the_background(project, authority):
     assert not laptop.sync_svc.needs_approval("https://authority.test", None)
 
 
+def test_identity_says_who_this_computer_is_before_and_after_joining(
+    project, authority
+):
+    laptop = device(project, authority, "laptop")
+    before = laptop.sync_svc.identity()
+    assert before.remote is None and before.device_id is None and not before.joined
+    assert before.device_name is None
+
+    connect(laptop)
+    laptop.commit()
+    after = laptop.sync_svc.identity()
+    assert after.remote == "https://authority.test" and after.joined
+    assert after.device_name == "laptop"
+    assert after.device_id
+    # Without asking the authority nothing goes over the wire: no name.
+    assert laptop.sync_svc.identity(ask=False).device_name is None
+
+
 def _unused(*_: object) -> None:  # keep the imports honest for ruff
     DeviceKeys, Loopback, AsDevice, user_state
