@@ -70,9 +70,12 @@ from civex.domain.query import (
     META_SORTS,
     UNSEARCHED_DTYPES,
     RecordQuery,
+    RecordSet,
     ResolvedQuery,
+    ResolvedSet,
     TextSearch,
 )
+from civex.domain.file_access import HeldFile
 from civex.domain.scopes import GLOBAL, can_reference
 from civex.domain import summary
 from civex.domain.timezones import offset_changes, parse_datetime
@@ -3552,6 +3555,81 @@ class RecordService:
         if as_stored:
             return named
         return self._attach_reference_labels(named, shapes)
+
+    def _resolve_set(self, picked: RecordSet) -> ResolvedSet:
+        """Names -> ids for a set of records. A query that asks `listed` what
+        a kind it can't be asked of lists (the filter means nothing there)
+        lists nothing; ids that name no record are left out."""
+        listed: list[ResolvedQuery] | None = None
+        if picked.listed is not None:
+            listed = []
+            for query in picked.listed:
+                try:
+                    listed.append(self.resolve(query))
+                except ValidationError:
+                    continue
+        ids: list[uuid.UUID] = []
+        for raw in dict.fromkeys(picked.ids):
+            try:
+                ids.append(uuid.UUID(str(raw)))
+            except (ValueError, AttributeError, TypeError):
+                continue
+        return ResolvedSet(
+            queries=[self.resolve(q) for q in picked.queries],
+            ids=ids,
+            below=picked.below,
+            listed=listed,
+            schema_ids=(
+                [s.id for s in self._schema_svc.list_all() if s.name in picked.kinds]
+                if picked.kinds is not None
+                else None
+            ),
+        )
+
+    def held_files(
+        self, picked: RecordSet, search: str | None = None
+    ) -> list[HeldFile]:
+        """Every file the set's records hold, as each is written in its record
+        and with the copy that record points at: read by the database alone,
+        in one statement however many records there are. Nothing is named and
+        no drive is asked (a caller names the few it shows). `search` marks
+        the files it finds (`HeldFile.found`): by the name a file was added
+        under, or by its record, or one above it, as a search of records
+        would find it."""
+        schemas = self._schema_svc.list_all()
+        file_fields = {
+            str(f.id): f.name
+            for s in schemas
+            for f in s.fields
+            if f.dtype in ("file", "file_list")
+        }
+        parent = {s.id: s.parent_id for s in schemas}
+        depth = 0
+        for start in parent:
+            hops, at = 0, parent.get(start)
+            while at is not None and hops < _MAX_TRAIL_DEPTH:
+                hops, at = hops + 1, parent.get(at)
+            depth = max(depth, hops)
+        looked_for = self.text_search(search) if search else None
+        if looked_for is not None:
+            # A file is found by its own name, not by the name of another
+            # file its record (or a record above) holds.
+            looked_for = TextSearch(
+                looked_for.term,
+                tuple(i for i in looked_for.field_ids if i not in file_fields),
+            )
+        return self._records.held_files(
+            self._resolve_set(picked),
+            file_fields,
+            looked_for,
+            depth,
+            following=self.files_from_server(),
+        )
+
+    def shared_copies(self) -> dict[tuple[str, str | None], int]:
+        """The copies of files, (sha256, volume), that more than one live
+        record points at, and how many do. From the catalog, one statement."""
+        return self._records.shared_copies()
 
     def file_values(
         self, records: list[RecordDTO], field_names: list[str] | None = None

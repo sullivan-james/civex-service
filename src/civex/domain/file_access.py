@@ -15,9 +15,10 @@ from __future__ import annotations
 import dataclasses
 import posixpath
 import re
+import uuid
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, NamedTuple
 
 from civex.domain.exceptions import CivexError
 from civex.domain.query import RecordQuery
@@ -203,6 +204,37 @@ def in_place(item: FileItem, wanted: str) -> bool:
     if wanted == PLACE_UNREACHABLE:
         return kind == "unreachable"
     return place == wanted
+
+
+class HeldFile(NamedTuple):
+    """One file value as a record holds it, read from the database alone (no
+    record loaded, nothing named, no drive asked): which record and field,
+    the file as written there, and the copy that record points at. (A tuple:
+    a list of a big collection makes tens of thousands.)"""
+
+    # The record, its collection and when it was made, each as the database
+    # keeps it (a key to group and order by; `record_key` reads an id).
+    record_id: Any
+    dataset_id: Any
+    created_at: Any
+    field: str  # the field's name
+    sha256: str
+    filename: str  # as stored: the name it was added under
+    size: int
+    volume: str | None  # the copy the record uses (None: none here yet)
+    # Drives holding a copy, when the record points at none.
+    stored_on: tuple[str, ...] = ()
+    on_server: bool = False  # the server said it holds it
+    server_lacks: bool = False  # the server said it hasn't got it
+    # A search matched it (always true when nothing was searched for).
+    found: bool = True
+
+
+def record_key(raw: Any) -> str:
+    """A record id as the database gave it, as the id is written."""
+    if isinstance(raw, str) and len(raw) == 32:
+        return f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:]}"
+    return str(raw if isinstance(raw, uuid.UUID) else uuid.UUID(str(raw)))
 
 
 @dataclass

@@ -60,7 +60,8 @@ from civex.domain.dtos import (
 from civex.domain.filters import FilterNode
 from civex.domain.library import LibraryItemDTO
 from civex.domain.placement import Pointer
-from civex.domain.query import ResolvedQuery, TextSearch
+from civex.domain.file_access import HeldFile
+from civex.domain.query import ResolvedQuery, ResolvedSet, TextSearch
 from civex.domain.summary import RawSummary, SummaryPlan
 from civex.domain.transfers import CopyResult, TransferRecord
 
@@ -357,6 +358,15 @@ class RecordRepository(Protocol):
     def list_by_dataset(self, dataset_id: uuid.UUID) -> list[RecordDTO]: ...
     def list_by_ids(self, ids: list[uuid.UUID]) -> list[RecordDTO]: ...
     def collections_of(self, ids: list[uuid.UUID]) -> set[uuid.UUID]: ...
+    def held_files(
+        self,
+        picked: ResolvedSet,
+        file_fields: dict[str, str],
+        search: TextSearch | None = None,
+        depth: int = 0,
+        following: bool = True,
+    ) -> list[HeldFile]: ...
+    def shared_copies(self) -> dict[tuple[str, str | None], int]: ...
     def list_filtered(
         self,
         query: ResolvedQuery,

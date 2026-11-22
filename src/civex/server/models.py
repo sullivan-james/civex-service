@@ -3498,7 +3498,9 @@ class FilePickRequest(FileSelectionRequest):
 class FileListRequest(FilePickRequest):
     order: str = Field(
         default="path",
-        description="path, name, size, record or place; a leading '-' reverses it.",
+        description="path or record (the order the records were added, as "
+        "the records list has them), name (the name a file was added under), "
+        "size or place; a leading '-' reverses it.",
     )
     offset: int = Field(default=0, ge=0)
     limit: int = Field(default=100, ge=1, le=1000)

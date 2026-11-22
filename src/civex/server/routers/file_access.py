@@ -308,7 +308,7 @@ def _picked(body: FilePickRequest, ctx: AppContext, progress: Progress | None = 
             body.used_by,
             progress,
             server=body.server,
-        )[1]
+        )
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except ValidationError as e:
@@ -322,9 +322,12 @@ def list_files(body: FileListRequest, ctx: AppContext = Depends(get_ctx)):
     names of the records above it, `trail`; `others` counts the records
     outside the selection that use it too), each with where it is (`place`: a
     drive's name, `server` or `missing`; `place_kind`: drive, unreachable,
-    server or missing), narrowed by place, name (the file's, or any record's
-    it sits under) and the selection's own filter; and `summary`, where all
-    of the selection's files are, by place. While this project follows a
+    server or missing), narrowed by place, name (the name a file was added
+    under, or its record or one above it, found as a search of records finds
+    them) and the selection's own filter; and `summary`, where all of the
+    selection's files are, by place. The counts and the order come from the
+    database alone, so a page costs the same whatever it is a page of; only
+    its rows are named. While this project follows a
     server, each file says whether the server has it (`sent`), `server`
     counts them (`sent`, and `unsent`: on a drive here, not sent yet), and
     `server` in the request narrows to either. Counts are of files."""

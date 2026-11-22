@@ -35,7 +35,8 @@ from civex.domain import notes as note_rules
 from civex.domain.dtos import RecordDTO
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.filters import FilterCondition, FilterGroup, FilterNode, SortKey
-from civex.domain.query import ID_PREFIX_MIN, ResolvedQuery, TextSearch
+from civex.domain.file_access import HeldFile
+from civex.domain.query import ID_PREFIX_MIN, ResolvedQuery, ResolvedSet, TextSearch
 from civex.domain.summary import RawSummary, SummaryPlan
 from civex.repositories.local._ids import prefix_span
 from civex.repositories.local._bucketing import day_bucket
@@ -356,6 +357,28 @@ class LocalRecordRepository:
             rid
             for (rid,) in _base_query(self._s, query, self._pg).with_entities(Record.id)
         ]
+
+    def held_files(
+        self,
+        picked: ResolvedSet,
+        file_fields: dict[str, str],
+        search: TextSearch | None = None,
+        depth: int = 0,
+        following: bool = True,
+    ) -> list[HeldFile]:
+        """Every file value the set's records hold (see `held_files`)."""
+        from civex.repositories.local import held_files
+
+        return held_files.held_files(
+            self._s, picked, file_fields, search, depth, self._pg, following
+        )
+
+    def shared_copies(self) -> dict[tuple[str, str | None], int]:
+        """The copies several live records point at, with how many (see
+        `held_files.shared_copies`)."""
+        from civex.repositories.local import held_files
+
+        return held_files.shared_copies(self._s)
 
     def count_children(
         self, parent_ids: list[uuid.UUID]
@@ -1075,7 +1098,7 @@ def _like_pattern(term: str) -> str:
     return f"%{escaped}%"
 
 
-def text_match(search: TextSearch, is_postgres: bool = False):
+def text_match(search: TextSearch, is_postgres: bool = False, entity: Any = Record):
     """The one rule for which records a text search finds (see TextSearch):
     a value of one of its fields contains the term, case-insensitively, or
     the record's id starts with it. A value is a top-level string or number,
@@ -1085,19 +1108,25 @@ def text_match(search: TextSearch, is_postgres: bool = False):
     One correlated EXISTS over the record's own JSON (`json_each` on SQLite,
     `jsonb_each`/`jsonb_array_elements` on PostgreSQL), so a search stays one
     statement. It reads every candidate row's data: no index serves a
-    substring match (a trigram index over the values would, on PostgreSQL)."""
+    substring match (a trigram index over the values would, on PostgreSQL).
+    `entity`: the records asked about, when not the statement's own (a
+    record above it)."""
     like = _like_pattern(search.term)
     matches = []
     if search.field_ids:
-        matches.append(_values_contain(list(search.field_ids), like, is_postgres))
+        matches.append(
+            _values_contain(list(search.field_ids), like, is_postgres, entity)
+        )
     digits = search.term.strip().lower().replace("-", "")
     span = prefix_span(digits) if len(digits) >= ID_PREFIX_MIN else None
     if span is not None:
-        matches.append(Record.id.between(*span))
+        matches.append(entity.id.between(*span))
     return or_(*matches) if matches else false()
 
 
-def _values_contain(field_ids: list[str], like: str, is_postgres: bool):
+def _values_contain(
+    field_ids: list[str], like: str, is_postgres: bool, entity: Any = Record
+):
     """EXISTS a top-level entry of one of `field_ids` whose value, a list
     item of it, or a file's name in either, contains `like`."""
     entry: Any
@@ -1108,7 +1137,7 @@ def _values_contain(field_ids: list[str], like: str, is_postgres: bool):
         # render_derived names the columns (`AS e(key, value)`), so they
         # don't depend on how PostgreSQL names a set-returning function's.
         entry = (
-            func.jsonb_each(Record.data).table_valued("key", "value").render_derived()
+            func.jsonb_each(entity.data).table_valued("key", "value").render_derived()
         )
         entry_type = func.jsonb_typeof(entry.c.value)
         items = case(
@@ -1125,7 +1154,7 @@ def _values_contain(field_ids: list[str], like: str, is_postgres: bool):
         def name_of(value: Any) -> Any:
             return value.op("->>")(literal_column("'filename'"))
     else:
-        entry = func.json_each(Record.data).table_valued("key", "value", "type")
+        entry = func.json_each(entity.data).table_valued("key", "value", "type")
         entry_type = entry.c.type
         items = case((entry_type == "array", entry.c.value), else_=literal("[]"))
         item = func.json_each(items).table_valued("value", "type")
