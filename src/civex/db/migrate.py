@@ -26,13 +26,15 @@ states a given project is in.
 from __future__ import annotations
 
 import threading
+from contextlib import contextmanager
+from typing import Iterator
 import weakref
 from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import Connection, Engine
 
 from civex.config import PartitionLayout
@@ -87,13 +89,36 @@ def ensure_schema_current(
         if engine in _migrated_engines:
             return
         with engine.connect() as connection:
-            _migrate_connection(connection, layout)
+            with _cross_process_lock(connection):
+                _migrate_connection(connection, layout)
         _migrated_engines.add(engine)
     # Months of `audit_log` partitions ahead of now: a no-op unless this is a
     # partitioned PostgreSQL database that has run out. Best effort.
     ensure_audit_partitions_daily(
         engine, (layout or PartitionLayout.from_env()).audit_months_ahead
     )
+
+
+@contextmanager
+def _cross_process_lock(connection: Connection) -> Iterator[None]:
+    """On PostgreSQL, one process at a time migrates a given schema: two
+    workers opening a new or old repository together would otherwise both try
+    to create `alembic_version` (or both convert `records`). The in-process
+    lock above does not cover other processes."""
+    if connection.dialect.name != "postgresql":
+        yield
+        return
+    key = "SELECT hashtextextended(current_database() || '/' || current_schema() || '/civex-migrate', 0)"
+    connection.execute(text(f"SELECT pg_advisory_lock({key.removeprefix('SELECT ')})"))
+    connection.commit()
+    try:
+        yield
+    finally:
+        connection.rollback()
+        connection.execute(
+            text(f"SELECT pg_advisory_unlock({key.removeprefix('SELECT ')})")
+        )
+        connection.commit()
 
 
 def missing_structure(engine: Engine) -> list[str]:
