@@ -71,11 +71,20 @@ def _connect_showing_progress(c, url: str, invite: str | None) -> str:
         def approve(started) -> None:  # noqa: ANN001 - LoginStarted
             bar.update(task, description="Waiting to be approved")
             until = datetime.fromtimestamp(started.expires_at).strftime("%H:%M")
-            console.print(
-                "This computer has asked to join. On the server, approve it with\n\n"
-                f"  civex sync device approve {started.user_code} <name>\n\n"
-                f"(or in Settings → Sync). Waiting until {until}; Ctrl+C stops."
-            )
+            if started.verify_url:
+                console.print(
+                    "This computer has asked to join. Open "
+                    f"{escape(started.verify_url)} and enter the code\n\n"
+                    f"  {escape(started.user_code)}\n\n"
+                    f"Waiting until {until}; Ctrl+C stops."
+                )
+            else:
+                console.print(
+                    "This computer has asked to join. On the server, approve it "
+                    "with\n\n"
+                    f"  civex sync device approve {started.user_code} <name>\n\n"
+                    f"(or in Settings → Sync). Waiting until {until}; Ctrl+C stops."
+                )
 
         mode = c.sync_svc.connect(url, invite, progress=show, on_code=approve)
         c.commit()
@@ -952,21 +961,26 @@ def clone(
     path: Path = typer.Argument(
         None, help="Where to put the copy (default: a new folder here)."
     ),
-    invite: str = typer.Option(
-        ...,
+    invite: str | None = typer.Option(
+        None,
         "--invite",
         envvar="CIVEX_SYNC_INVITE",
-        help="The invite the authority's admin gave.",
+        help="The invite the authority's admin gave. Leave out to sign in: a code "
+        "is shown to approve, and the copy starts once it is.",
     ),
 ) -> None:
-    """Make a new project that is a copy of an authority's, and keep it in step."""
+    """Make a new project that is a copy of an authority's, and keep it in step.
+    Without an invite, this computer signs in as a device: it shows a code (and
+    the page to enter it at, when the server has one), waits for approval, then
+    copies."""
     from civex.cli.init import _init_working
 
     target = (
         path or Path(url.rstrip("/").rsplit("/", 1)[-1] or "civex-project")
     ).resolve()
     target.mkdir(parents=True, exist_ok=True)
-    _init_working(target, use_sqlite=True)
+    if not (target / "_civex").exists():  # else: an earlier attempt stopped part way
+        _init_working(target, use_sqlite=True)
     os.chdir(target)
     c = _ctx()
     try:
@@ -976,3 +990,32 @@ def clone(
     finally:
         c.close()
     console.print(f"[success]Cloned into {target}.[/success]")
+
+
+auth_app = typer.Typer(help="This computer's sign-in to the project's authority.")
+
+
+@auth_app.command("status")
+def auth_status() -> None:
+    """Show the authority this project follows, this device's name and id,
+    whether it has joined, and the last sync error."""
+    c = _ctx()
+    try:
+        who = c.sync_svc.identity()
+    finally:
+        c.close()
+    if not who.remote:
+        console.print("Not following an authority.")
+        return
+    console.print(f"Authority   {escape(who.remote)}")
+    console.print(f"Device      {escape(who.device_name or 'unknown')}")
+    console.print(f"Device id   {who.device_id or 'none yet'}")
+    console.print(f"Joined      {'yes' if who.joined else 'no'}")
+    if who.last_error:
+        console.print(
+            f"[warning]Last sync error  {escape(who.last_error)}"
+            + (f" ({who.last_error_at})" if who.last_error_at else "")
+            + "[/warning]"
+        )
+    else:
+        console.print("Last sync error  none")

@@ -21,6 +21,18 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
+## Unreleased
+
+### Added
+
+- **Device sign-in from the CLI.** When the authority sends a `verify_url`, `civex
+  sync connect` shows "Open <url> and enter the code XXXX-XXXX" instead of only
+  `civex sync device approve`; authorities without a page keep the old hint.
+- **`civex clone <url>` needs no `--invite`.** Without one it signs in as a
+  device (shows the code, waits for approval, then copies).
+- **`civex auth status`** shows the authority, this device's name and id, whether
+  it has joined, and the last sync error.
+
 ## v2.1.0 — big collections stay fast, hosting hooks, partitioned PostgreSQL (2026-11-22)
 
 ### Breaking
