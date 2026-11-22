@@ -22,8 +22,7 @@ import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 
-from civex.config import Config, DBConfig, save_config
-from civex.db.partitioning import PartitionLayout
+from civex.config import Config, DBConfig, PartitionLayout, save_config
 from civex.docker_manager import (
     container_exists,
     container_name,
@@ -195,7 +194,7 @@ def structure_problems(url: str) -> list[str]:
         engine.dispose()
 
 
-def apply_migrations(url: str, layout: "PartitionLayout | None" = None) -> None:
+def apply_migrations(url: str, layout: PartitionLayout | None = None) -> None:
     """Bring the database at `url` to the latest revision. `layout`: the
     PostgreSQL table layout a not-yet-partitioned database gets (see
     `PartitionLayout.for_config`)."""

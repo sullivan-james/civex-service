@@ -30,7 +30,7 @@ from the next tag forward.
   (all indexes and foreign keys kept) and `audit_log` becomes one partition per
   month plus a default one. A database that already has data is copied into the
   new layout inside the migration: writers wait for the copy and index build
-  (about 1.5 minutes per million records, see
+  (about 50 seconds per million records, see
   `docs/contributing/records-partitioning.md`), readers only for the final swap.
   A new database converts in milliseconds. Opt out with
   `CIVEX_RECORDS_PARTITIONS=off` / `CIVEX_AUDIT_PARTITIONS=off` (or `[db]
@@ -40,10 +40,13 @@ from the next tag forward.
 
 ### Changes
 
-- New records, history entries and file references get time-ordered UUIDv7 ids
+- New records, history entries and file references get time-ordered ids
   instead of random ones, which keeps inserts fast once the id indexes outgrow
-  memory (10x the insert rate and 8x less WAL at 20M rows). Existing ids are
-  unchanged. The creation time of a row is now readable from its id.
+  memory (3-4x the insert rate and 3x less WAL at 5M rows, more at larger
+  sizes). Existing ids are unchanged, and the first 8 characters of an id
+  (the short id civex prints and accepts) stay as distinct as before: the ids
+  are a UUIDv8 with a wrapping microsecond clock first, not UUIDv7, whose first
+  8 characters would be the same for every row made in a minute.
 
 ## v2.0.1 — updating right after a release, a quicker desktop app (2026-11-19)
 

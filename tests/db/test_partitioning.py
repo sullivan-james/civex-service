@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 from civex.db import partitioning
 from civex.db.migrate import ensure_audit_partitions, ensure_schema_current
 from civex.db.models import AuditLog, Dataset, Record, Schema
-from civex.db.partitioning import PartitionLayout
+from civex.config import PartitionLayout
 
 _PG_URL = os.environ.get("CIVEX_TEST_POSTGRES_URL")
 _PRE = "e4b9c1a7d2f6"  # the revision before partitioning
@@ -50,9 +50,7 @@ def pg_schema():
     admin = create_engine(_PG_URL, isolation_level="AUTOCOMMIT")
     with admin.connect() as c:
         c.execute(text(f"CREATE SCHEMA {name}"))
-    engine = create_engine(
-        _PG_URL, connect_args={"options": f"-csearch_path={name}"}
-    )
+    engine = create_engine(_PG_URL, connect_args={"options": f"-csearch_path={name}"})
     yield engine
     engine.dispose()
     with admin.connect() as c:
@@ -347,11 +345,15 @@ def test_populated_database_keeps_its_data_indexes_and_foreign_keys(
             text("UPDATE records SET data = CAST(:d AS jsonb) WHERE id = :i"),
             {"d": json.dumps({"f": "zebra"}), "i": ids[3]},
         )
-        found = s.execute(
-            text(
-                "SELECT id FROM records WHERE search_vector @@ to_tsquery('simple','zebra')"
+        found = (
+            s.execute(
+                text(
+                    "SELECT id FROM records WHERE search_vector @@ to_tsquery('simple','zebra')"
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert found == [ids[3]]
 
 
@@ -366,7 +368,9 @@ def test_downgrade_restores_plain_tables_with_the_data(pg_schema: Engine) -> Non
         s.add(rec)
         s.flush()
         s.add(
-            AuditLog(action="create", entity_type="record", entity_id=rec.id, new_data={})
+            AuditLog(
+                action="create", entity_type="record", entity_id=rec.id, new_data={}
+            )
         )
         s.commit()
     cfg = _alembic()
@@ -420,7 +424,9 @@ def test_history_with_old_timestamps_lands_in_early_not_default(
                 {"i": uuid.uuid4(), "e": uuid.uuid4(), "y": years},
             )
         assert c.execute(text("SELECT count(*) FROM audit_log_early")).scalar_one() == 3
-        assert c.execute(text("SELECT count(*) FROM audit_log_default")).scalar_one() == 0
+        assert (
+            c.execute(text("SELECT count(*) FROM audit_log_default")).scalar_one() == 0
+        )
 
 
 @needs_pg
@@ -437,14 +443,81 @@ def test_rows_that_arrived_before_their_month_existed_are_moved_in(
             ),
             {"i": uuid.uuid4(), "e": uuid.uuid4(), "t": far},
         )
-        assert c.execute(text("SELECT count(*) FROM audit_log_default")).scalar_one() == 1
+        assert (
+            c.execute(text("SELECT count(*) FROM audit_log_default")).scalar_one() == 1
+        )
     created = ensure_audit_partitions(pg_schema, months_ahead=8)
     month = f"audit_log_y{far.year}m{far.month:02d}"
     assert month in created
     with pg_schema.connect() as c:
-        assert c.execute(text("SELECT count(*) FROM audit_log_default")).scalar_one() == 0
+        assert (
+            c.execute(text("SELECT count(*) FROM audit_log_default")).scalar_one() == 0
+        )
         assert c.execute(text(f"SELECT count(*) FROM {month}")).scalar_one() == 1
         assert c.execute(text("SELECT count(*) FROM audit_log")).scalar_one() == 1
+
+
+@needs_pg
+def test_grants_and_storage_settings_survive_the_rebuild(pg_schema: Engine) -> None:
+    _migrate_to_pre(pg_schema)
+    with pg_schema.begin() as c:
+        c.execute(text("GRANT SELECT ON records TO PUBLIC"))
+        c.execute(
+            text("ALTER TABLE records SET (autovacuum_vacuum_scale_factor = 0.01)")
+        )
+    ensure_schema_current(pg_schema)
+    with pg_schema.connect() as c:
+        assert (
+            "=r/"
+            in c.execute(
+                text(
+                    "SELECT relacl::text FROM pg_class WHERE oid = to_regclass('records')"
+                )
+            ).scalar_one()
+        )
+        opts = c.execute(
+            text(
+                "SELECT reloptions::text FROM pg_class "
+                "WHERE oid = to_regclass('records_p3')"
+            )
+        ).scalar_one()
+        assert "autovacuum_vacuum_scale_factor=0.01" in opts
+
+
+@needs_pg
+def test_row_level_security_is_refused_not_dropped(pg_schema: Engine) -> None:
+    _migrate_to_pre(pg_schema)
+    with pg_schema.begin() as c:
+        c.execute(text("ALTER TABLE records ENABLE ROW LEVEL SECURITY"))
+    with pytest.raises(RuntimeError, match="row-level security"):
+        ensure_schema_current(pg_schema)
+    assert _kind(pg_schema, "records") == "r"  # rolled back, as it was
+
+
+@needs_pg
+def test_daily_top_up_creates_missing_months_once_a_day(pg_schema: Engine) -> None:
+    ensure_schema_current(pg_schema)
+    later = datetime.now(timezone.utc) + timedelta(days=62)
+    name = f"audit_log_y{later.year}m{later.month:02d}"
+
+    def drop() -> None:
+        with pg_schema.begin() as c:
+            c.execute(text(f"DROP TABLE IF EXISTS {name}"))
+
+    def exists() -> bool:
+        with pg_schema.connect() as c:
+            return name in partitioning.partitions_of(c, "audit_log")
+
+    partitioning._topped_up.pop(pg_schema, None)
+    drop()
+    partitioning.ensure_audit_partitions_daily(pg_schema)
+    assert exists()
+    drop()
+    partitioning.ensure_audit_partitions_daily(pg_schema)  # same day: not again
+    assert not exists()
+    partitioning._topped_up.pop(pg_schema, None)  # "tomorrow"
+    partitioning.ensure_audit_partitions_daily(pg_schema)
+    assert exists()
 
 
 def test_sqlite_keeps_plain_tables(tmp_path: Path) -> None:
@@ -464,13 +537,37 @@ def test_sqlite_keeps_plain_tables(tmp_path: Path) -> None:
     assert partitioning.partition_records(engine.connect(), 8) is False
 
 
+def test_layout_rejects_values_that_are_not_counts() -> None:
+    from civex.config import DBConfig
+    from civex.domain.exceptions import ConfigError
+
+    for bad in ("eight", "-2", "true"):
+        with pytest.raises(ConfigError, match="CIVEX_RECORDS_PARTITIONS"):
+            PartitionLayout.from_env({"CIVEX_RECORDS_PARTITIONS": bad})
+    assert PartitionLayout.for_config(DBConfig(url="x", records_partitions=4), {}) == (
+        PartitionLayout(records_partitions=4)
+    )
+    # the [db] section wins over the environment
+    env = {"CIVEX_RECORDS_PARTITIONS": "16"}
+    assert PartitionLayout.for_config(DBConfig(url="x"), env).records_partitions == 16
+    assert (
+        PartitionLayout.for_config(
+            DBConfig(url="x", records_partitions=0), env
+        ).records_partitions
+        == 0
+    )
+
+
 def test_layout_from_environment() -> None:
     assert PartitionLayout.from_env({}) == PartitionLayout()
     assert PartitionLayout.from_env({"CIVEX_RECORDS_PARTITIONS": "16"}) == (
         PartitionLayout(records_partitions=16)
     )
     for off in ("off", "0", "1", "none"):
-        assert PartitionLayout.from_env(
-            {"CIVEX_RECORDS_PARTITIONS": off}
-        ).records_partitions < 2
+        assert (
+            PartitionLayout.from_env(
+                {"CIVEX_RECORDS_PARTITIONS": off}
+            ).records_partitions
+            < 2
+        )
     assert not PartitionLayout.from_env({"CIVEX_AUDIT_PARTITIONS": "off"}).audit_monthly

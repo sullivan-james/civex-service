@@ -19,7 +19,7 @@ partitioning and is single-user).
 
 ## 1. Time-ordered ids
 
-`civex.domain.ids.row_id()` is the default for `records.id`, `audit_log.id`
+`civex.domain.ids.row_id()` (pure Python, works on SQLite too) is the default for `records.id`, `audit_log.id`
 and `file_references.id` (everything else stays `uuid4`). Rows already stored
 keep their ids; old and new mix freely; the column type and wire format are
 unchanged.
@@ -68,7 +68,10 @@ the user's decision rather than only for outliers.
 **Modulus.** `PartitionLayout.records_partitions`, default **8**; `0`/`1` (or
 `CIVEX_RECORDS_PARTITIONS=off`, or `[db] records_partitions = 1` in
 `config.toml`) keeps a plain table for tiny deployments. Set it before the
-database first migrates; it is only read by migration `b5d8f1a3c6e2`
+database first migrates (`civex.config.PartitionLayout`, which
+`ensure_schema_current(engine, layout)` takes; the hub's `create_repo_schema` and
+`migrate-repos` should pass one, or set the environment, to choose per
+deployment); it is only read by migration `b5d8f1a3c6e2`
 (`partitioning.partition_records(conn, n)` re-lays out an existing table later).
 Use a power of two so a later split is a clean doubling.
 
@@ -108,13 +111,18 @@ tens of thousands of schemas should raise `max_locks_per_transaction` and
   repository lands here, never in the default partition); `audit_log_default`
   for anything beyond the horizon.
 - Future months: `civex.db.migrate.ensure_audit_partitions(engine)` creates
-  the missing ones. civex calls it when a database is migrated (once per
-  process start); **hosts should also call it daily** (civex-hub: from
-  `migrate-repos` and a periodic job). It is a few catalog lookups when nothing
-  is missing, safe from several processes at once, gives up quietly after a 3 s
-  lock timeout, and a host that forgets is safe, not broken: rows for a month
-  with no partition go to `audit_log_default`, and the next call moves them into
-  the new month's partition.
+  the missing ones (this month and `months_ahead`, default 2). civex calls a
+  throttled form (`ensure_audit_partitions_daily`: at most one catalog check a
+  day per engine, never raises) when a database is migrated and every time it
+  builds a request context, so a server that stays up for months keeps creating
+  them. **Hosts that do not build contexts for a repository (civex-hub's
+  `migrate-repos`, a cron) should also call `ensure_audit_partitions(engine)`
+  daily.** It is safe from several processes at once, gives up quietly after a
+  3 s lock timeout or when a writer races it, and a host that forgets is safe,
+  not broken: rows for a month with no partition go to `audit_log_default`, and
+  the next call moves them into the new month's partition. That move holds
+  `audit_log_default` (writers to it wait) for as long as the move takes, so
+  keep the top-up running: with it, the default partition is empty.
 - **`hub_seq` uniqueness.** The billion-row note says partitioning loses
   `audit_log`'s unique `hub_seq` index. On `main` that index never existed:
   `ix_audit_log_hub_seq` is a plain index (migration `c9e1f4a7b3d2`), and the
@@ -154,9 +162,12 @@ by `downgrade`):
    tables' foreign keys against the new table under temporary names, **before**
    the swap. Foreign keys are validated here, while the old table still serves
    readers.
-5. `DROP TABLE records CASCADE` (refused up front if a view depends on it),
-   rename the new table, constraints and indexes to their old names, recreate
-   the trigger, `ANALYZE`. Only this step takes ACCESS EXCLUSIVE: milliseconds.
+5. `DROP TABLE records CASCADE` (refused up front if a view depends on it or
+   row-level security is on), rename the new table, constraints and indexes to
+   their old names, recreate the trigger, carry over the owner, grants and
+   per-table storage settings (autovacuum tuning goes on each partition), then
+   `ANALYZE`. Only this step takes ACCESS EXCLUSIVE: milliseconds. Column
+   statistics targets are not carried over.
 
 It is **atomic, not chunked**: everything runs in the migration's transaction,
 so a failure (including killing the process) leaves the old table exactly as it
@@ -170,9 +181,9 @@ Measured (PostgreSQL 18.6, 256 MB `shared_buffers`, shared host, 5.0M records,
 
 | | records (5.0M) | per million rows | audit_log (5.0M) | per million rows |
 |---|---|---|---|---|
-| time, writers blocked | 261 s | **52 s** | 18.7 s | **3.7 s** |
+| time, writers blocked | 248-261 s (two runs) | **~50 s** | 18.7 s | **3.7 s** |
 | time, readers blocked | milliseconds | | milliseconds | |
-| WAL written | 12.5 GB | 2.5 GB | 1.6 GB | 0.3 GB |
+| WAL written | 12.5-12.7 GB | 2.5 GB | 1.6 GB | 0.3 GB |
 
 Budget about **1 minute of write downtime per million records** (the GIN indexes
 are most of it) and 2.5 GB of WAL and as much free disk again as the table
@@ -223,7 +234,22 @@ reasonable thing to revisit with `jsonb_path_ops`.
 Inserts, 100,000 rows through all indexes and the search-vector trigger, after
 a checkpoint, into the 5M-row table:
 
-ROWID_TABLE
+| ids | plain: rows/s | WAL/row | HASH(id) x8: rows/s | WAL/row |
+|---|---|---|---|---|
+| random `uuid4` (before) | 5,831 | 8.0 KB | 2,861 | 29 KB |
+| pure UUIDv7 (`ids.uuid7`) | 20,480 | 2.7 KB | 11,218 | 8.3 KB |
+| `row_id()` (now) | 19,186 | 2.7 KB | 17,364 | 2.9 KB |
+
+(A second full run measured 4,954 / 20,904 and 5,876 / 16,007 rows/s for random
+/ v7, plain / partitioned: the ordering of the three 100k-row runs and
+background checkpoints move individual cells by 2x, the pattern does not.)
+Time-ordered ids are 3-4x the insert rate and 3x less WAL per row at 5M rows,
+and `row_id()` keeps essentially all of pure v7's gain. The gap widens with
+size: at 20M rows the billion-row note measured random ids at 1.3-1.6k rows/s
+and 20-27 KB WAL per row against 15k rows/s and 2.6 KB for v7. The cache-sensitive
+GIN rows above moved with the same noise (plain 13 -> 85 ms and partitioned
+34 -> 3 ms for the in-collection `@>` page between the two runs), so read nothing
+into the GIN difference beyond "same order of magnitude".
 
 Audit log (5.0M entries, 24 months): plain vs monthly, ms median: `max(hub_seq)`
 0.17 vs 0.85; sync feed 1000 rows from the middle 1.4 vs 1.7; history of one

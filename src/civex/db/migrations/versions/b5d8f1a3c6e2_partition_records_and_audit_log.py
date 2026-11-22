@@ -32,6 +32,7 @@ from typing import Sequence, Union
 
 from alembic import op
 
+from civex.config import PartitionLayout
 from civex.db import partitioning
 
 revision: str = "b5d8f1a3c6e2"
@@ -40,10 +41,10 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def _layout() -> partitioning.PartitionLayout:
+def _layout() -> PartitionLayout:
     config = op.get_context().config
     given = config.attributes.get("layout") if config is not None else None
-    return given or partitioning.PartitionLayout.from_env()
+    return given or PartitionLayout.from_env()
 
 
 def upgrade() -> None:

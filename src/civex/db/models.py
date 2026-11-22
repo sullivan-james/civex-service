@@ -87,10 +87,6 @@ def _uuid() -> uuid.UUID:
     return uuid.uuid4()
 
 
-# Time-ordered ids (civex.domain.ids) for the tables that take the most
-# inserts: random ones scatter every write across every index holding the id.
-
-
 class Base(DeclarativeBase):
     pass
 
@@ -410,6 +406,8 @@ class Record(Base):
         ),
     )
 
+    # Time-ordered (civex.domain.ids): random ids scatter every insert across
+    # every index holding the id. Same for AuditLog and FileReference.
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=row_id)
     dataset_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("datasets.id"), nullable=False

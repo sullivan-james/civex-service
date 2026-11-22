@@ -425,7 +425,7 @@ def migrate() -> None:
     config = load_config()
     console.print("Applying migrations...", end="    ")
     try:
-        from civex.db.partitioning import PartitionLayout
+        from civex.config import PartitionLayout
 
         db_service.apply_migrations(
             config.db.url, PartitionLayout.for_config(config.db)

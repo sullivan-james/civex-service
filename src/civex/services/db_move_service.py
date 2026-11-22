@@ -28,10 +28,9 @@ from typing import Callable, Literal
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
-from civex.config import Config, DBConfig, save_config
+from civex.config import Config, DBConfig, PartitionLayout, save_config
 from civex.db import move as engine_move
 from civex.db.engine import enable_sqlite_foreign_keys
-from civex.db.partitioning import PartitionLayout
 from civex.db.sqlite_url import sqlite_file, sqlite_url
 from civex.domain.exceptions import ValidationError
 from civex.services import db_service

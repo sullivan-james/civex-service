@@ -35,7 +35,8 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import inspect
 from sqlalchemy.engine import Connection, Engine
 
-from civex.db.partitioning import PartitionLayout, ensure_audit_partitions
+from civex.config import PartitionLayout
+from civex.db.partitioning import ensure_audit_partitions, ensure_audit_partitions_daily
 
 __all__ = [
     "PartitionLayout",
@@ -87,10 +88,12 @@ def ensure_schema_current(
             return
         with engine.connect() as connection:
             _migrate_connection(connection, layout)
-        # Months of `audit_log` partitions ahead of now: a no-op unless this
-        # is a partitioned PostgreSQL database that has run out.
-        ensure_audit_partitions(engine)
         _migrated_engines.add(engine)
+    # Months of `audit_log` partitions ahead of now: a no-op unless this is a
+    # partitioned PostgreSQL database that has run out. Best effort.
+    ensure_audit_partitions_daily(
+        engine, (layout or PartitionLayout.from_env()).audit_months_ahead
+    )
 
 
 def missing_structure(engine: Engine) -> list[str]:

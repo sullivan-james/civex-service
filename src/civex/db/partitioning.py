@@ -36,18 +36,19 @@ works unchanged for civex-hub's schema-per-repository layout.
 from __future__ import annotations
 
 import hashlib
-import os
+import logging
 import re
-from dataclasses import dataclass, replace
+import weakref
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Iterable
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError
 
-DEFAULT_RECORDS_PARTITIONS = 8
-DEFAULT_AUDIT_MONTHS_AHEAD = 2
+from civex.config import DEFAULT_AUDIT_MONTHS_AHEAD
+
 # History older than this many months before the first month created goes in
 # one "early" partition instead of a partition per month.
 AUDIT_BACKFILL_MONTHS = 24
@@ -56,53 +57,6 @@ EARLY_PARTITION = "audit_log_early"
 # How long a conversion waits for a lock before giving up (and rolling back,
 # leaving the old table in place) instead of queueing everyone behind it.
 LOCK_TIMEOUT = "120s"
-
-ENV_RECORDS = "CIVEX_RECORDS_PARTITIONS"
-ENV_AUDIT = "CIVEX_AUDIT_PARTITIONS"
-ENV_AUDIT_AHEAD = "CIVEX_AUDIT_MONTHS_AHEAD"
-
-_OFF = {"", "0", "1", "off", "none", "false", "no"}
-
-
-@dataclass(frozen=True)
-class PartitionLayout:
-    """Which partitioned layout a PostgreSQL database gets when it is migrated.
-
-    Only read when the migration runs (once per database): changing it later
-    does not re-layout an existing database; call `partition_records` for that.
-    """
-
-    records_partitions: int = DEFAULT_RECORDS_PARTITIONS  # < 2: plain table
-    audit_monthly: bool = True
-    audit_months_ahead: int = DEFAULT_AUDIT_MONTHS_AHEAD
-
-    @classmethod
-    def for_config(cls, db, environ: dict[str, str] | None = None) -> PartitionLayout:
-        """The layout a project's `[db]` section asks for (`db`: civex.config.DBConfig),
-        else the environment's. Every place that migrates a project's database
-        takes its layout from here."""
-        layout = cls.from_env(environ)
-        if getattr(db, "records_partitions", None) is not None:
-            layout = replace(layout, records_partitions=int(db.records_partitions))
-        return layout
-
-    @classmethod
-    def from_env(cls, environ: dict[str, str] | None = None) -> PartitionLayout:
-        env = os.environ if environ is None else environ
-        records = env.get(ENV_RECORDS, "").strip().lower()
-        audit = env.get(ENV_AUDIT, "").strip().lower()
-        ahead = env.get(ENV_AUDIT_AHEAD, "").strip()
-        return cls(
-            records_partitions=(
-                DEFAULT_RECORDS_PARTITIONS
-                if not records
-                else 0
-                if records in _OFF
-                else int(records)
-            ),
-            audit_monthly=audit not in {"off", "none", "false", "no", "0"},
-            audit_months_ahead=int(ahead) if ahead else DEFAULT_AUDIT_MONTHS_AHEAD,
-        )
 
 
 # --- catalog helpers -------------------------------------------------------
@@ -264,6 +218,7 @@ def _rebuild(
     partitions: Iterable[tuple[str, str]],
     pk: str,
 ) -> None:
+    partitions = list(partitions)
     """Replace `table` with a copy laid out as `partition_by` (None = plain).
 
     `partitions` is (name, "FOR VALUES ...") pairs for the new table. `pk` is
@@ -278,6 +233,25 @@ def _rebuild(
     conn.execute(text(f"LOCK TABLE {qt} IN SHARE ROW EXCLUSIVE MODE"))
     _refuse_dependent_views(conn, table)
     cap = _capture(conn, table)
+    owner, reloptions, rls = conn.execute(
+        text(
+            "SELECT pg_get_userbyid(relowner), reloptions, relrowsecurity "
+            "FROM pg_class WHERE oid = to_regclass(:n)"
+        ),
+        {"n": qt},
+    ).one()
+    if rls:
+        raise RuntimeError(
+            f"cannot re-lay out {table}: row-level security is enabled on it"
+        )
+    grants = conn.execute(
+        text(
+            "SELECT CASE WHEN a.grantee = 0 THEN 'PUBLIC' "
+            "ELSE quote_ident(pg_get_userbyid(a.grantee)) END, a.privilege_type, a.is_grantable "
+            "FROM pg_class c, aclexplode(c.relacl) a WHERE c.oid = to_regclass(:n)"
+        ),
+        {"n": qt},
+    ).all()
     # The tables with foreign keys onto this one are locked now too (their
     # constraints are redone at the end): a lock that cannot be had should
     # fail before the copy, not after it.
@@ -342,6 +316,24 @@ def _rebuild(
         conn.execute(text(stmt))
     for trigger in cap.triggers:
         conn.execute(text(trigger))
+    # What a new table would not inherit from the old one: its owner, who was
+    # granted what, and per-table storage settings (autovacuum tuning).
+    # A partitioned parent takes no storage settings, so they go on each partition.
+    me = conn.execute(text("SELECT current_user")).scalar()
+    names = [qt] + [_q(conn, n) for n, _ in partitions]
+    if owner != me:
+        for n in names:
+            conn.execute(text(f"ALTER TABLE {n} OWNER TO {_q(conn, owner)}"))
+    for grantee, privilege, grantable in grants:
+        conn.execute(
+            text(
+                f"GRANT {privilege} ON TABLE {qt} TO {grantee}"
+                + (" WITH GRANT OPTION" if grantable else "")
+            )
+        )
+    if reloptions:
+        for n in names[1:] if partitions else names:
+            conn.execute(text(f"ALTER TABLE {n} SET ({', '.join(reloptions)})"))
     conn.execute(text("SELECT set_config('lock_timeout', :v, true)"), {"v": old_lock})
     conn.execute(text(f"ANALYZE {qt}"))
 
@@ -504,8 +496,17 @@ def ensure_audit_partitions(
     try:
         with conn.begin_nested():
             return _create_months(conn, missing)
-    except OperationalError as exc:
-        if "lock timeout" in str(exc) or "could not obtain lock" in str(exc):
+    except (OperationalError, IntegrityError) as exc:
+        # Lock not had in time, or a row for the month was written to the
+        # default partition while this was making the partition (PostgreSQL
+        # refuses: "updated partition constraint ... would be violated"). Both
+        # leave everything as it was; the next call tries again.
+        message = str(exc)
+        if (
+            "lock timeout" in message
+            or "could not obtain lock" in message
+            or "would be violated" in message
+        ):
             return []
         raise
 
@@ -519,6 +520,10 @@ def _create_months(conn: Connection, missing: list[date]) -> list[str]:
     existing = set(partitions_of(conn, "audit_log"))
     created: list[str] = []
     has_default = "audit_log_default" in existing
+    if has_default:
+        # Writers into the default partition wait while months are carved out of
+        # it, so a row cannot arrive between the count below and the CREATE.
+        conn.execute(text("LOCK TABLE audit_log_default IN SHARE ROW EXCLUSIVE MODE"))
     for month in missing:
         name = _month_name(month)
         if name in existing:
@@ -564,3 +569,29 @@ def _create_months(conn: Connection, missing: list[date]) -> list[str]:
         created.append(name)
     conn.execute(text("SELECT set_config('lock_timeout', :v, true)"), {"v": previous})
     return created
+
+
+log = logging.getLogger(__name__)
+
+# The day each engine's `audit_log` partitions were last topped up.
+_topped_up: weakref.WeakKeyDictionary[Engine, date] = weakref.WeakKeyDictionary()
+
+
+def ensure_audit_partitions_daily(
+    engine: Engine, months_ahead: int | None = None
+) -> None:
+    """`ensure_audit_partitions`, at most once a day per engine in this
+    process, and never raising: a process that stays up for months calls this
+    on every request context and only the first call of the day touches the
+    database. A failure is logged and retried the next day (rows meanwhile go
+    to the default partition, which is safe)."""
+    if engine.dialect.name != "postgresql":
+        return
+    today = datetime.now(timezone.utc).date()
+    if _topped_up.get(engine) == today:
+        return
+    _topped_up[engine] = today
+    try:
+        ensure_audit_partitions(engine, months_ahead)
+    except Exception:  # best effort: see above
+        log.warning("could not create upcoming audit_log partitions", exc_info=True)
