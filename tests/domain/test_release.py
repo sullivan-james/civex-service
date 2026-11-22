@@ -99,6 +99,17 @@ def test_renaming_a_field_changes_no_line_hash():
     ]
 
 
+def test_a_release_from_before_kinds_had_charts_reads_as_having_none():
+    # Its structure has no `charts` key at all: a kind with none now is the
+    # same; one given charts since has changed.
+    none = {"schemas": [STRUCTURE["schemas"][0] | {"charts": None}]}
+    assert rules.structure_changes(STRUCTURE, none) == []
+    some = {"schemas": [STRUCTURE["schemas"][0] | {"charts": [{"id": "a"}]}]}
+    assert [c["what"] for c in rules.structure_changes(STRUCTURE, some)] == [
+        ["charts"]
+    ]
+
+
 def test_the_hash_ignores_times_order_and_what_a_read_adds():
     one = _bundle(R1 + R2)
     located = R1.replace(b'"size": 10}', b'"size": 10, "location": {"volume": "x"}}')

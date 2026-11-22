@@ -217,6 +217,11 @@ def structure_of(schemas: list[Any], collections: list[Any]) -> dict[str, Any]:
                     "parent_id": str(s.parent_id) if s.parent_id else None,
                     "display_template": s.display_template,
                     "unique_keys": [list(k) for k in s.unique_keys],
+                    # The charts its lists open with are part of the kind.
+                    # None when it has none, as a release made before kinds
+                    # had charts reads (the key is absent there).
+                    "charts": [dict(c) for c in getattr(s, "charts", None) or []]
+                    or None,
                     "fields": sorted(
                         (
                             {
@@ -262,6 +267,7 @@ _SCHEMA_KEYS = (
     "parent_id",
     "display_template",
     "unique_keys",
+    "charts",
 )
 _FIELD_KEYS = ("name", "label", "type", "required", "restrictions", "default_value")
 

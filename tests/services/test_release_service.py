@@ -453,6 +453,26 @@ def _counts(c) -> tuple[int, int, int]:
     return c.added, c.changed, c.removed
 
 
+def test_changing_a_kinds_charts_is_a_change_to_the_structure(ctx, study):
+    _make(ctx)
+    ctx.schema_svc.set_charts(
+        "sample", [{"id": "a", "group_by": ["depth:5"], "measures": ["count"]}]
+    )
+    ctx.commit()
+    now = ctx.release_svc.compare("v1")
+    # The kind changed; no record did.
+    assert _counts(now) == (0, 0, 0)
+    assert now.structure == [
+        {
+            "kind": "schema",
+            "change": "changed",
+            "name": "sample",
+            "schema": None,
+            "what": ["charts"],
+        }
+    ]
+
+
 def test_a_release_made_a_moment_ago_is_the_same_as_the_data(ctx, study):
     _make(ctx)
     now = ctx.release_svc.compare("v1")
