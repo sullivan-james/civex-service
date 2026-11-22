@@ -93,6 +93,11 @@ you see their photos and readings. **Back to records** returns to the list.
   computer** (for a synced project), and **missing**. Click a place to list only
   its files.
 - **Kinds of file** narrows to some file fields.
+- The list is in the order the records were added, as the records list is.
+  Sort by the file's name (the name it was added under), its size or where it
+  is.
+- The search box finds a file by the name it was added under, or by its record
+  or a record above it, as searching the records does.
 
 Tick files, then:
 
