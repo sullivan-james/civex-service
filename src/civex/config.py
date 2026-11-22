@@ -164,6 +164,10 @@ class MapConfig:
 class DBConfig:
     url: str
     docker_managed: bool = False
+    # PostgreSQL only; used when a database is first migrated to the
+    # partitioned layout (civex.db.partitioning). None: the environment
+    # (CIVEX_RECORDS_PARTITIONS), else 8. 0 or 1: keep `records` a plain table.
+    records_partitions: int | None = None
 
 
 @dataclass
@@ -473,6 +477,7 @@ def parse_config(data: dict, root: Path) -> Config:
         db=DBConfig(
             url=data["db"]["url"],
             docker_managed=bool(data["db"].get("docker_managed", False)),
+            records_partitions=data["db"].get("records_partitions"),
         ),
         store=store,
         ai=ai,
@@ -531,6 +536,8 @@ def render_config(config: Config) -> str:
     ]
     if config.db.docker_managed:
         lines.append("docker_managed = true\n")
+    if config.db.records_partitions is not None:
+        lines.append(f"records_partitions = {int(config.db.records_partitions)}\n")
 
     if config.ai and not config.ai.from_env:
         lines += ["\n[ai]\n", f'api_key = "{_ts(config.ai.api_key)}"\n']

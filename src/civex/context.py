@@ -378,6 +378,7 @@ def build_context(
     from sqlalchemy.orm import Session
 
     from civex.db.migrate import ensure_schema_current
+    from civex.db.partitioning import PartitionLayout
     from civex.repositories.local.audit_repo import LocalAuditRepository
     from civex.repositories.local.dataset_repo import LocalDatasetRepository
     from civex.repositories.local.file_ref_repo import LocalFileReferenceRepository
@@ -425,7 +426,7 @@ def build_context(
     config = project.config
     engine = project.engine or _get_engine(config.db.url)
     if not project.migrated:
-        ensure_schema_current(engine)
+        ensure_schema_current(engine, PartitionLayout.for_config(config.db))
     session = Session(engine)
     schema_repo = LocalSchemaRepository(session)
     dataset_repo = LocalDatasetRepository(session)

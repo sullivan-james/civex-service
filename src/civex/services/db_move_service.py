@@ -31,6 +31,7 @@ from sqlalchemy.engine import Engine
 from civex.config import Config, DBConfig, save_config
 from civex.db import move as engine_move
 from civex.db.engine import enable_sqlite_foreign_keys
+from civex.db.partitioning import PartitionLayout
 from civex.db.sqlite_url import sqlite_file, sqlite_url
 from civex.domain.exceptions import ValidationError
 from civex.services import db_service
@@ -439,8 +440,9 @@ def _run_move(
     source = target_engine = None
     try:
         # Both ends at the same schema revision before a single row moves.
-        db_service.apply_migrations(config.db.url)
-        db_service.apply_migrations(target.url)
+        layout = PartitionLayout.for_config(config.db)
+        db_service.apply_migrations(config.db.url, layout)
+        db_service.apply_migrations(target.url, layout)
         source, target_engine = _engine(config.db.url), _engine(target.url)
         result = engine_move.copy_database(source, target_engine, progress, cancel)
         record.counts, record.seconds = result.counts, round(result.seconds, 1)

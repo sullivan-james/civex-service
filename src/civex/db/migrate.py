@@ -35,6 +35,16 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import inspect
 from sqlalchemy.engine import Connection, Engine
 
+from civex.db.partitioning import PartitionLayout, ensure_audit_partitions
+
+__all__ = [
+    "PartitionLayout",
+    "ensure_audit_partitions",
+    "ensure_schema_current",
+    "missing_structure",
+    "too_new_error",
+]
+
 _MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 
 # Present in every pre-Alembic install; absence means "brand new project".
@@ -52,10 +62,17 @@ def _alembic_config() -> Config:
     return cfg
 
 
-def ensure_schema_current(engine: Engine) -> None:
+def ensure_schema_current(
+    engine: Engine, layout: PartitionLayout | None = None
+) -> None:
     """Create or upgrade the schema at `engine` to the latest revision.
 
     No-op after the first call for a given engine instance.
+
+    `layout` chooses the PostgreSQL table layout (`records` hash partitions,
+    monthly `audit_log`) a database gets when it runs the migration that
+    partitions them; default `PartitionLayout.from_env()`. It has no effect on
+    a database that already ran that migration, or on SQLite.
     """
     if engine in _migrated_engines:
         return
@@ -69,7 +86,10 @@ def ensure_schema_current(engine: Engine) -> None:
         if engine in _migrated_engines:
             return
         with engine.connect() as connection:
-            _migrate_connection(connection)
+            _migrate_connection(connection, layout)
+        # Months of `audit_log` partitions ahead of now: a no-op unless this
+        # is a partitioned PostgreSQL database that has run out.
+        ensure_audit_partitions(engine)
         _migrated_engines.add(engine)
 
 
@@ -139,9 +159,12 @@ def _refuse_newer_database(connection: Connection, cfg: Config) -> None:
     raise too_new_error(where, unknown)
 
 
-def _migrate_connection(connection: Connection) -> None:
+def _migrate_connection(
+    connection: Connection, layout: PartitionLayout | None = None
+) -> None:
     cfg = _alembic_config()
     cfg.attributes["connection"] = connection
+    cfg.attributes["layout"] = layout
 
     # Reflecting table names below implicitly opens a transaction on this
     # connection. Alembic then detects that active transaction and treats it
