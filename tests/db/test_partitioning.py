@@ -30,6 +30,8 @@ from civex.config import PartitionLayout
 _PG_URL = os.environ.get("CIVEX_TEST_POSTGRES_URL")
 _PRE = "e4b9c1a7d2f6"  # the revision before partitioning
 
+pytestmark = pytest.mark.xdist_group("postgres_scratch")  # one shared scratch server
+
 needs_pg = pytest.mark.skipif(
     not _PG_URL,
     reason="set CIVEX_TEST_POSTGRES_URL to a scratch PostgreSQL DB to run this test",
