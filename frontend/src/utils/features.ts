@@ -14,6 +14,7 @@ export const LOCAL_FEATURES = [
   'ai',
   'open_folder',
   'desktop',
+  'remote_dial',
 ] as const
 
 export type Feature = (typeof LOCAL_FEATURES)[number] | string
