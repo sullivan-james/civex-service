@@ -200,7 +200,7 @@ class DeviceIdentity:
     """Who this computer is to the authority of the current project."""
 
     remote: str | None
-    device_id: str | None  # None until there is an authority: none is made before
+    device_id: str | None  # None until joined: asking never makes one
     joined: bool  # this computer holds the authority's key: it was let in
     device_name: (
         str | None
@@ -272,12 +272,12 @@ class SyncService:
                     .hello()
                     .device_name
                 )
-            except SyncError:
+            except (SyncError, OSError):
                 name = None
         return DeviceIdentity(
             remote=remote,
             device_id=(
-                str(user_state.device_id_for(meta.project_id)) if remote else None
+                str(user_state.device_id_for(meta.project_id)) if joined else None
             ),
             joined=joined,
             device_name=name,

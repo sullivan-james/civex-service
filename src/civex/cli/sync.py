@@ -979,11 +979,24 @@ def clone(
         path or Path(url.rstrip("/").rsplit("/", 1)[-1] or "civex-project")
     ).resolve()
     target.mkdir(parents=True, exist_ok=True)
-    if not (target / "_civex").exists():  # else: an earlier attempt stopped part way
+    resuming = (target / "_civex").exists()  # an earlier attempt stopped part way
+    if not resuming:
         _init_working(target, use_sqlite=True)
     os.chdir(target)
     c = _ctx()
     try:
+        if resuming:
+            # Only pick up a copy that holds nothing of its own and isn't
+            # following another authority: never connect live data to a stranger.
+            followed = c.sync_svc.status().remote
+            if (followed and followed.rstrip("/") != url.strip().rstrip("/")) or (
+                not followed and c.schema_svc.list_all()
+            ):
+                raise _fail(
+                    ValueError(
+                        f"{target} is already a civex project: clone into a new folder"
+                    )
+                )
         _connect_showing_progress(c, url, invite)
     except (SyncError, CivexError) as e:
         raise _fail(e)
