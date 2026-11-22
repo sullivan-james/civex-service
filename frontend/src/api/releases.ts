@@ -206,6 +206,10 @@ export const releasesApi = {
     body: {
       mode: 'link' | 'copy'
       volume?: string
+      /** Any folder of this computer to make it in. */
+      folder?: string
+      /** Also put the records in, in the form civex reads back. */
+      with_copy?: boolean
       allow_partial?: boolean
       open?: boolean
     },

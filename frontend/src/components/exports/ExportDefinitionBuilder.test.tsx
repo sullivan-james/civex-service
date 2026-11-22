@@ -316,7 +316,7 @@ describe('reviewing', () => {
     expect(
       (
         within(radios).getByRole('radio', {
-          name: /view as a folder/i,
+          name: /save to a folder/i,
         }) as HTMLInputElement
       ).checked,
     ).toBe(true)

@@ -168,11 +168,15 @@ export async function finishExport(
   }
   for (let i = 0; i < steps; i++)
     await userEvent.click(await box().findByRole('button', { name: /^next:/i }))
-  const [radio, button] = {
-    folder: [/view as a folder/i, /^open folder$/i],
-    copy: [/copy out/i, /^put on drive$/i],
-    zip: [/download a zip/i, /^download$/i],
-  }[method]
+  // Two ways out: a folder (links, or copies when asked for) or a zip.
+  const [radio, button] =
+    method === 'zip'
+      ? [/download a zip/i, /^download$/i]
+      : [/save to a folder/i, /^save to folder$/i]
   await userEvent.click(await box().findByRole('radio', { name: radio }))
+  if (method === 'copy')
+    await userEvent.click(
+      box().getByRole('checkbox', { name: /make copies i can edit/i }),
+    )
   await userEvent.click(box().getByRole('button', { name: button }))
 }

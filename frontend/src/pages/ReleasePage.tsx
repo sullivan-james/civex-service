@@ -13,6 +13,7 @@ import { AuditChangeList } from '../components/audit/AuditChanges'
 import { releasesApi } from '../api/releases'
 import type { FlowContext } from '../components/files/fileFlows'
 import { DrivePicker } from '../components/files/DrivePicker'
+import { MethodStep, type Method } from '../components/exports/MethodStep'
 import {
   EditReleaseDialog,
   WithdrawReleaseDialog,
@@ -33,6 +34,7 @@ import {
   useToast,
   Button,
   Card,
+  CheckRow,
   DataTable,
   DEFAULT_PAGE_SIZES,
   DetailSkeleton,
@@ -46,7 +48,7 @@ import {
   useTabParam,
   type DataTableColumn,
 } from '../components/ui'
-import { PROJECT, useDriveChoice } from '../hooks/useDriveChoice'
+import { useDriveChoice } from '../hooks/useDriveChoice'
 import { useFeatures } from '../hooks/useFeatures'
 import { usePermissions } from '../hooks/useMe'
 import {
@@ -81,6 +83,9 @@ export default function ReleasePage() {
   const [withdrawing, setWithdrawing] = useState(false)
   const [yanking, setYanking] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [moving, setMoving] = useState(false)
+  const features = useFeatures()
+  const flow = useFlow()
   const allowed = can('change_structure')
   const yanked = !!release?.yanked_at
 
@@ -91,17 +96,24 @@ export default function ReleasePage() {
       meta={release ? <Meta release={release} /> : undefined}
       loading={isLoading ? <DetailSkeleton /> : undefined}
       error={error ? <ErrorState message={errorMessage(error)} /> : undefined}
-      action={
-        release &&
-        !yanked && (
-          <Button onClick={() => setSaving(true)}>
-            Copy to another project…
-          </Button>
-        )
-      }
       secondaryActions={
         release
           ? [
+              // The release as one file another civex reads, and where civex
+              // itself keeps its files: neither is the export.
+              ...(yanked
+                ? []
+                : [
+                    {
+                      label: 'Copy to another project…',
+                      onClick: () => setSaving(true),
+                    },
+                    {
+                      label: 'Change storage drive…',
+                      onClick: () => setMoving(true),
+                      disabled: !features.has('volumes'),
+                    },
+                  ]),
               {
                 label: allowed
                   ? 'Edit details…'
@@ -179,6 +191,16 @@ export default function ReleasePage() {
             />
           )}
         </>
+      )}
+      {moving && release && (
+        <StorageDriveDialog
+          release={release}
+          onClose={() => setMoving(false)}
+          onChosen={(volume) => {
+            setMoving(false)
+            void gatherRelease(flow, release.name, volume)
+          }}
+        />
       )}
       {saving && release && (
         // Into a folder of this computer, where civex runs, or as a download.
@@ -440,52 +462,36 @@ function Verify({ name }: { name: string }) {
   )
 }
 
-/** Getting the release's files out, the way any export does: a folder to
- * open on the drive holding most of them, copies on a chosen drive, all of
- * them moved onto one drive, or a zip while it is small enough to download. */
+/** Getting the release out is the point of it: one **Export…**, the same
+ * two ways as any export (save to a folder, or a zip while it is small
+ * enough), with the records beside the files in the form civex reads back. */
 function Files({ release }: { release: Release }) {
   const flow = useFlow()
   const plan = useReleaseFilePlan(release.name)
-  const features = useFeatures()
-  const [picking, setPicking] = useState<'copy' | 'move' | null>(null)
+  const [exporting, setExporting] = useState(false)
+  const [method, setMethod] = useState<Method>('link')
+  const [withCopy, setWithCopy] = useState(true)
   const p = plan.data
   const files = Number(release.counts.files ?? 0)
+
+  function go() {
+    if (method === 'zip') void zipRelease(flow, release.name)
+    else
+      void exportRelease(flow, release.name, method, undefined, false, withCopy)
+    setExporting(false)
+  }
+
   return (
     <Card
       title="Its files"
       action={
-        files > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {features.has('open_folder') && (
-              <Button
-                size="sm"
-                onClick={() => void exportRelease(flow, release.name, 'link')}
-              >
-                View as a folder
-              </Button>
-            )}
-            <Button size="sm" onClick={() => setPicking('copy')}>
-              Copy out…
-            </Button>
-            {features.has('volumes') && (
-              <Button size="sm" onClick={() => setPicking('move')}>
-                Change storage drive…
-              </Button>
-            )}
-            {p?.zip_allowed && (
-              <Button
-                size="sm"
-                onClick={() => void zipRelease(flow, release.name)}
-              >
-                Download a zip
-              </Button>
-            )}
-          </div>
-        )
+        <Button size="sm" variant="primary" onClick={() => setExporting(true)}>
+          Export…
+        </Button>
       }
     >
       {files === 0 ? (
-        <p className="text-sm text-fg-muted">Its records cite no files.</p>
+        <p className="text-sm text-fg-muted">No files</p>
       ) : plan.error ? (
         <ErrorState message={errorMessage(plan.error)} />
       ) : !p ? (
@@ -499,68 +505,57 @@ function Files({ release }: { release: Release }) {
               {g.reason} {g.fix}
             </p>
           ))}
-          {!p.zip_allowed && (
-            <p className="text-fg-muted">
-              Too large to download as one zip: make a folder of it on a drive.
-            </p>
-          )}
-          <p className="text-xs text-fg-muted">
-            A folder holds them in a folder per record, as the records were,
-            with manifest-sha256.txt (each file&apos;s hash), release.json and
-            CITATION.cff beside them.
-          </p>
         </div>
       )}
-      {picking && (
-        <DriveDialog
-          kind={picking}
-          release={release}
-          need={p?.bytes ?? 0}
-          holding={p?.link_volume ?? undefined}
-          onClose={() => setPicking(null)}
-          onChosen={(volume) => {
-            setPicking(null)
-            if (picking === 'move')
-              void gatherRelease(flow, release.name, volume)
-            else
-              void exportRelease(
-                flow,
-                release.name,
-                'copy',
-                volume === PROJECT ? undefined : volume,
-              )
-          }}
-        />
+      {exporting && (
+        <Modal onClose={() => setExporting(false)} size="md">
+          <ModalHeader onClose={() => setExporting(false)}>
+            Export {release.name}
+          </ModalHeader>
+          <ModalBody className="space-y-3">
+            <MethodStep
+              method={method}
+              setMethod={setMethod}
+              zip={!!p?.zip_allowed}
+            />
+            {method !== 'zip' && (
+              <CheckRow
+                compact
+                checked={withCopy}
+                onChange={setWithCopy}
+                title="Include a copy civex can read back"
+              />
+            )}
+          </ModalBody>
+          <ModalFooter>
+            <Button onClick={() => setExporting(false)}>Cancel</Button>
+            <Button variant="primary" onClick={go}>
+              Export
+            </Button>
+          </ModalFooter>
+        </Modal>
       )}
     </Card>
   )
 }
 
-/** Which drive: the one drive-and-free-space rule. */
-function DriveDialog({
-  kind,
+/** Housekeeping, not an export: which drive civex itself keeps the release's
+ * files on (the one drive-and-free-space rule). */
+function StorageDriveDialog({
   release,
-  need,
-  holding,
   onClose,
   onChosen,
 }: {
-  kind: 'copy' | 'move'
   release: Release
-  need: number
-  holding?: string
   onClose: () => void
   onChosen: (volume: string) => void
 }) {
   const [chosen, setChosen] = useState<string | null>(null)
-  const allowProject = kind === 'copy'
-  const drive = useDriveChoice({ holding, need, allowProject, chosen })
+  const drive = useDriveChoice({ need: 0, allowProject: false, chosen })
   return (
     <Modal onClose={onClose} size="sm">
       <ModalHeader onClose={onClose}>
-        {kind === 'copy'
-          ? `Put the files of ${release.name} on a drive`
-          : `Move the files of ${release.name} to one drive`}
+        Storage drive for {release.name}
       </ModalHeader>
       <ModalBody>
         <div className="space-y-3 text-sm">
@@ -568,27 +563,22 @@ function DriveDialog({
             label="Drive"
             value={drive.target}
             targets={drive.targets}
-            allowProject={allowProject}
-            need={need}
+            allowProject={false}
+            need={0}
             free={drive.free}
             tooBig={drive.tooBig}
             onChange={setChosen}
           />
-          <p className="text-fg-muted">
-            {kind === 'copy'
-              ? 'A folder of copies, laid out as the records were, with the manifest and citation.'
-              : 'The release then keeps its files on that drive. Records that use them elsewhere keep theirs.'}
-          </p>
         </div>
       </ModalBody>
       <ModalFooter>
         <Button onClick={onClose}>Cancel</Button>
         <Button
           variant="primary"
-          disabled={!drive.target || drive.tooBig}
+          disabled={!drive.target}
           onClick={() => onChosen(drive.target)}
         >
-          {kind === 'copy' ? 'Copy' : 'Move'}
+          Move
         </Button>
       </ModalFooter>
     </Modal>

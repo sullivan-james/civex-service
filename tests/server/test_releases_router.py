@@ -102,6 +102,35 @@ def test_the_files_come_out_as_a_folder_or_a_small_zip(client: TestClient):
     assert folder.json()["copied"] == 1
 
 
+def test_a_release_is_exported_into_any_folder_in_a_form_read_back_in(
+    client: TestClient, tmp_path
+):
+    """Any folder of this computer, not only a drive set up in Settings; the
+    files, and beside them the records as civex reads them back."""
+    import pathlib
+
+    _study(client)
+    client.post("/api/releases", json={"name": "v1", "title": "Survey"})
+    made = client.post(
+        "/api/releases/v1/files/export",
+        json={"mode": "link", "folder": str(tmp_path)},
+    )
+    assert made.status_code == 200, made.text
+    dest = pathlib.Path(made.json()["dest"])
+    assert dest.parent == tmp_path and dest.name == "release-v1"
+    names = {p.name for p in dest.iterdir()}
+    assert {"manifest-sha256.txt", "CITATION.cff"} <= names
+    (copy,) = [n for n in names if n.endswith(".civex.zip")]
+    with zipfile.ZipFile(dest / copy) as zf:
+        assert "records.jsonl" in zf.namelist()
+    # Made again into the same folder, it is refreshed, not refused.
+    again = client.post(
+        "/api/releases/v1/files/export",
+        json={"mode": "copy", "folder": str(tmp_path), "with_copy": False},
+    )
+    assert again.status_code == 200, again.text
+
+
 def test_correct_withdraw_yank_and_compare(client: TestClient):
     _study(client)
     client.post("/api/releases", json={"name": "v1", "title": "Survey"})

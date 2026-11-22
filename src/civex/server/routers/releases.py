@@ -23,7 +23,11 @@ from civex.context import AppContext
 from civex.domain import release as rules
 from civex.domain.dtos import ReleaseDTO
 from civex.domain.exceptions import CivexError, NotFoundError
-from civex.domain.file_access import FilesUnavailableError, LinksNotPossibleError
+from civex.domain.file_access import (
+    FilesUnavailableError,
+    LinksNotPossibleError,
+    safe_segment,
+)
 from civex.domain.features import OPEN_FOLDER
 from civex.server.deps import get_ctx
 from civex.server.downloads import new_temp_dir, serve, temp_paths
@@ -236,6 +240,18 @@ class ReleaseExportRequest(BaseModel):
     )
     volume: str | None = Field(default=None, description="Where copies go (copy).")
     name: str | None = Field(default=None, description="The folder's name.")
+    folder: str | None = Field(
+        default=None,
+        description="Any folder of this computer to make it in (as "
+        "`<folder>/<name>`), instead of a drive's exports folder. With `link` "
+        "the files are linked where that is possible there and copied where "
+        "it is not.",
+    )
+    with_copy: bool = Field(
+        default=True,
+        description="Also put the release's bundle of records in the folder, "
+        "so what was exported can be read back into a civex project.",
+    )
     allow_partial: bool = Field(
         default=False, description="Make it with what can be reached."
     )
@@ -461,19 +477,31 @@ def export_release_files(
 ):
     """Make a folder of the release's files, as any export makes one (`link`:
     on the drive holding most of them, hard links where it can; `copy`: copies
-    on `volume`), with `manifest-sha256.txt` (BagIt: each file's hash and
-    path), `release.json` and `CITATION.cff`. 409 as an export when files are
+    on `volume`; or in any `folder` of this computer), with
+    `manifest-sha256.txt` (BagIt: each file's hash and path), `release.json`,
+    `CITATION.cff` and, unless `with_copy` is false, the release's bundle of
+    records, which `POST /bundle/import` reads back. 409 as an export when files are
     out of reach or the drive can't be written to."""
     try:
         with ctx.release_svc.file_access(name) as (access, selection):
-            result = access.export_managed(
-                selection,
-                body.name or f"release-{name}",
-                body.mode,
-                body.volume,
-                allow_partial=body.allow_partial,
-                progress=progress,
-            )
+            folder_name = body.name or f"release-{name}"
+            if body.folder:
+                result = access.export(
+                    selection,
+                    Path(body.folder) / safe_segment(folder_name, "release"),
+                    body.mode,
+                    allow_partial=body.allow_partial,
+                    progress=progress,
+                )
+            else:
+                result = access.export_managed(
+                    selection,
+                    folder_name,
+                    body.mode,
+                    body.volume,
+                    allow_partial=body.allow_partial,
+                    progress=progress,
+                )
             plan = access.plan(selection)
     except FilesUnavailableError as e:
         return _unreachable(e)
@@ -486,6 +514,11 @@ def export_release_files(
     except CivexError as e:
         raise HTTPException(422, detail=str(e))
     ctx.release_svc.write_bag(name, Path(result.dest), plan)
+    if body.with_copy:
+        # Beside the files: the same records in the form civex reads back.
+        ctx.release_svc.write_copy(
+            name, Path(result.dest) / ctx.release_svc.file_name_for(name)
+        )
     opened = (
         body.open
         and OPEN_FOLDER in ctx.features

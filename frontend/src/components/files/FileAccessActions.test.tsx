@@ -89,13 +89,21 @@ const next = () =>
 async function exportVia(method: 'folder' | 'copy' | 'zip') {
   await choose(/^export…/i)
   await next()
-  const names = {
-    folder: [/view as a folder/i, /^open folder$/i],
-    copy: [/copy out/i, /^put on drive$/i],
-    zip: [/download a zip/i, /^download$/i],
-  }[method]
-  await userEvent.click(screen.getByRole('radio', { name: names[0] }))
-  await userEvent.click(screen.getByRole('button', { name: names[1] }))
+  const zip = method === 'zip'
+  await userEvent.click(
+    screen.getByRole('radio', {
+      name: zip ? /download a zip/i : /save to a folder/i,
+    }),
+  )
+  if (method === 'copy')
+    await userEvent.click(
+      screen.getByRole('checkbox', { name: /make copies i can edit/i }),
+    )
+  await userEvent.click(
+    screen.getByRole('button', {
+      name: zip ? /^download$/i : /^save to folder$/i,
+    }),
+  )
 }
 
 const unreachable = (over: Record<string, unknown> = {}) =>
@@ -189,10 +197,10 @@ describe('exports saved for the schema', () => {
 
     await choose(/contour files/i)
     await userEvent.click(
-      screen.getByRole('radio', { name: /view as a folder/i }),
+      screen.getByRole('radio', { name: /save to a folder/i }),
     )
     await userEvent.click(
-      screen.getByRole('button', { name: /^open folder$/i }),
+      screen.getByRole('button', { name: /^save to folder$/i }),
     )
 
     await waitFor(() => expect(mine(calls)).toHaveLength(1))
@@ -394,7 +402,7 @@ describe('when files cannot be reached', () => {
       json(exported({ linked: 3, missing: [{ path: 'a', reason: 'x' }] }))
 
     await userEvent.click(
-      await screen.findByRole('button', { name: /open the 3 available/i }),
+      await screen.findByRole('button', { name: /save the 3 available/i }),
     )
 
     await waitFor(() => expect(mine(calls)).toHaveLength(2))
@@ -423,7 +431,7 @@ describe('when files cannot be reached', () => {
     )
     // Nothing is missing now: the same dialog offers to open it all.
     expect(
-      await screen.findByRole('button', { name: /^open folder$/i }),
+      await screen.findByRole('button', { name: /^save to folder$/i }),
     ).toBeTruthy()
     expect(screen.queryByText(/can’t be reached/i)).toBeNull()
     expect(screen.getAllByRole('dialog')).toHaveLength(1)
@@ -558,31 +566,8 @@ describe('when the folder cannot be made on its drive', () => {
   })
 })
 
-describe('Copy out', () => {
-  it('is a method of the export, with the drive chosen beside it', async () => {
-    const calls = serve()
-    renderIt()
-
-    await choose(/^export…/i)
-    await next()
-    await userEvent.click(screen.getByRole('radio', { name: /copy out/i }))
-    await userEvent.selectOptions(
-      await screen.findByRole('combobox', { name: /which drive/i }),
-      'archive',
-    )
-    await userEvent.click(
-      screen.getByRole('button', { name: /^put on drive$/i }),
-    )
-
-    await waitFor(() =>
-      expect(callPaths(calls)).toContain('/api/file-access/export'),
-    )
-    expect(
-      calls.find((c) => c.path === '/api/file-access/export')!.body,
-    ).toMatchObject({ mode: 'copy', volume: 'archive' })
-  })
-
-  it('copies into the project folder when no drive is chosen', async () => {
+describe('Copies to edit', () => {
+  it('is a tick on the folder, not a method of its own', async () => {
     const calls = serve()
     renderIt()
 
@@ -598,7 +583,7 @@ describe('Copy out', () => {
 })
 
 describe('one dialog for every way of getting the files', () => {
-  it('offers the three methods together, and no menu items for them', async () => {
+  it('offers two ways out, and no menu items for them', async () => {
     serve()
     renderIt()
 
@@ -606,10 +591,8 @@ describe('one dialog for every way of getting the files', () => {
     await next()
 
     expect(
-      screen
-        .getAllByRole('radio', { name: /folder|copy out|zip/i })
-        .map((r) => r.getAttribute('aria-label')),
-    ).toEqual(['View as a folder', 'Copy out', 'Download a zip'])
+      screen.getAllByRole('radio').map((r) => r.getAttribute('aria-label')),
+    ).toEqual(['Save to a folder', 'Download a zip'])
   })
 
   it('walks through what, then how, with the one layout choice beside the preview', async () => {

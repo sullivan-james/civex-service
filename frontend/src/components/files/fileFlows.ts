@@ -10,6 +10,7 @@ import {
 } from '../../api/fileAccess'
 import { transfersApi } from '../../api/transfers'
 import { runFileJob, type JobHandle } from '../../hooks/fileJobs'
+import { exportDest } from '../../utils/exportFolder'
 import { errorMessage } from '../../lib/errors'
 import { describeAmounts } from '../../utils/amounts'
 import { percentDone } from '../../utils/transfers'
@@ -162,6 +163,7 @@ export function openAsFolder(
     const out = await tracked(ctx, j, (progressId) =>
       fileAccessApi.tryExport(selection, {
         name,
+        dest: exportDest(name),
         mode: 'link',
         allowPartial: false,
         open: true,
@@ -176,17 +178,6 @@ export function openAsFolder(
       plan: await planFor(selection, out.plan),
       message: out.plan ? undefined : out.message,
     })
-  })
-}
-
-/** Look at what a selection holds, then show the dialog (for "copy to a drive",
- * which always needs a choice of drive). */
-export function chooseCopy(ctx: FlowContext, selection: FileSelection) {
-  return job(ctx, 'Preparing files…', async (j) => {
-    const plan = await tracked(ctx, j, (progressId) =>
-      fileAccessApi.plan(selection, progressId),
-    )
-    ctx.problem({ kind: 'copy', plan, selection })
   })
 }
 
@@ -238,6 +229,7 @@ export function openAvailable(
     const out = await tracked(ctx, j, (progressId) =>
       fileAccessApi.tryExport(selection, {
         name,
+        dest: exportDest(name),
         mode: 'link',
         allowPartial: true,
         open: true,
@@ -274,6 +266,7 @@ export function copyToDrive(
       await tracked(ctx, j, (progressId) =>
         fileAccessApi.export(selection, {
           name,
+          dest: exportDest(name),
           mode: 'copy',
           volume,
           allowPartial: true,

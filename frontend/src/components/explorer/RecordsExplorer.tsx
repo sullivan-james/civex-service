@@ -76,7 +76,6 @@ import { useToast } from '../ui/ToastProvider'
 import { CHARTS_AUTO_UP_TO, chartTitle, plural } from '../../utils/charts'
 import { totalsCells, totalsMeasures } from '../../utils/totals'
 import { useStored } from '../../hooks/useStored'
-import { MoveToDriveButton } from '../files/MoveDialog'
 import { useBulkSelection } from '../../hooks/useBulkSelection'
 import { BulkRunWorkflow, bulkRunnable } from '../workflows/BulkRunWorkflow'
 import { FileAccessActions } from '../files/FileAccessActions'
@@ -1084,22 +1083,6 @@ export function RecordsExplorer({
                                 scopeSchema={listedName ?? undefined}
                                 builderTo={builderHref}
                               />
-                              {canExportFiles && (
-                                // The files of the records ticked and of everything in
-                                // them: the one move dialog.
-                                <MoveToDriveButton
-                                  label="Change storage drive…"
-                                  what={`the files of ${bulkCount.toLocaleString()} record${bulkCount === 1 ? '' : 's'}`}
-                                  pick={selectionFor(
-                                    x.query,
-                                    dataset,
-                                    allMatching ? undefined : [...selected],
-                                    undefined,
-                                    true,
-                                  )}
-                                  onStarted={picked.clear}
-                                />
-                              )}
                               {allKinds && (
                                 // Edits and workflows are about one kind's fields.
                                 <>

@@ -142,6 +142,9 @@ export interface ExportOptions {
   mode: ExportMode
   /** For a copy: the drive to copy onto (the project folder if left out). */
   volume?: string
+  /** Make it in this folder of the computer instead (any folder: it wins
+   * over `name` and `volume`). */
+  dest?: string
   allowPartial: boolean
   open: boolean
 }
@@ -423,6 +426,7 @@ export const fileAccessApi = {
         name: options.name,
         mode: options.mode,
         volume: options.volume,
+        dest: options.dest,
         allow_partial: options.allowPartial,
         open: options.open,
       },
