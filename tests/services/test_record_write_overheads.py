@@ -99,14 +99,18 @@ def test_streaming_a_large_listing_never_pages_by_offset(
     ctx.commit()
 
     repo = ctx.record_svc._records
-    real = repo.list_filtered
-    offsets: list[int] = []
+    real = repo.list_keyset
+    afters: list[object] = []
 
-    def spy(query, offset, limit, after=None):
-        offsets.append(offset)
-        return real(query, offset, limit, after=after)
+    def spy(query, limit, after_key=None):
+        afters.append(after_key)
+        return real(query, limit, after_key)
 
-    repo.list_filtered = spy  # type: ignore[method-assign]
+    def no_offset(*a, **k):
+        raise AssertionError("streaming must not page by OFFSET")
+
+    repo.list_keyset = spy  # type: ignore[method-assign]
+    repo.list_filtered = no_offset  # type: ignore[method-assign]
     pages = list(
         ctx.record_svc.stream_records(
             RecordQuery(dataset="study", schema="patient"), page_size=10
@@ -116,7 +120,9 @@ def test_streaming_a_large_listing_never_pages_by_offset(
     streamed = [r.id for page in pages for r in page]
     assert sorted(streamed) == sorted(made)  # nothing skipped or repeated
     assert [len(p) for p in pages] == [10, 10, 5]
-    assert offsets == [0, 0, 0]  # continued from the last record, not skipped to
+    # Each page continued from the last record's key, not skipped to.
+    assert afters[0] is None and all(a is not None for a in afters[1:])
+    assert len(afters) == 3
 
 
 def test_add_can_skip_resolving_reference_labels(

@@ -27,6 +27,7 @@ from civex.server.models import (
     MoveRecordsResponse,
     PaginatedRecordResponse,
     QualityFindingResponse,
+    RecordsCountResponse,
     QualityRecordsRequest,
     QualityRecordsResponse,
     QualityReportResponse,
@@ -126,16 +127,35 @@ def _page(
     child_counts: bool,
     limit: int,
     offset: int,
+    cursor: str | None = None,
+    estimate: bool = False,
 ) -> PaginatedRecordResponse:
+    if cursor and offset:
+        raise HTTPException(422, detail="Give 'cursor' or 'offset', not both")
     try:
-        items = ctx.record_svc.query_records(
-            query,
-            limit=limit,
-            offset=offset,
-            columns=columns or None,
-            child_counts=child_counts,
-        )
-        total = ctx.record_svc.count_records(query)
+        next_cursor: str | None = None
+        if cursor or not offset:
+            # Keyset: the first page too, so it can hand out the cursor.
+            page = ctx.record_svc.query_records_page(
+                query,
+                limit=limit,
+                cursor=cursor,
+                columns=columns or None,
+                child_counts=child_counts,
+            )
+            items, next_cursor = page.items, page.next_cursor
+        else:
+            items = ctx.record_svc.query_records(
+                query,
+                limit=limit,
+                offset=offset,
+                columns=columns or None,
+                child_counts=child_counts,
+            )
+        if estimate:
+            total, estimated = ctx.record_svc.estimate_records(query)
+        else:
+            total, estimated = ctx.record_svc.count_records(query), False
     except (NotFoundError, ValueError, ValidationError) as e:
         raise HTTPException(404 if isinstance(e, NotFoundError) else 422, detail=str(e))
     return PaginatedRecordResponse(
@@ -143,6 +163,8 @@ def _page(
         total=total,
         offset=offset,
         limit=limit,
+        total_estimated=estimated,
+        next_cursor=next_cursor,
     )
 
 
@@ -151,6 +173,19 @@ _COLUMNS = Query(
     description="Repeatable column names whose values aren't in a record's "
     "own 'data' -- inherited fields and 'ref_field.target_field' joins -- "
     "returned under each record's 'derived'.",
+)
+_CURSOR = Query(
+    default=None,
+    description="Opaque 'next_cursor' of the previous page: continue strictly "
+    "after its last record. Costs the same at any depth and is stable while "
+    "records are added or removed, unlike 'offset' (which it replaces; give "
+    "one or the other). Sorted and searched lists page by it too.",
+)
+_ESTIMATE = Query(
+    default=False,
+    description="Take 'total' from the query planner's estimate instead of "
+    "counting (PostgreSQL; elsewhere the count is exact). 'total_estimated' "
+    "says which it is.",
 )
 _CHILD_COUNTS = Query(
     default=False,
@@ -168,6 +203,8 @@ def list_records(
     child_counts: bool = _CHILD_COUNTS,
     limit: int = Query(default=50, le=1000),
     offset: int = Query(default=0, ge=0),
+    cursor: Optional[str] = _CURSOR,
+    estimate: bool = _ESTIMATE,
     ctx: AppContext = Depends(get_ctx),
 ):
     """List records in a collection, paginated, filtered and sorted.
@@ -176,7 +213,7 @@ def list_records(
     are AND-combined with the 'filter' tree, if both are given.
     """
     query.dataset = dataset_name
-    return _page(ctx, query, columns, child_counts, limit, offset)
+    return _page(ctx, query, columns, child_counts, limit, offset, cursor, estimate)
 
 
 @router.get("/records/all", response_model=PaginatedRecordResponse)
@@ -186,6 +223,8 @@ def list_all_records(
     child_counts: bool = _CHILD_COUNTS,
     limit: int = Query(default=50, le=1000),
     offset: int = Query(default=0, ge=0),
+    cursor: Optional[str] = _CURSOR,
+    estimate: bool = _ESTIMATE,
     ctx: AppContext = Depends(get_ctx),
 ):
     """List records in every collection, paginated: of one schema, or with
@@ -194,7 +233,49 @@ def list_all_records(
     and sorted by '@kind', '@collection', '@updated_at' or '@created_at'; a
     filter or sort on a field needs a 'schema' and is refused without one."""
     query.dataset = None
-    return _page(ctx, query, columns, child_counts, limit, offset)
+    return _page(ctx, query, columns, child_counts, limit, offset, cursor, estimate)
+
+
+def _count(ctx: AppContext, query: RecordQuery, estimate: bool) -> RecordsCountResponse:
+    try:
+        if estimate:
+            count, estimated = ctx.record_svc.estimate_records(query)
+        else:
+            count, estimated = ctx.record_svc.count_records(query), False
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except (ValueError, ValidationError) as e:
+        raise HTTPException(422, detail=str(e))
+    return RecordsCountResponse(count=count, estimated=estimated)
+
+
+@router.get("/records/count", response_model=RecordsCountResponse)
+def count_all_records(
+    query: RecordQuery = Depends(record_query),
+    estimate: bool = _ESTIMATE,
+    ctx: AppContext = Depends(get_ctx),
+):
+    """How many records match, in every collection. `estimate=true` answers
+    from the planner on PostgreSQL (no scan: the same at a billion records as
+    at a thousand); `estimated` says whether the count is exact."""
+    query.dataset = None
+    query.sort = None
+    return _count(ctx, query, estimate)
+
+
+@router.get(
+    "/collections/{dataset_name}/records/count", response_model=RecordsCountResponse
+)
+def count_collection_records(
+    dataset_name: str,
+    query: RecordQuery = Depends(record_query),
+    estimate: bool = _ESTIMATE,
+    ctx: AppContext = Depends(get_ctx),
+):
+    """How many records of a collection match (see `/records/count`)."""
+    query.dataset = dataset_name
+    query.sort = None
+    return _count(ctx, query, estimate)
 
 
 @router.get("/records/counts")
@@ -223,13 +304,15 @@ def list_schema_records(
     child_counts: bool = _CHILD_COUNTS,
     limit: int = Query(default=50, le=1000),
     offset: int = Query(default=0, ge=0),
+    cursor: Optional[str] = _CURSOR,
+    estimate: bool = _ESTIMATE,
     ctx: AppContext = Depends(get_ctx),
 ):
     """List a schema's records across every collection -- the same query as
     a collection's list, just not scoped to one collection (what a saved view
     browses)."""
     query.schema = schema_name
-    return _page(ctx, query, columns, child_counts, limit, offset)
+    return _page(ctx, query, columns, child_counts, limit, offset, cursor, estimate)
 
 
 @router.post(

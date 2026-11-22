@@ -1502,6 +1502,18 @@ class PaginatedRecordResponse(BaseModel):
     total: int
     offset: int
     limit: int
+    # True when `total` is the planner's estimate (`estimate=true` on
+    # PostgreSQL); false when it is exact.
+    total_estimated: bool = False
+    # Opaque; pass as `cursor` for the page after this one. None on the last
+    # page, and on an offset page past the first (offset paging has none).
+    next_cursor: str | None = None
+
+
+class RecordsCountResponse(BaseModel):
+    count: int
+    # True when `count` is the planner's estimate, not an exact count.
+    estimated: bool
 
 
 class CreateRecordRequest(BaseModel):

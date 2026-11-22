@@ -38,6 +38,17 @@ No database migrations.
   and `missing_structure`. `civex db status` and `civex serve`'s pre-flight
   use it too.
 
+### Added
+
+- Record lists page by cursor as well as by offset: `cursor` / `next_cursor`
+  on every records list, sorted or not, searched or not. A deep page costs what
+  the first does, and records added or removed while paging neither repeat nor
+  skip. `offset` still works. Exports of sorted lists no longer page by OFFSET.
+- `estimate=true` on record lists and on the new `/records/count` and
+  `/collections/{name}/records/count` endpoints answers totals from the
+  PostgreSQL planner (no scan), reporting whether the figure is estimated;
+  exact elsewhere.
+
 ## v2.0.1 — updating right after a release, a quicker desktop app (2026-11-19)
 
 No database migrations.

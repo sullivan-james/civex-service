@@ -369,6 +369,10 @@ export interface PaginatedRecords {
   total: number
   offset: number
   limit: number
+  /** True when `total` is the planner's estimate (`estimate: true`). */
+  total_estimated?: boolean
+  /** Pass as `cursor` for the next page; null on the last. */
+  next_cursor?: string | null
 }
 
 export type ListParams = RecordQueryParams & PageParams
