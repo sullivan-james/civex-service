@@ -19,9 +19,14 @@ from sqlalchemy import (
     select,
     String,
     type_coerce,
+    text,
+    tuple_,
     update,
 )
 from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.sql.base import Executable
+from sqlalchemy.sql.expression import ClauseElement
 from sqlalchemy.orm import Session, aliased
 
 from civex.db.models import (
@@ -45,25 +50,87 @@ from civex.repositories.local._jobs import bulk_delete_jobs
 from civex.repositories.protocols import RecordGrowthRow
 
 
-def _order_by(sort: list[SortKey] | None) -> list[Any]:
-    """ORDER BY terms for a view-style sort on JSON fields: nulls (absent or
-    JSON null) always last regardless of direction, numeric types compared
-    as numbers, everything else (ISO dates/datetimes included) as text. A key
-    on an ancestor's field sorts by that ancestor record's value."""
-    terms: list[Any] = []
+class _Explain(Executable, ClauseElement):
+    """EXPLAIN (FORMAT JSON) of a statement, bound parameters and all."""
+
+    inherit_cache = False
+
+    def __init__(self, stmt: Any) -> None:
+        self.stmt = stmt
+
+
+@compiles(_Explain, "postgresql")
+def _compile_explain(element: _Explain, compiler: Any, **kw: Any) -> str:
+    return "EXPLAIN (FORMAT JSON) " + compiler.process(element.stmt, **kw)
+
+
+def _is_unfiltered(query: ResolvedQuery) -> bool:
+    return (
+        query.dataset_id is None
+        and query.schema_id is None
+        and query.parent_record_id is None
+        and query.within is None
+        and query.beneath is None
+        and not query.field_filters
+        and query.search is None
+        and query.filter_tree is None
+    )
+
+
+def _sort_terms(sort: list[SortKey] | None) -> list[tuple[Any, bool, bool]]:
+    """The sort as (expression, descending, nullable) terms, in order: what a
+    view-style sort on JSON fields compares by. Nulls (absent or JSON null)
+    always sort last regardless of direction, numeric types compare as
+    numbers, everything else (ISO dates/datetimes included) as text. A key on
+    an ancestor's field sorts by that ancestor record's value."""
+    terms: list[tuple[Any, bool, bool]] = []
     for key in sort or []:
         if key.meta is not None:
-            value = _meta_value(key.meta)
-            terms.append(value.desc() if key.descending else value.asc())
+            terms.append((_meta_value(key.meta), key.descending, False))
             continue
         if key.rel.direction == "up":
             value = _up_value(key.rel.hops, key.field_id, key.numeric)
         else:
             col = Record.data[key.field_id]
             value = col.as_float() if key.numeric else col.as_string()
-        terms.append(value.is_(None))
-        terms.append(value.desc() if key.descending else value.asc())
+        terms.append((value, key.descending, True))
     return terms
+
+
+def _order_by(sort: list[SortKey] | None) -> list[Any]:
+    """ORDER BY terms for `_sort_terms` (a nullable term is preceded by its
+    IS NULL flag, which puts nulls last)."""
+    out: list[Any] = []
+    for value, descending, nullable in _sort_terms(sort):
+        if nullable:
+            out.append(value.is_(None))
+        out.append(value.desc() if descending else value.asc())
+    return out
+
+
+def _after_key(terms: list[tuple[Any, bool, bool]], key: list[Any]) -> Any:
+    """WHERE: the row sorts strictly after the row whose term values are
+    `key`, under the ordering of `terms` (nulls last, whatever the direction).
+    `terms` ends in the ascending, non-null (created_at, id) pair that makes
+    the ordering total; that pair is one row comparison, which PostgreSQL
+    turns into an index range, where the equivalent OR of two branches reads
+    from the start of the index and filters."""
+    clauses: list[Any] = []
+    equal: list[Any] = []
+    for (value, descending, nullable), last in zip(terms[:-2], key):
+        if last is None:
+            # Nulls come last: nothing is after one but a later term.
+            after: Any = false()
+            same = value.is_(None)
+        else:
+            beyond = value < last if descending else value > last
+            after = or_(beyond, value.is_(None)) if nullable else beyond
+            same = value == last
+        clauses.append(and_(*equal, after))
+        equal.append(same)
+    (when, _, _), (ident, _, _) = terms[-2:]
+    clauses.append(and_(*equal, tuple_(when, ident) > tuple_(key[-2], key[-1])))
+    return or_(*clauses)
 
 
 def _meta_value(name: str) -> Any:
@@ -329,8 +396,61 @@ class LocalRecordRepository:
             q = q.offset(offset)
         return [_to_dto(r) for r in q.limit(limit).all()]
 
+    def list_keyset(
+        self,
+        query: ResolvedQuery,
+        limit: int,
+        after_key: list[Any] | None = None,
+    ) -> tuple[list[RecordDTO], list[Any] | None, str]:
+        """One page by keyset, for any sort: (records, key of the last
+        record when more follow else None, directions of the key's terms).
+        `after_key` is a previous page's key: the page starts strictly after
+        that row, so cost doesn't grow with depth and rows added or removed
+        meanwhile neither repeat nor skip. created_at and id close the
+        ordering, so it is total."""
+        terms = _sort_terms(query.sort) + [
+            (Record.created_at, False, False),
+            (Record.id, False, False),
+        ]
+        directions = "".join("d" if d else "a" for _, d, _ in terms)
+        q = _base_query(self._s, query, self._pg)
+        if after_key is not None:
+            if len(after_key) != len(terms):
+                raise ValidationError("The cursor does not belong to this query")
+            q = q.filter(_after_key(terms, after_key))
+        q = q.add_columns(*[t[0].label(f"_k{i}") for i, t in enumerate(terms)])
+        q = q.order_by(*_order_by(query.sort), Record.created_at, Record.id)
+        rows = q.limit(limit + 1).all()
+        more = len(rows) > limit
+        rows = rows[:limit]
+        key = list(rows[-1][1:]) if more else None
+        return [_to_dto(r[0]) for r in rows], key, directions
+
     def count(self, query: ResolvedQuery) -> int:
         return _base_query(self._s, query, self._pg).count()
+
+    def estimate_count(self, query: ResolvedQuery) -> tuple[int, bool]:
+        """(how many records `query` lists, whether that is the planner's
+        estimate). On PostgreSQL an unfiltered listing reads the table's
+        `pg_class.reltuples` and anything else the row estimate of EXPLAIN:
+        neither scans a row, so they cost the same at 10 billion records as
+        at 10. Deleted rows are counted by `reltuples`, and both are only as
+        fresh as the last ANALYZE. Elsewhere the count is exact."""
+        if not self._pg:
+            return self.count(query), False
+        if _is_unfiltered(query):
+            tuples = self._s.execute(
+                text(
+                    "SELECT reltuples::bigint FROM pg_class "
+                    "WHERE oid = to_regclass('records')"
+                )
+            ).scalar()
+            if tuples is not None and tuples >= 0:
+                return int(tuples), True
+        listed = _base_query(self._s, query, self._pg).with_entities(Record.id)
+        plan = self._s.execute(_Explain(listed.order_by(None).statement)).scalar()
+        assert plan is not None
+        return int(plan[0]["Plan"]["Plan Rows"]), True
 
     def count_open_notes(self, query: ResolvedQuery) -> tuple[int, int]:
         """(threads not yet resolved, records holding them) among the records

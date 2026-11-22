@@ -11,6 +11,7 @@ from typing import Any, Callable, Generator, Iterable, Iterator
 from zoneinfo import ZoneInfo
 
 from civex.domain.charts import Chart
+from civex.domain.cursor import decode_cursor, encode_cursor
 from civex.domain import permissions
 from civex.domain import notes as note_rules
 from civex.domain.permissions import EVERYTHING, Permissions
@@ -676,6 +677,15 @@ def _referrers_message(referrers: list[tuple[RecordDTO, dict[str, str]]]) -> str
     if len(referrers) > len(shown):
         msg += f" and {len(referrers) - len(shown)} more"
     return msg
+
+
+@dataclasses.dataclass(frozen=True)
+class RecordPage:
+    """One keyset page of records and the cursor for the next (None when
+    this is the last)."""
+
+    items: list[RecordDTO]
+    next_cursor: str | None
 
 
 class RecordService:
@@ -2982,6 +2992,43 @@ class RecordService:
         records = self._records.list_filtered(
             self.resolve(query), offset, limit, after=after
         )
+        return self._decorate(records, query, columns, child_counts, as_stored)
+
+    def query_records_page(
+        self,
+        query: RecordQuery,
+        limit: int = 50,
+        cursor: str | None = None,
+        columns: list[str] | None = None,
+        child_counts: bool = False,
+        as_stored: bool = False,
+    ) -> RecordPage:
+        """One page of `query` by keyset, sorted or not: `cursor` (the
+        previous page's `next_cursor`, opaque) continues strictly after its
+        last record, so a deep page costs what the first does and records
+        added or removed between requests neither repeat nor skip. The page's
+        `next_cursor` is None on the last page."""
+        after_key: list[Any] | None = None
+        if cursor:
+            after_key, directions = decode_cursor(cursor)
+        records, key, directions_now = self._records.list_keyset(
+            self.resolve(query), limit, after_key
+        )
+        if cursor and directions != directions_now:
+            raise ValidationError("The cursor does not belong to this query's sort")
+        return RecordPage(
+            self._decorate(records, query, columns, child_counts, as_stored),
+            encode_cursor(key, directions_now) if key is not None else None,
+        )
+
+    def _decorate(
+        self,
+        records: list[RecordDTO],
+        query: RecordQuery,
+        columns: list[str] | None,
+        child_counts: bool,
+        as_stored: bool,
+    ) -> list[RecordDTO]:
         if as_stored:
             return self._with_names_many(records)
         named = self._attach_open_notes(
@@ -2999,6 +3046,11 @@ class RecordService:
     def count_records(self, query: RecordQuery) -> int:
         return self._records.count(self.resolve(query))
 
+    def estimate_records(self, query: RecordQuery) -> tuple[int, bool]:
+        """(matching records, whether that is an estimate): the planner's on
+        PostgreSQL, at no cost per record, exact elsewhere."""
+        return self._records.estimate_count(self.resolve(query))
+
     def stream_records(
         self,
         query: RecordQuery,
@@ -3010,30 +3062,23 @@ class RecordService:
         must not hold the whole result set in memory (`as_stored`: see
         `query_records`).
 
-        An unsorted walk continues from the last record's (created_at, id)
-        rather than an ever-growing OFFSET, which would re-read every row it
-        skips and make a large export quadratic. A custom sort has no such
-        cursor, so it still pages by offset."""
-        offset = 0
-        after: tuple[_dt, uuid.UUID] | None = None
+        Each page continues from the last record's sort key (a cursor, see
+        `query_records_page`) rather than an ever-growing OFFSET, which would
+        re-read every row it skips and make a large export quadratic."""
+        cursor: str | None = None
         while True:
-            page = self.query_records(
+            page = self.query_records_page(
                 query,
                 limit=page_size,
-                offset=0 if after else offset,
+                cursor=cursor,
                 columns=columns,
-                after=after,
                 as_stored=as_stored,
             )
-            if not page:
+            if page.items:
+                yield page.items
+            if page.next_cursor is None:
                 return
-            yield page
-            if len(page) < page_size:
-                return
-            if query.sort:
-                offset += page_size
-            else:
-                after = (page[-1].created_at, page[-1].id)
+            cursor = page.next_cursor
 
     def schema_counts(self, query: RecordQuery) -> dict[str, int]:
         """Matching records per schema name -- one GROUP BY, no rows loaded.

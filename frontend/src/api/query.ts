@@ -49,6 +49,11 @@ export interface RecordQueryParams {
 export interface PageParams {
   limit?: number
   offset?: number
+  /** A previous page's `next_cursor`: keyset paging, which costs the same at
+   * any depth and is stable while records change. Replaces `offset`. */
+  cursor?: string
+  /** Take `total` from the planner's estimate (see `total_estimated`). */
+  estimate?: boolean
 }
 
 /** `?a=b&…` for the query plus paging, or '' when there is nothing to send. */
@@ -71,6 +76,8 @@ export function recordQueryString(
   if (params.child_counts) qs.set('child_counts', 'true')
   if (params.limit != null) qs.set('limit', String(params.limit))
   if (params.offset != null) qs.set('offset', String(params.offset))
+  if (params.cursor) qs.set('cursor', params.cursor)
+  if (params.estimate) qs.set('estimate', 'true')
   const query = qs.toString()
   return query ? `?${query}` : ''
 }

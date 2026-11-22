@@ -6,6 +6,7 @@
 | `stress.py` | Time, load, break and check a project made by `generate.py`: metadata and files |
 | `bench_indexes.py` | PostgreSQL index comparison on its own throwaway tables |
 | `bench_scale.py` | `records` / `audit_log` at tens of millions of rows on PostgreSQL, plus a partitioning / BRIN / JSONB side-table spike; numbers in [the design note](../docs/contributing/billion-row-collections.md) |
+| `bench_paging.py` | PostgreSQL: OFFSET vs keyset paging and exact vs estimated counts, seeded with N records (`PG_URL`, `--records`) |
 
 They import civex, so run them with this checkout's virtualenv, from inside the
 project they work on. Make a project for them; never point them at real data
