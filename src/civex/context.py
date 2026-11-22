@@ -61,6 +61,7 @@ if TYPE_CHECKING:
     from civex.services.bundle_service import BundleService
     from civex.services.export_definition_service import ExportDefinitionService
     from civex.services.history_compaction import HistoryCompactionService
+    from civex.services.index_service import IndexService
     from civex.services.device_keys import DeviceKeys
     from civex.services.library_service import LibraryService
     from civex.services.sync_authority import SyncAuthorityService
@@ -133,6 +134,8 @@ class AppContext:
     compaction_svc: HistoryCompactionService
     # Data checks: what in the records needs a look (`domain/quality`).
     quality_svc: QualityService
+    # Which fields have an index in this computer's database.
+    index_svc: IndexService
     # Where files are kept: drives or a bucket (`features.STORE_ADMIN`).
     bucket_svc: BucketService
     project: Project
@@ -768,6 +771,16 @@ def build_context(
     )
     file_access_svc.why_not_here = lambda shas: _sync().not_here_reasons(shas)
 
+    from civex.repositories.local.field_index_repo import LocalFieldIndexRepository
+    from civex.services.index_service import IndexService
+
+    index_svc = IndexService(
+        LocalFieldIndexRepository(session),
+        schema_svc,
+        project.config_store,
+        permissions=may,
+    )
+
     from civex.services.release_service import ReleaseService
 
     bundle_svc = BundleService(
@@ -778,6 +791,7 @@ def build_context(
         session.commit,
         config.civex_dir,
         batch=history_svc.batch,
+        after_bulk_write=index_svc.after_bulk_write,
     )
     release_svc = ReleaseService(
         release_repo,
@@ -831,6 +845,7 @@ def build_context(
         history_svc=history_svc,
         compaction_svc=HistoryCompactionService(audit_repo, LocalDbSpace(engine)),
         quality_svc=QualityService(record_svc, schema_svc, permissions=may),
+        index_svc=index_svc,
         retention_svc=retention_svc,
         ai_svc=ai_svc,
         ai_usage_svc=ai_usage_svc,

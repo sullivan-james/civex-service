@@ -158,9 +158,26 @@ def _stop_the_transfer_worker() -> Iterator[None]:
     first time a move is queued. Left running, it would carry on polling
     whichever project a later test is using, so stop it after each test."""
     yield
+    from civex.services.index_jobs import index_jobs
     from civex.services.transfer_jobs import jobs
 
     jobs.shutdown()
+    index_jobs.shutdown()  # likewise the field-index upkeep thread
+
+
+@pytest.fixture(autouse=True)
+def background_upkeep(monkeypatch) -> list:
+    """A CLI command that changes which fields are indexed starts a process of
+    its own to build them (`index_jobs.start_background_upkeep`). Tests never
+    start one: they get the list of projects it would have been started for,
+    and build in the foreground (`run_upkeep`) where they need the index."""
+    from civex.services import index_jobs as jobs
+
+    started: list = []
+    monkeypatch.setattr(
+        jobs, "start_background_upkeep", lambda root, civex_dir: started.append(root)
+    )
+    return started
 
 
 _template: dict[str, sqlite3.Connection] = {}

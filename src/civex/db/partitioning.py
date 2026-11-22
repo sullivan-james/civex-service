@@ -113,6 +113,7 @@ class _Captured:
     constraints: list[tuple[str, str, str]]  # (name, contype, definition)
     referencing: list[tuple[str, str, str]]  # (child table, name, definition)
     triggers: list[str]
+    statistics: list[str]  # extended statistics (field indexes keep one each)
 
 
 def _capture(conn: Connection, table: str) -> _Captured:
@@ -178,7 +179,17 @@ def _capture(conn: Connection, table: str) -> _Captured:
             {"oid": oid},
         )
     ]
-    return _Captured(indexes, constraints, referencing, triggers)
+    statistics = [
+        r[0]
+        for r in conn.execute(
+            text(
+                "SELECT pg_get_statisticsobjdef(oid) FROM pg_statistic_ext "
+                "WHERE stxrelid = :oid ORDER BY stxname"
+            ),
+            {"oid": oid},
+        )
+    ]
+    return _Captured(indexes, constraints, referencing, triggers, statistics)
 
 
 def _retarget(definition: str, old: str, new: str) -> str:
@@ -316,6 +327,9 @@ def _rebuild(
         conn.execute(text(stmt))
     for trigger in cap.triggers:
         conn.execute(text(trigger))
+    # Dropped with the old table; ANALYZE below fills them again.
+    for statistic in cap.statistics:
+        conn.execute(text(statistic))
     # What a new table would not inherit from the old one: its owner, who was
     # granted what, and per-table storage settings (autovacuum tuning).
     # A partitioned parent takes no storage settings, so they go on each partition.

@@ -1,0 +1,129 @@
+name: Benchmarks
+
+# How fast the explorer's reads are on a project of ~170k records (the `medium`
+# study from benchmarks/generate.py, without files): `stress.py queries` times
+# first pages, filters and their counts, sorts and text search, without and
+# with field indexes (see benchmarks/README.md).
+#
+#   Weekly, on tags and on demand. Not on PRs: a run takes a while and a
+#   shared runner's timings are only comparable with its own earlier ones.
+#   The generated project is cached, keyed on what decides what generation
+#   writes (the generator, the migrations and the record write path), so most
+#   weeks skip the ~15 minutes of generating it.
+#   Fails only when an operation is more than twice as slow as in the last
+#   successful run (and more than a few ms slower: `stress.py` NOISE_MS). No
+#   earlier run = nothing to compare = pass.
+
+on:
+  schedule:
+    - cron: "41 4 * * 1"
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: benchmarks-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read # to download the previous run's results
+
+jobs:
+  queries:
+    name: query benchmark (medium, SQLite)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Where things go
+        # Outside the checkout: civex finds a project by walking up from the
+        # working directory, and a checkout must never be one.
+        run: |
+          echo "PROJECT=$RUNNER_TEMP/bench-medium" >> "$GITHUB_ENV"
+          echo "RESULTS=$RUNNER_TEMP/bench-results" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # setuptools_scm reads tags
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --extra server --extra workflows --extra dev
+
+      - name: Restore the generated project
+        id: project
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PROJECT }}
+          key: bench-medium-${{ hashFiles('benchmarks/generate.py', 'src/civex/db/migrations/**', 'src/civex/services/record_service.py', 'src/civex/repositories/local/record_repo.py', 'src/civex/db/models.py') }}
+
+      - name: Generate the medium study (no files)
+        if: steps.project.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$PROJECT" "$RESULTS"
+          cd "$PROJECT"
+          "$GITHUB_WORKSPACE/.venv/bin/civex" init --sqlite
+          start=$(date +%s)
+          "$GITHUB_WORKSPACE/.venv/bin/python" "$GITHUB_WORKSPACE/benchmarks/generate.py" \
+            --preset medium | tee "$RESULTS/generate.log"
+          echo "seconds=$(( $(date +%s) - start ))" > "$RESULTS/generate.txt"
+
+      - name: Download the last successful run's results
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RESULTS/baseline"
+          run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow benchmarks.yml \
+            --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          if [ -n "$run" ]; then
+            gh run download "$run" --repo "$GITHUB_REPOSITORY" -n query-benchmark \
+              -D "$RESULTS/baseline" || echo "No results in run $run."
+          else
+            echo "No earlier successful run: nothing to compare with."
+          fi
+
+      - name: Time the queries
+        run: |
+          mkdir -p "$RESULTS"
+          cd "$PROJECT"
+          baseline=()
+          if [ -f "$RESULTS/baseline/queries.json" ]; then
+            baseline=(--baseline "$RESULTS/baseline/queries.json")
+          fi
+          "$GITHUB_WORKSPACE/.venv/bin/python" "$GITHUB_WORKSPACE/benchmarks/stress.py" \
+            queries --reps 5 \
+            --results "$RESULTS/queries.json" --markdown "$RESULTS/queries.md" \
+            "${baseline[@]}"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Query benchmark"
+            echo
+            if [ -f "$RESULTS/generate.txt" ]; then
+              . "$RESULTS/generate.txt"
+              line=$(grep '^done:' "$RESULTS/generate.log" || true)
+              echo "Generated the project this run in ${seconds}s: ${line#done: }"
+            else
+              echo "Project from the cache (generation skipped)."
+            fi
+            echo
+            cat "$RESULTS/queries.md" 2>/dev/null || echo "No results."
+          } | tee -a "$GITHUB_STEP_SUMMARY" > "$RESULTS/summary.md"
+
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: query-benchmark
+          path: |
+            ${{ env.RESULTS }}/queries.json
+            ${{ env.RESULTS }}/queries.md
+            ${{ env.RESULTS }}/summary.md
+            ${{ env.RESULTS }}/generate.log
+          if-no-files-found: warn
+          retention-days: 90

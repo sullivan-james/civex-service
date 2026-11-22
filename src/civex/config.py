@@ -169,6 +169,11 @@ class DBConfig:
     # (CIVEX_RECORDS_PARTITIONS), else 8. 0 or 1: keep `records` a plain table.
     records_partitions: int | None = None
 
+    # Field ids a person chose to index in this computer's database
+    # (`IndexService`, `domain/field_index.py`). About this database only: a
+    # setting, never synced or in history, and kept when the database moves.
+    indexed_fields: list[str] = field(default_factory=list)
+
 
 DEFAULT_RECORDS_PARTITIONS = 8
 DEFAULT_AUDIT_MONTHS_AHEAD = 2
@@ -556,6 +561,7 @@ def parse_config(data: dict, root: Path) -> Config:
         db=DBConfig(
             url=data["db"]["url"],
             docker_managed=bool(data["db"].get("docker_managed", False)),
+            indexed_fields=[str(f) for f in data["db"].get("indexed_fields", [])],
             records_partitions=(
                 _partition_count(
                     data["db"]["records_partitions"], "[db] records_partitions"
@@ -623,6 +629,9 @@ def render_config(config: Config) -> str:
         lines.append("docker_managed = true\n")
     if config.db.records_partitions is not None:
         lines.append(f"records_partitions = {int(config.db.records_partitions)}\n")
+    if config.db.indexed_fields:
+        listed = ", ".join(_tv(f) for f in config.db.indexed_fields)
+        lines.append(f"indexed_fields = [{listed}]\n")
 
     if config.ai and not config.ai.from_env:
         lines += ["\n[ai]\n", f'api_key = "{_ts(config.ai.api_key)}"\n']

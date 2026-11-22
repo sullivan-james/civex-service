@@ -15,6 +15,7 @@ callers (CLI, HTTP) decide how to show progress and errors.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import threading
@@ -28,7 +29,7 @@ from typing import Callable, Literal
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
-from civex.config import Config, DBConfig, PartitionLayout, save_config
+from civex.config import Config, PartitionLayout, save_config
 from civex.db import move as engine_move
 from civex.db.engine import enable_sqlite_foreign_keys
 from civex.db.sqlite_url import sqlite_file, sqlite_url
@@ -398,6 +399,16 @@ def run_move(
         _active.release()
 
 
+def _indexes_soon() -> None:
+    """The field indexes are this computer's choice, not data, and aren't
+    copied: the database just switched to gets them built in the background
+    by the server's `index_jobs` (the CLI queues them itself)."""
+    from civex.services.index_jobs import index_jobs
+
+    if index_jobs.running:
+        index_jobs.request()
+
+
 def _run_move(
     config: Config,
     spec: TargetSpec,
@@ -451,9 +462,12 @@ def _run_move(
                 "The copy didn't match the original, so nothing was switched."
             )
         else:
-            config.db = DBConfig(url=target.url, docker_managed=target.docker_managed)
+            config.db = dataclasses.replace(
+                config.db, url=target.url, docker_managed=target.docker_managed
+            )
             save_config(config)
             record.status = "done"
+            _indexes_soon()
     except engine_move.MoveCancelled:
         record.status, record.error = "cancelled", "Cancelled. Nothing was changed."
     except Exception as exc:
@@ -494,8 +508,11 @@ def revert(config: Config, move_id: str) -> MoveRecord:
     err = db_service.test_connection(record.from_url)
     if err:
         raise ValidationError(f"The original database can't be reached: {err}")
-    config.db = DBConfig(url=record.from_url, docker_managed=record.from_docker_managed)
+    config.db = dataclasses.replace(
+        config.db, url=record.from_url, docker_managed=record.from_docker_managed
+    )
     save_config(config)
+    _indexes_soon()
     record.reverted_at = _now()
     _save(config, record)
     return record

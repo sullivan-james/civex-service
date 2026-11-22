@@ -24,6 +24,7 @@ from civex.server.routers import (
     bucket,
     datasets,
     db,
+    indexes,
     bundle,
     export_definitions,
     file_access,
@@ -359,17 +360,20 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     from civex.services.transfer_jobs import jobs
 
     from civex.services.history_jobs import history_jobs
+    from civex.services.index_jobs import index_jobs
     from civex.services.sync_jobs import sync_jobs
 
     jobs.ensure_worker()  # picks up anything a restart left waiting
     sync_jobs.ensure_worker()  # idles unless the project follows an authority
     history_jobs.ensure_running()  # converts history from before deltas, if any
+    index_jobs.ensure_running()  # field indexes in step, planner statistics fresh
     try:
         yield
     finally:
         jobs.shutdown()
         sync_jobs.shutdown()
         history_jobs.shutdown()
+        index_jobs.shutdown()
         from civex.plugins.workers import POOL
 
         POOL.close()  # the plugin processes kept warm between runs
@@ -445,6 +449,7 @@ def api_routers(
         (remote.router, None),
         (transfers.router, features_.VOLUMES),
         (db.router, features_.DB_ADMIN),
+        (indexes.router, features_.DB_ADMIN),
         (legal.router, None),
         (status.router, None),
         (me.router, None),

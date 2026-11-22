@@ -91,6 +91,13 @@ from the next tag forward.
   Everything else uses the primary. `Project.needs_primary` (or
   `request.state.needs_primary`) keeps one request on the primary. Unset, and
   always on SQLite, nothing changes.
+- `civex.usage.project_usage(engine)`: a public, read-only, bounded-cost
+  measure of a project for a host that meters many of them. It returns stored
+  bytes and files (each file counted once however many drives hold it) and a
+  record count: exact on SQLite, the planner's estimate on PostgreSQL (a
+  capped count if the table was never analysed). It honours the engine's
+  `search_path`, runs under a statement timeout, and reports a figure it could
+  not measure as `None`.
 
 ## v2.0.1 — updating right after a release, a quicker desktop app (2026-11-19)
 

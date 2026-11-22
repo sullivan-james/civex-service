@@ -256,3 +256,30 @@ def test_a_move_keeps_which_copy_each_record_uses(
         ).all()
     moved.dispose()
     assert rows == [(ref.sha256, "default")]
+
+
+def test_the_indexes_are_built_in_the_background_after_a_switch(
+    project: Path, tmp_path: Path, monkeypatch
+):
+    from civex.context import build_local_context
+    from civex.services import index_jobs as jobs
+
+    ctx = build_local_context(load_config())
+    ctx.index_svc.set_indexed("patient", "name", True)
+    jobs.run_upkeep(ctx)
+    ctx.close()
+
+    requested = []
+    monkeypatch.setattr(jobs.IndexJobs, "running", property(lambda self: True))
+    monkeypatch.setattr(jobs.index_jobs, "request", lambda: requested.append(True))
+    record = svc.run_move(load_config(), _target(tmp_path))
+    assert record.status == "done", record.error
+    assert requested  # the server's thread was asked; the move didn't wait
+
+    ctx = build_local_context(load_config())
+    try:
+        assert not ctx.index_svc.in_step()  # not copied
+        assert jobs.run_upkeep(ctx).created  # what that thread does
+        assert ctx.index_svc.in_step()
+    finally:
+        ctx.close()

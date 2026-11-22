@@ -3691,3 +3691,85 @@ class WorkflowTrialManyResponse(BaseModel):
         description="True when the records were picked here: the most recently "
         "changed of the kind it runs on."
     )
+
+
+class FieldIndexResponse(BaseModel):
+    """A field's index in this computer's database."""
+
+    field_id: str
+    field: str = Field(description="The field's key (name).")
+    schema_name: str = Field(description="The schema that defines the field.")
+    indexed: bool = Field(
+        description="Whether the field has (or is about to have) an index."
+    )
+    reasons: list[str] = Field(
+        description=(
+            "Why: `unique_key` (part of a uniqueness key, always indexed), "
+            "`chosen` (a person asked for it). Empty when not indexed."
+        )
+    )
+    built: bool = Field(
+        description="Whether the index is in the database yet (it is built in the background)."
+    )
+    indexable: bool = Field(
+        description="Whether a field of this type can have an index (single values only)."
+    )
+
+    @classmethod
+    def from_state(cls, state: Any) -> "FieldIndexResponse":
+        return cls(
+            field_id=str(state.field_id),
+            field=state.field_name,
+            schema_name=state.schema_name,
+            indexed=bool(state.reasons),
+            reasons=list(state.reasons),
+            built=state.built,
+            indexable=state.indexable,
+        )
+
+
+class SetFieldIndexRequest(BaseModel):
+    indexed: bool = Field(
+        description="Ask for an index on the field (true) or stop asking for one (false)."
+    )
+
+
+class IndexProgressResponse(BaseModel):
+    done: int = Field(description="Indexes built so far in this round.")
+    total: int = Field(description="Indexes this round builds.")
+    schema_label: str = Field(
+        description="The kind of record the one being built is on."
+    )
+    field_label: str = Field(description="The field the one being built is on.")
+    waiting: bool = Field(
+        description="Waiting for a moment when nobody is saving (SQLite: a build "
+        "holds saves back, so it waits for them and gives way to them)."
+    )
+    yielded: int = Field(
+        description="Times a build gave way to a save and started again."
+    )
+
+
+class FieldIndexReportResponse(BaseModel):
+    fields: list[FieldIndexResponse] = Field(
+        description="Every field that should have an index, built or not."
+    )
+    stale: list[str] = Field(
+        description="Managed indexes nothing wants any more (dropped at the next reconcile)."
+    )
+    in_step: bool = Field(
+        description="Whether the database has exactly the indexes wanted."
+    )
+    building: bool = Field(
+        description="Whether the server is building or dropping indexes now."
+    )
+    progress: IndexProgressResponse | None = Field(
+        default=None, description="How far the server's build has got, while it runs."
+    )
+    elsewhere: bool = Field(
+        default=False,
+        description="Another civex process (the CLI's) is updating the indexes now.",
+    )
+    error: str | None = Field(
+        default=None, description="Why the last attempt to keep them in step failed."
+    )

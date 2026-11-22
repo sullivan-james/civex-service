@@ -109,6 +109,7 @@ config.toml
 civex.db
 civex.db-journal
 civex.db-wal
+civex.db-indexing*
 objects/
 logs/
 .cache/

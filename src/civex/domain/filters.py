@@ -53,6 +53,10 @@ class FilterCondition:
     # service; repositories only ever read `rel`.
     schema: str | None = None
     rel: Relation = SELF
+    # The field's type, set by the service with `rel` (None when the leaf
+    # names a stored key directly). A repository may use it to pick an
+    # equivalent but indexable form of a comparison.
+    dtype: str | None = None
 
 
 @dataclass

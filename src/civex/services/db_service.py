@@ -15,6 +15,7 @@ server" split, one layer up.
 
 from __future__ import annotations
 
+import dataclasses
 import socket
 import subprocess
 import time
@@ -22,7 +23,7 @@ import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 
-from civex.config import Config, DBConfig, PartitionLayout, save_config
+from civex.config import Config, PartitionLayout, save_config
 from civex.docker_manager import (
     container_exists,
     container_name,
@@ -516,7 +517,7 @@ def set_url(config: Config, url: str) -> DbStatus:
     if err:
         raise ValidationError(f"Could not connect: {err}")
     refuse_to_abandon_data(config, url)
-    config.db = DBConfig(url=url, docker_managed=False)
+    config.db = dataclasses.replace(config.db, url=url, docker_managed=False)
     save_config(config)
     apply_migrations(url)
     return get_status(config)
@@ -558,7 +559,7 @@ def setup_docker(config: Config, project_name: str | None = None) -> DbStatus:
     point config at it, and migrate."""
     url = provision_docker_postgres(project_name or config.project_root.name)
     refuse_to_abandon_data(config, url)
-    config.db = DBConfig(url=url, docker_managed=True)
+    config.db = dataclasses.replace(config.db, url=url, docker_managed=True)
     save_config(config)
     apply_migrations(url)
     return get_status(config)

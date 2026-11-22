@@ -506,6 +506,77 @@ def test_estimated_count_sums_the_partitions(pg_schema: Engine) -> None:
         assert estimated and 1900 <= count <= 2100
 
 
+def _spec(kind: str = "text"):
+    from civex.domain.field_index import FieldIndexSpec
+
+    return FieldIndexSpec(field_id=uuid.uuid4(), schema_id=uuid.uuid4(), kind=kind)
+
+
+def _index_state(engine: Engine, name: str) -> tuple[str, bool, int, int]:
+    """(relkind, valid, partitions holding a child of it, extended statistics)."""
+    with engine.connect() as c:
+        kind, valid = c.execute(
+            text(
+                "SELECT c.relkind, i.indisvalid FROM pg_class c "
+                "JOIN pg_index i ON i.indexrelid = c.oid "
+                "WHERE c.oid = to_regclass(:n)"
+            ),
+            {"n": name},
+        ).one()
+        children = c.execute(
+            text("SELECT count(*) FROM pg_inherits WHERE inhparent = to_regclass(:n)"),
+            {"n": name},
+        ).scalar_one()
+        stats = c.execute(
+            text("SELECT count(*) FROM pg_statistic_ext WHERE stxname = :n"),
+            {"n": f"{name}_stats"},
+        ).scalar_one()
+        return kind, valid, children, stats
+
+
+@needs_pg
+def test_managed_field_indexes_are_partitioned_indexes_on_the_parent(
+    pg_schema: Engine,
+) -> None:
+    from civex.db import field_indexes, statistics
+
+    ensure_schema_current(pg_schema)
+    spec = _spec("number")
+    with pg_schema.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
+        field_indexes.create(c, spec)
+        assert spec.name in field_indexes.existing(c)
+        statistics.refresh(c, statistics.INDEX_BUILT)
+    # a partitioned index ('I'), valid, with a child on each of the 8 partitions
+    assert _index_state(pg_schema, spec.name) == ("I", True, 8, 1)
+    # building it again is harmless, and dropping removes it and its statistics
+    with pg_schema.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
+        field_indexes.create(c, spec)
+        field_indexes.drop(c, spec.name)
+        assert spec.name not in field_indexes.existing(c)
+    with pg_schema.connect() as c:
+        assert (
+            c.execute(text("SELECT to_regclass(:n)"), {"n": spec.name}).scalar_one()
+            is None
+        )
+
+
+@needs_pg
+def test_conversion_recreates_managed_field_indexes_and_their_statistics(
+    pg_schema: Engine,
+) -> None:
+    from civex.db import field_indexes
+
+    _migrate_to_pre(pg_schema)
+    spec = _spec()
+    with pg_schema.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
+        field_indexes.create(c, spec)
+    assert _index_state(pg_schema, spec.name)[0] == "i"  # a plain index before
+    ensure_schema_current(pg_schema)
+    assert _index_state(pg_schema, spec.name) == ("I", True, 8, 1)
+    with pg_schema.connect() as c:
+        assert spec.name in field_indexes.existing(c)
+
+
 @needs_pg
 def test_grants_and_storage_settings_survive_the_rebuild(pg_schema: Engine) -> None:
     _migrate_to_pre(pg_schema)
