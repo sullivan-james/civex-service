@@ -156,8 +156,8 @@ def _running_docker_url(config: Config) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _engine(url: str) -> Engine:
-    return enable_sqlite_foreign_keys(create_engine(url))
+def _engine(url: str, optimize: bool = True) -> Engine:
+    return enable_sqlite_foreign_keys(create_engine(url), optimize=optimize)
 
 
 @dataclass
@@ -196,7 +196,7 @@ def summarize(url: str, docker_managed: bool = False) -> DatabaseSummary:
             if not path.exists():
                 # Connecting would create the file -- a preview mustn't.
                 return out
-        engine = _engine(url)
+        engine = _engine(url, optimize=False)  # a preview only reads
         out.tables = engine_move.row_counts(engine)
         out.rows = sum(out.tables.values())
         out.records = out.tables.get("records", 0)
@@ -453,7 +453,10 @@ def _run_move(
         layout = PartitionLayout.for_config(config.db)
         db_service.apply_migrations(config.db.url, layout)
         db_service.apply_migrations(target.url, layout)
-        source, target_engine = _engine(config.db.url), _engine(target.url)
+        source, target_engine = (
+            _engine(config.db.url, optimize=False),  # only ever read
+            _engine(target.url),
+        )
         result = engine_move.copy_database(source, target_engine, progress, cancel)
         record.counts, record.seconds = result.counts, round(result.seconds, 1)
         if not result.verified:

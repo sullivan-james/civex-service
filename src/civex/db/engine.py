@@ -29,7 +29,7 @@ from civex.db.statistics import sqlite_optimize
 SQLITE_BUSY_TIMEOUT_MS = 30_000
 
 
-def enable_sqlite_foreign_keys(engine: Engine) -> Engine:
+def enable_sqlite_foreign_keys(engine: Engine, optimize: bool = True) -> Engine:
     if engine.dialect.name == "sqlite":
 
         @event.listens_for(engine, "connect")
@@ -49,6 +49,9 @@ def enable_sqlite_foreign_keys(engine: Engine) -> Engine:
                 # A save asks a running index build to give way (index_gate).
                 if not conn.info.get(index_gate.BUILDER):
                     index_gate.note_write(db, statement)
+
+        if not optimize:  # a database that is only being read (a move's source)
+            return engine
 
         @event.listens_for(engine, "close")
         def _optimize_on_close(dbapi_connection: Any, connection_record: Any) -> None:
