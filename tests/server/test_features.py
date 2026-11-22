@@ -215,6 +215,28 @@ def test_a_host_without_remote_dial_cannot_connect_out_but_can_administer(
 @pytest.mark.parametrize(
     "method, path, body",
     [
+        ("get", "/api/remote", None),
+        ("patch", "/api/remote", {"paused": True}),
+        ("get", "/api/remote/files", None),
+        ("patch", "/api/remote/files/c", {"mode": "keep"}),
+        ("post", "/api/remote/files/c/free-up", None),
+        ("get", "/api/remote/conflicts", None),
+        ("post", "/api/remote/conflicts/x/resolve", {"take": "theirs"}),
+        ("post", "/api/remote/conflicts/resolve-many", {"ids": [], "take": "theirs"}),
+        ("post", "/api/remote/conflicts/reopen", {"ids": []}),
+    ],
+)
+def test_the_rest_of_the_dial_out_routes_answer_501_on_a_host(
+    hosted: TestClient, method: str, path: str, body: dict | None
+):
+    answer = getattr(hosted, method)(path, **({} if body is None else {"json": body}))
+    assert answer.status_code == 501, answer.text
+    assert answer.json()["detail"] == f.unavailable_message(f.REMOTE_DIAL)
+
+
+@pytest.mark.parametrize(
+    "method, path, body",
+    [
         ("post", "/api/bundle/save", {}),
         ("post", "/api/file-access/export", {"dest": "/tmp/x"}),
         ("get", "/api/file-access/exports", None),

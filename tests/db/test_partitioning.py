@@ -691,3 +691,37 @@ def test_layout_from_environment() -> None:
             < 2
         )
     assert not PartitionLayout.from_env({"CIVEX_AUDIT_PARTITIONS": "off"}).audit_monthly
+
+
+# --- the public conversion API (civex.db.migrate) ------------------------------
+
+
+@needs_pg
+def test_a_plain_records_table_converts_through_the_public_api(
+    pg_schema: Engine,
+) -> None:
+    from civex.db.migrate import convert_records_partitions, records_partitioning
+
+    ensure_schema_current(pg_schema, PartitionLayout(records_partitions=1))
+    assert records_partitioning(pg_schema).partitioned is False
+    assert convert_records_partitions(pg_schema, 1).partitioned is False  # < 2: no-op
+
+    status = convert_records_partitions(pg_schema, 4)
+    assert (status.supported, status.partitioned, status.partitions) == (True, True, 4)
+    assert _kind(pg_schema, "records") == "p"
+    # Already partitioned: left as it is, whatever count is asked for.
+    assert convert_records_partitions(pg_schema, 8).partitions == 4
+
+
+def test_the_conversion_api_reports_sqlite_as_unsupported(tmp_path: Path) -> None:
+    from civex.db.migrate import convert_records_partitions, records_partitioning
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'c.db'}")
+    ensure_schema_current(engine)
+    status = records_partitioning(engine)
+    assert (status.supported, status.partitioned, status.partitions) == (
+        False,
+        False,
+        0,
+    )
+    assert convert_records_partitions(engine, 8) == status

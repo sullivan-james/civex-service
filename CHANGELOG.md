@@ -33,6 +33,18 @@ from the next tag forward.
 - **`civex auth status`** shows the authority, this device's name and id, whether
   it has joined, and the last sync error.
 
+### For hosts
+
+- **Converting `records` to hash partitions is public.**
+  `civex.db.migrate.convert_records_partitions(engine, partitions=8)` lays an
+  existing PostgreSQL `records` table out as hash partitions, and
+  `records_partitioning(engine)` reports the layout (`RecordsPartitioning`), so
+  a host no longer imports `civex.db.partitioning`.
+- **The dial-out routes are all gated on `remote_dial`.** `/remote`,
+  `/remote/files*` and `/remote/conflicts*` now answer 501 on a host without it,
+  like `/remote/connect` and `/remote/sync`; the app's status poll stops asking
+  there.
+
 ## v2.1.0 — big collections stay fast, hosting hooks, partitioned PostgreSQL (2026-11-22)
 
 ### Breaking

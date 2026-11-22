@@ -165,7 +165,7 @@ Star topology: a project follows one **authority** (`civex serve` with `[sync] s
 - Workflows and plugins are shared through the library, never synced, and **nothing is written into `_civex/workflows`/`_civex/plugins` by sync or publishing** (describing a plugin runs it). The authority checks text without running it.
 - Failures go through `domain/sync.plain_failure` (plain words; technical text in `detail`). A sync failure is not toasted; the status bar holds it.
 - A new sync scenario goes in `civex.testing`, with a thin wrapper test in `tests/sync`. `tests/sync/test_invariants.py` must keep passing.
-- **Hosting surface for the database.** `civex.db.migrate` is public to hosts: `ensure_schema_current(engine)` migrates, `schema_status(engine)` only reports (`SchemaStatus`) and honours a `search_path` on the engine. A host that wants to refuse a stale tenant calls `schema_status`, never a migration attempt.
+- **Hosting surface for the database.** `civex.db.migrate` is public to hosts: `ensure_schema_current(engine)` migrates, `schema_status(engine)` only reports (`SchemaStatus`) and honours a `search_path` on the engine. A host that wants to refuse a stale tenant calls `schema_status`, never a migration attempt. A host that wants a PostgreSQL `records` table (made with partitioning off, or before it existed) hash-partitioned calls `convert_records_partitions(engine, n)` and reads the layout with `records_partitioning(engine)`; hosts never import `civex.db.partitioning`.
 
 ### Formula fields
 
