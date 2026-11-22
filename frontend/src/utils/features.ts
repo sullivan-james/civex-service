@@ -21,6 +21,7 @@ export const LOCAL_FEATURES = [
   'settings_advanced',
   'settings_devices',
   'settings_members',
+  'remote_dial',
 ] as const
 
 export type Feature = (typeof LOCAL_FEATURES)[number] | string
