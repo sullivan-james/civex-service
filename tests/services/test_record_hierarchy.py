@@ -78,9 +78,8 @@ def test_within_counts_and_pages_agree(ctx: AppContext, tree):
     assert len(ctx.record_svc.query_records(query, limit=2)) == 2
 
 
-def test_within_requires_a_schema_and_a_descendant_schema(ctx: AppContext, tree):
-    with pytest.raises(ValidationError, match="needs a schema"):
-        ctx.record_svc.query_records(_q(within=str(tree["e1"].id)))
+def test_within_needs_a_descendant_schema(ctx: AppContext, tree):
+    # With no schema, within lists every kind beneath (test_records_of_every_kind).
     with pytest.raises(ValidationError, match="can't descend"):
         ctx.record_svc.query_records(_q(schema="recording", within=str(tree["S1a"].id)))
 

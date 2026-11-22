@@ -57,8 +57,7 @@ pg_dump --format=custom --file civex.pgdump "postgresql://…"
 the records cite, and the project's workflows and plugins to one file that
 any civex can read, whatever its database. Records keep their ids, so a record
 inside another, and one that references another, still line up in the project
-the bundle is read into. In the app it is **Export bundle…** and **Import
-bundle…** on the Collections page.
+the bundle is read into. In the app it is **Copy to another project…** and **Bring in from another project…** on the Collections page. The copy can be put straight onto a drive of this computer (its exports folder), or downloaded.
 
 ```bash
 civex bundle export --output backup.civex.zip

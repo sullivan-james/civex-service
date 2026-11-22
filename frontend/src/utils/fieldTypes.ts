@@ -24,6 +24,7 @@ export const FIELD_TYPES = [
   'tags',
   'geo',
   'longtext',
+  'formula',
 ] as const
 
 export type FieldType = (typeof FIELD_TYPES)[number]

@@ -8,8 +8,11 @@ import uuid
 from datetime import date as _date, datetime as _dt, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
+from zoneinfo import ZoneInfo
 
+from civex.domain.charts import Chart
 from civex.domain import permissions
+from civex.domain import notes as note_rules
 from civex.domain.permissions import EVERYTHING, Permissions
 from civex.domain.file_refs import without_file_locations
 from civex.domain.sync import not_on_server_yet
@@ -21,9 +24,17 @@ from civex.domain.dtos import (
     FieldDTO,
     FieldValueDTO,
     FileRef,
+    BulkEditSkipDTO,
+    RecordBulkEditPlanDTO,
+    RecordBulkEditResultDTO,
     RecordDTO,
     RecordMovePlanDTO,
     RecordMoveResultDTO,
+    RecordPoint,
+    RecordPoints,
+    FormulaPreviewDTO,
+    POINTS_DEFAULT_LIMIT,
+    POINTS_MAX_LIMIT,
     ReferrerGroupDTO,
     ResolvedField,
     ResolvedSchema,
@@ -36,7 +47,8 @@ from civex.domain.dtos import (
 from civex.domain import filename_extract
 from civex.domain import geo as geo_domain
 from civex.domain.audit_diff import tombstone
-from civex.domain import partial_dates, templating, units
+from civex.domain import formulas, partial_dates, templating, units
+from civex.domain.field_descriptors import COMPUTED_DTYPES
 from civex.domain.exceptions import (
     FieldValueError,
     CoercionError,
@@ -54,9 +66,16 @@ from civex.domain.filters import (
     map_leaves,
     parse_filter_tree,
 )
-from civex.domain.query import RecordQuery, ResolvedQuery
+from civex.domain.query import (
+    META_SORTS,
+    UNSEARCHED_DTYPES,
+    RecordQuery,
+    ResolvedQuery,
+    TextSearch,
+)
 from civex.domain.scopes import GLOBAL, can_reference
-from civex.domain.timezones import parse_datetime
+from civex.domain import summary
+from civex.domain.timezones import offset_changes, parse_datetime
 from civex.domain.uniqueness import key_values
 from civex.repositories.protocols import (
     AuditRepository,
@@ -64,6 +83,7 @@ from civex.repositories.protocols import (
     ObjectStore,
     RecordRepository,
 )
+from civex.services.progress import Progress
 from civex.services.schema_service import SchemaResolver, SchemaService
 
 from typing import TYPE_CHECKING
@@ -303,6 +323,24 @@ def _check_restrictions(
                 )
 
 
+def restriction_problem(
+    value: Any, field: FieldDTO, restrictions: dict[str, Any] | None = None
+) -> str | None:
+    """Why `field`'s rules (or `restrictions`, rules it would have) refuse a
+    stored value, or None: `_check_restrictions` asked without raising, for
+    the data check, which reports every value instead of stopping at one."""
+    try:
+        _check_restrictions(
+            value,
+            field.dtype,
+            field.restrictions if restrictions is None else restrictions,
+            field.name,
+        )
+    except ValidationError as e:
+        return str(e)
+    return None
+
+
 # Path separators and characters invalid in filenames on common filesystems —
 # template values come from user-entered field data, so they're untrusted.
 _UNSAFE_FILENAME_CHARS_RE = re.compile(r'[\\/\x00-\x1f:*?"<>|]')
@@ -343,10 +381,68 @@ def resolve_filename(
     return templating.with_extension(stem, ref.filename)
 
 
+def _check_open_notes_leaf(leaf: FilterCondition) -> None:
+    """A filter condition on whether a record has open threads of notes
+    (`civex.domain.notes.OPEN_NOTES_FILTER`): about the listed record itself,
+    `eq` true or false."""
+    if leaf.schema:
+        raise ValidationError(f"'{leaf.field}' is about the listed records only")
+    if leaf.op not in note_rules.FILTER_OPERATORS:
+        raise ValidationError(
+            f"'{leaf.field}' can't be filtered with '{leaf.op}' "
+            f"(use {', '.join(note_rules.FILTER_OPERATORS)})"
+        )
+    if not isinstance(leaf.value, bool):
+        raise ValidationError(f"'{leaf.field}' is true or false")
+
+
 def _audit_batch(audit: AuditRepository | None, kind: str, many: bool):
     """One batch for an operation that touches several records, so history
     shows it as one event. A single record is just its own entry."""
     return audit.batch(kind) if audit is not None and many else nullcontext()
+
+
+# Records read and saved at a time by a bulk edit.
+BULK_EDIT_PAGE = 500
+# How many skipped records a bulk change names (the count is exact).
+MAX_REPORTED = 200
+
+
+def _bulk_edit_problem(shape: ResolvedSchema | None, fields: list[str]) -> str | None:
+    """Why a record of `shape` can't take a bulk edit of `fields`, or None. A
+    record holds values only for its schema's *own* fields: an inherited one's
+    value is on the record above, so it is that kind that is edited."""
+    if shape is None:
+        return "Its schema no longer exists"
+    own = {f.name for f in shape.schema.fields}
+    kind = shape.schema.display_name
+    for name in fields:
+        found = shape.by_name.get(name)
+        if found is not None and found.dtype in COMPUTED_DTYPES:
+            return f"'{name}' is a formula: it is worked out, never set"
+        if name in own:
+            continue
+        if name in shape.by_name:
+            source = next(
+                (rf.source_schema_name for rf in shape.fields if rf.field.name == name),
+                "the record above",
+            )
+            return (
+                f"'{name}' is a field of the {source} a {kind} sits in, not of "
+                f"the {kind} itself: edit the {source} records instead"
+            )
+        return f"A {kind} has no field '{name}'"
+    return None
+
+
+def _patched(existing: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any] | None:
+    """The whole data a record holding `existing` (by field name) would hold
+    with only `fields` changed, or None when they already hold those values:
+    the one "change only these fields" rule, behind `patch` and a bulk edit.
+    A field set to None is cleared; one already empty counts as holding it."""
+    if all(existing.get(k) == v for k, v in fields.items()):
+        return None
+    return {**existing, **fields}
 
 
 def _is_blank_value(value: Any) -> bool:
@@ -362,10 +458,27 @@ def _file_dicts(value: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _changed_values(
+    data: dict[str, Any], stored: dict[str, Any] | None
+) -> dict[str, Any]:
+    """The values in `data` (by field name) that differ from `stored`, the
+    record's values now, or all of them when there is none (a create). The
+    one rule for what an update checks: a value the record already holds is
+    not checked again against restrictions, references or unique keys, so a
+    rule tightened since it was stored never blocks an edit to another field.
+    Compare after `_strip_derived_file_keys` and `_normalise_datetimes`, so an
+    echoed-back file or datetime counts as unchanged."""
+    if stored is None:
+        return data
+    return {k: v for k, v in data.items() if k not in stored or stored[k] != v}
+
+
 def _strip_derived_file_keys(
     data: dict[str, Any], fields: list[ResolvedField]
 ) -> dict[str, Any]:
-    """`data` without the response-only keys on its file values."""
+    """`data` without what reads add and a client may echo back: the
+    response-only keys on its file values, and any value for a formula
+    (worked out when read, never stored)."""
 
     def clean(item: Any) -> Any:
         if isinstance(item, dict):
@@ -374,6 +487,9 @@ def _strip_derived_file_keys(
 
     result = dict(data)
     for rf in fields:
+        if rf.field.dtype in COMPUTED_DTYPES:
+            result.pop(rf.field.name, None)
+            continue
         if rf.field.dtype not in ("file", "file_list"):
             continue
         value = result.get(rf.field.name)
@@ -603,12 +719,19 @@ class RecordService:
     ) -> dict[str, Any]:
         if shape is None:
             return data
-        # A deleted field's value stays in the stored data (so a restore brings it
-        # back) but isn't a field the record has now.
+        # A record's data is the values of the fields its kind has. A deleted
+        # field's value stays in the stored data (so a restore brings it back)
+        # but isn't one of them. Nor is a value left under a key that names no
+        # field at all: the id of a field that is gone for good (its kind was
+        # purged, or the record's kind no longer sits under the one that had
+        # it), or a name kept from before values were stored by field id whose
+        # field has since gone. Passed through, it would read as a field no
+        # kind has, and a bundle or a release of the record could not be read
+        # back ("A line of records.jsonl can't be read").
         return {
             shape.id_to_name.get(k, k): v
             for k, v in data.items()
-            if k not in shape.deleted_by_id
+            if k in shape.id_to_name or k in shape.name_to_id
         }
 
     def _snapshot(self, dto: RecordDTO) -> dict[str, Any]:
@@ -690,12 +813,145 @@ class RecordService:
         (`_attach_file_locations`). Audit snapshots use `_with_names` alone, so
         none of this -- all of it momentary -- is ever frozen into the log."""
         shapes = shapes or self._schema_svc.resolver()
-        return self._attach_file_locations(
-            self._label_references(
-                self._name_files_from_relatives(records, shapes), shapes
+        return self._attach_formulas(
+            self._attach_file_locations(
+                self._label_references(
+                    self._name_files_from_relatives(records, shapes), shapes
+                ),
+                shapes,
             ),
             shapes,
         )
+
+    def _attach_open_notes(self, records: list[RecordDTO]) -> list[RecordDTO]:
+        """How many threads of notes not yet resolved each record has, and the
+        first line of the latest, in one query: on a record read (`get`) and a
+        list (`query_records`), not on a write."""
+        if not records:
+            return records
+        found = self._records.open_notes_of([r.id for r in records])
+        return [
+            dataclasses.replace(
+                r,
+                open_notes=found[r.id][0] if r.id in found else 0,
+                latest_note=note_rules.first_line(found[r.id][1])
+                if r.id in found
+                else None,
+            )
+            for r in records
+        ]
+
+    def _attach_formulas(
+        self, records: list[RecordDTO], shapes: SchemaResolver
+    ) -> list[RecordDTO]:
+        """Each record's own formula fields worked out, in `derived` (never in
+        `data`, so nothing that stores or sends a record's values can carry
+        one), with `formula_errors` saying why one is blank when it can't be.
+        Per schema, the values it reads from the records above and through
+        links are fetched in one batch (`_derived_values`); a schema with no
+        formulas costs nothing."""
+        groups: dict[uuid.UUID, list[int]] = {}
+        for i, r in enumerate(records):
+            shape = shapes(r.schema_id)
+            if shape is not None and any(
+                f.dtype in COMPUTED_DTYPES for f in shape.schema.fields
+            ):
+                groups.setdefault(r.schema_id, []).append(i)
+        if not groups:
+            return records
+        out = list(records)
+        for schema_id, indexes in groups.items():
+            shape = shapes(schema_id)
+            assert shape is not None
+            names = [f.name for f in shape.schema.fields if f.dtype in COMPUTED_DTYPES]
+            results = self._formula_results(
+                shape.schema, [records[i] for i in indexes], names
+            )
+            for i, found in zip(indexes, results):
+                r = records[i]
+                errors = {n: e for n, (_, e) in found.items() if e}
+                out[i] = dataclasses.replace(
+                    r,
+                    derived={
+                        **(r.derived or {}),
+                        **{n: v for n, (v, _) in found.items()},
+                    },
+                    formula_errors=errors or None,
+                )
+        return out
+
+    def _formula_results(
+        self, schema: SchemaDTO, records: list[RecordDTO], names: list[str]
+    ) -> list[dict[str, tuple[Any, str | None]]]:
+        """Per record (all of `schema`, name-keyed), each of the formula fields
+        `names` worked out: (value, None), or (None, why) when it can't be.
+        The one place a formula is worked out for records. A formula may read
+        another of the schema's formulas (worked out first), a field of a
+        record above (its formula too) or `link.field`; those are fetched for
+        the whole batch, one lookup per level, never per record."""
+        own = {f.name: f for f in schema.fields}
+        compiled: dict[str, tuple[formulas.Formula | None, str | None]] = {}
+        pending = list(names)
+        while pending:
+            name = pending.pop()
+            f = own.get(name)
+            if name in compiled or f is None or f.dtype not in COMPUTED_DTYPES:
+                continue
+            try:
+                formula = formulas.parse((f.restrictions or {}).get("expression", ""))
+            except ValidationError as e:
+                compiled[name] = (None, str(e))
+                continue
+            compiled[name] = (formula, None)
+            pending.extend(n for n in formula.names if n in own)
+        outside = list(
+            dict.fromkeys(
+                n
+                for formula, _ in compiled.values()
+                if formula is not None
+                for n in formula.names
+                if n not in own
+            )
+        )
+        extra = (
+            self._derived_values(schema.name, records, outside)
+            if outside and records
+            else [{} for _ in records]
+        )
+        _, dtypes = self._schema_svc.formula_kinds(schema)
+
+        out: list[dict[str, tuple[Any, str | None]]] = []
+        for record, more in zip(records, extra):
+            values = {**record.data, **more}
+            done: dict[str, tuple[Any, str | None]] = {}
+
+            def work(name: str, seen: frozenset[str]) -> None:
+                formula, problem = compiled[name]
+                if formula is None:
+                    done[name] = (None, problem)
+                    return
+                if name in seen:
+                    done[name] = (None, "it reads itself through other formulas")
+                    return
+                for used in formula.names:
+                    if used in compiled and used not in done:
+                        work(used, seen | {name})
+                    if used in compiled:
+                        values[used] = done[used][0]
+                rules = own[name].restrictions or {}
+                done[name] = formulas.compute(
+                    formula,
+                    values,
+                    dtypes,
+                    rules.get("result") or "string",
+                    rules.get("decimals"),
+                )
+
+            for name in names:
+                if name in compiled and name not in done:
+                    work(name, frozenset())
+            out.append({n: done[n] for n in names if n in done})
+        return out
 
     def _name_files_from_relatives(
         self, records: list[RecordDTO], shapes: SchemaResolver
@@ -798,6 +1054,50 @@ class RecordService:
             for ref in _file_dicts(r.data.get(name))
             if ref.get("sha256") and (r.id, ref["sha256"]) not in used
         }
+        location = self._locator(wanted, used, unpointed)
+
+        def decorate(record_id: uuid.UUID, value: Any) -> Any:
+            if isinstance(value, dict):
+                return {
+                    **value,
+                    "location": location(record_id, value.get("sha256")),
+                }
+            if isinstance(value, list):
+                return [decorate(record_id, item) for item in value]
+            return value
+
+        return [
+            dataclasses.replace(
+                r,
+                data={
+                    **r.data,
+                    **{n: decorate(r.id, r.data.get(n)) for n in names if n in r.data},
+                },
+            )
+            if names
+            else r
+            for r, names in zip(records, file_fields)
+        ]
+
+    def locate_pointed(
+        self, pointed: dict[str, str | None]
+    ) -> Callable[[str], dict[str, Any]]:
+        """Where files are for an owner that isn't a live record (a release):
+        `pointed` is each file's copy as that owner points at it (None: none
+        yet). The same `location` a record's file value carries, worked out the
+        same way (one status check per drive)."""
+        nobody = uuid.UUID(int=0)
+        used = {(nobody, sha): v for sha, v in pointed.items() if v}
+        unpointed = {sha for sha, v in pointed.items() if not v}
+        location = self._locator(set(pointed), used, unpointed)
+        return lambda sha: location(nobody, sha)
+
+    def _locator(
+        self,
+        wanted: set[str],
+        used: dict[tuple[uuid.UUID, str], str],
+        unpointed: set[str],
+    ) -> Callable[[uuid.UUID, str | None], dict[str, Any]]:
         volume_of = self._files.locate_volumes(unpointed) if unpointed else {}
         following = self.files_from_server()
         from_server = None in volume_of.values() and following
@@ -866,28 +1166,7 @@ class RecordService:
                 **({"sent": sha not in unsent} if following else {}),
             }
 
-        def decorate(record_id: uuid.UUID, value: Any) -> Any:
-            if isinstance(value, dict):
-                return {
-                    **value,
-                    "location": location(record_id, value.get("sha256")),
-                }
-            if isinstance(value, list):
-                return [decorate(record_id, item) for item in value]
-            return value
-
-        return [
-            dataclasses.replace(
-                r,
-                data={
-                    **r.data,
-                    **{n: decorate(r.id, r.data.get(n)) for n in names if n in r.data},
-                },
-            )
-            if names
-            else r
-            for r, names in zip(records, file_fields)
-        ]
+        return location
 
     def _label_references(
         self, records: list[RecordDTO], shapes: SchemaResolver | None = None
@@ -1183,6 +1462,11 @@ class RecordService:
         """`collection_id` steers where a new file is stored (placement).
         `timezone` is the collection's zone, used to read an offset-less
         datetime; the field's own `timezone` restriction takes precedence."""
+        if dtype in COMPUTED_DTYPES:
+            raise ValidationError(
+                f"Field '{field_name}' is a formula: it is worked out from the "
+                "other fields, never set"
+            )
         if dtype == "datetime":
             try:
                 parsed = _parse_datetime(
@@ -1376,15 +1660,14 @@ class RecordService:
         editing a record never fails over a reference it already held."""
         if shape is None:
             return
+        changed = _changed_values(data, unchanged)
         wanted: list[tuple[str, Any]] = []
         for rf in shape.fields:
             field = rf.field
             if field.dtype not in ("reference", "reference_list"):
                 continue
-            value = data.get(field.name)
-            if value is None or (
-                unchanged is not None and unchanged.get(field.name) == value
-            ):
+            value = changed.get(field.name)
+            if value is None:
                 continue
             for item in value if isinstance(value, list) else [value]:
                 wanted.append((field.name, item))
@@ -1397,23 +1680,44 @@ class RecordService:
         the target must be a live record here or in a global collection. All
         the targets are fetched together, and each collection looked up once,
         however many references a record holds."""
+        for problem in self.reference_problems(wanted, dataset.id):
+            if problem:
+                raise ValidationError(problem)
+
+    def reference_problems(
+        self,
+        wanted: list[tuple[str, Any]],
+        dataset_id: uuid.UUID,
+        owners: dict[uuid.UUID, DatasetDTO | None] | None = None,
+    ) -> list[str | None]:
+        """For each (field name, record id) in `wanted`, why a record in
+        collection `dataset_id` can't hold that reference, or None: the target
+        must be a live record there or in a global collection. The one rule
+        behind a save and the data check. All the targets are fetched
+        together, and each collection looked up once (`owners` carries the
+        lookups across calls), however many references there are."""
         if not wanted:
-            return
-        ids: list[uuid.UUID] = []
-        for field_name, raw in wanted:
+            return []
+        ids: list[uuid.UUID | None] = []
+        for _, raw in wanted:
             try:
                 ids.append(uuid.UUID(str(raw)))
             except ValueError:
-                raise ValidationError(
-                    f"Field '{field_name}': '{raw}' is not a record id"
-                ) from None
-        targets = {t.id: t for t in self._records.list_by_ids(ids)}
-        owners: dict[uuid.UUID, DatasetDTO | None] = {}
+                ids.append(None)
+        found = [i for i in ids if i is not None]
+        targets = {t.id: t for t in self._records.list_by_ids(found)} if found else {}
+        owners = {} if owners is None else owners
+        problems: list[str | None] = []
         for (field_name, raw), target_id in zip(wanted, ids):
+            if target_id is None:
+                problems.append(f"Field '{field_name}': '{raw}' is not a record id")
+                continue
             target = targets.get(target_id)
             if target is None or target.deleted_at is not None:
-                raise ValidationError(f"Field '{field_name}': record {raw} not found")
-            if target.dataset_id == dataset.id:
+                problems.append(f"Field '{field_name}': record {raw} not found")
+                continue
+            if target.dataset_id == dataset_id:
+                problems.append(None)
                 continue
             if target.dataset_id not in owners:
                 owners[target.dataset_id] = self._datasets.get_by_id(
@@ -1422,13 +1726,16 @@ class RecordService:
                     with_count=False,
                 )
             owner = owners[target.dataset_id]
-            if owner is None or not can_reference(dataset.id, owner.id, owner.scope):
+            if owner is None or not can_reference(dataset_id, owner.id, owner.scope):
                 where = f"collection '{owner.name}'" if owner else "another collection"
-                raise ValidationError(
+                problems.append(
                     f"Field '{field_name}': record {str(target_id)[:8]} is in "
                     f"{where}, which is local. A record can only reference "
                     f"records in its own collection or in a global collection."
                 )
+                continue
+            problems.append(None)
+        return problems
 
     def referrer_counts(self, record_id: str) -> list[ReferrerGroupDTO]:
         """What points at this record: live records holding a reference to it,
@@ -1491,10 +1798,7 @@ class RecordService:
         that knows only some fields must start from the current ones: this is
         the one place that does, for `patch` and for a plugin's `patch_record`."""
         current = self.get(record_id)
-        existing = without_file_locations(current.data)
-        if all(existing.get(k) == v for k, v in fields.items()):
-            return current, None
-        return current, {**existing, **fields}
+        return current, _patched(without_file_locations(current.data), fields)
 
     def patch(
         self,
@@ -1645,12 +1949,7 @@ class RecordService:
         before = head.get("data") or {} if head and not head.get("deleted_at") else None
         named = self._ids_to_names(data, shape)
         before_named = self._ids_to_names(before, shape) if before is not None else None
-        changed = {
-            k: v
-            for k, v in named.items()
-            if before_named is None or before_named.get(k) != v
-        }
-        self._validate_data(changed, shape)
+        self._validate_data(_changed_values(named, before_named), shape)
         self._check_references(named, shape, dataset, unchanged=before_named)
         self._check_unique(
             shape, dataset.id, parent_id, data, exclude_id=record_id, unchanged=before
@@ -1806,7 +2105,9 @@ class RecordService:
         record = self._records.get_by_prefix(record_id)
         if not record:
             raise NotFoundError(f"Record '{record_id}' not found")
-        return self._attach_reference_labels([self._with_names(record)])[0]
+        return self._attach_open_notes(
+            self._attach_reference_labels([self._with_names(record)])
+        )[0]
 
     def files_for_zip(
         self,
@@ -1896,7 +2197,33 @@ class RecordService:
             raise NotFoundError(f"Record '{record_id}' not found")
         self._permissions.require(permissions.WRITE_RECORDS, raw.dataset_id)
         shapes = self._schema_svc.resolver()
-        shape = shapes(raw.schema_id)
+        dataset = (
+            self._datasets.get_by_id(
+                raw.dataset_id,
+                include_deleted=True,
+                with_count=False,
+            )
+            if raw.dataset_id
+            else None
+        )
+        named, _ = self._write_update(
+            raw, data, shapes, dataset, _job_depth=_job_depth, _cause=_cause
+        )
+        return self._attach_reference_labels([named], shapes)[0]
+
+    def _checked_update(
+        self,
+        raw: RecordDTO,
+        data: dict[str, Any],
+        shape: ResolvedSchema | None,
+        dataset: DatasetDTO | None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """What `raw` would store if saved with `data` (its whole data, by
+        field name), checked as every save is: values read from file names,
+        defaults, datetimes normalised, restrictions, references and unique
+        keys. The record's data as it was (by name) and the data to store (by
+        field id); raises `ValidationError` and writes nothing. The one set of
+        checks behind `update` and a bulk edit's plan."""
         old_data = self._ids_to_names(raw.data, shape)
         # Fields read from a file's name first, then defaults, then validation.
         # The stored data says whether the file changed; the parent is only
@@ -1909,15 +2236,6 @@ class RecordService:
             stored=old_data,
         )
         data = self._apply_defaults(data, shape)
-        dataset = (
-            self._datasets.get_by_id(
-                raw.dataset_id,
-                include_deleted=True,
-                with_count=False,
-            )
-            if raw.dataset_id
-            else None
-        )
         if shape is not None:
             data = _strip_derived_file_keys(data, shape.fields)
         data = self._normalise_datetimes(
@@ -1926,7 +2244,10 @@ class RecordService:
             dataset.timezone if dataset else None,
             unchanged=old_data,
         )
-        self._validate_data(data, shape)
+        # Only what this save changes is checked (`_changed_values`): a value
+        # the record already holds may break a rule tightened since, and must
+        # not stop an edit to another field (the data check finds it).
+        self._validate_data(_changed_values(data, old_data), shape)
         if dataset:
             self._check_references(data, shape, dataset, unchanged=old_data)
         id_data = self._names_to_ids(data, shape)
@@ -1945,6 +2266,23 @@ class RecordService:
                 exclude_id=raw.id,
                 unchanged=raw.data,
             )
+        return old_data, id_data
+
+    def _write_update(
+        self,
+        raw: RecordDTO,
+        data: dict[str, Any],
+        shapes: SchemaResolver,
+        dataset: DatasetDTO | None,
+        _job_depth: int = 0,
+        _cause: dict[str, Any] | None = None,
+    ) -> tuple[RecordDTO, int]:
+        """Save `raw` with `data` (checked first, `_checked_update`), log it and
+        fire its triggers: the record as saved, by name and without reference
+        labels, and how many workflow runs were queued. Permission is the
+        caller's to ask."""
+        shape = shapes(raw.schema_id)
+        old_data, id_data = self._checked_update(raw, data, shape, dataset)
         dto = self._records.update(id=raw.id, data=id_data)
         named = self._with_names(dto, shapes)
         # What was stored, by field name, with nothing the server adds on a read
@@ -1964,7 +2302,7 @@ class RecordService:
                 for k in set(old_data) | set(new_data)
                 if old_data.get(k) != new_data.get(k)
             }
-            self._job_svc.trigger_for_record(
+            runs = self._job_svc.trigger_for_record(
                 named,
                 "record_updated",
                 changed_fields=changed,
@@ -1972,7 +2310,8 @@ class RecordService:
                 changes={k: (old_data.get(k), new_data.get(k)) for k in changed},
                 cause=_cause,
             )
-        return self._attach_reference_labels([named], shapes)[0]
+            return named, len(runs)
+        return named, 0
 
     # ------------------------------------------------------------------
     # Queries -- every read path (collection list, a record's descendants,
@@ -2001,13 +2340,17 @@ class RecordService:
                 )
             parent_uuid = parent.id
 
-        within = None
-        if query.within:
-            if schema is None:
-                raise ValidationError("'within' needs a schema to list")
-            ancestor = self._records.get_by_prefix(query.within)
-            if not ancestor:
-                raise NotFoundError(f"Record '{query.within}' not found")
+        within = beneath = None
+        ancestor = self._records.get_by_prefix(query.within) if query.within else None
+        if query.within and ancestor is None:
+            raise NotFoundError(f"Record '{query.within}' not found")
+        if ancestor is not None and schema is None:
+            # Every kind beneath the record: as far down as its kinds go.
+            below = self._schema_svc.descendants(
+                self._schema_svc.get(ancestor.schema_name)
+            )
+            beneath = (ancestor.id, max((d for _, d in below), default=0))
+        elif ancestor is not None and schema is not None:
             chain = self._schema_svc.ancestors(schema)
             hops = next(
                 (i for i, a in enumerate(chain, start=1) if a.id == ancestor.schema_id),
@@ -2040,10 +2383,63 @@ class RecordService:
             schema_id=schema.id if schema else None,
             parent_record_id=parent_uuid,
             within=within,
+            beneath=beneath,
             field_filters=field_filters,
-            search=query.search or None,
+            search=self.text_search(query.search, schema, query.search_fields),
             filter_tree=self._resolve_filter(schema, query.filter_tree),
             sort=self._resolve_sort(schema, query.sort),
+        )
+
+    def text_search(
+        self,
+        term: str | None,
+        schema: SchemaDTO | None = None,
+        field_names: list[str] | None = None,
+    ) -> TextSearch | None:
+        """A search term resolved to the fields it looks in: the one rule
+        behind the explorer, reference pickers, the jump-to box and the AI
+        tools. Without `field_names` that is every searchable field of
+        `schema`, or of every schema when there is none; with them, exactly
+        those fields of `schema`. Only a kind's own fields: a record holds no
+        value for a field it inherits (that is the record above's). A field of a type in
+        `UNSEARCHED_DTYPES` (a reference, a boolean, a geometry) can't be
+        searched. None when there is nothing to search for."""
+        term = (term or "").strip()
+        if not term:
+            return None
+        if field_names:
+            if schema is None:
+                raise ValidationError(
+                    "To search one field, also choose a schema. To search "
+                    "every field, leave the field out."
+                )
+            by_name = {f.name: f for f in schema.fields}
+            ids = []
+            for name in field_names:
+                f = by_name.get(name)
+                if f is None:
+                    raise ValidationError(
+                        f"'{schema.name}' has no field '{name}' of its own to "
+                        "search (an inherited field's value is on the record "
+                        "above: search that kind instead)"
+                    )
+                if f.dtype in UNSEARCHED_DTYPES:
+                    raise ValidationError(
+                        f"'{name}' is a {f.dtype} field and can't be searched"
+                    )
+                ids.append(str(f.id))
+            return TextSearch(term, tuple(dict.fromkeys(ids)))
+        if schema is not None:
+            fields = list(schema.fields)
+        else:
+            fields = [f for s in self._schema_svc.list_all() for f in s.fields]
+        return TextSearch(
+            term,
+            tuple(
+                dict.fromkeys(
+                    str(f.id) for f in fields if f.dtype not in UNSEARCHED_DTYPES
+                )
+            ),
         )
 
     def _relations(self, schema: SchemaDTO) -> dict[str, tuple[SchemaDTO, Relation]]:
@@ -2071,7 +2467,24 @@ class RecordService:
         """The field a condition/sort names, and its relation to `schema`.
         Unqualified names resolve on `schema` itself, else on the nearest
         ancestor that owns them (an inherited field lives on the parent
-        record, not the child's own data)."""
+        record, not the child's own data). A formula can't be filtered or
+        sorted by: the database holds no value for it to test."""
+        f, rel = self._locate_field(schema, related, field_name, schema_name, what)
+        if f.dtype in COMPUTED_DTYPES and what in ("filter", "sort"):
+            raise ValidationError(
+                f"'{f.name}' is a formula, worked out when read: a list can't be "
+                f"{'filtered' if what == 'filter' else 'sorted'} by it"
+            )
+        return f, rel
+
+    def _locate_field(
+        self,
+        schema: SchemaDTO,
+        related: dict[str, tuple[SchemaDTO, Relation]],
+        field_name: str,
+        schema_name: str | None,
+        what: str,
+    ) -> tuple[FieldDTO, Relation]:
         if schema_name is None:
             for owner, rel in related.values():
                 if rel.direction == "down":
@@ -2102,17 +2515,25 @@ class RecordService:
         if tree is None:
             return None
         node = parse_filter_tree(tree)
+        for leaf in leaves(node):
+            if leaf.field == note_rules.OPEN_NOTES_FILTER:
+                _check_open_notes_leaf(leaf)
         if schema is None:
-            # No schema to resolve names against (a mixed-schema list):
-            # conditions pass through by stored key, as they always have.
-            if any(leaf.schema for leaf in leaves(node)):
-                raise ValidationError(
-                    "A filter condition naming a schema needs a schema to query"
-                )
+            # A list of every kind: a field means something only within its
+            # kind, so only what is about the record itself can be asked.
+            for leaf in leaves(node):
+                if leaf.field != note_rules.OPEN_NOTES_FILTER:
+                    raise ValidationError(
+                        f"To filter by '{leaf.field}', choose a kind of record "
+                        "first: a field belongs to one kind. A list of every "
+                        "kind can be filtered by whether it has open notes."
+                    )
             return node
         related = self._relations(schema)
 
         def resolve_leaf(leaf: FilterCondition) -> FilterCondition:
+            if leaf.field == note_rules.OPEN_NOTES_FILTER:
+                return leaf  # about the record itself, not one of its fields
             f, rel = self._locate(schema, related, leaf.field, leaf.schema, "filter")
             return dataclasses.replace(leaf, field=str(f.id), rel=rel)
 
@@ -2123,9 +2544,7 @@ class RecordService:
     ) -> list[SortKey] | None:
         if not sort:
             return None
-        if schema is None:
-            raise ValidationError("Sorting needs a schema to list")
-        related = self._relations(schema)
+        related = self._relations(schema) if schema is not None else None
         keys = []
         for entry in sort:
             if not isinstance(entry, dict) or "field" not in entry:
@@ -2136,6 +2555,20 @@ class RecordService:
             if direction not in ("asc", "desc"):
                 raise ValidationError(
                     f"Invalid sort direction '{direction}': must be 'asc' or 'desc'"
+                )
+            if entry["field"] in META_SORTS and not entry.get("schema"):
+                keys.append(
+                    SortKey(
+                        field_id="",
+                        descending=direction == "desc",
+                        meta=entry["field"],
+                    )
+                )
+                continue
+            if schema is None or related is None:
+                raise ValidationError(
+                    f"To sort by '{entry['field']}', choose a kind of record "
+                    f"first. A list of every kind sorts by {', '.join(META_SORTS)}."
                 )
             f, rel = self._locate(
                 schema, related, entry["field"], entry.get("schema"), "sort"
@@ -2155,6 +2588,367 @@ class RecordService:
             )
         return keys
 
+    def preview_formula(
+        self,
+        schema_name: str,
+        expression: str,
+        *,
+        result: str | None = None,
+        decimals: int | None = None,
+        field: str | None = None,
+        record_id: str | None = None,
+        values: dict[str, Any] | None = None,
+    ) -> FormulaPreviewDTO:
+        """What a formula on `schema_name` would give, saving nothing: checked
+        as saving the field would (`SchemaService.check_formula`; `field` is the
+        formula being edited, which can't read itself), then worked out for the
+        record `record_id` (of that kind; fields above it and links are read as
+        for any formula), or over `values` (by field name, as stored), or, with
+        neither, the kind's most recently changed record. A formula that can't
+        be saved comes back as `problem`, one that can't be worked out for that
+        record as `error`: neither raises."""
+        self._permissions.require(permissions.READ)
+        schema = self._schema_svc.get(schema_name)
+        rules: dict[str, Any] = {"expression": expression}
+        if result:
+            rules["result"] = result
+        if decimals is not None:
+            rules["decimals"] = decimals
+        try:
+            rules = self._schema_svc.check_formula(schema_name, rules, field)
+        except ValidationError as e:
+            return FormulaPreviewDTO(problem=str(e))
+        formula = formulas.parse(rules["expression"])
+        record: RecordDTO | None = None
+        if values is None:
+            if record_id:
+                record = self.get(record_id)
+                if record.schema_id != schema.id:
+                    raise ValidationError(
+                        f"That record is a {record.schema_name}, not a {schema.name}"
+                    )
+            else:
+                latest = self.recently_changed(schema_name, limit=1)
+                record = latest[0] if latest else None
+            if record is not None:
+                values = {**record.data, **(record.derived or {})}
+                outside = [n for n in formula.names if n not in values]
+                if outside:
+                    values.update(
+                        self._derived_values(schema.name, [record], outside)[0]
+                    )
+        _, dtypes = self._schema_svc.formula_kinds(schema, leave_out=field)
+        value, error = formulas.compute(
+            formula,
+            values or {},
+            dtypes,
+            rules["result"],
+            rules.get("decimals"),
+        )
+        return FormulaPreviewDTO(
+            value=value,
+            error=error,
+            result=rules["result"],
+            record_id=record.id if record else None,
+            record_name=record.natural_name if record else None,
+        )
+
+    def points(
+        self,
+        query: RecordQuery,
+        field: str,
+        schema: str | None = None,
+        limit: int = POINTS_DEFAULT_LIMIT,
+    ) -> RecordPoints:
+        """Where the records `query` lists are, for a map: each one's id,
+        name and the geometry in its `geo` field `field` (of the kind listed,
+        or of `schema`, a kind above it, like a filter condition; the record
+        above holds it then). Records with no value are left out; at most
+        `limit`, oldest first, and `total` says how many have one. A fixed
+        number of statements however many records."""
+        self._permissions.require(permissions.READ)
+        if not 1 <= limit <= POINTS_MAX_LIMIT:
+            raise ValidationError(f"The limit must be between 1 and {POINTS_MAX_LIMIT}")
+        if not query.schema:
+            raise ValidationError(
+                "Choose the kind of record to map: a map shows one kind's "
+                "location field"
+            )
+        resolved = self.resolve(query)
+        listed = self._schema_svc.get(query.schema)
+        related = self._relations(listed)
+        f, rel = self._locate(listed, related, field, schema, "map")
+        if rel.direction == "down":
+            raise ValidationError(
+                f"Can't map '{field}' of '{schema}': each record has many of "
+                "those beneath it"
+            )
+        if f.dtype != "geo":
+            raise ValidationError(f"'{f.name}' is not a location field")
+        owner = next(s for s, r in related.values() if r == rel)
+        found, total = self._records.geometries(resolved, str(f.id), rel.hops, limit)
+        shapes = self._schema_svc.resolver()
+        named = self._label_references(
+            [self._with_names(r, shapes) for r, _ in found], shapes
+        )
+        return RecordPoints(
+            schema=owner.name,
+            field=f.name,
+            points=[
+                RecordPoint(r.id, r.natural_name, geometry)
+                for r, (_, geometry) in zip(named, found)
+            ],
+            total=total,
+            limit=limit,
+        )
+
+    def check_summary(self, schema_name: str, request: summary.SummaryRequest) -> None:
+        """Whether `request` can summarise records of `schema_name`: its shape
+        (`SummaryRequest.check`), and each grouping and measure a field of that
+        kind or of a kind above it that allows it. The rule `summarise` runs
+        first, without reading any record (a saved analysis is checked by it)."""
+        request.check()
+        self._summary_columns(schema_name, request, "UTC")
+
+    def check_chart(self, schema_name: str, chart: Chart) -> None:
+        """Whether `chart` can be drawn for records of `schema_name`, without
+        reading any record: its bars by `check_summary`, a map's field a
+        location field of the kind or of a kind above it."""
+        if chart.summary is not None:
+            self.check_summary(schema_name, chart.summary.request())
+            return
+        listed = self._schema_svc.get(schema_name)
+        field, above = chart.map_field
+        f, rel = self._locate(listed, self._relations(listed), field, above, "map")
+        if rel.direction == "down" or f.dtype != "geo":
+            raise ValidationError(f"'{chart.map}' is not a location field")
+
+    def _summary_columns(
+        self, schema_name: str, request: summary.SummaryRequest, zone_default: str
+    ) -> tuple[
+        list[summary.GroupPlan],
+        list[summary.GroupColumn],
+        list[summary.MeasurePlan],
+        list[summary.MeasureColumn],
+        str | None,
+    ]:
+        """The request's groupings and measures resolved against the kind's
+        fields: what the repository is handed and how the columns read, and
+        the zone dates and times are grouped in, if any."""
+        schema = self._schema_svc.get(schema_name)
+        related = self._relations(schema)
+        owners = {rel: s for s, rel in related.values()}
+
+        def locate(field: str, schema_name: str | None, what: str):
+            f, rel = self._locate(schema, related, field, schema_name, what)
+            if rel.direction == "down":
+                raise ValidationError(
+                    f"Can't {what} '{field}' of '{schema_name}': each record "
+                    "has many of those beneath it"
+                )
+            owner = owners[rel]
+            label = f.display_name
+            if owner.id != schema.id:
+                label = f"{owner.display_name} {label}"
+            return f, rel.hops, owner.name, label
+
+        group_plans: list[summary.GroupPlan] = []
+        group_columns: list[summary.GroupColumn] = []
+        zone_used: str | None = None
+        for g in request.group_by:
+            f, hops, owner, label = locate(g.field, g.schema, "group by")
+            problem = summary.group_problem(g, f.dtype, f.name)
+            if problem:
+                raise ValidationError(problem)
+            zone = None
+            if f.dtype == "datetime" and g.bucket:
+                zone = f.restrictions.get("timezone") or zone_default
+                zone_used = zone
+            group_plans.append(
+                summary.GroupPlan(
+                    summary.FieldPlan(str(f.id), f.dtype, hops),
+                    bucket=g.bucket,
+                    bin=g.bin,
+                    zone=zone,
+                    zone_offsets=offset_changes(zone) if zone else None,
+                )
+            )
+            if g.bucket:
+                label = f"{label} ({g.bucket})"
+            group_columns.append(
+                summary.GroupColumn(
+                    key=g.key,
+                    field=f.name,
+                    schema=owner,
+                    label=label,
+                    dtype=f.dtype,
+                    bucket=g.bucket,
+                    bin=g.bin,
+                    unit=f.restrictions.get("unit"),
+                )
+            )
+
+        measure_plans: list[summary.MeasurePlan] = []
+        measure_columns: list[summary.MeasureColumn] = []
+        for m in request.measures:
+            if m.field is None:
+                measure_plans.append(summary.MeasurePlan("count"))
+                measure_columns.append(
+                    summary.MeasureColumn(m.key, "count", summary.MEASURES["count"])
+                )
+                continue
+            if m.measure == summary.INSIDE:
+                below = {
+                    s.name: (s, depth)
+                    for s, depth in self._schema_svc.descendants(schema)
+                }
+                if m.field not in below:
+                    raise ValidationError(
+                        f"'{m.field}' is not a kind of record beneath '{schema.name}'"
+                    )
+                child, depth = below[m.field]
+                measure_plans.append(
+                    summary.MeasurePlan(summary.INSIDE, child=(child.id, depth))
+                )
+                measure_columns.append(
+                    summary.MeasureColumn(
+                        key=m.key,
+                        measure=summary.INSIDE,
+                        label=f"{child.display_name} inside",
+                        field=child.name,
+                    )
+                )
+                continue
+            f, hops, owner, label = locate(m.field, m.schema, "work out")
+            problem = summary.measure_problem(m.measure, f.dtype, f.name)
+            if problem:
+                raise ValidationError(problem)
+            measure_plans.append(
+                summary.MeasurePlan(
+                    m.measure, summary.FieldPlan(str(f.id), f.dtype, hops)
+                )
+            )
+            unit = (
+                f.restrictions.get("unit")
+                if m.measure in summary.VALUE_MEASURES
+                else None
+            )
+            measure_columns.append(
+                summary.MeasureColumn(
+                    key=m.key,
+                    measure=m.measure,
+                    label=summary.measure_label(m.measure, label),
+                    field=f.name,
+                    schema=owner,
+                    dtype=f.dtype,
+                    unit=unit,
+                )
+            )
+
+        return group_plans, group_columns, measure_plans, measure_columns, zone_used
+
+    def summarise(
+        self, query: RecordQuery, request: summary.SummaryRequest
+    ) -> summary.SummaryResult:
+        """Group the records `query` lists by field values and work out
+        measures over each group and over them all (see `domain/summary`).
+        The query must name the kind summarised (`schema`); a grouping or a
+        measure names one of its fields, or (`schema`) a field of a kind above
+        it, like a filter condition. In SQL, one statement however many
+        records; a link field's groups are named in one more lookup."""
+        self._permissions.require(permissions.READ)
+        request.check()
+        if not query.schema:
+            raise ValidationError(
+                "Choose the kind of record to summarise: a summary groups the "
+                "values of one kind's fields"
+            )
+        resolved = self.resolve(query)
+        zone_default = "UTC"
+        if query.dataset:
+            dataset = self._datasets.get_by_name(query.dataset, with_count=False)
+            if dataset and dataset.timezone:
+                zone_default = dataset.timezone
+
+        group_plans, group_columns, measure_plans, measure_columns, zone_used = (
+            self._summary_columns(query.schema, request, zone_default)
+        )
+
+        raw = self._records.summarise(
+            resolved,
+            summary.SummaryPlan(group_plans, measure_plans, request.limit),
+        )
+
+        # Records a link field's groups point at, named as everywhere else.
+        linked = {
+            str(r[i])
+            for r in raw.rows
+            for i, c in enumerate(group_columns)
+            if c.dtype in ("reference", "reference_list") and r[i] is not None
+        }
+        names = (
+            {
+                str(r.id): r.natural_name or str(r.id)[:8]
+                for r in self.labels(sorted(linked))
+            }
+            if linked
+            else {}
+        )
+
+        def to_utc(zone: str):
+            def convert(local_date: str) -> str:
+                start = _dt.fromisoformat(local_date).replace(tzinfo=ZoneInfo(zone))
+                return start.astimezone(timezone.utc).isoformat()
+
+            return convert
+
+        rows: list[summary.SummaryRow] = []
+        width = len(group_columns)
+        for r in raw.rows:
+            groups = []
+            conditions: list[dict[str, Any]] | None = []
+            for i, (column, plan) in enumerate(zip(group_columns, group_plans)):
+                value, where = summary.group_value(
+                    column,
+                    r[i],
+                    each=plan.each,
+                    names=names,
+                    to_utc=to_utc(plan.zone) if plan.zone else None,
+                )
+                groups.append(value)
+                if where is None:
+                    conditions = None
+                elif conditions is not None:
+                    conditions.append(where)
+            rows.append(
+                summary.SummaryRow(
+                    groups=groups,
+                    values=[
+                        summary.measure_value(c, v)
+                        for c, v in zip(measure_columns, r[width:])
+                    ],
+                    where=(
+                        None
+                        if not conditions
+                        else conditions[0]
+                        if len(conditions) == 1
+                        else {"and": conditions}
+                    ),
+                )
+            )
+        return summary.SummaryResult(
+            schema=self._schema_svc.get(query.schema).name,
+            group_columns=group_columns,
+            measure_columns=measure_columns,
+            rows=rows,
+            total=[
+                summary.measure_value(c, v) for c, v in zip(measure_columns, raw.total)
+            ],
+            truncated=raw.truncated,
+            limit=request.limit,
+            timezone=zone_used,
+        )
+
     def query_records(
         self,
         query: RecordQuery,
@@ -2163,15 +2957,22 @@ class RecordService:
         columns: list[str] | None = None,
         child_counts: bool = False,
         after: tuple[_dt, uuid.UUID] | None = None,
+        as_stored: bool = False,
     ) -> list[RecordDTO]:
         """One page of `query`. `columns` asks for values that aren't in a
         record's own data (an inherited field, a `ref.field` join), attached
         as `derived`; `child_counts` attaches per-child-schema counts. `after`
-        continues an unsorted listing past a record (see `stream_records`)."""
+        continues an unsorted listing past a record (see `stream_records`).
+        `as_stored`: the records as they are kept (name-keyed), with none of
+        the momentary extras, so reading them asks no drive where a file is."""
         records = self._records.list_filtered(
             self.resolve(query), offset, limit, after=after
         )
-        named = self._attach_reference_labels(self._with_names_many(records))
+        if as_stored:
+            return self._with_names_many(records)
+        named = self._attach_open_notes(
+            self._attach_reference_labels(self._with_names_many(records))
+        )
         if columns and query.schema:
             named = self._attach_derived(query.schema, named, columns)
         if child_counts:
@@ -2189,9 +2990,11 @@ class RecordService:
         query: RecordQuery,
         page_size: int = 500,
         columns: list[str] | None = None,
+        as_stored: bool = False,
     ) -> Iterator[list[RecordDTO]]:
         """Every matching record, one page at a time -- for exports, which
-        must not hold the whole result set in memory.
+        must not hold the whole result set in memory (`as_stored`: see
+        `query_records`).
 
         An unsorted walk continues from the last record's (created_at, id)
         rather than an ever-growing OFFSET, which would re-read every row it
@@ -2206,6 +3009,7 @@ class RecordService:
                 offset=0 if after else offset,
                 columns=columns,
                 after=after,
+                as_stored=as_stored,
             )
             if not page:
                 return
@@ -2229,9 +3033,7 @@ class RecordService:
             for descendant, _ in self._schema_svc.descendants(
                 self._schema_svc.get(ancestor.schema_name)
             ):
-                n = self.count_records(
-                    dataclasses.replace(query, schema=descendant.name)
-                )
+                n = self.count_records(query.for_kind(descendant.name))
                 if n:
                     counts[descendant.name] = n
             return counts
@@ -2250,6 +3052,7 @@ class RecordService:
         search: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        search_fields: list[str] | None = None,
     ) -> list[RecordDTO]:
         return self.query_records(
             RecordQuery(
@@ -2259,6 +3062,7 @@ class RecordService:
                 where=filters or [],
                 filter_tree=filter_tree,
                 search=search,
+                search_fields=search_fields,
             ),
             limit=limit,
             offset=offset,
@@ -2272,6 +3076,7 @@ class RecordService:
         filters: list[str] | None = None,
         filter_tree: dict[str, Any] | None = None,
         search: str | None = None,
+        search_fields: list[str] | None = None,
     ) -> int:
         return self.count_records(
             RecordQuery(
@@ -2281,6 +3086,7 @@ class RecordService:
                 where=filters or [],
                 filter_tree=filter_tree,
                 search=search,
+                search_fields=search_fields,
             )
         )
 
@@ -2293,6 +3099,7 @@ class RecordService:
         filter_tree: dict[str, Any] | None = None,
         search: str | None = None,
         page_size: int = 500,
+        search_fields: list[str] | None = None,
     ) -> Iterator[list[RecordDTO]]:
         return self.stream_records(
             RecordQuery(
@@ -2302,16 +3109,22 @@ class RecordService:
                 where=filters or [],
                 filter_tree=filter_tree,
                 search=search,
+                search_fields=search_fields,
             ),
             page_size=page_size,
         )
 
     def count_by_schema_search(
-        self, schema_name: str, search: str | None = None
+        self,
+        schema_name: str,
+        search: str | None = None,
+        search_fields: list[str] | None = None,
     ) -> int:
         """Total matching `find_by_schema` -- same predicate, in SQL."""
         schema = self._schema_svc.get(schema_name)
-        return self._records.count_schema_matches(schema.id, search=search)
+        return self._records.count_schema_matches(
+            schema.id, search=self.text_search(search, schema, search_fields)
+        )
 
     def find_by_schema(
         self,
@@ -2319,6 +3132,7 @@ class RecordService:
         search: str | None = None,
         limit: int = 20,
         reachable_from: str | None = None,
+        search_fields: list[str] | None = None,
     ) -> list[RecordDTO]:
         """`reachable_from` (a collection name) limits the search to records a
         record in that collection may reference: its own collection's plus
@@ -2337,7 +3151,10 @@ class RecordService:
                 if d.scope == GLOBAL and d.id != source.id
             ]
         records = self._records.list_by_schema(
-            schema.id, search=search, limit=limit, dataset_ids=dataset_ids
+            schema.id,
+            search=self.text_search(search, schema, search_fields),
+            limit=limit,
+            dataset_ids=dataset_ids,
         )
         return self._attach_reference_labels(self._with_names_many(records))
 
@@ -2351,8 +3168,8 @@ class RecordService:
         jump-to box searches. Every collection unless `collection` (a name)
         narrows it; each result carries its collection's name, since the same
         schema's records can live in several."""
-        query = query.strip()
-        if not query:
+        search = self.text_search(query)
+        if search is None:
             return []
         dataset_id = None
         if collection:
@@ -2360,7 +3177,7 @@ class RecordService:
             if not dataset:
                 raise NotFoundError(f"Dataset '{collection}' not found")
             dataset_id = dataset.id
-        records = self._records.search_all(query, limit=limit, dataset_id=dataset_id)
+        records = self._records.search_all(search, limit=limit, dataset_id=dataset_id)
         return self._attach_reference_labels(self._with_names_many(records))
 
     # ------------------------------------------------------------------
@@ -2368,13 +3185,17 @@ class RecordService:
     # ------------------------------------------------------------------
 
     def validate_columns(self, schema: SchemaDTO, columns: list[str]) -> None:
-        """Every column must be a field of `schema` (own or inherited) or a
-        single-hop `ref_field.target_field` join through a reference field."""
+        """Every column must be a field of `schema` (own or inherited), a
+        single-hop `ref_field.target_field` join through a reference field, or
+        `@open_notes` (the record's open threads of notes, a column of the
+        explorer)."""
         fields_by_name = {
             rf.field.name: rf.field for rf in self._schema_svc.collect_fields(schema)
         }
         unknown = []
         for col in columns:
+            if col == note_rules.OPEN_NOTES_FILTER:
+                continue  # shown from `open_notes`/`latest_note`, not `data`
             if "." in col:
                 self._validate_join_column(col, fields_by_name)
             elif col not in fields_by_name:
@@ -2438,11 +3259,15 @@ class RecordService:
     ) -> list[RecordDTO]:
         """Fill `derived` with the requested columns a record's own data
         can't answer (see `_derived_values`)."""
+        # A record read for the API already has its own formulas worked out.
+        columns = [
+            c for c in columns if not all(c in (r.derived or {}) for r in records)
+        ]
         values = self._derived_values(schema_name, records, columns)
         if not any(values):
             return records
         return [
-            dataclasses.replace(record, derived=derived)
+            dataclasses.replace(record, derived={**(record.derived or {}), **derived})
             for record, derived in zip(records, values)
         ]
 
@@ -2462,6 +3287,14 @@ class RecordService:
             return [{} for _ in records]
         related = self._relations(schema)
         own = {f.name for f in schema.fields}
+        own_formulas = [
+            c
+            for c in columns
+            if any(f.name == c and f.dtype in COMPUTED_DTYPES for f in schema.fields)
+        ]
+        # Formulas of the records above, by the schema that has them.
+        above: dict[uuid.UUID, list[tuple[str, FieldDTO, int]]] = {}
+        located_fields: dict[str, FieldDTO] = {}
 
         def plain(name: str) -> tuple[str, int] | None:
             """(field id, hops up) for a non-dotted column, None if unknown."""
@@ -2469,6 +3302,7 @@ class RecordService:
                 f, rel = self._locate(schema, related, name, None, "column")
             except ValidationError:
                 return None
+            located_fields[name] = f
             return str(f.id), rel.hops
 
         plans: dict[str, Any] = {}
@@ -2501,19 +3335,62 @@ class RecordService:
                 if target_id is not None:
                     plans[col] = ("join", ref, target_id)
             elif col not in own and (located := plain(col)) is not None:
+                f = located_fields[col]
+                if f.dtype in COMPUTED_DTYPES:
+                    above.setdefault(f.schema_id, []).append((col, f, located[1]))
                 plans[col] = ("inherited", located)
+        computed = (
+            dict(
+                zip(
+                    (str(r.id) for r in records),
+                    self._formula_results(schema, records, own_formulas),
+                )
+            )
+            if own_formulas and records
+            else {}
+        )
         if not plans:
-            return [{} for _ in records]
+            return [
+                {c: v for c, (v, _) in computed.get(str(r.id), {}).items()}
+                for r in records
+            ]
 
         chains = self._ancestor_chains(records, max(p[1][1] for p in plans.values()))
+        # An inherited formula is worked out on the record above that has it.
+        worked_above: dict[tuple[str, uuid.UUID], Any] = {}
+        for owner_id, wanted in above.items():
+            owner = self._schema_svc.get_by_id(owner_id)
+            if owner is None:
+                continue
+            holders: dict[uuid.UUID, RecordDTO] = {}
+            for col, f, hops in wanted:
+                for r in records:
+                    a = chains[r.id][hops - 1] if hops else None
+                    if a is not None and a.schema_id == owner_id:
+                        holders.setdefault(a.id, a)
+            named = self._with_names_many(list(holders.values()))
+            results = self._formula_results(
+                owner, named, list(dict.fromkeys(f.name for _, f, _ in wanted))
+            )
+            for a, found in zip(named, results):
+                for name, (worked, _) in found.items():
+                    worked_above[(name, a.id)] = worked
         id_to_name = self._schema_svc.id_to_name_map(schema)
+
+        formula_names = {
+            str(f.id): f.name for wanted in above.values() for _, f, _ in wanted
+        }
 
         def value(record: RecordDTO, located: tuple[str, int]) -> Any:
             field_id, hops = located
             if hops == 0:
                 return record.data.get(id_to_name[field_id])
             ancestor = chains[record.id][hops - 1]
-            return ancestor.data.get(field_id) if ancestor else None
+            if ancestor is None:
+                return None
+            if field_id in formula_names:
+                return worked_above.get((formula_names[field_id], ancestor.id))
+            return ancestor.data.get(field_id)
 
         ref_values: dict[str, list[Any]] = {}
         for col, plan in plans.items():
@@ -2529,7 +3406,9 @@ class RecordService:
 
         out = []
         for i, record in enumerate(records):
-            derived: dict[str, Any] = {}
+            derived: dict[str, Any] = {
+                c: v for c, (v, _) in computed.get(str(record.id), {}).items()
+            }
             for col, plan in plans.items():
                 if plan[0] == "inherited":
                     derived[col] = value(record, plan[1])
@@ -2616,6 +3495,7 @@ class RecordService:
         records: list[RecordDTO],
         on_level: Callable[[int], None] | None = None,
         keep: Callable[[RecordDTO], bool] | None = None,
+        as_stored: bool = False,
     ) -> list[RecordDTO]:
         """Every live record beneath these (children, their children, and so on),
         in the full response form, found a level at a time: a few queries for the
@@ -2639,7 +3519,10 @@ class RecordService:
             if keep is not None:
                 kids = [k for k in kids if keep(k)]
             named = [self._with_names(k, shapes) for k in kids]
-            found.extend(self._attach_reference_labels(named, shapes))
+            # `as_stored`: as kept (no labels or file locations looked up).
+            found.extend(
+                named if as_stored else self._attach_reference_labels(named, shapes)
+            )
             if on_level:
                 on_level(len(found))
         return found
@@ -2650,10 +3533,13 @@ class RecordService:
         schema = self._schema_svc.get(schema_name)
         return self.get_many(self._records.recently_changed(schema.id, limit))
 
-    def get_many(self, record_ids: list[str]) -> list[RecordDTO]:
+    def get_many(
+        self, record_ids: list[str], as_stored: bool = False
+    ) -> list[RecordDTO]:
         """These live records in the order asked, in the full response form
         (names, reference labels, where each file is stored), in a fixed number
-        of queries. Ids that aren't live records are left out."""
+        of queries. Ids that aren't live records are left out. `as_stored`: as
+        they are kept (see `query_records`)."""
         ids: list[uuid.UUID] = []
         for raw in dict.fromkeys(record_ids):
             try:
@@ -2663,6 +3549,8 @@ class RecordService:
         found = {r.id: r for r in self._records.list_by_ids(ids) if not r.deleted_at}
         shapes = self._schema_svc.resolver()
         named = [self._with_names(found[i], shapes) for i in ids if i in found]
+        if as_stored:
+            return named
         return self._attach_reference_labels(named, shapes)
 
     def file_values(
@@ -2931,6 +3819,16 @@ class RecordService:
     ) -> list[RecordDTO]:
         """The live records a person picked: by id (full or prefix), or every
         one a query lists."""
+        found = self._records.list_by_ids(self._chosen_ids(ids, query, "move"))
+        return [r for r in found if r.deleted_at is None]
+
+    def _chosen_ids(
+        self, ids: list[str] | None, query: RecordQuery | None, verb: str
+    ) -> list[uuid.UUID]:
+        """The ids of the records a person picked, in order: exactly `ids`
+        (full or prefix), or every record `query` lists. The one reading of
+        "these, or all N matching" behind a move and a bulk edit. Deleted
+        records may be among them: the caller leaves them out as it loads."""
         if ids is not None:
             full: list[uuid.UUID] = []
             for rid in ids:
@@ -2940,14 +3838,198 @@ class RecordService:
                     record = self._records.get_by_prefix(rid)
                     if record:
                         full.append(record.id)
-            found = self._records.list_by_ids(list(dict.fromkeys(full)))
-        elif query is not None:
-            found = self._records.list_by_ids(
-                self._records.list_ids(self.resolve(query))
-            )
-        else:
-            raise ValidationError("Choose the records to move: ids, or a query")
-        return [r for r in found if r.deleted_at is None]
+            return list(dict.fromkeys(full))
+        if query is not None:
+            return self._records.list_ids(self.resolve(query))
+        raise ValidationError(f"Choose the records to {verb}: ids, or a query")
+
+    # ------------------------------------------------------------------
+    # Editing many records at once
+    # ------------------------------------------------------------------
+
+    def plan_bulk_edit(
+        self,
+        changes: dict[str, Any],
+        *,
+        ids: list[str] | None = None,
+        query: RecordQuery | None = None,
+        progress: Progress | None = None,
+    ) -> RecordBulkEditPlanDTO:
+        """What setting `changes` ({field name: value, None to clear}) on the
+        chosen records (`ids`, or every record `query` lists) would do,
+        without doing it: how many would change, how many already hold the
+        values, which can't take them and why, and how many workflow runs it
+        would start. The same walk as `bulk_edit`, so they can't disagree."""
+        return self._bulk_edit(changes, ids, query, write=False, progress=progress)[0]
+
+    def bulk_edit(
+        self,
+        changes: dict[str, Any],
+        *,
+        ids: list[str] | None = None,
+        query: RecordQuery | None = None,
+        progress: Progress | None = None,
+    ) -> RecordBulkEditResultDTO:
+        """Set (or, with None, clear) `changes` on every chosen record. Each
+        record is saved as an edit of only those fields (`_patched`, the rule
+        behind `patch`), through the checks, history and triggers of any save;
+        one that already holds the values is not written. A record that can't
+        take the change is left as it is and reported, the others go ahead:
+        `plan_bulk_edit` says which beforehand. The lot is one event in
+        Activity. `write_records` is asked for every collection involved
+        before anything is written."""
+        return self._bulk_edit(changes, ids, query, write=True, progress=progress)[1]
+
+    def _bulk_edit(
+        self,
+        changes: dict[str, Any],
+        ids: list[str] | None,
+        query: RecordQuery | None,
+        *,
+        write: bool,
+        progress: Progress | None = None,
+    ) -> tuple[RecordBulkEditPlanDTO, RecordBulkEditResultDTO]:
+        """The one walk behind the plan and the edit. Records are read a page
+        at a time and each schema resolved once; when `write`, each record
+        that can change is saved as it is reached, so a key one record takes
+        is taken for the next. Planning stands in for that by remembering the
+        keys the records before it would take."""
+        fields = list(changes)
+        if not fields:
+            raise ValidationError("Choose a field to set or clear")
+        chosen = self._chosen_ids(ids, query, "edit")
+        for dataset_id in self._records.collections_of(chosen):
+            self._permissions.require(permissions.WRITE_RECORDS, dataset_id)
+        shapes = self._schema_svc.resolver()
+        datasets: dict[uuid.UUID, DatasetDTO | None] = {}
+        claimed: dict[tuple[Any, ...], uuid.UUID] = {}
+        paused = self._job_svc.is_paused() if self._job_svc else True
+        workflows: dict[str, int] = {}
+        skips: list[BulkEditSkipDTO] = []
+        counts = {"records": 0, "changing": 0, "unchanged": 0, "skipped": 0}
+        runs = 0
+
+        def skip(raw: RecordDTO, reason: str) -> None:
+            counts["skipped"] += 1
+            if len(skips) < MAX_REPORTED:
+                skips.append(
+                    BulkEditSkipDTO(
+                        record_id=raw.id,
+                        name=self._with_names(raw, shapes).natural_name,
+                        reason=reason,
+                    )
+                )
+
+        batch = (
+            self._audit.batch("edit", ", ".join(fields))
+            if write and self._audit is not None and len(chosen) > 1
+            else nullcontext()
+        )
+        if progress:
+            progress.phase("Changing records" if write else "Checking", len(chosen))
+        done = 0
+        with batch:
+            for start in range(0, len(chosen), BULK_EDIT_PAGE):
+                page = chosen[start : start + BULK_EDIT_PAGE]
+                by_id = {r.id: r for r in self._records.list_by_ids(page)}
+                for rid in page:
+                    raw = by_id.get(rid)
+                    if raw is None or raw.deleted_at is not None:
+                        continue
+                    counts["records"] += 1
+                    shape = shapes(raw.schema_id)
+                    problem = _bulk_edit_problem(shape, fields)
+                    if problem or shape is None:
+                        skip(raw, problem or "Its schema no longer exists")
+                        continue
+                    wanted = _strip_derived_file_keys(changes, shape.fields)
+                    merged = _patched(self._ids_to_names(raw.data, shape), wanted)
+                    if merged is None:
+                        counts["unchanged"] += 1
+                        continue
+                    if raw.dataset_id not in datasets:
+                        datasets[raw.dataset_id] = self._datasets.get_by_id(
+                            raw.dataset_id, include_deleted=True, with_count=False
+                        )
+                    dataset = datasets[raw.dataset_id]
+                    try:
+                        if write:
+                            runs += self._write_update(raw, merged, shapes, dataset)[1]
+                        else:
+                            before, id_data = self._checked_update(
+                                raw, merged, shape, dataset
+                            )
+                            self._claim_keys(claimed, shape, raw, id_data)
+                            if not paused and self._job_svc is not None:
+                                after = self._ids_to_names(id_data, shape)
+                                changed = {
+                                    k
+                                    for k in set(before) | set(after)
+                                    if before.get(k) != after.get(k)
+                                }
+                                for wf in self._job_svc.triggered_by(
+                                    shape.schema.name, "record_updated", changed
+                                ):
+                                    runs += 1
+                                    workflows[wf.name] = workflows.get(wf.name, 0) + 1
+                    except ValidationError as e:
+                        skip(raw, str(e))
+                        continue
+                    counts["changing"] += 1
+                done += len(page)
+                if progress:
+                    progress.advance(done)
+        plan = RecordBulkEditPlanDTO(
+            fields=fields,
+            records=counts["records"],
+            changing=counts["changing"],
+            unchanged=counts["unchanged"],
+            skipped=counts["skipped"],
+            skipped_records=skips,
+            runs=runs,
+            workflows=sorted(workflows),
+            automation_paused=paused and self._job_svc is not None,
+        )
+        result = RecordBulkEditResultDTO(
+            changed=counts["changing"],
+            unchanged=counts["unchanged"],
+            skipped=counts["skipped"],
+            skipped_records=skips,
+            runs=runs,
+        )
+        return plan, result
+
+    def _claim_keys(
+        self,
+        claimed: dict[tuple[Any, ...], uuid.UUID],
+        shape: ResolvedSchema,
+        raw: RecordDTO,
+        id_data: dict[str, Any],
+    ) -> None:
+        """For a plan: refuse a record whose new values would share a unique
+        key with an earlier record of the same plan (`_check_unique` only sees
+        what is stored, and the earlier one isn't yet), else remember its keys.
+        A key whose values the record already held is not taken anew."""
+        for key in shape.schema.unique_keys:
+            values = key_values(id_data, key)
+            if values is None or key_values(raw.data, key) == values:
+                continue
+            slot = (raw.dataset_id, shape.schema.id, raw.parent_record_id, tuple(key))
+            spot = (*slot, *values)
+            if spot in claimed and claimed[spot] != raw.id:
+                names = [shape.id_to_name.get(i, i) for i in key]
+                raise DuplicateRecordError(
+                    f"Another of the chosen records would get the same "
+                    f"{_join_names(names)}. {_join_names(names, cap=True)} must be "
+                    + (
+                        "unique within its parent."
+                        if raw.parent_record_id
+                        else "unique within the collection."
+                    ),
+                    existing_id=str(claimed[spot]),
+                    fields=names,
+                )
+            claimed[spot] = raw.id
 
     def _move_kind_problems(
         self, roots: list[RecordDTO], above: RecordDTO | None
@@ -3696,9 +4778,16 @@ class RecordService:
             raise ValidationError(
                 f"Record '{record_id}' must be deleted before it can be purged"
             )
+        self.purge_records(self.purge_set(record_id))
+
+    def purge_set(self, record_id: str) -> list[uuid.UUID]:
+        """The records a permanent delete of this deleted record removes: it and
+        everything beneath it."""
+        record = self._records.get_by_prefix(record_id, include_deleted=True)
+        if record is None:
+            raise NotFoundError(f"Record '{record_id}' not found")
         levels = self._records.subtree_levels([record.id], deleted=None)
-        every = [rid for level in levels for rid in level]
-        self.purge_records(every)
+        return [rid for level in levels for rid in level]
 
     def _reference_field_map(
         self, target_schema: str | None = None

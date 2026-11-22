@@ -1,100 +1,97 @@
-import type { ReactNode } from 'react'
-import { useDriveChoice } from '../../hooks/useDriveChoice'
+import { useState, type ReactNode } from 'react'
 import { useHasFeature } from '../../hooks/useFeatures'
-import { DrivePicker } from '../files/DrivePicker'
-import { Archive, FolderOpen, HardDrive } from '../ui/icons'
+import { useStored } from '../../hooks/useStored'
+import { EXPORT_FOLDER_KEY } from '../../utils/exportFolder'
+import { FolderPickerModal } from '../settings/FolderPickerModal'
+import { Button } from '../ui'
+import { Archive, FolderOpen } from '../ui/icons'
 
 import type { ExportMethod } from '../../api/exportDefinitions'
 
 export type Method = ExportMethod
 
-const METHODS: {
-  id: Method
-  title: string
-  hint: string
-  icon: typeof FolderOpen
-}[] = [
-  {
-    id: 'link',
-    title: 'Open as a folder',
-    hint: 'Ready at once, taking almost no space. To change the files, edit them in civex or put them on a drive.',
-    icon: FolderOpen,
-  },
-  {
-    id: 'copy',
-    title: 'Put on a drive',
-    hint: 'Files of your own to change or take away, such as on a USB stick.',
-    icon: HardDrive,
-  },
-  {
-    id: 'zip',
-    title: 'Download as a zip',
-    hint: 'One file, to send or keep somewhere else.',
-    icon: Archive,
-  },
-]
-
-/** The same choices in words for a table with no files. */
-const TABLE_ONLY: Partial<Record<Method, { title: string; hint: string }>> = {
-  copy: { title: 'Save to a drive', hint: 'A folder holding the table.' },
-  zip: { title: 'Download', hint: 'The table, as one file.' },
-}
-
-/** What the person ends up with: a folder to open, files on a drive, or a zip.
- * How a folder is made (links to the stored files, copies of any that can't be
- * linked) is civex's business, never a choice. A drive also asks which, with
- * its free space. */
+/** How an export is handed over: **Save to a folder**, or **Download a zip**.
+ * Nothing else is asked. A folder the person chose (the folder browser,
+ * remembered) gets ordinary files of their own; with none chosen it is a
+ * quick look in civex's own exports folder, read-only because those are the
+ * stored files themselves (`utils/exportFolder.folderMode`). */
 export function MethodStep({
   files = true,
   method,
   setMethod,
-  drive,
-  setDrive,
-  need = 0,
+  zip = true,
 }: {
   /** False for a table alone: there are no files to link to or zip. */
   files?: boolean
   method: Method
   setMethod: (m: Method) => void
-  drive: string | null
-  setDrive: (d: string) => void
-  /** Bytes the files take, when known: whether they fit on the drive. */
+  /** False where a zip isn't offered (too big to download). */
+  zip?: boolean
+  /** Kept for callers that still pass a drive: a saved export may name one,
+   * and runs on it when no folder is chosen. */
+  drive?: string | null
+  setDrive?: (d: string) => void
   need?: number
 }) {
-  const choice = useDriveChoice({ need, allowProject: true, chosen: drive })
   const has = useHasFeature()
-  // A folder of links or copies is made on a drive of this machine; a server
-  // keeping its files in a bucket offers the zip alone.
-  const offered = METHODS.filter(
-    (m) => (m.id === 'zip' || has('volumes')) && (files || m.id !== 'link'),
-  )
+  const [folder, setFolder] = useStored<string | null>(EXPORT_FOLDER_KEY, null)
+  const [browsing, setBrowsing] = useState(false)
+  // A folder is made on this machine; a server keeping its files in a bucket
+  // offers the zip alone.
+  const folders = has('volumes')
+  const toFolder = method !== 'zip'
   return (
     <div role="radiogroup" aria-label="Method" className="space-y-3">
-      {offered.map((m) => (
+      {folders && (
         <MethodCard
-          key={m.id}
-          selected={method === m.id}
-          onSelect={() => setMethod(m.id)}
-          icon={<m.icon size={22} aria-hidden="true" />}
-          title={files ? m.title : (TABLE_ONLY[m.id]?.title ?? m.title)}
-          hint={files ? m.hint : (TABLE_ONLY[m.id]?.hint ?? m.hint)}
+          selected={toFolder}
+          onSelect={() => setMethod(files ? 'link' : 'copy')}
+          icon={<FolderOpen size={22} aria-hidden="true" />}
+          title="Save to a folder"
+          hint="Opens when it is ready"
         >
-          {m.id === 'copy' && method === 'copy' && (
-            <div className="mt-3 max-w-md space-y-1 text-sm">
-              <DrivePicker
-                label="Which drive"
-                value={choice.target}
-                targets={choice.targets}
-                allowProject
-                need={need}
-                free={choice.free}
-                tooBig={choice.tooBig}
-                onChange={setDrive}
-              />
+          {toFolder && (
+            <div className="mt-3 max-w-md space-y-2 text-sm">
+              <div className="flex items-center gap-2">
+                <span
+                  className="min-w-0 flex-1 truncate font-mono text-xs"
+                  title={folder ?? undefined}
+                >
+                  {folder ?? 'Quick look (read-only)'}
+                </span>
+                <Button size="sm" onClick={() => setBrowsing(true)}>
+                  Choose…
+                </Button>
+                {folder && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setFolder(null)}
+                  >
+                    Reset
+                  </Button>
+                )}
+              </div>
             </div>
           )}
         </MethodCard>
-      ))}
+      )}
+      {zip && (
+        <MethodCard
+          selected={method === 'zip'}
+          onSelect={() => setMethod('zip')}
+          icon={<Archive size={22} aria-hidden="true" />}
+          title={files ? 'Download a zip' : 'Download'}
+          hint="One file, to send"
+        />
+      )}
+      {browsing && (
+        <FolderPickerModal
+          initialPath={folder ?? undefined}
+          onSelect={setFolder}
+          onClose={() => setBrowsing(false)}
+        />
+      )}
     </div>
   )
 }

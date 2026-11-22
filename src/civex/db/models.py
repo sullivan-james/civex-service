@@ -116,6 +116,9 @@ class Schema(Base):
     # within the same parent (or, at the top level, the same collection).
     # Enforced by RecordService, not the database (see domain/uniqueness.py).
     unique_keys: Mapped[list[list[str]] | None] = mapped_column(_JSON, nullable=True)
+    # The charts a list of this kind opens with: a list of chart definitions
+    # (`civex.domain.charts`), or NULL for none.
+    charts: Mapped[list[dict[str, Any]] | None] = mapped_column(_JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
     # Soft-delete marker. NULL = live. Set instead of a hard DELETE so a
     # schema (and, via SchemaRepository's cascade, the records typed by it)
@@ -216,6 +219,24 @@ class View(Base):
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
 
     schema: Mapped[Schema] = relationship("Schema")
+
+
+class Dashboard(Base):
+    """
+    The project's Analytics page: its cards in order (saved analyses and
+    built-in widgets, `civex.domain.dashboard`). One row, with a fixed id
+    (`dashboard.DASHBOARD_ID`), made the first time the page is edited; until
+    then the page shows the default cards. Shared by everyone, and synced and
+    audited like a view.
+    """
+
+    __tablename__ = "dashboards"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    cards: Mapped[list[dict[str, Any]]] = mapped_column(
+        _JSON, nullable=False, default=list
+    )
+    created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
 
 
 class ExportDefinition(Base):
@@ -371,9 +392,10 @@ class Record(Base):
         # GIN index enables containment (@>) queries on JSONB data fields.
         # On SQLite this degrades to a plain B-tree on the JSON text column (harmless).
         Index("ix_records_data_gin", "data", postgresql_using="gin"),
-        # Full-text search (`search_vector @@ plainto_tsquery`) is a scan of
-        # every record without this. SQLite never populates the column, so
-        # there the (partial) index stays empty.
+        # Full-text ranking of the jump-to box (`ts_rank(search_vector, ...)`);
+        # matching is `record_repo.text_match`, a substring of the values,
+        # which this index does not serve. SQLite never populates the column,
+        # so there the (partial) index stays empty.
         Index(
             "ix_records_search_vector",
             "search_vector",
@@ -410,6 +432,88 @@ class Record(Base):
     # Every record read names its schema (RecordDTO.schema_name); joined, that
     # arrives with the record's own row instead of a lazy load per record.
     schema: Mapped[Schema] = relationship("Schema", lazy="joined")
+
+
+class RecordNote(Base):
+    """
+    A note a person left on a record ("value looks off, re-check the
+    calibration"): plain text, who wrote it, and whether it has been resolved
+    (`civex.domain.notes`). Synced and audited as kind `note`. Soft-deleted
+    like a record; a record deleted for good takes its notes with it (the
+    foreign key cascades), and `NoteService` keeps them hidden while their
+    record is deleted. A note with a `thread_id` is a reply in the thread that
+    note starts (one level: a reply to a reply joins the same thread); a
+    thread's replies are hidden while the note that starts it is deleted.
+    """
+
+    __tablename__ = "record_notes"
+    __table_args__ = (Index("ix_record_notes_record", "record_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    record_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("records.id", ondelete="CASCADE"), nullable=False
+    )
+    # The note this one replies to (always a thread's first note), or None
+    # for a note that starts a thread. No foreign key: sync writes notes by
+    # snapshot, and a reply may arrive on a copy before the note it answers.
+    thread_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    # Who wrote it, as history names people (`identity.local_actor`, or the
+    # label a device gave): a name, not an account.
+    author: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
+    edited_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+    resolved_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        _UTCDateTime(), nullable=True, default=None
+    )
+
+
+class Release(Base):
+    """A frozen, citable copy of the data (`civex.domain.release`): citation
+    metadata, what it covers, and the manifest of the small bundle of its
+    records, kept in the object store under `bundle_sha256`. The files it
+    cites are not copied: the release owns them (and its bundle) through
+    `file_references.release_id`. Never changed in content; the metadata may
+    be corrected, the release withdrawn, or yanked (its data given up, a
+    tombstone kept), each a history entry. Synced and audited as `release`."""
+
+    __tablename__ = "releases"
+    __table_args__ = (Index("ux_releases_name", "name", unique=True),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    authors: Mapped[list[Any]] = mapped_column(_JSON, nullable=False, default=list)
+    licence: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    doi: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    scope: Mapped[dict[str, Any]] = mapped_column(_JSON, nullable=False, default=dict)
+    keywords: Mapped[list[Any]] = mapped_column(_JSON, nullable=False, default=list)
+    content_hash: Mapped[str] = mapped_column(String(80), nullable=False)
+    bundle_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    bundle_size: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    counts: Mapped[dict[str, Any]] = mapped_column(_JSON, nullable=False, default=dict)
+    # This copy's history position when it was made (local only, never sent).
+    local_seq: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # The authority's feed number it was made at, on a synced project.
+    feed_seq: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    civex_version: Mapped[str] = mapped_column(String(40), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
+    created_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+    withdrawn_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+    withdrawn_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    withdrawn_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Yanked: its data given up (its file_references rows removed; clean-up
+    # decides what goes); the row stays as the tombstone a citation finds.
+    yanked_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+    yanked_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    yanked_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Whether this copy has written the release's file_references rows (from
+    # its records, or from its bundle once that is here). Local, never sent.
+    indexed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class AuditBatch(Base):
@@ -771,9 +875,9 @@ class RecordReference(Base):
 
 
 class FileReference(Base):
-    """A live reference from a record (or a workflow job's input) to a blob.
-    Maintained by ORM events in `civex.db.file_refs` whenever a record's
-    `data` or a job's `input_data` is written, and removed by ON DELETE
+    """A live reference from a record, a workflow job's input or a release to
+    a blob. Maintained by ORM events whenever a record's `data` or a job's
+    `input_data` is written (a release's rows by its repository), and removed by ON DELETE
     CASCADE when the owner is purged. GC collects blobs with no row here.
     `sha256` is deliberately not a FK to `stored_objects`: a record may
     reference a blob that hasn't been fetched from the remote yet."""
@@ -781,12 +885,14 @@ class FileReference(Base):
     __tablename__ = "file_references"
     __table_args__ = (
         CheckConstraint(
-            "(record_id IS NOT NULL AND job_id IS NULL) "
-            "OR (record_id IS NULL AND job_id IS NOT NULL)",
+            "(CASE WHEN record_id IS NULL THEN 0 ELSE 1 END"
+            " + CASE WHEN job_id IS NULL THEN 0 ELSE 1 END"
+            " + CASE WHEN release_id IS NULL THEN 0 ELSE 1 END) = 1",
             name="ck_file_references_one_owner",
         ),
         UniqueConstraint("record_id", "sha256", name="uq_file_refs_record_sha"),
         UniqueConstraint("job_id", "sha256", name="uq_file_refs_job_sha"),
+        UniqueConstraint("release_id", "sha256", name="uq_file_refs_release_sha"),
         Index("ix_file_references_sha256", "sha256"),
         Index("ix_file_references_sha_volume", "sha256", "volume"),
     )
@@ -798,6 +904,14 @@ class FileReference(Base):
     )
     job_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("workflow_jobs.id", ondelete="CASCADE"), nullable=True
+    )
+    # A release keeps the files it cites (and its own bundle) as long as it
+    # isn't yanked: written by `LocalReleaseRepository`, never by an ORM event.
+    release_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey(
+            "releases.id", ondelete="CASCADE", name="fk_file_references_release"
+        ),
+        nullable=True,
     )
     # The copy this owner uses: the volume holding it, on this computer. One
     # file can be stored on several drives; each record points at exactly one

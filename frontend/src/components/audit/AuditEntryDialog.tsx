@@ -1,4 +1,6 @@
+import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
+import { recordsApi } from '../../api/records'
 import { byWhom } from '../../utils/syncConflicts'
 import type { AuditLogEntry, RevertField, RevertPlan } from '../../api/audit'
 import { blockerTarget } from '../../api/restore'
@@ -107,7 +109,15 @@ export function AuditEntryDialog({
       {purging && now?.ref && (
         <ConfirmDialog
           title="Delete permanently"
-          body={`Permanently delete '${now.name ?? now.ref}'? This cannot be undone.`}
+          body={
+            <>
+              <p>
+                Permanently delete &lsquo;{now.name ?? now.ref}&rsquo;? This
+                cannot be undone.
+              </p>
+              {now.kind === 'record' && <KeptByReleases id={now.ref} />}
+            </>
+          }
           confirmLabel="Delete permanently"
           variant="danger"
           onConfirm={() => {
@@ -119,6 +129,28 @@ export function AuditEntryDialog({
         />
       )}
     </Modal>
+  )
+}
+
+/** Which releases keep files of the records a permanent delete takes: those
+ * files stay, for the release, until it is yanked. */
+function KeptByReleases({ id }: { id: string }) {
+  const { data } = useQuery({
+    queryKey: ['purge-plan', id],
+    queryFn: () => recordsApi.purgePlan(id),
+  })
+  const kept = Object.entries(data?.kept_by_releases ?? {})
+  if (!kept.length) return null
+  return (
+    <p className="mt-2 text-fg-muted" data-testid="kept-by-releases">
+      {kept
+        .map(
+          ([name, n]) =>
+            `Release ${name} keeps ${n} of its file${n === 1 ? '' : 's'}`,
+        )
+        .join('; ')}
+      : they stay until the release is yanked.
+    </p>
   )
 }
 

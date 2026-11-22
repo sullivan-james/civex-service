@@ -4,6 +4,7 @@ import { usePins } from '../hooks/usePins'
 import { useTargetLabel } from '../hooks/useTargetLabel'
 import type { NavTarget } from '../utils/pins'
 import { PIN_ICONS } from './pinIcons'
+import { SAVED_KINDS } from '../utils/savedKinds'
 import { IconButton } from './ui/IconButton'
 import { Star } from './ui/icons'
 
@@ -32,7 +33,7 @@ function PinnedItem({
   onNavigate?: () => void
   onUnpin: () => void
 }) {
-  const Icon = PIN_ICONS[pin.kind]
+  const Icon = pin.saved ? SAVED_KINDS[pin.saved].icon : PIN_ICONS[pin.kind]
   const label = useTargetLabel(pin)
   return (
     <div className="group relative flex items-center">
@@ -55,6 +56,11 @@ function PinnedItem({
         {!collapsed && (
           <>
             <span className="truncate">{label}</span>
+            {pin.saved && (
+              <span className="shrink-0 text-xs font-normal text-fg-subtle">
+                {SAVED_KINDS[pin.saved].word}
+              </span>
+            )}
             <PinCount target={pin} />
           </>
         )}

@@ -7,10 +7,13 @@ from typing import Any
 
 from sqlalchemy import (
     and_,
+    case,
     cast,
     delete,
+    false,
     func,
     literal,
+    literal_column,
     not_,
     or_,
     select,
@@ -20,11 +23,20 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
 from sqlalchemy.orm import Session, aliased
 
-from civex.db.models import Dataset, Record, RecordReference, Schema, WorkflowJob
+from civex.db.models import (
+    Dataset,
+    Record,
+    RecordNote,
+    RecordReference,
+    Schema,
+    WorkflowJob,
+)
+from civex.domain import notes as note_rules
 from civex.domain.dtos import RecordDTO
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.filters import FilterCondition, FilterGroup, FilterNode, SortKey
-from civex.domain.query import ResolvedQuery
+from civex.domain.query import ID_PREFIX_MIN, ResolvedQuery, TextSearch
+from civex.domain.summary import RawSummary, SummaryPlan
 from civex.repositories.local._ids import prefix_span
 from civex.repositories.local._bucketing import day_bucket
 from civex.repositories.local._jobs import bulk_delete_jobs
@@ -38,6 +50,10 @@ def _order_by(sort: list[SortKey] | None) -> list[Any]:
     on an ancestor's field sorts by that ancestor record's value."""
     terms: list[Any] = []
     for key in sort or []:
+        if key.meta is not None:
+            value = _meta_value(key.meta)
+            terms.append(value.desc() if key.descending else value.asc())
+            continue
         if key.rel.direction == "up":
             value = _up_value(key.rel.hops, key.field_id, key.numeric)
         else:
@@ -46,6 +62,29 @@ def _order_by(sort: list[SortKey] | None) -> list[Any]:
         terms.append(value.is_(None))
         terms.append(value.desc() if key.descending else value.asc())
     return terms
+
+
+def _meta_value(name: str) -> Any:
+    """What a record is sorted by for a `query.META_SORTS` key: its kind's or
+    collection's name (a correlated scalar, so no join changes the rows), or
+    when it was last changed or made."""
+    if name == "@kind":
+        return (
+            select(func.coalesce(Schema.label, Schema.name))
+            .where(Schema.id == Record.schema_id)
+            .correlate(Record)
+            .scalar_subquery()
+        )
+    if name == "@collection":
+        return (
+            select(Dataset.name)
+            .where(Dataset.id == Record.dataset_id)
+            .correlate(Record)
+            .scalar_subquery()
+        )
+    if name == "@updated_at":
+        return Record.updated_at
+    return Record.created_at
 
 
 def _chain(columns: Any, hops: int, link: Any):
@@ -247,6 +286,19 @@ class LocalRecordRepository:
             for r in self._s.query(Record).filter(Record.id.in_(chunk)).all()
         ]
 
+    def collections_of(self, ids: list[uuid.UUID]) -> set[uuid.UUID]:
+        """The collections these records are in: one query per chunk of ids,
+        no rows hydrated (what a bulk change asks permission for up front)."""
+        found: set[uuid.UUID] = set()
+        for chunk in _chunks(ids):
+            found.update(
+                did
+                for (did,) in self._s.query(Record.dataset_id)
+                .filter(Record.id.in_(chunk))
+                .distinct()
+            )
+        return found
+
     def list_filtered(
         self,
         query: ResolvedQuery,
@@ -277,6 +329,25 @@ class LocalRecordRepository:
 
     def count(self, query: ResolvedQuery) -> int:
         return _base_query(self._s, query, self._pg).count()
+
+    def count_open_notes(self, query: ResolvedQuery) -> tuple[int, int]:
+        """(threads not yet resolved, records holding them) among the records
+        `query` lists: a note and its replies count once. One statement."""
+        listed = _base_query(self._s, query, self._pg).with_entities(Record.id)
+        notes, records = (
+            self._s.query(
+                func.count(RecordNote.id),
+                func.count(func.distinct(RecordNote.record_id)),
+            )
+            .filter(
+                RecordNote.record_id.in_(listed.scalar_subquery()),
+                RecordNote.thread_id.is_(None),
+                RecordNote.resolved_at.is_(None),
+                RecordNote.deleted_at.is_(None),
+            )
+            .one()
+        )
+        return int(notes or 0), int(records or 0)
 
     def list_ids(self, query: ResolvedQuery) -> list[uuid.UUID]:
         """Ids of every record the query matches -- no rows hydrated, for
@@ -309,23 +380,18 @@ class LocalRecordRepository:
             counts.setdefault(parent_id, {})[schema_name] = n
         return counts
 
-    def _by_schema_query(self, schema_id: uuid.UUID, search: str | None):
+    def _by_schema_query(self, schema_id: uuid.UUID, search: TextSearch | None):
         q = self._s.query(Record).filter(
             Record.schema_id == schema_id, Record.deleted_at.is_(None)
         )
         if search:
-            q = q.filter(
-                or_(
-                    cast(Record.data, String).ilike(f"%{search}%"),
-                    cast(Record.id, String).ilike(f"{search}%"),
-                )
-            )
+            q = q.filter(text_match(search, self._pg))
         return q
 
     def list_by_schema(
         self,
         schema_id: uuid.UUID,
-        search: str | None = None,
+        search: TextSearch | None = None,
         limit: int = 20,
         dataset_ids: list[uuid.UUID] | None = None,
     ) -> list[RecordDTO]:
@@ -337,7 +403,7 @@ class LocalRecordRepository:
 
     def search_all(
         self,
-        search: str,
+        search: TextSearch,
         limit: int = 20,
         dataset_id: uuid.UUID | None = None,
     ) -> list[RecordDTO]:
@@ -346,10 +412,9 @@ class LocalRecordRepository:
         One query across every schema (and, unless `dataset_id` narrows it,
         every collection). Records whose collection or schema is soft-deleted
         are left out, even though the record row itself may not be marked.
-        On PostgreSQL the match is the same indexed full-text search the
-        explorer uses, ranked by relevance; elsewhere it is a substring match
-        on the record's data, newest first. An id prefix always matches, so a
-        pasted id finds its record."""
+        The match is `text_match`, the explorer's; on PostgreSQL results are
+        ranked by full-text relevance, elsewhere (and among equals) newest
+        first."""
         q = (
             self._s.query(Record)
             .join(Dataset, Record.dataset_id == Dataset.id)
@@ -362,24 +427,17 @@ class LocalRecordRepository:
         )
         if dataset_id is not None:
             q = q.filter(Record.dataset_id == dataset_id)
-        like = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        id_match = cast(Record.id, String).ilike(f"{like}%", escape="\\")
+        q = q.filter(text_match(search, self._pg))
         newest: list[Any] = [Record.created_at.desc(), Record.id.desc()]
         if self._pg:
-            tsquery = func.plainto_tsquery("simple", search)
-            q = q.filter(or_(Record.search_vector.op("@@")(tsquery), id_match))
+            tsquery = func.plainto_tsquery("simple", search.term)
             q = q.order_by(func.ts_rank(Record.search_vector, tsquery).desc(), *newest)
         else:
-            q = q.filter(
-                or_(
-                    cast(Record.data, String).ilike(f"%{like}%", escape="\\"),
-                    id_match,
-                )
-            ).order_by(*newest)
+            q = q.order_by(*newest)
         return [_to_dto(r) for r in q.limit(limit).all()]
 
     def count_schema_matches(
-        self, schema_id: uuid.UUID, search: str | None = None
+        self, schema_id: uuid.UUID, search: TextSearch | None = None
     ) -> int:
         """Same predicate as list_by_schema, so a count and a page agree."""
         return self._by_schema_query(schema_id, search).count()
@@ -544,6 +602,49 @@ class LocalRecordRepository:
         )
         return {name: count for name, count in rows}
 
+    def summarise(self, query: ResolvedQuery, plan: SummaryPlan) -> RawSummary:
+        """Group the records `query` lists by field values and work out the
+        plan's measures over each group and over them all: one statement
+        (`summary_sql`)."""
+        from civex.repositories.local import summary_sql
+
+        return summary_sql.summarise(
+            self._s, _base_query(self._s, query, self._pg), plan, self._pg
+        )
+
+    def geometries(
+        self, query: ResolvedQuery, field_id: str, hops: int, limit: int
+    ) -> tuple[list[tuple[RecordDTO, Any]], int]:
+        """The records `query` lists that have a geometry (a JSON object) in
+        `field_id`, on the record itself (`hops` 0) or on the record that
+        many levels above it: at most `limit`, oldest first, each with the
+        geometry, plus how many there are in all. Two statements."""
+        from civex.repositories.local.summary_sql import _Value
+
+        owner: Any = Record
+        q = _base_query(self._s, query, self._pg)
+        prev: Any = Record
+        for h in range(1, hops + 1):
+            owner = aliased(Record, name=f"geo_above_{h}")
+            q = q.join(owner, owner.id == prev.parent_record_id)
+            prev = owner
+        value = _Value(owner, field_id, self._pg)
+        has = value.kind == "object"
+        total = q.filter(has).with_entities(func.count(Record.id)).scalar() or 0
+        rows = (
+            q.filter(has)
+            .with_entities(Record, value.raw_text)
+            .order_by(Record.created_at, Record.id)
+            .limit(limit)
+            .all()
+        )
+        out: list[tuple[RecordDTO, Any]] = []
+        for row, raw in rows:
+            geometry = json.loads(raw) if isinstance(raw, str) else raw
+            if isinstance(geometry, dict):
+                out.append((_to_dto(row), geometry))
+        return out, int(total)
+
     def growth_by_period(
         self,
         dataset_id: uuid.UUID | None,
@@ -619,6 +720,41 @@ class LocalRecordRepository:
         row.data = data
         self._s.flush()
         return _to_dto(row)
+
+    def open_notes_of(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, tuple[int, str]]:
+        """For each of these records with threads of notes not yet resolved:
+        how many, and the text of the latest one's first note (records with
+        none are left out). One query per chunk, whatever the number of
+        notes: the count and the latest come from one windowed pass."""
+        out: dict[uuid.UUID, tuple[int, str]] = {}
+        for chunk in _chunks(ids):
+            ranked = (
+                select(
+                    RecordNote.record_id.label("record_id"),
+                    RecordNote.body.label("body"),
+                    func.count().over(partition_by=RecordNote.record_id).label("open"),
+                    func.row_number()
+                    .over(
+                        partition_by=RecordNote.record_id,
+                        order_by=(RecordNote.created_at.desc(), RecordNote.id.desc()),
+                    )
+                    .label("nth"),
+                )
+                .where(
+                    RecordNote.record_id.in_(chunk),
+                    RecordNote.thread_id.is_(None),
+                    RecordNote.resolved_at.is_(None),
+                    RecordNote.deleted_at.is_(None),
+                )
+                .subquery()
+            )
+            for rid, body, n in self._s.execute(
+                select(ranked.c.record_id, ranked.c.body, ranked.c.open).where(
+                    ranked.c.nth == 1
+                )
+            ):
+                out[rid] = (int(n), body)
+        return out
 
     def find_key_match(
         self,
@@ -887,6 +1023,13 @@ class LocalRecordRepository:
         self._s.flush()
 
 
+def _descends(ancestor_id: uuid.UUID, hops: int):
+    """The record sits `hops` levels below `ancestor_id` (1: its child)."""
+    if hops == 1:
+        return Record.parent_record_id == ancestor_id
+    return _exists_up(hops - 1, lambda a: a.parent_record_id == ancestor_id)
+
+
 def _base_query(session: Session, query: ResolvedQuery, is_postgres: bool = False):
     q = session.query(Record).filter(Record.deleted_at.is_(None))
     if query.dataset_id is not None:
@@ -897,12 +1040,16 @@ def _base_query(session: Session, query: ResolvedQuery, is_postgres: bool = Fals
         q = q.filter(Record.parent_record_id == query.parent_record_id)
     if query.within is not None:
         ancestor_id, hops = query.within
-        if hops == 1:
-            q = q.filter(Record.parent_record_id == ancestor_id)
-        else:
-            q = q.filter(
-                _exists_up(hops - 1, lambda a: a.parent_record_id == ancestor_id)
-            )
+        q = q.filter(_descends(ancestor_id, hops))
+    if query.beneath is not None:
+        ancestor_id, deepest = query.beneath
+        # Every kind beneath the record: one level down, two, ... to the
+        # deepest kind there is (a record's kind fixes how far down it sits).
+        q = q.filter(
+            or_(*[_descends(ancestor_id, h) for h in range(1, deepest + 1)])
+            if deepest
+            else false()
+        )
     for key, value in query.field_filters:
         if is_postgres:
             # @> containment uses the GIN index on PostgreSQL.
@@ -919,15 +1066,99 @@ def _base_query(session: Session, query: ResolvedQuery, is_postgres: bool = Fals
     if query.filter_tree is not None:
         q = q.filter(_build_filter_condition(query.filter_tree))
     if query.search:
-        if is_postgres:
-            q = q.filter(
-                Record.search_vector.op("@@")(
-                    func.plainto_tsquery("simple", query.search)
-                )
-            )
-        else:
-            q = q.filter(cast(Record.data, String).ilike(f"%{query.search}%"))
+        q = q.filter(text_match(query.search, is_postgres))
     return q
+
+
+def _like_pattern(term: str) -> str:
+    escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+def text_match(search: TextSearch, is_postgres: bool = False):
+    """The one rule for which records a text search finds (see TextSearch):
+    a value of one of its fields contains the term, case-insensitively, or
+    the record's id starts with it. A value is a top-level string or number,
+    a list's string or number items, or the `filename` of a file (or of each
+    file in a list); keys, hashes, sizes and nested structure never match.
+
+    One correlated EXISTS over the record's own JSON (`json_each` on SQLite,
+    `jsonb_each`/`jsonb_array_elements` on PostgreSQL), so a search stays one
+    statement. It reads every candidate row's data: no index serves a
+    substring match (a trigram index over the values would, on PostgreSQL)."""
+    like = _like_pattern(search.term)
+    matches = []
+    if search.field_ids:
+        matches.append(_values_contain(list(search.field_ids), like, is_postgres))
+    digits = search.term.strip().lower().replace("-", "")
+    span = prefix_span(digits) if len(digits) >= ID_PREFIX_MIN else None
+    if span is not None:
+        matches.append(Record.id.between(*span))
+    return or_(*matches) if matches else false()
+
+
+def _values_contain(field_ids: list[str], like: str, is_postgres: bool):
+    """EXISTS a top-level entry of one of `field_ids` whose value, a list
+    item of it, or a file's name in either, contains `like`."""
+    entry: Any
+    entry_type: Any
+    item: Any
+    item_type: Any
+    if is_postgres:
+        # render_derived names the columns (`AS e(key, value)`), so they
+        # don't depend on how PostgreSQL names a set-returning function's.
+        entry = (
+            func.jsonb_each(Record.data).table_valued("key", "value").render_derived()
+        )
+        entry_type = func.jsonb_typeof(entry.c.value)
+        items = case(
+            (entry_type == "array", entry.c.value),
+            else_=cast(literal_column("'[]'"), PG_JSONB),
+        )
+        item = func.jsonb_array_elements(items).table_valued("value").render_derived()
+        item_type = func.jsonb_typeof(item.c.value)
+        scalars, objects = ["string", "number"], "object"
+
+        def text_of(value: Any) -> Any:
+            return value.op("#>>")(literal_column("'{}'"))
+
+        def name_of(value: Any) -> Any:
+            return value.op("->>")(literal_column("'filename'"))
+    else:
+        entry = func.json_each(Record.data).table_valued("key", "value", "type")
+        entry_type = entry.c.type
+        items = case((entry_type == "array", entry.c.value), else_=literal("[]"))
+        item = func.json_each(items).table_valued("value", "type")
+        item_type = item.c.type
+        scalars, objects = ["text", "integer", "real"], "object"
+
+        def text_of(value: Any) -> Any:
+            return value
+
+        def name_of(value: Any) -> Any:
+            return func.json_extract(value, "$.filename")
+
+    def found(value: Any, kind: Any) -> Any:
+        return or_(
+            and_(kind.in_(scalars), text_of(value).ilike(like, escape="\\")),
+            and_(kind == objects, name_of(value).ilike(like, escape="\\")),
+        )
+
+    in_a_list = (
+        select(literal(1))
+        .select_from(item)
+        .where(found(item.c.value, item_type))
+        .exists()
+    )
+    return (
+        select(literal(1))
+        .select_from(entry)
+        .where(
+            entry.c.key.in_(field_ids),
+            or_(found(entry.c.value, entry_type), in_a_list),
+        )
+        .exists()
+    )
 
 
 def _build_filter_condition(node: FilterNode):
@@ -944,7 +1175,25 @@ def _build_filter_condition(node: FilterNode):
     return _build_leaf_condition(node, Record)
 
 
+def _open_notes_condition(node: FilterCondition, entity: Any):
+    """Whether a record has (`value` true) or hasn't threads of notes not yet
+    resolved (`civex.domain.notes`)."""
+    open_note = (
+        select(literal(1))
+        .where(
+            RecordNote.record_id == entity.id,
+            RecordNote.thread_id.is_(None),
+            RecordNote.resolved_at.is_(None),
+            RecordNote.deleted_at.is_(None),
+        )
+        .exists()
+    )
+    return open_note if node.value else not_(open_note)
+
+
 def _build_leaf_condition(node: FilterCondition, entity: Any):
+    if node.field == note_rules.OPEN_NOTES_FILTER:
+        return _open_notes_condition(node, entity)
     col = entity.data[node.field]
     if node.op == "is_null":
         # `.as_string()` (->>` on PG, plain json_extract on SQLite) collapses

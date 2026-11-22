@@ -13,6 +13,26 @@ export interface Field {
   position: number | null
 }
 
+/** A chart (civex/domain/charts.py): bars (what the records are grouped by
+ * and what each bar shows, as a summary writes them) or a map of a location
+ * field. The one definition a kind's charts, the explorer and the Analytics
+ * page share. */
+export interface Chart {
+  id: string
+  title?: string | null
+  /** How big its card is: the usual size, or large (full width, taller). */
+  size?: 'small' | 'large'
+  /** A map: the location field (`field`, or `kind.field` for a kind above). */
+  map?: string | null
+  group_by: string[]
+  measures: string[]
+  sort?: { column: string; direction: 'asc' | 'desc' } | null
+  /** How it is drawn: `chart` (or absent) picks from what it groups by; or
+   * bars, a line, a pie or its table of numbers. */
+  show?: 'chart' | 'bars' | 'line' | 'pie' | 'table'
+  chart_measure?: string | null
+}
+
 export interface Schema {
   id: string
   name: string
@@ -26,6 +46,9 @@ export interface Schema {
    * values no two records may share (within the same parent record, or the
    * same collection for a top-level record). */
   unique_keys?: string[][]
+  /** The charts a list of this kind opens with, in order (none: suggested
+   * ones are shown). */
+  charts?: Chart[]
   fields: Field[]
   /** When this schema was soft-deleted. Null means live. */
   deleted_at: string | null
@@ -50,6 +73,40 @@ export interface FieldTypeDescriptor {
   example: string
   restrictions: RestrictionDescriptor[]
   supports_default: boolean
+  /** Whether a text search looks in values of this type. */
+  searchable: boolean
+  /** What a summary can work out over a field of this type (besides
+   * `count`, which counts records). */
+  measures: string[]
+  /** How a summary groups by it: each `value`, a number by value or in
+   * ranges (`bin`), a date by value or a period (`bucket`), a list by `each`
+   * item, or not at all (null). */
+  grouping: 'value' | 'bin' | 'bucket' | 'each' | null
+  /** The periods a `bucket` grouping offers. */
+  buckets: string[]
+  /** Worked out from other fields when read, never stored (a formula): it
+   * can't be typed in, filtered or sorted by. */
+  computed?: boolean
+}
+
+/** What a formula would give, saving nothing (`POST
+ * /schemas/{s}/fields/preview-formula`). */
+export interface FormulaPreview {
+  value: unknown
+  /** Why it can't be worked out for that record. */
+  error: string | null
+  /** Why the formula can't be saved. */
+  problem: string | null
+  result: string | null
+  record_id: string | null
+  record_name: string | null
+}
+
+/** A measure a summary can work out. */
+export interface SummaryMeasure {
+  key: string
+  label: string
+  help: string
 }
 
 /** An entry in the "what kind of data is this?" picker. */
@@ -65,6 +122,7 @@ export interface FieldKind {
 export interface FieldTypes {
   types: FieldTypeDescriptor[]
   kinds: FieldKind[]
+  summary_measures: SummaryMeasure[]
 }
 
 export interface SchemaDeleteImpact {
@@ -132,6 +190,20 @@ export const schemasApi = {
       kind: 'record' | 'file'
     },
   ) => api.post<NamePreview>(`/schemas/${name}/preview-name`, body),
+  previewFormula: (
+    name: string,
+    body: {
+      expression: string
+      result?: string | null
+      decimals?: number | null
+      field?: string | null
+      record_id?: string | null
+    },
+  ) =>
+    api.post<FormulaPreview>(
+      `/schemas/${encodeURIComponent(name)}/fields/preview-formula`,
+      body,
+    ),
   create: (body: {
     name: string
     label?: string
@@ -159,6 +231,8 @@ export const schemasApi = {
   ) => api.patch<Schema>(`/schemas/${name}`, body),
   setUniqueKeys: (name: string, keys: string[][]) =>
     api.put<Schema>(`/schemas/${name}/unique-keys`, { keys }),
+  setCharts: (name: string, charts: Chart[]) =>
+    api.put<Schema>(`/schemas/${name}/charts`, { charts }),
   delete: (name: string) => api.delete<void>(`/schemas/${name}`),
   listDeleted: () => api.get<Schema[]>('/schemas/deleted'),
   restore: (name: string) => api.post<Schema>(`/schemas/${name}/restore`, {}),
@@ -185,8 +259,29 @@ export const schemasApi = {
       restrictions?: Record<string, unknown> | null
     },
   ) => api.patch<Field>(`/schemas/${name}/fields/${fieldName}`, body),
+  /** What a field's rules as they would be make of the values stored: how
+   * many records' values they refuse (a rule never re-checks stored values),
+   * and how many leave it empty if it were required. Nothing is changed. */
+  checkField: (
+    name: string,
+    fieldName: string,
+    body: { restrictions?: Record<string, unknown> | null; required?: boolean },
+  ) =>
+    api.post<FieldCheck>(
+      `/schemas/${encodeURIComponent(name)}/fields/${encodeURIComponent(fieldName)}/check`,
+      body,
+    ),
   deleteField: (name: string, fieldName: string) =>
     api.delete<void>(`/schemas/${name}/fields/${fieldName}`),
   reorderFields: (name: string, order: string[]) =>
     api.put<void>(`/schemas/${name}/fields/reorder`, { order }),
+}
+
+/** What a field's rules would leave behind (`checkField`). */
+export interface FieldCheck {
+  schema_name: string
+  field: string
+  breaks_rule: number
+  blank: number
+  examples: { record_id: string; record_name: string | null; message: string }[]
 }

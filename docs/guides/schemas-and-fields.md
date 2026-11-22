@@ -68,6 +68,7 @@ the kind of field you pick.
 | `tags` | Tags | A list of short labels | `seal, tagged` |
 | `url` | Web address | `http(s)://` text | `https://example.org` |
 | `enum` | Choice (legacy) | Use `string` with `--choices` instead | |
+| `formula` | Formula | Nothing: worked out from other fields when read | (can't be typed in) |
 
 ## Rules on a field
 
@@ -88,6 +89,16 @@ imports and workflows.
 | `--max-size` | `file`, `file_list` | `--max-size 10485760` (bytes) |
 | `--references` | `reference`, `reference_list` | `--references species` |
 | `--from-file` + `--filename-pattern` | `string`, `integer`, `float`, `date`, `datetime` | `--from-file reading --filename-pattern "YYYYMMDD[-_]HHmmSS"` (read from the file's name when the file is attached or replaced; see [Fill fields from file names](../how-to/fill-fields-from-filenames.md)) |
+
+Changing a rule doesn't re-check the values already stored. Before you save,
+the field editor says how many records hold a value the new rules refuse (or
+leave a newly required field empty), names a few, and links to the
+[data check](collections-and-records.md#checking-the-data) that lists them all;
+`civex schema update-field` says the same and asks before going on
+(`POST /api/schemas/{schema}/fields/{field}/check` with the rules you would
+set). Those records keep their values and can still be edited: a save checks
+only the values it changes, so a broken value is refused only when it is
+changed to another one the rules refuse.
 
 Some rules are set in the app (or over the API, as `restrictions`) only: a
 `date`/`datetime` minimum and maximum, a `datetime` field's own timezone, and a
@@ -198,6 +209,61 @@ builder. It names the stem, keeps the file's own extension, and may use fields o
 records above and through any reference:
 `{species.common}_{name}_{number:02}`.
 
+## Formulas
+
+A **formula** field is worked out from the record's other fields each time the
+record is read: a duration, a ratio, a converted unit, a label made of two
+codes. Nothing is stored, so it never drifts from the values it reads and
+changing the formula changes every record at once, with no run to wait for.
+
+```bash
+civex schema add-field patient bmi --type formula --expression "mass / height ** 2" --decimals 1
+civex schema add-field patient stay --type formula -e "days_between(admitted, discharged)" --result integer
+civex schema add-field dive depth_m --type formula -e "depth_ft * 0.3048" --unit m
+civex schema add-field sample code --type formula -e 'concat(site.code, "-", number)'
+civex schema preview-formula patient "round(mass / height ** 2, 1)" --record 3f2a
+```
+
+| Write | Means |
+|---|---|
+| `mass`, `site.code` | a field of the record (or of a record above it), or a field of the record a link points at |
+| `12`, `0.3048`, `"text"`, `True` | a number, text, yes/no |
+| `+ - * / // % **` | arithmetic (`+` also joins two texts) |
+| `== != < <= > >=`, `and or not` | comparisons and logic |
+| `"deep" if depth > 200 else "shallow"` | a choice |
+| `round(x, 2)`, `abs`, `min`, `max`, `sqrt`, `log(x[, base])`, `exp`, `floor`, `ceil` | numbers |
+| `concat(a, "-", b)`, `str`, `upper`, `lower`, `len` | text (and `len` of tags) |
+| `days_between(start, end)`, `hours_between(start, end)`, `year`, `month`, `day`, `date_add(date, days)` | dates and times |
+| `coalesce(value, fallback)` | the first value that isn't blank |
+
+- **Blank in, blank out**: a formula reading an empty field is empty, unless
+  `coalesce` gives it something else.
+- **What it gives** (`--result`: `float`, `integer`, `string`, `boolean`, `date`,
+  `datetime`) is worked out from the formula when you leave it out. A decimal
+  result can have `--decimals` and a `--unit`, which tables and DataFrames carry.
+- A value that can't be worked out for one record (dividing by zero, a value of
+  the wrong kind) is left blank there with the reason shown on the record; the
+  rest of the list is unaffected.
+- The formula is checked when you save it: the fields must exist and fit, and
+  formulas can't read each other in a circle. One formula can read another, and
+  a field of a record above, including its formula. A link reaches only stored
+  values of the record it points at.
+- Renaming a field rewrites the formulas that read it. A field a formula reads
+  can't be deleted until the formula is changed or deleted.
+- A formula can't be required, have a default, be part of a record's name or a
+  unique key, or be set by an edit, an import or a workflow (a value sent for
+  it is ignored).
+- **Lists can't be filtered, sorted or summarised by a formula**: the database
+  holds no value for it. Formulas do show as columns in the explorer and in
+  exported tables, and in `ctx.frame()` / `ctx.rows()`, typed by what they give.
+- Over the API a record's formulas are in `derived` (never in `data`), with
+  `formula_errors` saying why one is blank. History, sync and bundles hold no
+  formula values; a bundle carries the formula itself.
+
+In the app, the field editor's **Formula** box puts field names and functions in
+at the cursor and shows what the formula gives for the latest record of that
+kind, or one you pick.
+
 ## Types inside other types
 
 ```bash
@@ -235,6 +301,29 @@ In the app: the record type's **Uniqueness** tab.
   skip such rows and list them in a `duplicates` output.
 - A deleted record frees its values. Restoring it is refused if another record
   took them.
+
+## Charts for a kind
+
+A kind of record says which charts its lists open with, on its **Charts** tab:
+the same chart cards as beside any list of records (see
+[Charts](collections-and-records.md#charts)), drawn here over every record of
+the kind. Add, reorder or remove them, here or beside any list of the kind;
+each change is saved for everyone, is in the kind's history and syncs. A kind
+starts with no charts.
+
+A chart follows a field that is renamed, and goes when a field it uses is
+deleted.
+
+```bash
+civex schema charts list sample
+civex schema charts add sample --by site --measure mean:depth
+civex schema charts add sample --by taken:month
+civex schema charts add sample --map position --title "Where they are"
+civex schema charts remove sample <id>
+civex schema charts clear sample        # no charts again
+```
+
+The API is `PUT /api/schemas/{schema}/charts` with the whole list.
 
 ## Changing and deleting fields and types
 

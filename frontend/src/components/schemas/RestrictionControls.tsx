@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import { useRangeSelect } from '../../hooks/useRangeSelect'
 import type {
   Field as SchemaField,
@@ -15,6 +22,7 @@ import {
   DateTimeInput,
   Input,
   Select,
+  Textarea,
   TimeZoneSelect,
   Tooltip,
 } from '../ui'
@@ -43,8 +51,20 @@ import { useExampleFilenames } from '../../hooks/useExampleFilenames'
 import { PatternFromExampleDialog } from '../files/PatternFromExample'
 import {
   TemplateBuilder,
+  ValueInserter,
+  choicesFor,
   type TemplateField,
 } from '../templates/TemplateBuilder'
+import { insertAt } from '../../utils/templates'
+import {
+  FORMULA_FUNCTIONS,
+  FORMULA_RESULTS,
+  readableInFormula,
+  shownAs,
+} from '../../utils/formulas'
+import { useFormulaPreview } from '../../hooks/useFormulaPreview'
+import { RecordSearchPicker } from '../records/RecordSearchPicker'
+import { FieldValue } from '../records/FieldValue'
 
 export type Rules = Record<string, unknown>
 
@@ -819,6 +839,213 @@ export function BboxControl({ desc, rules, set, problem }: ControlProps) {
         </div>
         {valid && <LocatorMap bbox={nums} className="w-56" />}
       </div>
+    </Shell>
+  )
+}
+
+/** A formula's expression: a monospace box, the fields it can read and the
+ * functions it can call put in at the cursor, and what it gives worked out by
+ * the server for a record of the kind (the latest, or one picked), with the
+ * same check saving makes, so a formula that can't be saved says why here. */
+export function FormulaControl({
+  desc,
+  rules,
+  set,
+  problem,
+  ctx,
+}: ControlProps) {
+  const value =
+    typeof rules[desc.key] === 'string' ? (rules[desc.key] as string) : ''
+  const box = useRef<HTMLTextAreaElement>(null)
+  const pendingCursor = useRef<number | null>(null)
+  const [recordId, setRecordId] = useState<string | undefined>()
+  useLayoutEffect(() => {
+    if (pendingCursor.current === null) return
+    box.current?.focus()
+    box.current?.setSelectionRange(pendingCursor.current, pendingCursor.current)
+    pendingCursor.current = null
+  }, [value])
+
+  const self = ctx.existing?.name
+  const choices = useMemo(
+    () =>
+      choicesFor(
+        ctx.fields.filter((f) => f.name !== self),
+        {
+          usable: (f) => readableInFormula(f.dtype),
+          // A link reaches stored values only, one step.
+          reachable: (f) => readableInFormula(f.dtype) && f.dtype !== 'formula',
+          builtins: false,
+        },
+      ),
+    [ctx.fields, self],
+  )
+
+  function insert(snippet: string, back = 0) {
+    const el = box.current
+    const next = insertAt(
+      value,
+      el?.selectionStart ?? value.length,
+      el?.selectionEnd ?? value.length,
+      snippet,
+    )
+    pendingCursor.current = next.cursor - back
+    set(desc.key, next.value || undefined)
+  }
+
+  const result = typeof rules.result === 'string' ? rules.result : null
+  const decimals = typeof rules.decimals === 'number' ? rules.decimals : null
+  const preview = useFormulaPreview(ctx.schemaName, {
+    expression: value,
+    result,
+    decimals,
+    field: self ?? null,
+    record_id: recordId ?? null,
+  })
+  const data = value.trim() ? preview.data : undefined
+  const refused = data?.problem ?? null
+  useEffect(() => {
+    problem(desc.key, value.trim() ? refused : null)
+  }, [desc.key, problem, refused, value])
+
+  return (
+    <Shell label={desc.label} help={desc.help}>
+      <Textarea
+        ref={box}
+        value={value}
+        rows={3}
+        placeholder="mass / height ** 2"
+        aria-label={desc.label}
+        invalid={!!refused}
+        spellCheck={false}
+        autoComplete="off"
+        className="w-full font-mono"
+        onChange={(e) => set(desc.key, e.target.value || undefined)}
+      />
+      <ValueInserter
+        choices={choices}
+        written={(name) => name}
+        onPick={(c) => insert(c.name)}
+      />
+      <Select
+        size="sm"
+        value=""
+        aria-label="Insert a function"
+        className="w-56"
+        onChange={(e) => {
+          const fn = FORMULA_FUNCTIONS.find((f) => f.name === e.target.value)
+          if (!fn) return
+          // The cursor goes inside the brackets, where the first value goes.
+          insert(fn.insert, fn.insert.length - fn.insert.indexOf('(') - 1)
+        }}
+      >
+        <option value="">Insert a function…</option>
+        {FORMULA_FUNCTIONS.map((f) => (
+          <option key={f.name} value={f.name}>
+            {f.name}: {f.help}
+          </option>
+        ))}
+      </Select>
+      <div className="space-y-1.5 rounded-md bg-canvas-subtle px-3 py-2 text-sm">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-fg-subtle">Try it on</span>
+          <RecordSearchPicker
+            schemaName={ctx.schemaName}
+            value={recordId}
+            onChange={(id) => setRecordId(id ?? undefined)}
+            placeholder="The latest record"
+            aria-label="Record to try the formula on"
+            className="w-64"
+          />
+        </div>
+        {refused ? (
+          <p role="alert" className="text-danger">
+            {refused}
+          </p>
+        ) : data ? (
+          <p
+            role="status"
+            data-testid="formula-preview"
+            className="flex min-w-0 items-baseline gap-2"
+          >
+            <span className="shrink-0 text-xs text-fg-subtle">
+              {data.record_id
+                ? `For ${data.record_name ?? data.record_id.slice(0, 8)}`
+                : 'With no record yet'}
+            </span>
+            {data.error ? (
+              <span className="text-warning">Blank: {data.error}</span>
+            ) : (
+              <span className="min-w-0 font-mono text-fg">
+                <FieldValue
+                  value={data.value}
+                  field={shownAs({
+                    id: '',
+                    name: '',
+                    label: null,
+                    required: false,
+                    default: null,
+                    position: null,
+                    type: 'formula',
+                    restrictions: { ...rules, result: data.result },
+                  })}
+                />
+              </span>
+            )}
+          </p>
+        ) : null}
+      </div>
+    </Shell>
+  )
+}
+
+/** What a formula gives; empty = worked out from the formula on save. */
+export function FormulaResultControl({ desc, rules, set }: ControlProps) {
+  const value =
+    typeof rules[desc.key] === 'string' ? (rules[desc.key] as string) : ''
+  return (
+    <Shell label={desc.label} help={desc.help}>
+      <Select
+        size="sm"
+        value={value}
+        aria-label={desc.label}
+        onChange={(e) => set(desc.key, e.target.value || undefined)}
+        className="w-56"
+      >
+        <option value="">Worked out from the formula</option>
+        {FORMULA_RESULTS.map((r) => (
+          <option key={r.value} value={r.value}>
+            {r.label}
+          </option>
+        ))}
+      </Select>
+    </Shell>
+  )
+}
+
+/** 0 to 10 decimal places. */
+export function DecimalsControl({ desc, rules, set }: ControlProps) {
+  const stored = rules[desc.key]
+  return (
+    <Shell label={desc.label} help={desc.help}>
+      <Input
+        size="sm"
+        type="number"
+        step="1"
+        min={0}
+        max={10}
+        value={typeof stored === 'number' ? String(stored) : ''}
+        placeholder="as worked out"
+        aria-label={desc.label}
+        onChange={(e) => {
+          const n = parseInt(e.target.value, 10)
+          set(
+            desc.key,
+            e.target.value === '' || Number.isNaN(n) ? undefined : n,
+          )
+        }}
+        className="w-40"
+      />
     </Shell>
   )
 }

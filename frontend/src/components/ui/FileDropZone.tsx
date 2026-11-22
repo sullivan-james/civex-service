@@ -18,7 +18,11 @@ export function FileDropZone({
   'aria-invalid': invalid,
   required,
   title,
+  compact = false,
 }: {
+  /** A small, quiet control (a file field among a record's values): it still
+   * takes a drop, but reads as a button, not a box. */
+  compact?: boolean
   onFiles: (files: File[]) => void
   multiple?: boolean
   /** Hint for the browser's picker; dropped files are not filtered by it. */
@@ -55,7 +59,11 @@ export function FileDropZone({
       onDragLeave={() => setOver(false)}
       onDrop={drop}
       title={title}
-      className={`relative flex min-h-12 items-center justify-center rounded-md border-2 border-dashed px-4 py-3 text-center text-sm transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent ${
+      className={`relative items-center justify-center rounded-md text-sm transition-colors ${
+        compact
+          ? 'inline-flex min-h-8 gap-1 border px-3'
+          : 'flex min-h-12 border-2 border-dashed px-4 py-3 text-center'
+      } has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent ${
         disabled
           ? 'cursor-not-allowed border-border text-fg-subtle opacity-60'
           : over

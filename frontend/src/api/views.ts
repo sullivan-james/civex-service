@@ -38,6 +38,7 @@ export interface UpdateViewBody {
   filter_tree?: FilterTreeWire | null
   sort?: ViewSortEntry[]
   files_layout?: FilesLayout
+  /** null makes an analysis a plain saved filter again. */
 }
 
 export interface PreviewViewBody {

@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Link, useLocation, useNavigate, useSearchParams } from 'react-router'
-import { recordsApi, type CivexRecord } from '../../api/records'
-import { viewsApi } from '../../api/views'
+import { useLocation, useNavigate, useSearchParams } from 'react-router'
 import {
   useDeleteManyRecords,
   useDeleteMatchingRecords,
+  useRecordPage,
+  useRecordQuality,
+  useRecordSummary,
 } from '../../hooks/useRecords'
+import { queryBody } from '../../api/records'
 import {
   useCreateView,
   useDeleteView,
@@ -13,6 +15,7 @@ import {
 } from '../../hooks/useViews'
 import {
   Button,
+  Chip,
   ConfirmDialog,
   EmptyState,
   ErrorState,
@@ -20,14 +23,25 @@ import {
   Pagination,
   Menu,
   PinButton,
+  type MenuEntry,
   type MenuItem,
   TriggerPopover,
   TableSkeleton,
-  SegmentedControl,
   Field,
   Skeleton,
+  SplitPane,
+  Subheading,
 } from '../ui'
-import { ChevronDown, Columns3, Download, Plus } from '../ui/icons'
+import {
+  AlertTriangle,
+  BarChart3,
+  ListFilter,
+  MessageSquare,
+  PanelRightOpen,
+  ChevronDown,
+  Columns3,
+  Plus,
+} from '../ui/icons'
 import { toTableRows } from '../records/tableRows'
 import {
   RecordsTable,
@@ -35,14 +49,33 @@ import {
   type RecordsTableSort,
 } from '../records/RecordsTable'
 import { ColumnPicker, columnLabel } from '../views/ColumnPicker'
+import {
+  OPEN_NOTES,
+  OPEN_NOTES_FILTER,
+  asksForOpenNotes,
+} from '../../utils/notes'
 import { FilterControls } from './FilterControls'
 import { DrillLinks } from './DrillLinks'
 import { SavedViewBar } from './SavedViewBar'
 import { ScopeTrail, type TrailItem } from './ScopeTrail'
 import { SelectionBar } from './SelectionBar'
 import { MoveRecordsDialog } from './MoveRecordsDialog'
+import { BulkEditDialog } from './BulkEditDialog'
+import { bulkEditableFields } from '../../utils/bulkEdit'
 import { FilesView } from '../files/FilesView'
-import { MoveToDriveButton } from '../files/MoveDialog'
+import type { View } from '../../api/views'
+import { SAVED_KINDS } from '../../utils/savedKinds'
+import { ChecksView } from './ChecksView'
+import { withCondition } from '../../utils/summary'
+import { ChartsColumn } from './ChartsColumn'
+import { useExplorerCharts } from './useExplorerCharts'
+import { OpenChart } from '../charts/ChartBoard'
+import { NewChart } from '../charts/NewChart'
+import { downloadCharts } from '../charts/downloadCharts'
+import { useToast } from '../ui/ToastProvider'
+import { CHARTS_AUTO_UP_TO, chartTitle, plural } from '../../utils/charts'
+import { totalsCells, totalsMeasures } from '../../utils/totals'
+import { useStored } from '../../hooks/useStored'
 import { useBulkSelection } from '../../hooks/useBulkSelection'
 import { BulkRunWorkflow, bulkRunnable } from '../workflows/BulkRunWorkflow'
 import { FileAccessActions } from '../files/FileAccessActions'
@@ -57,12 +90,25 @@ import { usePermissions } from '../../hooks/useMe'
 import { EmptyCollectionGuide } from './EmptyCollectionGuide'
 import { recordRecent } from '../../hooks/usePins'
 import { placeTarget, viewTarget } from '../../utils/navTargets'
-import { viewPatch } from '../../utils/explorerState'
+import type { NavTarget } from '../../utils/pins'
+import { applyExplorerPatch, viewPatch } from '../../utils/explorerState'
 import { ancestorSchemas } from '../../utils/hierarchy'
 import { HIGH_IMPACT_RECORD_THRESHOLD } from '../../lib/deleteImpact'
 import { errorMessage } from '../../lib/errors'
 import { pluralise } from '../../lib/utils'
 import { displayLabel } from '../../utils/naming'
+
+/** A kind's display name, for a chart's title. */
+const listedLabelOf = (
+  listed: { name: string; label: string | null } | null | undefined,
+) => (listed ? displayLabel(listed.name, listed.label) : '')
+
+/** What the explorer shows of a list: its records, its charts, or both. */
+type ExplorerLayout = 'records' | 'both' | 'charts'
+
+/** Past this many listed records, the data check is not run just to count
+ * (it reads every record): the count waits until Checks is opened. */
+const CHECK_COUNT_UP_TO = 5000
 
 export interface RecordsExplorerProps extends ExplorerScope {
   /** Shown as the first crumb when browsing a whole collection. */
@@ -77,14 +123,35 @@ export interface RecordsExplorerProps extends ExplorerScope {
  * picks the level, a trail shows where you are, search + filters + saved
  * filters narrow it, and every row links down to its children. All state is
  * in the URL. */
+/** The columns of what every record has, which a list of every kind shows
+ * (`ALL_KINDS_COLUMNS`) and any list can sort by. */
+const META_COLUMNS: Record<string, { label: string; type: string }> = {
+  '@kind': { label: 'Kind', type: 'kind' },
+  '@collection': { label: 'Collection', type: 'collection' },
+  '@updated_at': { label: 'Last edited', type: 'updated' },
+}
+
+/** Why something about one kind's fields is switched off in a list of every
+ * kind. */
+function pickKind(what: string): string {
+  return `Pick a kind of record to ${what}`
+}
+
 export function RecordsExplorer({
   scopeLabel,
   toolbarActions,
   ...scope
 }: RecordsExplorerProps) {
   const x = useExplorer(scope)
-  const { state, patch, listed, listedName } = x
+  const { state, patch, listed, listedName, allKinds } = x
   const dataset = scope.dataset
+  // Shown under a record's fields ("Inside this …"): a quieter explorer.
+  const inside = !!scope.root
+  // There it starts as just the rows. Its tools (filters, saved filters,
+  // columns, charts, export, ticking rows) open in place, in this same list,
+  // so there is one place for a record's contents, not two.
+  const [tools, setTools] = useState(false)
+  const quiet = inside && !tools && !x.filter
   const { data: collection } = useCollection(dataset ?? '')
   const location = useLocation()
 
@@ -101,16 +168,6 @@ export function RecordsExplorer({
     return () => clearTimeout(t)
   }, [searchInput, state.q, patch])
 
-  // --- `?view=name` in a shared link: apply it once, when nothing else was
-  // chosen. Only ever on arrival -- afterwards the URL is the truth, so
-  // clearing the filter of a view stays cleared.
-  const seededView = useRef(false)
-  useEffect(() => {
-    if (seededView.current || !x.viewsLoaded) return
-    seededView.current = true
-    if (x.activeView && !x.hasSelection) patch(viewPatch(x.activeView))
-  }, [x.viewsLoaded, x.activeView, x.hasSelection, patch])
-
   // --- selection (only where rows can be deleted)
   const picked = useBulkSelection(
     (x.page.data?.items ?? []).map((r) => r.id),
@@ -120,9 +177,136 @@ export function RecordsExplorer({
   // The same records, as their files (and those of everything beneath them):
   // one set of filters for both, held in the address like the rest.
   const [params, setParams] = useSearchParams()
-  const showFiles = params.get('show') === 'files'
+  const show = params.get('show')
+  const showFiles = show === 'files'
+  /** Open a saved filter: its filter, sort and columns. */
+  const openView = (v: View) => patch(viewPatch(v))
+  // --- `?view=name` in a shared link: apply it once, when nothing else was
+  // chosen. Only ever on arrival -- afterwards the URL is the truth, so
+  // clearing the filter of a saved filter stays cleared.
+  const seededView = useRef(false)
+  useEffect(() => {
+    if (seededView.current || !x.viewsLoaded) return
+    seededView.current = true
+    const v = x.activeView
+    if (!v || x.hasSelection) return
+    patch(viewPatch(v))
+  }, [x.viewsLoaded, x.activeView, x.hasSelection, patch])
+
+  // What in the listed records needs a look (`ChecksView`).
+  const showChecks = show === 'checks' && !!listed
+  const setShow = (v: string | null) =>
+    setParams(
+      (prev) => {
+        const out = new URLSearchParams(prev)
+        if (v === null) out.delete('show')
+        else out.set('show', v)
+        return out
+      },
+      { replace: true },
+    )
+  // How many listed records have something to look at: the data check reads
+  // every listed record, so it is asked by itself only for a list up to
+  // CHECK_COUNT_UP_TO records; a bigger one is counted once Checks is opened.
+  // Shared with ChecksView (the same query, under `records`, so an edit
+  // counts again).
+  const listedTotal = x.page.data?.total ?? 0
+  const checkCount = useRecordQuality(
+    listed &&
+      !x.page.error &&
+      x.page.data !== undefined &&
+      // Not counted under a record's fields, where it isn't shown.
+      (showChecks || (!quiet && listedTotal <= CHECK_COUNT_UP_TO))
+      ? queryBody({ ...x.query, sort: undefined }, dataset)
+      : null,
+  )
+  const issuesFound = checkCount.data?.records_with_issues
+  // How many of the listed records have an open note: a fact beside the
+  // count, like problems, shown only when there are any (one count, asked
+  // once the rows are in; not while the list is already narrowed to them).
+  const openNotesListed = asksForOpenNotes(x.filter)
+  const withOpenNotes = useRecordPage(
+    {
+      datasetName: dataset,
+      schemaName: listedName ?? undefined,
+      allKinds,
+    },
+    {
+      ...x.query,
+      sort: undefined,
+      filter: withCondition(x.filter, OPEN_NOTES),
+      limit: 1,
+    },
+    {
+      enabled: x.page.data !== undefined && !x.page.error && !openNotesListed,
+    },
+  )
+  const openNotes = openNotesListed ? 0 : (withOpenNotes.data?.total ?? 0)
+  // --- charts: beside the records, counting exactly what is listed. They
+  // are asked for once the rows are in, and a very big list waits for a click.
+  const records = queryBody({ ...x.query, sort: undefined }, dataset)
+  // Whether charts are beside the records, remembered in this browser for
+  // this project (not, to start with, on a narrow screen). `charts` is the
+  // charts at full width: a screen over the same records, with a way back.
+  const [layout, setLayout] = useStored<ExplorerLayout>(
+    // Under a record's fields charts start folded, remembered apart from a
+    // collection's list.
+    inside ? 'explorer.layout.inside' : 'explorer.layout',
+    inside || (typeof window !== 'undefined' && window.innerWidth < 1024)
+      ? 'records'
+      : 'both',
+  )
+  const chartsHidden = layout === 'records'
+  const chartsOnly = layout === 'charts' && !!listed
+  const [chartsAsked, setChartsAsked] = useState(false)
+  // Problems and files are screens of their own over the same records:
+  // the charts, which count records, step aside.
+  const aside = showChecks || showFiles
+  const rowsIn = x.page.data !== undefined && !x.page.error
+  const chartsOn = rowsIn && (listedTotal <= CHARTS_AUTO_UP_TO || chartsAsked)
+  const charts = useExplorerCharts(listed ?? null, x.filterFields)
+  const setFilter = (filter: typeof x.filter) => patch({ filter })
+  // The charts on screen go out with Export too: their numbers, a table
+  // each (a map has none).
+  const toast = useToast()
+  const exportable = charts.charts
+    .filter((c) => !c.map)
+    .map((chart) => ({
+      chart,
+      title: chartTitle(chart, charts.usable, listedLabelOf(listed), x.schemas),
+    }))
+  const sendCharts = (which: typeof exportable) =>
+    downloadCharts(which, records, 'csv').catch((e) =>
+      toast.error(errorMessage(e)),
+    )
+  const chartItems: MenuEntry[] =
+    listed && exportable.length > 0
+      ? [
+          { heading: 'Charts' },
+          ...(exportable.length > 1
+            ? [
+                {
+                  label: `All ${exportable.length} charts`,
+                  onClick: () => sendCharts(exportable),
+                },
+              ]
+            : []),
+          ...exportable.map((c) => ({
+            label: c.title,
+            onClick: () => sendCharts([c]),
+          })),
+        ]
+      : []
+  // --- totals under the table, for every record listed.
+  const totalsAsk = listed ? totalsMeasures(x.columnNames, listed.fields) : []
+  const totals = useRecordSummary(
+    rowsIn && !quiet && totalsAsk.length > 0 && listedTotal > 0
+      ? { ...records, group_by: [], measures: totalsAsk }
+      : null,
+  )
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [moving, setMoving] = useState(false)
+  const [editing, setEditing] = useState(false)
   const deleteMany = useDeleteManyRecords(dataset ?? '')
   const deleteMatching = useDeleteMatchingRecords(dataset ?? '')
   const createView = useCreateView(listedName ?? '')
@@ -163,13 +347,37 @@ export function RecordsExplorer({
 
   const items = x.page.data?.items ?? []
   const total = x.page.data?.total ?? 0
+  // How many of the kind there are here before the filter and search.
+  const inScope =
+    listed && (x.filter || state.q)
+      ? (x.levels.find((l) => l.schema.id === listed.id)?.count ?? null)
+      : null
   const rows = toTableRows(items)
-  const columns = x.columnNames.map((name) => ({
-    name,
-    label: columnLabel(name, x.baseFields, x.joinable),
-    type: x.baseFields.find((f) => f.name === name)?.type,
-    sortable: !name.includes('.'),
-  }))
+  // Listing records with open notes (the "Open notes" view): the column says
+  // what is open, and a record opens on its Notes tab.
+  const openNotesView = asksForOpenNotes(x.filter)
+  const columnNames =
+    openNotesView && !x.columnNames.includes(OPEN_NOTES_FILTER)
+      ? [...x.columnNames, OPEN_NOTES_FILTER]
+      : x.columnNames
+  const columns = columnNames.map((name) => {
+    if (name === OPEN_NOTES_FILTER)
+      return { name, label: 'Open notes', type: 'notes', sortable: false }
+    const meta = META_COLUMNS[name]
+    if (meta) return { name, label: meta.label, type: meta.type }
+    const field = x.baseFields.find((f) => f.name === name)
+    return {
+      name,
+      label: columnLabel(name, x.baseFields, x.joinable),
+      // A formula's cells are of the type it gives; a list can't be sorted
+      // by it (worked out when read, so the database holds nothing to order).
+      type:
+        field?.type === 'formula'
+          ? String(field.restrictions?.result ?? 'string')
+          : field?.type,
+      sortable: !name.includes('.') && field?.type !== 'formula',
+    }
+  })
   const sort: RecordsTableSort | undefined = x.sort[0]
     ? { key: x.sort[0].field, direction: x.sort[0].direction }
     : undefined
@@ -238,7 +446,9 @@ export function RecordsExplorer({
     tables: [
       {
         format: 'csv' as const,
-        columns: x.columnNames,
+        // What every record has (its kind, open notes) is shown, not
+        // written in a table: a list of every kind writes one per kind.
+        columns: x.columnNames.filter((c) => !c.startsWith('@')),
         kind: x.listed?.name ?? null,
       },
     ],
@@ -257,7 +467,11 @@ export function RecordsExplorer({
   const bulkCount = allMatching ? total : selected.size
   const { data: allWorkflows } = useWorkflows()
   const runnable = listed ? bulkRunnable(allWorkflows, listed.name) : []
-  const listedLabel = listed ? displayLabel(listed.name, listed.label) : ''
+  const listedLabel = listed
+    ? displayLabel(listed.name, listed.label)
+    : allKinds
+      ? 'Record'
+      : ''
 
   // What the star pins: the saved filter when one is applied as saved,
   // otherwise this place in the explorer exactly as the address bar has it.
@@ -269,7 +483,7 @@ export function RecordsExplorer({
   ]
     .filter(Boolean)
     .join(' ')
-  const pinTarget =
+  const pinTarget: NavTarget | null =
     listed && x.activeView && !x.modified
       ? viewTarget(listed, x.activeView.name)
       : listed
@@ -388,12 +602,56 @@ export function RecordsExplorer({
       </Button>
     ))
 
+  // Which columns: a choice about the records, so it sits beside their count. A
+  // list of every kind shows what every record has (no choice).
+  const columnsButton = !allKinds && (
+    <TriggerPopover
+      label="Choose columns"
+      align="right"
+      panelClassName="w-[28rem] max-w-[90vw]"
+      trigger={({ toggle, open }) => (
+        <Button size="sm" onClick={toggle} aria-expanded={open}>
+          <Columns3 size={14} /> Columns
+        </Button>
+      )}
+    >
+      <ColumnPicker
+        columns={x.columnNames}
+        // Remembered for this kind; the address stays as it was unless a
+        // saved filter or a link named its own columns.
+        onChange={(cols) => {
+          x.rememberColumns(cols)
+          if (x.cols) patch({ cols: null })
+        }}
+        baseFields={x.baseFields}
+        joinable={x.joinable}
+        extra={[{ name: OPEN_NOTES_FILTER, label: 'Open notes' }]}
+        allowHideAll={false}
+      />
+      {(x.cols || x.columnsRemembered) && (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="mt-2"
+          onClick={() => {
+            x.rememberColumns(null)
+            if (x.cols) patch({ cols: null })
+          }}
+        >
+          Reset to default columns
+        </Button>
+      )}
+    </TriggerPopover>
+  )
+
+  const kindsInside = x.levels.filter((l) => (l.count ?? 0) > 0)
+
   // Until the collection and its counts have answered, nothing is listed and
   // there is no New: a menu opened now would be replaced by the loaded one.
-  if (!listed && (!x.countsLoaded || (dataset && !collection)))
+  if (!listed && !allKinds && (!x.countsLoaded || (dataset && !collection)))
     return <Skeleton className="h-32 w-full" />
 
-  if (!listed && !x.page.isLoading && x.levels.length === 0) {
+  if (!listed && !allKinds && !x.page.isLoading && x.levels.length === 0) {
     // Levels come from record counts, so an empty collection has none and the
     // list's own "Add" button never renders -- offer the collection's own
     // top-level schemas here instead, or there is no way to create the first
@@ -418,7 +676,34 @@ export function RecordsExplorer({
   return (
     <div>
       <div className="min-w-0 space-y-3">
-        <ScopeTrail items={trail} heading={listedLabel} />
+        {/* Under a record's own heading ("Inside this …") its name and the
+            kind listed would only repeat it: the chips say the kind. */}
+        {(!inside || !!state.within) && (
+          <ScopeTrail items={trail} heading={listedLabel} />
+        )}
+        {inside && kindsInside.length > 0 && (
+          // What it contains, a kind at a time: the section's own heading.
+          <div
+            className="flex flex-wrap items-center gap-2"
+            aria-label="Kinds inside"
+          >
+            <Subheading as="h2" className="mr-1">
+              Contains
+            </Subheading>
+            {kindsInside.map((l) => (
+              <Chip
+                key={l.schema.id}
+                selected={l.schema.id === listed?.id}
+                onClick={() => pickLevel(l.schema.name)}
+              >
+                {displayLabel(l.schema.name, l.schema.label)}
+                <span className="text-xs font-normal opacity-70">
+                  {(l.count ?? 0).toLocaleString()}
+                </span>
+              </Chip>
+            ))}
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-2">
           <div className="min-w-[14rem] max-w-xl flex-1">
@@ -436,12 +721,38 @@ export function RecordsExplorer({
               />
             </Field>
           </div>
+          {inside && listed && !aside && (
+            <>
+              {/* The list's own tools (filters, saved filters, columns,
+                  export, ticking rows), opened here. */}
+              <Button
+                size="sm"
+                aria-pressed={tools || !!x.filter}
+                disabled={!!x.filter}
+                onClick={() => setTools((on) => !on)}
+              >
+                <ListFilter size={14} /> Filter
+              </Button>
+              <Button
+                size="sm"
+                aria-pressed={!chartsHidden}
+                onClick={() => setLayout(chartsHidden ? 'both' : 'records')}
+              >
+                <BarChart3 size={14} /> Charts
+              </Button>
+            </>
+          )}
           <div className="ml-auto flex flex-wrap items-center gap-2">
             {toolbarActions}
-            {pinTarget && (
+            {/* The record's own page has its star. */}
+            {pinTarget && !inside && (
               <PinButton
                 target={pinTarget}
-                noun={pinTarget.kind === 'view' ? 'filter' : 'place'}
+                noun={
+                  pinTarget.saved
+                    ? SAVED_KINDS[pinTarget.saved].word.toLowerCase()
+                    : 'place'
+                }
                 size="md"
               />
             )}
@@ -450,103 +761,82 @@ export function RecordsExplorer({
         </div>
 
         {/* The view's own controls: which rows (saved filters and the conditions
-            below), which columns, and Export of what that leaves. */}
-        <div className="flex flex-wrap items-start gap-2">
+            below), which columns, and Export of what that leaves. Inside a
+            record's page they open with the list's other tools. */}
+        <div
+          hidden={quiet}
+          className={`flex flex-wrap items-start gap-2 ${quiet ? 'hidden' : ''}`}
+        >
           <div className="min-w-0 flex-1">
-            <SavedViewBar
-              views={x.views}
-              activeView={x.activeView}
-              modified={x.modified}
-              hasSelection={x.hasSelection}
-              onApply={(v) => patch(viewPatch(v))}
-              onClear={() =>
-                patch({ view: null, filter: null, sort: [], cols: null })
-              }
-              onSave={() =>
-                updateView.mutate({
-                  columns: x.columnNames,
-                  filter_tree: x.filter,
-                  sort: x.sort,
-                })
-              }
-              onSaveAs={(name, done) =>
-                createView.mutate(
-                  {
-                    name,
+            {/* A saved filter belongs to one kind of record. */}
+            {!allKinds && (
+              <SavedViewBar
+                views={x.views}
+                activeView={x.activeView}
+                modified={x.modified}
+                hasSelection={x.hasSelection}
+                onApply={openView}
+                onClear={() =>
+                  patch({ view: null, filter: null, sort: [], cols: null })
+                }
+                onSave={() =>
+                  updateView.mutate({
                     columns: x.columnNames,
                     filter_tree: x.filter,
                     sort: x.sort,
-                  },
-                  {
-                    onSuccess: (created) => {
-                      done()
-                      patch({ view: created.name })
+                  })
+                }
+                onSaveAs={(name, done) =>
+                  createView.mutate(
+                    {
+                      name,
+                      columns: x.columnNames,
+                      filter_tree: x.filter,
+                      sort: x.sort,
                     },
-                  },
-                )
-              }
-              onRename={(name, done) =>
-                updateView.mutate(
-                  { rename: name },
-                  {
-                    onSuccess: (updated) => {
-                      done()
-                      patch({ view: updated.name })
+                    {
+                      onSuccess: (created) => {
+                        done()
+                        patch({ view: created.name })
+                      },
                     },
-                  },
-                )
-              }
-              onDelete={(done) =>
-                deleteView.mutate(x.activeView!.name, {
-                  onSuccess: () => {
-                    done()
-                    patch({ view: null })
-                  },
-                })
-              }
-              filesLayout={hasFiles ? x.activeView?.files_layout : undefined}
-              onFilesLayout={
-                hasFiles && x.activeView
-                  ? (files_layout) => updateView.mutate({ files_layout })
-                  : undefined
-              }
-              pending={
-                createView.isPending ||
-                updateView.isPending ||
-                deleteView.isPending
-              }
-              error={createView.error ?? updateView.error ?? deleteView.error}
-            />
+                  )
+                }
+                onRename={(name, done) =>
+                  updateView.mutate(
+                    { rename: name },
+                    {
+                      onSuccess: (updated) => {
+                        done()
+                        patch({ view: updated.name })
+                      },
+                    },
+                  )
+                }
+                onDelete={(done) =>
+                  deleteView.mutate(x.activeView!.name, {
+                    onSuccess: () => {
+                      done()
+                      patch({ view: null })
+                    },
+                  })
+                }
+                filesLayout={hasFiles ? x.activeView?.files_layout : undefined}
+                onFilesLayout={
+                  hasFiles && x.activeView
+                    ? (files_layout) => updateView.mutate({ files_layout })
+                    : undefined
+                }
+                pending={
+                  createView.isPending ||
+                  updateView.isPending ||
+                  deleteView.isPending
+                }
+                error={createView.error ?? updateView.error ?? deleteView.error}
+              />
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <TriggerPopover
-              label="Choose columns"
-              align="right"
-              panelClassName="w-[28rem] max-w-[90vw]"
-              trigger={({ toggle, open }) => (
-                <Button size="sm" onClick={toggle} aria-expanded={open}>
-                  <Columns3 size={14} /> Columns
-                </Button>
-              )}
-            >
-              <ColumnPicker
-                columns={x.columnNames}
-                onChange={(cols) => patch({ cols })}
-                baseFields={x.baseFields}
-                joinable={x.joinable}
-                allowHideAll={false}
-              />
-              {x.cols && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="mt-2"
-                  onClick={() => patch({ cols: null })}
-                >
-                  Reset to default columns
-                </Button>
-              )}
-            </TriggerPopover>
             <FileAccessActions
               label="Export"
               selection={exportContext()}
@@ -554,234 +844,428 @@ export function RecordsExplorer({
               presets={canExportFiles ? exportPresets : []}
               scopeSchema={listedName ?? undefined}
               builderTo={builderHref}
+              leading={chartItems}
             />
           </div>
         </div>
 
-        {listed && (
+        {(listed || allKinds) && (!quiet || x.filter) && (
           <FilterControls
             wire={x.filter}
             fields={x.filterFields}
-            listedSchema={listed.name}
+            listedSchema={listed?.name ?? ''}
+            records={listed ? records : undefined}
+            // Beside a Filter button that opened this, it adds a condition.
+            addLabel={inside ? 'Add filter' : undefined}
             onChange={(filter) => patch({ filter })}
           />
         )}
         {x.ignoredConditions > 0 && (
           <p className="text-xs text-fg-muted">
-            {pluralise(x.ignoredConditions, 'filter')} on another branch of the
-            hierarchy {x.ignoredConditions === 1 ? "doesn't" : "don't"} apply
-            here.
+            {pluralise(x.ignoredConditions, 'filter')} not used here
           </p>
         )}
 
-        {!x.page.error && (
-          // The results: which records the filters above found, and whether
-          // to see them or their files. A rule sets them apart from the
-          // filters.
-          <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
-            <p className="text-sm text-fg-muted" aria-live="polite">
-              <span className="font-medium text-fg">
-                {total.toLocaleString()}
-              </span>{' '}
-              {listedLabel.toLowerCase()}
-              {total === 1 ? '' : 's'}
-              {state.q && <> matching “{state.q}”</>}
-            </p>
-            <SegmentedControl
-              size="sm"
-              label="Show"
-              value={showFiles ? 'files' : 'records'}
-              onChange={(v) =>
-                setParams(
-                  (prev) => {
-                    const out = new URLSearchParams(prev)
-                    if (v === 'files') out.set('show', 'files')
-                    else out.delete('show')
-                    return out
-                  },
-                  { replace: true },
-                )
-              }
-              options={[
-                { value: 'records', label: 'Records' },
-                { value: 'files', label: 'Their files' },
-              ]}
-            />
-          </div>
+        {(charts.building || charts.editing) && listed && !aside && (
+          <NewChart
+            // A fresh builder for each chart it is opened on.
+            key={charts.editing?.id ?? 'new'}
+            listed={listed}
+            schemas={x.schemas}
+            usable={charts.usable}
+            kind={listedLabel}
+            records={records}
+            initial={charts.editing ?? undefined}
+            onAdd={charts.keep}
+            onCancel={() => charts.setOpen(null)}
+          />
+        )}
+        {charts.open && listed && !aside && (
+          <OpenChart
+            chart={charts.open}
+            title={chartTitle(
+              charts.open,
+              charts.usable,
+              listedLabel,
+              x.schemas,
+            )}
+            records={records}
+            usable={charts.usable}
+            onFilter={setFilter}
+            onClose={() => charts.setOpen(null)}
+          />
         )}
 
-        {showFiles ? (
-          <FilesView
-            // The search box looks for files here (their names, and the
-            // records they sit under), not for the records listed above them.
-            // Inside a record, its own files are among "their files" too.
-            // With no record chosen and no filter, they are every file here
-            // (the collection's, or every collection's), whatever level the
-            // rail shows: a kind of record narrows only what is filtered.
-            selection={{
-              ...selectionFor(
-                {
-                  ...x.query,
-                  search: undefined,
-                  schema:
-                    x.query.within || x.filter ? x.query.schema : undefined,
-                },
-                dataset,
-                undefined,
-                undefined,
-                true,
-              ),
-              with_within: !!x.query.within,
-            }}
-            search={state.q || undefined}
-          />
-        ) : (
-          <>
-            {dataset && (
-              <SelectionBar
-                selectedCount={selected.size}
-                pageCount={rows.length}
-                total={total}
-                allMatching={allMatching}
-                onSelectAllMatching={picked.selectAllMatching}
-                onDelete={() => setConfirmDelete(true)}
-                cannotDelete={mayDelete ? undefined : why('delete')}
-                deleting={deleteMany.isPending || deleteMatching.isPending}
-                // Runs are queued for the records ticked, not for "all matching":
-                // that would be every record the filters match, on every page.
-                actions={
-                  <>
-                    <FileAccessActions
-                      selection={exportContext(
-                        allMatching ? undefined : [...selected],
+        {/* A rule sets the results apart from the filters above. */}
+        <div className="flex items-start gap-2 border-t border-border pt-4">
+          <div className="min-w-0 flex-1">
+            <SplitPane
+              storageKey="explorer.charts.width"
+              label="Charts"
+              // Charts alone: the records step aside (the count stays above).
+              sideOnly={chartsOnly && !aside}
+              side={
+                chartsHidden || aside || x.page.error ? undefined : listed ? (
+                  <ChartsColumn
+                    model={charts}
+                    listed={listed}
+                    schemas={x.schemas}
+                    kind={listedLabel}
+                    records={records}
+                    scope={{
+                      collection: collection?.id ?? null,
+                      within: x.rootId ?? null,
+                    }}
+                    onFilter={setFilter}
+                    enabled={chartsOn}
+                    onShow={() => setChartsAsked(true)}
+                    onExpand={
+                      chartsOnly ? undefined : () => setLayout('charts')
+                    }
+                    onCollapse={
+                      chartsOnly ? undefined : () => setLayout('records')
+                    }
+                    onBack={chartsOnly ? () => setLayout('both') : undefined}
+                  />
+                ) : undefined
+              }
+              main={
+                <div className="min-w-0 space-y-3">
+                  {!x.page.error && (
+                    // The records' own heading: how many, and what is about them. It
+                    // is level with the charts panel's heading beside it.
+                    <div className="flex min-h-9 flex-wrap items-center gap-3">
+                      {showFiles ? (
+                        // The files of what is listed: an occasional job (moving,
+                        // downloading), reached from the page's menu, not a peer of
+                        // the records.
+                        <Subheading as="h2">Files</Subheading>
+                      ) : (
+                        <p className="text-base" aria-live="polite">
+                          <span className="font-semibold text-fg">
+                            {total.toLocaleString()}
+                          </span>{' '}
+                          {inScope !== null && inScope !== total && (
+                            <>of {inScope.toLocaleString()} </>
+                          )}
+                          {total === 1
+                            ? listedLabel.toLowerCase()
+                            : plural(listedLabel)}
+                        </p>
                       )}
-                      folderName={`${folderName}-selected`}
-                      scopeSchema={listedName ?? undefined}
-                      builderTo={builderHref}
+                      {listed &&
+                        !quiet &&
+                        !!issuesFound &&
+                        !showChecks &&
+                        !showFiles && (
+                          // A fact beside the count: nothing is shown when all is well.
+                          <Button
+                            size="sm"
+                            variant="link"
+                            onClick={() => setShow('checks')}
+                          >
+                            <AlertTriangle
+                              size={14}
+                              className="text-attention"
+                            />
+                            {issuesFound.toLocaleString()}{' '}
+                            {issuesFound === 1 ? 'problem' : 'problems'}
+                          </Button>
+                        )}
+                      {/* Beside the count of the records whose columns they are. */}
+                      {!quiet && !aside && !chartsOnly && columnsButton}
+                      {openNotes > 0 && !aside && (
+                        // Clicking it lists them: the filter gains "has open notes".
+                        <Button
+                          size="sm"
+                          variant="link"
+                          onClick={() =>
+                            patch({
+                              filter: withCondition(x.filter, OPEN_NOTES),
+                            })
+                          }
+                        >
+                          <MessageSquare size={14} />
+                          {openNotes.toLocaleString()}{' '}
+                          {openNotes === 1 ? 'open note' : 'open notes'}
+                        </Button>
+                      )}
+                      {(showChecks || showFiles) && (
+                        <Button
+                          size="sm"
+                          variant="link"
+                          onClick={() => setShow(null)}
+                        >
+                          Back to records
+                        </Button>
+                      )}
+                      <div className="ml-auto flex items-center gap-2">
+                        {chartsHidden && listed && !aside && !inside && (
+                          // Folded away: the way back says what it opens, at
+                          // the right-hand edge of the table.
+                          <Button size="sm" onClick={() => setLayout('both')}>
+                            <PanelRightOpen size={14} /> Charts
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {showChecks && listed ? (
+                    <ChecksView
+                      query={x.query}
+                      collection={dataset}
+                      listed={listed}
+                      mayWrite={mayWrite}
+                      cannotWrite={why('write_records')}
+                      // The records: the condition added to the filter, listed, in one
+                      // change to the address (as a summary's group).
+                      onDrill={(where) =>
+                        setParams((prev) => {
+                          const out = applyExplorerPatch(prev, {
+                            filter: withCondition(x.filter, where),
+                          })
+                          out.delete('show')
+                          return out
+                        })
+                      }
                     />
-                    {canExportFiles && (
-                      // The files of the records ticked and of everything in
-                      // them: the one move dialog.
-                      <MoveToDriveButton
-                        label="Move files to drive…"
-                        what={`the files of ${bulkCount.toLocaleString()} record${bulkCount === 1 ? '' : 's'}`}
-                        pick={selectionFor(
-                          x.query,
+                  ) : showFiles ? (
+                    <FilesView
+                      // The search box looks for files here (their names, and the
+                      // records they sit under), not for the records listed above them.
+                      // Inside a record, its own files are among "their files" too.
+                      // With no record chosen and no filter, they are every file here
+                      // (the collection's, or every collection's), whatever level the
+                      // rail shows: a kind of record narrows only what is filtered.
+                      selection={{
+                        ...selectionFor(
+                          {
+                            ...x.query,
+                            search: undefined,
+                            schema:
+                              x.query.within || x.filter
+                                ? x.query.schema
+                                : undefined,
+                          },
                           dataset,
-                          allMatching ? undefined : [...selected],
+                          undefined,
                           undefined,
                           true,
-                        )}
-                        onStarted={picked.clear}
-                      />
-                    )}
-                    {!allMatching && (
-                      <BulkRunWorkflow
-                        workflows={runnable}
-                        recordIds={[...selected]}
-                        onStarted={picked.clear}
-                      />
-                    )}
-                    {listed && (
-                      // Moving takes the records out of this collection, so
-                      // it asks for the same permission as deleting here.
-                      <Button
-                        size="sm"
-                        disabled={!mayDelete}
-                        title={mayDelete ? undefined : why('delete')}
-                        onClick={() => setMoving(true)}
-                      >
-                        Move to…
-                      </Button>
-                    )}
-                  </>
-                }
-              />
-            )}
+                        ),
+                        with_within: !!x.query.within,
+                      }}
+                      search={state.q || undefined}
+                    />
+                  ) : (
+                    <>
+                      {dataset && (
+                        <SelectionBar
+                          selectedCount={selected.size}
+                          pageCount={rows.length}
+                          total={total}
+                          allMatching={allMatching}
+                          onSelectAllMatching={picked.selectAllMatching}
+                          onDelete={() => setConfirmDelete(true)}
+                          cannotDelete={mayDelete ? undefined : why('delete')}
+                          deleting={
+                            deleteMany.isPending || deleteMatching.isPending
+                          }
+                          // Runs are queued for the records ticked, not for "all matching":
+                          // that would be every record the filters match, on every page.
+                          actions={
+                            <>
+                              <FileAccessActions
+                                selection={exportContext(
+                                  allMatching ? undefined : [...selected],
+                                )}
+                                folderName={`${folderName}-selected`}
+                                scopeSchema={listedName ?? undefined}
+                                builderTo={builderHref}
+                              />
+                              {allKinds && (
+                                // Edits and workflows are about one kind's fields.
+                                <>
+                                  <Button
+                                    size="sm"
+                                    disabled
+                                    title={pickKind('run a workflow on them')}
+                                  >
+                                    Run workflow
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    disabled
+                                    title={pickKind('edit them together')}
+                                  >
+                                    Edit…
+                                  </Button>
+                                </>
+                              )}
+                              {!allMatching && (
+                                <BulkRunWorkflow
+                                  workflows={runnable}
+                                  recordIds={[...selected]}
+                                  onStarted={picked.clear}
+                                />
+                              )}
+                              {listed &&
+                                bulkEditableFields(listed).length > 0 && (
+                                  <Button
+                                    size="sm"
+                                    disabled={!mayWrite}
+                                    title={
+                                      mayWrite
+                                        ? undefined
+                                        : why('write_records')
+                                    }
+                                    onClick={() => setEditing(true)}
+                                  >
+                                    Edit…
+                                  </Button>
+                                )}
+                              <Button
+                                size="sm"
+                                disabled={
+                                  !can('change_structure') ||
+                                  (allKinds && allMatching)
+                                }
+                                title={
+                                  allKinds && allMatching
+                                    ? pickKind('release every matching record')
+                                    : can('change_structure')
+                                      ? 'Freeze these records, with the files they cite, as a citable release'
+                                      : why('change_structure')
+                                }
+                                onClick={() =>
+                                  navigate(
+                                    `/releases/new?${new URLSearchParams(
+                                      allMatching
+                                        ? {
+                                            query: JSON.stringify(
+                                              queryBody(
+                                                { ...x.query, sort: undefined },
+                                                dataset,
+                                              ),
+                                            ),
+                                          }
+                                        : { records: [...selected].join(',') },
+                                    )}`,
+                                  )
+                                }
+                              >
+                                Release these…
+                              </Button>
+                              {(listed || allKinds) && (
+                                // Moving takes the records out of this collection, so
+                                // it asks for the same permission as deleting here.
+                                <Button
+                                  size="sm"
+                                  disabled={!mayDelete}
+                                  title={mayDelete ? undefined : why('delete')}
+                                  onClick={() => setMoving(true)}
+                                >
+                                  Move to…
+                                </Button>
+                              )}
+                            </>
+                          }
+                        />
+                      )}
 
-            {x.page.error ? (
-              // In place of the rows only: the filters and search stay editable,
-              // since a bad one is usually what caused this.
-              <div className="space-y-2">
-                <ErrorState message={errorMessage(x.page.error)} />
-                {(x.hasSelection || state.q) && (
-                  <Button
-                    size="sm"
-                    onClick={() =>
-                      patch({
-                        filter: null,
-                        sort: [],
-                        cols: null,
-                        view: null,
-                        q: '',
-                      })
-                    }
-                  >
-                    Clear filters
-                  </Button>
-                )}
-              </div>
-            ) : x.page.isLoading ? (
-              <TableSkeleton
-                columns={['w-8', 'w-24', 'w-32', 'w-32', 'w-24']}
-                rows={8}
-              />
-            ) : rows.length === 0 ? (
-              <EmptyState
-                title={`No ${listedLabel.toLowerCase()} match`}
-                message={
-                  state.q || x.filter
-                    ? 'Try removing a filter or clearing the search.'
-                    : 'Nothing here yet.'
-                }
-              />
-            ) : (
-              <div aria-busy={x.page.isFetching}>
-                <RecordsTable
-                  columns={columns}
-                  rows={rows}
-                  schemas={x.schemas}
-                  recordLink={(r) => `/records/${r.id}`}
-                  sort={sort}
-                  onSortChange={toggleSort}
-                  selection={dataset ? picked.table : undefined}
-                  trailing={{
-                    header: 'Contains',
-                    render: (row) => (
-                      <DrillLinks
-                        counts={row.child_counts}
-                        byName={x.byName}
-                        onDrill={(child) => drill(row, child)}
-                      />
-                    ),
-                  }}
-                />
-                <Pagination
-                  page={state.page}
-                  pageSize={state.pageSize}
-                  total={total}
-                  onPage={(page) => patch({ page })}
-                  onPageSize={(pageSize) => patch({ pageSize })}
-                />
-              </div>
-            )}
-          </>
-        )}
-        {listed && listed.parent_id && !scope.root && x.chain.length === 0 && (
-          <p className="text-xs text-fg-muted">
-            Listing every {listedLabel.toLowerCase()} in this collection —{' '}
-            <Link
-              className="text-accent hover:underline"
-              to={`/schemas/${listed.parent_id}`}
-            >
-              open the schema it goes inside
-            </Link>{' '}
-            to start from the top of the hierarchy.
-          </p>
-        )}
+                      {x.page.error ? (
+                        // In place of the rows only: the filters and search stay editable,
+                        // since a bad one is usually what caused this.
+                        <div className="space-y-2">
+                          <ErrorState message={errorMessage(x.page.error)} />
+                          {(x.hasSelection || state.q) && (
+                            <Button
+                              size="sm"
+                              onClick={() =>
+                                patch({
+                                  filter: null,
+                                  sort: [],
+                                  cols: null,
+                                  view: null,
+                                  q: '',
+                                })
+                              }
+                            >
+                              Reset
+                            </Button>
+                          )}
+                        </div>
+                      ) : x.page.isLoading ? (
+                        <TableSkeleton
+                          columns={['w-8', 'w-24', 'w-32', 'w-32', 'w-24']}
+                          rows={8}
+                        />
+                      ) : rows.length === 0 ? (
+                        <EmptyState
+                          title={`No ${listedLabel.toLowerCase()} match`}
+                          message={
+                            state.q || x.filter
+                              ? 'Try removing a filter or clearing the search.'
+                              : 'Nothing here yet.'
+                          }
+                        />
+                      ) : (
+                        <div aria-busy={x.page.isFetching}>
+                          <RecordsTable
+                            columns={columns}
+                            rows={rows}
+                            schemas={x.schemas}
+                            recordLink={(r) =>
+                              openNotesView
+                                ? `/records/${r.id}?tab=notes`
+                                : `/records/${r.id}`
+                            }
+                            idHeader={allKinds ? 'Name' : undefined}
+                            showAddedColumn={!allKinds}
+                            sort={sort}
+                            onSortChange={toggleSort}
+                            selection={dataset ? picked.table : undefined}
+                            totals={
+                              !quiet && totalsAsk.length > 0 && totals.data
+                                ? {
+                                    label: `All ${total.toLocaleString()}`,
+                                    cells: totalsCells(
+                                      x.columnNames,
+                                      totals.data,
+                                    ),
+                                  }
+                                : undefined
+                            }
+                            trailing={{
+                              header: 'Contains',
+                              render: (row) => (
+                                <DrillLinks
+                                  counts={row.child_counts}
+                                  byName={x.byName}
+                                  onDrill={(child) => drill(row, child)}
+                                />
+                              ),
+                            }}
+                          />
+                          <Pagination
+                            page={state.page}
+                            pageSize={state.pageSize}
+                            total={total}
+                            onPage={(page) => patch({ page })}
+                            onPageSize={(pageSize) => patch({ pageSize })}
+                          />
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              }
+            />
+          </div>
+        </div>
       </div>
 
-      {moving && dataset && listed && (
+      {moving && dataset && (listed || allKinds) && (
         <MoveRecordsDialog
           selection={
             allMatching
@@ -797,6 +1281,20 @@ export function RecordsExplorer({
         />
       )}
 
+      {editing && dataset && listed && (
+        <BulkEditDialog
+          selection={
+            allMatching
+              ? { query: x.query, collection: dataset }
+              : { ids: [...selected] }
+          }
+          count={bulkCount}
+          listed={listed}
+          onClose={() => setEditing(false)}
+          onDone={picked.clear}
+        />
+      )}
+
       {confirmDelete && (
         <ConfirmDialog
           title={`Delete ${pluralise(bulkCount, listedLabel.toLowerCase())}`}
@@ -808,7 +1306,9 @@ export function RecordsExplorer({
           confirmLabel={`Delete ${bulkCount.toLocaleString()}`}
           variant="danger"
           typedConfirmationValue={
-            bulkCount > HIGH_IMPACT_RECORD_THRESHOLD ? listed?.name : undefined
+            bulkCount > HIGH_IMPACT_RECORD_THRESHOLD
+              ? (listed?.name ?? 'delete')
+              : undefined
           }
           warning={
             deleteMany.error || deleteMatching.error

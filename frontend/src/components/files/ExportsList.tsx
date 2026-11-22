@@ -91,10 +91,7 @@ export function ExportsList() {
       {isLoading && <Spinner />}
       {error && <ErrorState message={errorMessage(error)} />}
       {exports && list.length === 0 && (
-        <EmptyState
-          title="No exports"
-          message="Folders made with Export → Open as a folder or Put on a drive appear here."
-        />
+        <EmptyState title="No exports" message="None yet" />
       )}
       {list.length > 0 && (
         <>

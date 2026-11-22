@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from 'react'
-import { NavLink } from 'react-router'
+import { NavLink, useLocation } from 'react-router'
 import { useFeatures } from '../hooks/useFeatures'
 import { offered } from '../utils/features'
 import {
@@ -44,6 +44,7 @@ import {
   FolderPlus,
   Folder,
   FolderTree,
+  BookMarked,
   ChevronDown,
   LayoutGrid,
   House,
@@ -126,7 +127,9 @@ const navGroups: NavGroupDef[] = [
     heading: 'Data',
     items: [
       { to: '/collections', label: 'Collections', icon: LayoutGrid },
+      // Every record with a thread not yet resolved: All records, filtered.
       { to: '/exports', label: 'Exports', icon: FolderTree },
+      { to: '/releases', label: 'Releases', icon: BookMarked },
       { to: '/activity', label: 'Activity', icon: History },
     ],
   },
@@ -197,6 +200,12 @@ function NavItem({
   indent?: boolean
   onNavigate?: () => void
 }) {
+  const location = useLocation()
+  // An item that is a filtered address is where you are only when the
+  // address asks the same; others go by the page.
+  const query = to.includes('?') ? to.slice(to.indexOf('?')) : null
+  const here = (isActive: boolean) =>
+    isActive && (query === null || location.search === query)
   return (
     <NavLink
       to={to}
@@ -207,7 +216,7 @@ function NavItem({
         `flex items-center gap-3 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
           collapsed ? 'justify-center px-0' : indent ? 'pl-8' : ''
         } ${
-          isActive
+          here(isActive)
             ? 'bg-accent-subtle text-accent'
             : secondary
               ? 'text-fg-subtle hover:bg-canvas-inset hover:text-fg'

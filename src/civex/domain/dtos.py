@@ -95,6 +95,9 @@ class SchemaDTO:
     # Uniqueness policies: each a list of this schema's own field ids. See
     # domain/uniqueness.py.
     unique_keys: list[list[str]] = field(default_factory=list)
+    # The charts a list of this kind opens with (`civex.domain.charts`, each
+    # as `Chart.to_dict` writes it); empty: none set.
+    charts: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def display_name(self) -> str:
@@ -120,6 +123,9 @@ class SchemaDTO:
             "parent_id": str(self.parent_id) if self.parent_id else None,
             "display_template": self.display_template,
             "unique_keys": self.unique_keys,
+            # None when none are set, as before kinds had charts: an entry
+            # written then says the same thing as one written now.
+            "charts": self.charts or None,
             "created_at": self.created_at.isoformat(),
             "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
         }
@@ -140,6 +146,7 @@ class SchemaDTO:
                 else None
             ),
             unique_keys=d.get("unique_keys") or [],
+            charts=d.get("charts") or [],
             created_at=datetime.fromisoformat(d["created_at"]),
             deleted_at=_parse_dt(d.get("deleted_at")),
         )
@@ -313,6 +320,44 @@ class ViewDTO:
             created_at=datetime.fromisoformat(d["created_at"]),
             files_layout=d.get("files_layout") or "tree",
         )
+
+
+@dataclass
+class DashboardDTO:
+    """The project's Analytics page as stored: its cards in order, each as
+    `civex.domain.dashboard.Card.to_dict` writes it."""
+
+    id: uuid.UUID
+    cards: list[dict[str, Any]]
+    created_at: datetime
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": str(self.id),
+            "cards": self.cards,
+            "created_at": self.created_at.isoformat(),
+        }
+
+
+@dataclass
+class DashboardCardDTO:
+    """A card as the page shows it: the stored card, and for a chart the
+    names of the kind and collection its records are of (None when that
+    kind, or the collection, is gone)."""
+
+    card: Any  # civex.domain.dashboard.Card
+    schema_name: str | None = None
+    schema_label: str | None = None
+    collection_name: str | None = None
+    # Why the chart can't be drawn any more (its kind or collection is gone).
+    problem: str | None = None
+
+
+@dataclass
+class DashboardPageDTO:
+    cards: list[DashboardCardDTO]
+    # Whether anyone has edited the page yet (False: the default cards).
+    edited: bool
 
 
 @dataclass
@@ -595,6 +640,9 @@ class FileInfo:
     # Deleted records that still reference it: they keep it while they can be
     # restored, but don't count as using it until they are.
     deleted_records: int = 0
+    # The releases that keep it (by name): it stays while any of them does,
+    # and yanking them gives it up.
+    releases: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -700,6 +748,56 @@ class GCReport:
         }
 
 
+#: The most locations `RecordService.points` answers with at once.
+POINTS_DEFAULT_LIMIT = 10_000
+POINTS_MAX_LIMIT = 50_000
+
+
+@dataclass
+class RecordPoint:
+    """One record's location, for a map: its id, its name as every list shows
+    it, and the geometry (GeoJSON, WGS84) of the field asked for, which may be
+    held by a record above it."""
+
+    id: uuid.UUID
+    name: str | None
+    geometry: dict[str, Any]
+
+
+@dataclass
+class RecordPoints:
+    """The locations of the records a query lists (`RecordService.points`):
+    those with a value in `field` (of `schema`, the kind listed or one above
+    it), oldest first, at most `limit`; `total` counts every record with one
+    and `truncated` says some were left out."""
+
+    schema: str
+    field: str
+    points: list[RecordPoint]
+    total: int
+    limit: int
+
+    @property
+    def truncated(self) -> bool:
+        return self.total > len(self.points)
+
+
+@dataclass
+class FormulaPreviewDTO:
+    """What a formula would give, without saving it (`RecordService.
+    preview_formula`): the value, or why it can't be worked out for that
+    record (`error`), or why the formula itself can't be saved (`problem`)."""
+
+    value: Any = None
+    error: str | None = None
+    problem: str | None = None
+    #: The result type it gives (worked out when none was given).
+    result: str | None = None
+    #: The record it was worked out for, if any.
+    record_id: uuid.UUID | None = None
+    record_name: str | None = None
+
+
 @dataclass
 class RecordDTO:
     id: uuid.UUID
@@ -728,12 +826,19 @@ class RecordDTO:
     # Response-only, like reference_labels: live child counts per child schema
     # name, and the requested columns the record's own data can't answer
     # (inherited fields, `ref.field` joins). See RecordService.query_records.
+    # Formula fields (worked out when read, never stored) are in `derived`
+    # too; `formula_errors` says why one is blank when it can't be worked out.
     child_counts: dict[str, int] | None = None
     derived: dict[str, Any] | None = None
+    formula_errors: dict[str, str] | None = None
     # Response-only: values this record still holds for fields that have been
     # deleted from its schema, each with when it was deleted and the schema to
     # restore it on. Nothing in `data` is lost; a restore brings them back.
     deleted_fields: list[dict[str, Any]] | None = None
+    # Response-only: how many of its threads of notes are not yet resolved,
+    # and the first line of the latest of them (`civex.domain.notes`).
+    open_notes: int | None = None
+    latest_note: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         # schema_name excluded — denormalized display field, not stored on the entity
@@ -765,6 +870,115 @@ class RecordDTO:
             updated_at=datetime.fromisoformat(d["updated_at"]),
             deleted_at=_parse_dt(d.get("deleted_at")),
         )
+
+
+@dataclass
+class NoteDTO:
+    """A note left on a record (`civex.domain.notes`). `thread_id` is the
+    note it replies to (a thread's first note), None for one that starts a
+    thread; `replies` (response-only, never in a snapshot) are a thread's
+    replies, oldest first, filled in by `NoteService.notes`."""
+
+    id: uuid.UUID
+    record_id: uuid.UUID
+    body: str
+    author: str | None
+    created_at: datetime
+    edited_at: datetime | None = None
+    resolved_at: datetime | None = None
+    resolved_by: str | None = None
+    deleted_at: datetime | None = None
+    thread_id: uuid.UUID | None = None
+    replies: list[NoteDTO] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        def iso(v: datetime | None) -> str | None:
+            return v.isoformat() if v else None
+
+        return {
+            "id": str(self.id),
+            "record_id": str(self.record_id),
+            "thread_id": str(self.thread_id) if self.thread_id else None,
+            "body": self.body,
+            "author": self.author,
+            "created_at": self.created_at.isoformat(),
+            "edited_at": iso(self.edited_at),
+            "resolved_at": iso(self.resolved_at),
+            "resolved_by": self.resolved_by,
+            "deleted_at": iso(self.deleted_at),
+        }
+
+
+@dataclass
+class ReleaseDTO:
+    """A frozen, citable copy of the data (`civex.domain.release`)."""
+
+    id: uuid.UUID
+    name: str
+    title: str
+    content_hash: str
+    bundle_sha256: str
+    bundle_size: int
+    created_at: datetime
+    description: str | None = None
+    # {name, orcid?, affiliation?} each.
+    authors: list[dict[str, str]] = field(default_factory=list)
+    licence: str | None = None
+    doi: str | None = None
+    keywords: list[str] = field(default_factory=list)
+    # What it covers: {} the whole project, {"collections": [names]}, or
+    # {"query": RecordQuery fields}, or {"records": [ids]}.
+    scope: dict[str, Any] = field(default_factory=dict)
+    counts: dict[str, Any] = field(default_factory=dict)
+    # The history position it was taken at: this copy's audit_log.local_seq
+    # (local only: another copy's numbers mean nothing here, so it never
+    # travels) and the authority's feed number on a synced project.
+    local_seq: int | None = None
+    feed_seq: int | None = None
+    civex_version: str = ""
+    created_by: str | None = None
+    updated_at: datetime | None = None
+    withdrawn_at: datetime | None = None
+    withdrawn_by: str | None = None
+    withdrawn_reason: str | None = None
+    # Yanked: its data given up for good; what is left is this tombstone.
+    yanked_at: datetime | None = None
+    yanked_by: str | None = None
+    yanked_reason: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        def iso(v: datetime | None) -> str | None:
+            return v.isoformat() if v else None
+
+        out: dict[str, Any] = {
+            "id": str(self.id),
+            "name": self.name,
+            "title": self.title,
+            "description": self.description,
+            "authors": [dict(a) for a in self.authors],
+            "licence": self.licence,
+            "doi": self.doi,
+            "keywords": list(self.keywords),
+            "scope": self.scope,
+            "content_hash": self.content_hash,
+            "bundle_sha256": self.bundle_sha256,
+            "bundle_size": self.bundle_size,
+            "counts": self.counts,
+            "feed_seq": self.feed_seq,
+            "civex_version": self.civex_version,
+            "created_at": self.created_at.isoformat(),
+            "created_by": self.created_by,
+            "updated_at": iso(self.updated_at),
+            "withdrawn_at": iso(self.withdrawn_at),
+            "withdrawn_by": self.withdrawn_by,
+            "withdrawn_reason": self.withdrawn_reason,
+            "yanked_at": iso(self.yanked_at),
+            "yanked_by": self.yanked_by,
+            "yanked_reason": self.yanked_reason,
+        }
+        if self.local_seq is not None:
+            out["local_seq"] = self.local_seq
+        return out
 
 
 @dataclass
@@ -1098,6 +1312,76 @@ class RecordMoveResultDTO:
 
 
 @dataclass
+class BulkEditSkipDTO:
+    """A chosen record a bulk edit leaves as it is, and why, in plain words."""
+
+    record_id: uuid.UUID
+    name: str | None  # the record's natural name
+    reason: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "record_id": str(self.record_id),
+            "name": self.name,
+            "reason": self.reason,
+        }
+
+
+@dataclass
+class RecordBulkEditPlanDTO:
+    """What setting (or clearing) some fields on many records would do,
+    worked out without doing it. A record takes every change or none: one
+    that can't (no such field of its own, a value its field won't take, a
+    uniqueness key taken) is skipped and named, and the rest go ahead."""
+
+    fields: list[str]  # the fields being set or cleared
+    records: int  # chosen (live) records
+    changing: int  # would change
+    unchanged: int  # already hold every value
+    skipped: int  # can't take the change, exactly counted
+    skipped_records: list[BulkEditSkipDTO]  # the first MAX_REPORTED of them
+    runs: int  # workflow runs the edit would queue
+    workflows: list[str]  # which workflows those are
+    automation_paused: bool  # so no runs would start
+
+    @property
+    def can_apply(self) -> bool:
+        return self.changing > 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "fields": self.fields,
+            "records": self.records,
+            "changing": self.changing,
+            "unchanged": self.unchanged,
+            "skipped": self.skipped,
+            "skipped_records": [s.to_dict() for s in self.skipped_records],
+            "runs": self.runs,
+            "workflows": self.workflows,
+            "automation_paused": self.automation_paused,
+            "can_apply": self.can_apply,
+        }
+
+
+@dataclass
+class RecordBulkEditResultDTO:
+    changed: int  # records changed
+    unchanged: int  # already held every value
+    skipped: int  # left as they were, exactly counted
+    skipped_records: list[BulkEditSkipDTO]  # the first MAX_REPORTED of them
+    runs: int  # workflow runs queued
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "changed": self.changed,
+            "unchanged": self.unchanged,
+            "skipped": self.skipped,
+            "skipped_records": [s.to_dict() for s in self.skipped_records],
+            "runs": self.runs,
+        }
+
+
+@dataclass
 class RestoreSetResultDTO:
     restored: int  # records restored in their own right
     came_back: int  # records live again in all, with what went with them
@@ -1217,6 +1501,35 @@ class RevertPlanDTO:
             "blocker": self.blocker.to_dict() if self.blocker else None,
             "can_apply": self.can_apply,
             "has_conflicts": self.has_conflicts,
+        }
+
+
+@dataclass
+class BatchRevertDTO:
+    """Undoing every change of one bulk edit, each by the one-entry revert
+    rule (`AuditService.plan_revert`): planned (`applied` is how many would
+    be undone) or done. A change that can't be undone is left and counted in
+    `left`, the first few with why in `reasons`."""
+
+    batch_id: uuid.UUID
+    entries: int = 0
+    applied: int = 0
+    # Undone (or would be) only with `force`: a field was edited since.
+    conflicts: int = 0
+    # Nothing to do: every field already as it was.
+    same: int = 0
+    left: int = 0
+    reasons: list[dict[str, str]] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "batch_id": str(self.batch_id),
+            "entries": self.entries,
+            "applied": self.applied,
+            "conflicts": self.conflicts,
+            "same": self.same,
+            "left": self.left,
+            "reasons": self.reasons,
         }
 
 

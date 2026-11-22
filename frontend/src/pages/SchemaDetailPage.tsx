@@ -31,6 +31,7 @@ import { displayLabel, nameError } from '../utils/naming'
 import { SchemaFieldsSection } from '../components/schemas/SchemaFieldsSection'
 import { NamingSection } from '../components/schemas/NamingSection'
 import { UniquenessSection } from '../components/schemas/UniquenessSection'
+import { KindCharts } from '../components/schemas/KindCharts'
 import { AuditTrail } from '../components/audit/AuditTrail'
 import { describeAuditEntry as describeSchemaAuditEntry } from '../utils/schemaAudit'
 import { WorkflowsPanel } from '../components/workflows/WorkflowsPanel'
@@ -131,6 +132,7 @@ function MetaEditor({
 const TABS = [
   { id: 'fields', label: 'Fields' },
   { id: 'records', label: 'Records' },
+  { id: 'charts', label: 'Charts' },
   { id: 'automations', label: 'Automations' },
   { id: 'history', label: 'History' },
 ] as const
@@ -270,6 +272,10 @@ export default function SchemaDetailPage() {
             <UniquenessSection schema={schema} />
           </Card>
         </div>
+      </TabPanel>
+
+      <TabPanel id="charts" value={tab}>
+        <KindCharts schema={schema} schemas={allSchemas ?? []} />
       </TabPanel>
 
       <TabPanel id="automations" value={tab}>

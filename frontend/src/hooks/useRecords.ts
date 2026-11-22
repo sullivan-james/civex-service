@@ -14,7 +14,12 @@ import {
   type FileUpload,
   type PaginatedRecords,
   type ListParams,
+  type BulkEditRequest,
   type MoveRecordsRequest,
+  type SummaryRequest,
+  type QualityRecordsRequest,
+  type RecordSelectionBody,
+  type PointsRequest,
 } from '../api/records'
 import type { RecordQueryParams } from '../api/query'
 import { ApiError } from '../api/client'
@@ -91,21 +96,30 @@ export function useHasSchemaRecords(schemaName: string | null | undefined) {
 }
 
 /** One page of records -- of a collection, or (no `datasetName`, a
- * `schemaName`) of a schema across every collection. The same query either
- * way, so the explorer doesn't care which it is browsing. */
+ * `schemaName`) of a schema across every collection, or (`allKinds`, no
+ * `schemaName`) of every kind. The same query either way, so the explorer
+ * doesn't care which it is browsing. */
 export function useRecordPage(
-  scope: { datasetName?: string; schemaName?: string },
+  scope: { datasetName?: string; schemaName?: string; allKinds?: boolean },
   params: ListParams,
   options: { enabled?: boolean; refetchInterval?: number | false } = {},
 ) {
   return useQuery({
-    queryKey: ['records', scope.datasetName ?? null, scope.schemaName, params],
+    queryKey: [
+      'records',
+      scope.datasetName ?? null,
+      scope.schemaName ?? (scope.allKinds ? '*' : undefined),
+      params,
+    ],
     queryFn: () =>
       scope.datasetName
         ? recordsApi.list(scope.datasetName, params)
-        : recordsApi.listBySchema(scope.schemaName!, params),
+        : scope.schemaName
+          ? recordsApi.listBySchema(scope.schemaName, params)
+          : recordsApi.listAll(params),
     enabled:
-      (options.enabled ?? true) && !!(scope.datasetName || scope.schemaName),
+      (options.enabled ?? true) &&
+      !!(scope.datasetName || scope.schemaName || scope.allKinds),
     refetchInterval: options.refetchInterval ?? false,
     placeholderData: keepPreviousData,
   })
@@ -123,6 +137,47 @@ export function useRecordCounts(
     queryKey: ['record-counts', datasetName, params ?? null],
     queryFn: () => recordsApi.counts(datasetName ?? '', params),
     enabled: datasetName !== '',
+  })
+}
+
+/** A summary of the records a query lists (`null` waits). Keyed under
+ * `records`, so any record edit refreshes it. */
+/** The listed records' locations, for the explorer's map. */
+export function useRecordPoints(body: PointsRequest | null) {
+  return useQuery({
+    queryKey: ['records', 'points', body],
+    queryFn: () => recordsApi.points(body!),
+    enabled: body !== null,
+    placeholderData: keepPreviousData,
+  })
+}
+
+export function useRecordSummary(body: SummaryRequest | null) {
+  return useQuery({
+    queryKey: ['records', 'summary', body],
+    queryFn: () => recordsApi.summary(body!),
+    enabled: body !== null,
+    placeholderData: keepPreviousData,
+  })
+}
+
+/** What needs a look in the records a query lists (`null`: not asked). */
+export function useRecordQuality(body: RecordSelectionBody | null) {
+  return useQuery({
+    queryKey: ['records', 'quality', body],
+    queryFn: () => recordsApi.quality(body!),
+    enabled: body !== null,
+    placeholderData: keepPreviousData,
+  })
+}
+
+/** The records with one issue, a page at a time (`null`: none chosen). */
+export function useQualityRecords(body: QualityRecordsRequest | null) {
+  return useQuery({
+    queryKey: ['records', 'quality', 'records', body],
+    queryFn: () => recordsApi.qualityRecords(body!),
+    enabled: body !== null,
+    placeholderData: keepPreviousData,
   })
 }
 
@@ -355,6 +410,50 @@ export function useMovePlan(body: MoveRecordsRequest | null) {
     queryFn: () => recordsApi.movePlan(body!),
     enabled: body !== null,
     placeholderData: keepPreviousData,
+  })
+}
+
+/** What a bulk edit would do, asked again as the choices change (null waits). */
+export function useBulkEditPlan(body: BulkEditRequest | null) {
+  return useQuery({
+    queryKey: ['record-bulk-edit-plan', body],
+    queryFn: () => recordsApi.bulkEditPlan(body!),
+    enabled: body !== null,
+    placeholderData: keepPreviousData,
+  })
+}
+
+/** Sets fields on many records. Every list and record page may show them,
+ * and runs may have been started. */
+export function useBulkEdit() {
+  const qc = useQueryClient()
+  const toast = useToast()
+  return useMutation({
+    mutationFn: ({
+      body,
+      progressId,
+    }: {
+      body: BulkEditRequest
+      progressId?: string
+    }) => recordsApi.bulkEdit(body, progressId),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ['records'] })
+      qc.invalidateQueries({ queryKey: ['record'] })
+      qc.invalidateQueries({ queryKey: ['record-bulk-edit-plan'] })
+      qc.invalidateQueries({ queryKey: ['audit'] })
+      invalidateRecordNames(qc)
+      if (result.runs) {
+        qc.invalidateQueries({ queryKey: ['jobs'] })
+        qc.invalidateQueries({ queryKey: ['automation'] })
+      }
+      toast.success(
+        `${result.changed.toLocaleString()} record${result.changed === 1 ? '' : 's'} changed` +
+          (result.skipped
+            ? `, ${result.skipped.toLocaleString()} left as ${result.skipped === 1 ? 'it was' : 'they were'}`
+            : ''),
+      )
+    },
+    onError: (err) => toast.error(errorMessage(err)),
   })
 }
 

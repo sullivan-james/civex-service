@@ -41,7 +41,9 @@ function renderIt(
 }
 
 const openMenu = () =>
-  userEvent.click(screen.getByRole('button', { name: /manage view tables/i }))
+  userEvent.click(
+    screen.getByRole('button', { name: /manage saved filter tables/i }),
+  )
 
 describe('a saved view’s files layout', () => {
   it('offers the other layout to a view that arranges files by record', async () => {
@@ -101,6 +103,6 @@ describe('a saved view’s files layout', () => {
     await openMenu()
 
     expect(screen.queryByRole('menuitem', { name: /export files/i })).toBeNull()
-    expect(screen.getByRole('menuitem', { name: /rename view/i })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: /rename…/i })).toBeTruthy()
   })
 })

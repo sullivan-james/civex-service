@@ -3,6 +3,7 @@ interface ChartTooltipPayloadEntry {
   name?: string | number
   value?: number | string
   color?: string
+  payload?: unknown
 }
 
 export interface ChartTooltipProps {
@@ -10,6 +11,9 @@ export interface ChartTooltipProps {
   label?: string | number
   payload?: ChartTooltipPayloadEntry[]
   formatValue?: (value: number) => string
+  /** Title the tooltip with this key of the hovered row instead of the axis
+   * label (a range's full wording rather than its start). */
+  labelKey?: string
   formatLabel?: (label: string) => string
 }
 
@@ -21,17 +25,20 @@ export function ChartTooltip({
   label,
   payload,
   formatValue = (value) => String(value),
+  labelKey,
   formatLabel = (label) => label,
 }: ChartTooltipProps) {
   if (!active || !payload?.length) return null
+  const row = payload[0].payload as Record<string, unknown> | undefined
+  const title = labelKey
+    ? String(row?.[labelKey] ?? label ?? '')
+    : label != null
+      ? formatLabel(String(label))
+      : null
 
   return (
     <div className="rounded-md border border-border bg-canvas px-3 py-2 text-xs shadow-sm">
-      {label != null && (
-        <div className="mb-1 font-medium text-fg">
-          {formatLabel(String(label))}
-        </div>
-      )}
+      {title != null && <div className="mb-1 font-medium text-fg">{title}</div>}
       <div className="flex flex-col gap-1">
         {payload.map((entry, index) => (
           <div

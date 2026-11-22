@@ -35,6 +35,8 @@ export interface RecordQueryParams {
   /** Direct children only, of any schema. */
   parent_record_id?: string
   search?: string
+  /** Look for `search` only in these fields of `schema`. */
+  search_fields?: string[]
   /** Legacy `field=value` equality terms. */
   where?: string[]
   filter?: FilterTreeWire | null
@@ -60,6 +62,8 @@ export function recordQueryString(
   if (params.parent_record_id)
     qs.set('parent_record_id', params.parent_record_id)
   if (params.search) qs.set('search', params.search)
+  if (params.search)
+    params.search_fields?.forEach((f) => qs.append('search_field', f))
   params.where?.forEach((w) => qs.append('where', w))
   if (params.filter) qs.set('filter', JSON.stringify(params.filter))
   params.sort?.forEach((s) => qs.append('sort', encodeSort(s)))

@@ -45,12 +45,16 @@ from civex.domain.sync import (
     DIRECT_FILES,
     PROTOCOL_MAX,
     PROTOCOL_MIN,
+    FeedPage,
     Principal,
     SyncEntry,
     SyncError,
     agree,
+    entry_for,
+    kinds_for,
     protocol_mismatch,
     protocol_range,
+    snapshot_for,
 )
 from civex.server.deps import current_project, get_ctx
 
@@ -461,7 +465,27 @@ def feed(
     call: Peer = Depends(peer),
 ):
     """Everyone's changes past `after`, in the order the authority numbered them."""
-    return SyncFeedResponse(**call.ctx.authority_svc.feed(after, limit).to_dict())
+    return SyncFeedResponse(**_feed_for(call, after, limit).to_dict())
+
+
+def _feed_for(call: Peer, after: int, limit: int) -> FeedPage:
+    """The feed as a device on the agreed protocol can read it (`entry_for`):
+    on an older one, entries about a kind it doesn't know are left out and
+    fields it doesn't know are cut. A page left empty while there is more is
+    read past, so a run of such entries can't hold the device in place."""
+    svc = call.ctx.authority_svc
+    page = svc.feed(after, limit)
+    if call.protocol >= PROTOCOL_MAX:
+        return page
+    while True:
+        kept = [
+            e
+            for entry in page.entries
+            if (e := entry_for(call.protocol, entry)) is not None
+        ]
+        if kept or not page.more or not page.entries:
+            return FeedPage(kept, page.head_seq, page.more)
+        page = svc.feed(page.entries[-1].hub_seq or after, limit)
 
 
 @router.get("/snapshot/{kind}", response_model=SyncSnapshotResponse)
@@ -474,11 +498,14 @@ def snapshot(
     call: Peer = Depends(peer),
 ):
     """One kind of thing as it is now, a page at a time, for a device joining
-    the project: schema, field, dataset, view, record (in that order)."""
+    the project: schema, field, dataset, view, dashboard, record (in that
+    order)."""
+    if kind not in kinds_for(call.protocol):
+        raise HTTPException(422, detail=f"Unknown kind '{kind}'")
     try:
-        return SyncSnapshotResponse(
-            **call.ctx.authority_svc.snapshot(kind, after, limit).to_dict()
-        )
+        page = call.ctx.authority_svc.snapshot(kind, after, limit)
+        page.items = [snapshot_for(call.protocol, kind, i) or {} for i in page.items]
+        return SyncSnapshotResponse(**page.to_dict())
     except ValidationError as e:
         raise HTTPException(422, detail=str(e))
 
@@ -509,6 +536,7 @@ async def upload_file(sha256: str, request: Request, call: Peer = Depends(peer))
         raise HTTPException(507, detail=str(e))
     if ref.sha256 != sha256:
         raise HTTPException(422, detail="The content does not match that hash")
+    call.ctx.authority_svc.received_file(sha256)
 
 
 @router.post(
@@ -555,6 +583,7 @@ def complete_upload(
         raise HTTPException(422, detail=str(e))
     except VolumeUnavailableError as e:
         raise HTTPException(507, detail=str(e))
+    call.ctx.authority_svc.received_file(sha256)
     return Response(status_code=204)
 
 

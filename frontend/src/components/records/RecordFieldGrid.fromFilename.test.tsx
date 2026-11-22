@@ -28,17 +28,8 @@ const start = field('start', 'datetime', 'Start', {
 })
 
 describe('a field filled from a file name', () => {
-  it('is hinted with the file field it is read from, by its label', () => {
-    expect(restrictionHints(start, [audio, start])).toEqual([
-      "Filled from Audio's name when the file changes; you can still edit it.",
-    ])
-    // Without the record's fields, the file field's name has to do.
-    expect(restrictionHints(start)).toEqual([
-      "Filled from audio's name when the file changes; you can still edit it.",
-    ])
-  })
-
-  it('shows the hint on the record form', () => {
+  it('is not explained on the record: it reads like any other field', () => {
+    expect(restrictionHints(start)).toEqual([])
     render(
       <QueryClientProvider client={new QueryClient()}>
         <MemoryRouter>
@@ -51,10 +42,6 @@ describe('a field filled from a file name', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     )
-    expect(
-      screen.getByText(
-        "Filled from Audio's name when the file changes; you can still edit it.",
-      ),
-    ).toBeTruthy()
+    expect(screen.queryByText(/Filled from/)).toBeNull()
   })
 })

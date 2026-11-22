@@ -30,7 +30,7 @@ export {
   TONE_TEXT,
   type Tone,
 } from './Status'
-export { Menu, type MenuItem } from './Menu'
+export { Menu, type MenuEntry, type MenuItem } from './Menu'
 export { Popover } from './Popover'
 export { TriggerPopover } from './TriggerPopover'
 export { MultiPick, type MultiPickOption } from './MultiPick'
@@ -83,4 +83,5 @@ export { FileDropZone } from './FileDropZone'
 export { Disclosure } from './Disclosure'
 export { ListButton } from './ListButton'
 export { Subheading } from './Subheading'
+export { SplitPane } from './SplitPane'
 export { ListToolbar, type ListPick } from './ListToolbar'

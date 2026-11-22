@@ -34,6 +34,14 @@ describe('recordQueryString', () => {
     expect(p.get('limit')).toBe('25')
     expect(p.get('offset')).toBe('50')
   })
+
+  it('sends the fields to search in only with a search', () => {
+    const p = new URLSearchParams(
+      recordQueryString({ search: 'S02', search_fields: ['site', 'code'] }),
+    )
+    expect(p.getAll('search_field')).toEqual(['site', 'code'])
+    expect(recordQueryString({ search_fields: ['site'] })).toBe('')
+  })
 })
 
 describe('sort encoding', () => {

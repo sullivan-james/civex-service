@@ -2,7 +2,8 @@
 
 Sync will send these entries and nothing else, so a change that wrote no entry
 (or a stale one) would never reach another device. This does everything a
-person can do to schemas, fields, collections, views and records, then, for
+person can do to schemas, fields, collections, views, the Analytics page,
+records and their notes, and releases, then, for
 every thing, starts from its create and applies each entry in the order written
 (an edit stores only what changed) and checks the result is what is in the
 database."""
@@ -40,6 +41,12 @@ def _current(ctx: AppContext, kind: str, entity_id: Any) -> dict[str, Any] | Non
         found = ctx.dataset_svc._datasets.get_by_id(entity_id, include_deleted=True)
     elif kind == "view":
         found = ctx.view_svc._views.get_by_id(entity_id)
+    elif kind == "dashboard":
+        found = ctx.dashboard_svc._repo.get()
+    elif kind == "note":
+        found = ctx.note_svc._repo.get(entity_id)
+    elif kind == "release":
+        found = ctx.release_svc._repo.get(entity_id)
     elif kind == "record":
         rows = ctx.record_svc._records.list_by_ids([entity_id])
         found = rows[0] if rows else None
@@ -114,10 +121,12 @@ def _wrong(ctx: AppContext) -> list[str]:
         if kind == "dataset":
             expected.pop("schemas", None)
             expected.pop("schema_ids", None)
-        if expected != now:
-            differs = sorted(
-                k for k in set(expected) | set(now) if expected.get(k) != now.get(k)
-            )
+        # An attribute added since an entry was written, and still unset, is
+        # absent there and None now: the same to every reader.
+        differs = sorted(
+            k for k in set(expected) | set(now) if expected.get(k) != now.get(k)
+        )
+        if differs:
             problems.append(
                 f"{kind} {entity_id}: replaying its history (last: {last.action}) "
                 f"gives something else on {differs}"
@@ -172,7 +181,48 @@ def test_history_describes_everything_a_person_can_do(ctx: AppContext) -> None:
     ctx.view_svc.update("encounter", "v1", columns=["location", "depth"])
     ctx.view_svc.create("encounter", "v2")
     ctx.view_svc.delete("encounter", "v2")
+    # A kind's charts, and a chart on the Analytics page.
+    ctx.schema_svc.set_charts(
+        "encounter", [{"id": "a", "group_by": ["location"], "measures": ["count"]}]
+    )
+    ctx.schema_svc.set_charts(
+        "encounter",
+        [{"id": "a", "group_by": ["location"], "measures": ["mean:depth"]}],
+    )
+    ctx.dashboard_svc.add(
+        chart={"group_by": ["location"]}, schema="encounter", size="wide"
+    )
+    ctx.dashboard_svc.remove("widget-storage")
+    ctx.dashboard_svc.resize("widget-ai_tokens", "small")
     ctx.dataset_svc.update("c", description="study", scope="global")
+    ctx.commit()
+
+    # Notes on records, and their threads.
+    note = ctx.note_svc.add(str(rec.id), "re-check the rate")
+    ctx.note_svc.edit(str(note.id), "re-check the sample rate")
+    ctx.note_svc.resolve(str(note.id))
+    dropped = ctx.note_svc.add(str(enc.id), "typo")
+    ctx.note_svc.delete(str(dropped.id))
+    restored = ctx.note_svc.add(str(enc.id), "kept")
+    ctx.note_svc.delete(str(restored.id))
+    ctx.note_svc.restore(str(restored.id))
+    # Threads: replies, one deleted alone, a resolved thread a reply reopens,
+    # and a thread deleted and brought back with its replies.
+    answer = ctx.note_svc.reply(str(note.id), "done, 48 kHz")
+    ctx.note_svc.edit(str(answer.id), "done: 48 kHz")
+    ctx.note_svc.reply(str(answer.id), "thanks")
+    aside = ctx.note_svc.reply(str(restored.id), "aside")
+    ctx.note_svc.delete(str(aside.id))
+    ctx.note_svc.delete(str(restored.id))
+    ctx.note_svc.restore(str(restored.id))
+    ctx.commit()
+
+    # Releases: made, their citation corrected, withdrawn.
+    ctx.release_svc.create("v1", "Study", authors=[{"name": "A. Person"}])
+    ctx.release_svc.correct("v1", title="The study", doi="10.1234/abc")
+    ctx.release_svc.withdraw("v1", "superseded")
+    ctx.release_svc.create("v2", "Study again", keywords=["seals"])
+    ctx.release_svc.yank("v2", "consent withdrawn")
     ctx.commit()
 
     # Deleting and bringing back.
@@ -192,6 +242,7 @@ def test_history_describes_everything_a_person_can_do(ctx: AppContext) -> None:
 
     # Permanent deletion leaves a tombstone, and for a schema takes its fields.
     gone = ctx.record_svc.add("c", "encounter", {"site": "y"})
+    ctx.note_svc.add(str(gone.id), "goes with it")
     ctx.record_svc.delete(str(gone.id))
     ctx.record_svc.purge(str(gone.id))
     svc.create("scratch")

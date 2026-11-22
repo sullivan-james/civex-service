@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
@@ -10,6 +16,36 @@ import type { CivexRecord } from '../../api/records'
 import type { Schema } from '../../api/schemas'
 import type { View } from '../../api/views'
 import { finishExport } from '../files/testSupport'
+import { setFieldTypesForTest } from '../../hooks/useFieldTypes'
+
+// The map itself (OpenLayers) is not drawn here: a stand-in lists what it got.
+vi.mock('../geo/RecordsMap', () => ({
+  default: ({ points }: { points: { name: string | null }[] }) => (
+    <ul aria-label="map">
+      {points.map((p) => (
+        <li key={p.name}>{p.name}</li>
+      ))}
+    </ul>
+  ),
+}))
+
+// A chart's container measures its parent, which has no size here: draw at a
+// fixed size instead.
+vi.mock('recharts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('recharts')>()
+  const { cloneElement } = await import('react')
+  return {
+    ...actual,
+    ResponsiveContainer: ({ children }: { children: React.ReactElement }) =>
+      cloneElement(
+        children as React.ReactElement<{ width: number; height: number }>,
+        {
+          width: 600,
+          height: 300,
+        },
+      ),
+  }
+})
 
 // --- a tiny in-memory API: just enough shape to drive the explorer -------
 
@@ -198,14 +234,21 @@ function renderExplorer(
 
 const search = () =>
   new URLSearchParams(screen.getByTestId('search').textContent ?? '')
+// The list's own requests (not the one-row count of open notes beside it).
 const recordCalls = () =>
-  calls.filter((c) => c.method === 'GET' && c.path.endsWith('/records'))
+  calls.filter(
+    (c) =>
+      c.method === 'GET' &&
+      c.path.endsWith('/records') &&
+      c.params.get('limit') !== '1',
+  )
 const lastRecordCall = () => {
   const all = recordCalls()
   return all[all.length - 1]
 }
 
 beforeEach(() => {
+  localStorage.clear()
   calls = []
   viewName = EMPTY_TABLES.name
   override = null
@@ -232,6 +275,7 @@ afterEach(() => vi.unstubAllGlobals())
 async function openNew() {
   await userEvent.click(await screen.findByRole('button', { name: /^New$/ }))
 }
+
 const item = (name: RegExp) => screen.queryByRole('menuitem', { name })
 
 describe('RecordsExplorer', () => {
@@ -479,7 +523,9 @@ describe('RecordsExplorer', () => {
     await screen.findByText('a.txt')
 
     await user.click(
-      await screen.findByRole('button', { name: 'Selections missing a table' }),
+      await screen.findByRole('button', {
+        name: /^Selections missing a table/,
+      }),
     )
 
     await waitFor(() =>
@@ -504,14 +550,16 @@ describe('RecordsExplorer', () => {
     renderExplorer({}, '/collections/hb?schema=selection&within=r1')
     await screen.findByText('a.txt')
     await user.click(
-      await screen.findByRole('button', { name: 'Selections missing a table' }),
+      await screen.findByRole('button', {
+        name: /^Selections missing a table/,
+      }),
     )
     await user.click(
       screen.getByRole('button', {
-        name: 'Manage view Selections missing a table',
+        name: 'Manage saved filter Selections missing a table',
       }),
     )
-    await user.click(screen.getByRole('menuitem', { name: 'Rename view…' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Rename…' }))
     const dialog = await screen.findByRole('dialog')
     const input = within(dialog).getByRole('textbox')
     await user.clear(input)
@@ -529,18 +577,137 @@ describe('RecordsExplorer', () => {
     await waitFor(() => expect(search().get('view')).toBe('Needs QC'))
 
     await user.click(
-      screen.getByRole('button', { name: 'Manage view Needs QC' }),
+      screen.getByRole('button', { name: 'Manage saved filter Needs QC' }),
     )
-    await user.click(screen.getByRole('menuitem', { name: 'Delete view…' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Delete…' }))
     await user.click(
       within(await screen.findByRole('dialog')).getByRole('button', {
-        name: 'Delete view',
+        name: 'Delete',
       }),
     )
     await waitFor(() =>
       expect(calls.some((c) => c.method === 'DELETE')).toBe(true),
     )
     await waitFor(() => expect(search().get('view')).toBeNull())
+  })
+
+  it('says how many listed records have open notes, and lists them on a click', async () => {
+    const user = userEvent.setup()
+    renderExplorer({}, '/collections/hb?schema=recording')
+    // A fact beside the count, like problems: the fake server finds one.
+    await user.click(await screen.findByRole('button', { name: '1 open note' }))
+    await waitFor(() =>
+      expect(JSON.parse(search().get('filter')!)).toEqual({
+        field: '@open_notes',
+        op: 'eq',
+        value: true,
+      }),
+    )
+    // Listing them, it is not said again.
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: /^\d+ open notes?$/ }),
+      ).toBeNull(),
+    )
+  })
+
+  it('lists records with open notes with what is open, each opening on its notes', async () => {
+    const filter = JSON.stringify({
+      field: '@open_notes',
+      op: 'eq',
+      value: true,
+    })
+    override = (url) =>
+      url.pathname.endsWith('/records') && url.searchParams.get('filter')
+        ? json(page([{ ...E1, open_notes: 2, latest_note: 'depth looks off' }]))
+        : undefined
+    renderExplorer(
+      {},
+      `/collections/hb?schema=encounter&filter=${encodeURIComponent(filter)}`,
+    )
+    expect(
+      await screen.findByText('2 open · depth looks off'),
+    ).toBeInTheDocument()
+    expect(lastRecordCall().params.get('filter')).toBe(filter)
+    expect(
+      screen
+        .getAllByRole('link')
+        .some((a) => a.getAttribute('href') === '/records/e1?tab=notes'),
+    ).toBe(true)
+  })
+
+  it('lists every kind at once, with what every record has', async () => {
+    const user = userEvent.setup()
+    override = (url) =>
+      url.pathname === '/api/collections/hb/records' &&
+      !url.searchParams.get('schema')
+        ? json(
+            page([
+              { ...E1, collection: 'hb' },
+              { ...R1, collection: 'hb' },
+              { ...S1, collection: 'hb' },
+            ]),
+          )
+        : undefined
+    renderExplorer({}, '/collections/hb?schema=*')
+    expect(await screen.findByText('E1')).toBeInTheDocument()
+    expect(lastRecordCall().params.get('schema')).toBeNull()
+    for (const kind of ['Encounter', 'Recording', 'Selection'])
+      expect(
+        within(screen.getByRole('table')).getByText(kind),
+      ).toBeInTheDocument()
+    expect(
+      screen.getByRole('columnheader', { name: /Last edited/ }),
+    ).toBeInTheDocument()
+    // The kind list offers All kinds, and it is the one picked.
+    expect(screen.getByRole('button', { name: 'All kinds' })).toHaveAttribute(
+      'aria-current',
+      'true',
+    )
+    // Charts are of one kind's fields: there are none here.
+    expect(screen.queryByRole('region', { name: 'Charts' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Choose columns' })).toBeNull()
+    await user.click(screen.getByRole('checkbox', { name: /Select record E1/ }))
+    expect(screen.getByRole('button', { name: 'Edit…' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Run workflow' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Move to…' })).toBeEnabled()
+    // Picking a kind lists that kind as before.
+    await user.click(screen.getByRole('button', { name: /^Recording/ }))
+    await waitFor(() => expect(search().get('schema')).toBe('recording'))
+  })
+
+  it('finds open notes on any kind from All records', async () => {
+    const filter = JSON.stringify({
+      field: '@open_notes',
+      op: 'eq',
+      value: true,
+    })
+    override = (url) =>
+      url.pathname === '/api/records/all'
+        ? json(
+            page([
+              {
+                ...S1,
+                collection: 'hb',
+                open_notes: 1,
+                latest_note: 'wrong table',
+              },
+            ]),
+          )
+        : undefined
+    renderExplorer(
+      { dataset: undefined },
+      `/collections?tab=records&filter=${encodeURIComponent(filter)}`,
+    )
+    expect(await screen.findByText('1 open · wrong table')).toBeInTheDocument()
+    const sent = calls.filter((c) => c.path === '/api/records/all').pop()!
+    expect(sent.params.get('schema')).toBeNull()
+    expect(sent.params.get('filter')).toBe(filter)
+    expect(
+      screen
+        .getAllByRole('link')
+        .some((a) => a.getAttribute('href') === '/records/s1?tab=notes'),
+    ).toBe(true)
   })
 
   it('keeps the filter as you drill, so the question stays the same', async () => {
@@ -761,6 +928,53 @@ describe('RecordsExplorer', () => {
     expect(within(rail).getByText('Selection')).toBeInTheDocument()
   })
 
+  it('inside a record it is just the rows, with its tools opened in place', async () => {
+    const user = userEvent.setup()
+    renderExplorer({ root: { id: 'e1' }, scopeLabel: 'E1' }, '/records/e1')
+    await screen.findByText('96')
+    // The kinds inside are a click each.
+    const kinds = screen.getByLabelText('Kinds inside')
+    expect(
+      within(kinds).getByRole('button', { name: /Recording/ }),
+    ).toHaveAttribute('aria-pressed', 'true')
+    expect(
+      within(kinds).getByRole('button', { name: /Selection/ }),
+    ).toBeInTheDocument()
+    // The page's own heading says where we are: no trail repeating it.
+    expect(screen.queryByRole('heading', { name: 'Recording' })).toBeNull()
+    // What it contains is the heading; Filter and Charts sit by the search.
+    expect(
+      within(kinds).getByRole('heading', { name: 'Contains' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Filter' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    )
+    expect(screen.getByRole('button', { name: 'Charts' })).toBeInTheDocument()
+    // No tools until asked for; and no second place to go for them.
+    expect(screen.getByRole('searchbox')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Clear filters' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Export/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Columns/ })).toBeNull()
+    // Rows can be ticked here as on any list (to edit, run or delete).
+    expect(screen.getAllByRole('checkbox').length).toBeGreaterThan(0)
+    expect(screen.queryByRole('link', { name: /Filter/ })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Filter' }))
+    expect(screen.getByRole('button', { name: 'Filter' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    expect(screen.getByRole('button', { name: /^Export/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Columns/ })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Add filter' }),
+    ).toBeInTheDocument()
+    // Still the same list, inside the same record.
+    expect(lastRecordCall().params.get('within')).toBe('e1')
+    await user.click(screen.getByRole('button', { name: 'Filter' }))
+    expect(screen.queryByRole('button', { name: /^Export/ })).toBeNull()
+  })
+
   it('moving up a level sets aside a sort and a bare filter that only fit the level below', async () => {
     const user = userEvent.setup()
     const bare = JSON.stringify({ field: 'selection_table', op: 'is_null' })
@@ -806,7 +1020,7 @@ describe('RecordsExplorer', () => {
       screen.getByRole('button', { name: /Remove filter/ }),
     ).toBeInTheDocument()
     expect(screen.getByRole('searchbox')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Clear filters' }))
+    await user.click(screen.getByRole('button', { name: 'Reset' }))
     expect(await screen.findByText('a.txt')).toBeInTheDocument()
   })
 
@@ -866,7 +1080,13 @@ describe('RecordsExplorer', () => {
 
     const name = (label: string) =>
       within(screen.getByRole('dialog')).getByText(label, { selector: 'label' })
-    const cols = () => search().get('cols')
+    // The columns on screen, by their headers.
+    const cols = () =>
+      screen
+        .getAllByRole('columnheader')
+        .map((h) => (h.textContent ?? '').trim().toLowerCase())
+        .filter((h) => ['site', 'area', 'depth', 'vessel'].includes(h))
+        .join(',')
 
     it('unticks one column with a plain click', async () => {
       const { user } = await openColumns()
@@ -890,11 +1110,33 @@ describe('RecordsExplorer', () => {
       await user.keyboard('{/Shift}')
 
       await waitFor(() => {
-        const chosen = (cols() ?? '').split(',')
+        const chosen = cols().split(',')
         expect(chosen).toEqual(
           expect.arrayContaining(['site', 'area', 'depth', 'vessel']),
         )
       })
+    })
+
+    it('remembers the columns chosen for a kind, without putting them in the address', async () => {
+      const user = userEvent.setup()
+      const first = renderExplorer()
+      await screen.findByText('Stellwagen')
+      await user.click(screen.getByRole('button', { name: /Columns/ }))
+      await screen.findByRole('dialog')
+      await user.click(name('Vessel'))
+      await waitFor(() => expect(cols()).toBe('site,area,depth'))
+      expect(search().get('cols')).toBeNull()
+      first.unmount()
+      // Coming back to a list of the kind, they are as they were left.
+      renderExplorer()
+      await screen.findByText('Stellwagen')
+      expect(cols()).toBe('site,area,depth')
+      // And the default is one click away.
+      await user.click(screen.getByRole('button', { name: /Columns/ }))
+      await user.click(
+        await screen.findByRole('button', { name: 'Reset to default columns' }),
+      )
+      await waitFor(() => expect(cols()).toBe('site,area,depth,vessel'))
     })
   })
 
@@ -1100,13 +1342,13 @@ describe('RecordsExplorer', () => {
         },
       ],
     })
+    // Reached from the page's menu (`show=files`), not a switch beside the
+    // records.
     renderExplorer(
       {},
-      `/collections/hb?schema=recording&filter=${encodeURIComponent(filter)}`,
+      `/collections/hb?schema=recording&show=files&filter=${encodeURIComponent(filter)}`,
     )
-    await userEvent.click(
-      await screen.findByRole('radio', { name: 'Their files' }),
-    )
+    expect(screen.queryByRole('radio', { name: /files/i })).toBeNull()
     await waitFor(() =>
       expect(
         calls.find((c) => c.path === '/api/file-access/files')?.body,
@@ -1117,8 +1359,696 @@ describe('RecordsExplorer', () => {
         below: true,
       }),
     )
-    expect(search().get('show')).toBe('files')
     expect(search().get('filter')).toBe(filter) // one filter for both
+    // The charts count records, so they step aside; one click goes back.
+    expect(screen.queryByRole('region', { name: 'Charts' })).toBeNull()
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Back to records' }),
+    )
+    await waitFor(() => expect(search().get('show')).toBeNull())
+    expect(search().get('filter')).toBe(filter)
+  })
+})
+
+describe('charts beside the records', () => {
+  const types = {
+    types: [
+      {
+        type: 'string',
+        label: 'Text',
+        description: '',
+        stored_as: '',
+        entry_hint: '',
+        example: '',
+        restrictions: [],
+        supports_default: true,
+        searchable: true,
+        measures: ['filled', 'distinct', 'min', 'max'],
+        grouping: 'value' as const,
+        buckets: [],
+      },
+      {
+        type: 'geo',
+        label: 'Location',
+        description: '',
+        stored_as: '',
+        entry_hint: '',
+        example: '',
+        restrictions: [],
+        supports_default: false,
+        searchable: false,
+        measures: ['filled'],
+        grouping: null,
+        buckets: [],
+      },
+    ],
+    kinds: [],
+    summary_measures: [],
+  }
+  const site = (value: string) => ({
+    field: 'site',
+    schema: 'encounter',
+    op: 'eq',
+    value,
+  })
+  const bySite = { id: 'a', group_by: ['encounter.site'], measures: ['count'] }
+  const byRate = { id: 'b', group_by: ['rate'], measures: ['count'] }
+  // What the kind opens with; a test may change it before rendering.
+  let kindCharts: unknown[]
+  let put: unknown[] | null
+  let me: unknown
+
+  const column = (key: string, field: string, schema_name: string) => ({
+    key,
+    field,
+    schema_name,
+    label: field,
+    type: 'string',
+    bucket: null,
+    bin: null,
+    unit: null,
+  })
+  const group = (value: string, n: number, where: unknown) => ({
+    groups: [
+      { value, label: value, lower: null, upper: null, precision: null },
+    ],
+    values: [n],
+    where,
+  })
+  const count = {
+    key: 'count',
+    measure: 'count',
+    label: 'Records',
+    field: null,
+    schema_name: null,
+    type: null,
+    unit: null,
+  }
+  /** The summaries asked for, by what they group by. */
+  const last = <T,>(list: T[]) => list[list.length - 1]
+  const asked = (by: string) =>
+    calls.filter(
+      (c) =>
+        c.path === '/api/records/summary' &&
+        JSON.stringify(c.body?.group_by) === JSON.stringify([by]),
+    )
+
+  beforeEach(() => {
+    setFieldTypesForTest(types)
+    kindCharts = [bySite, byRate]
+    put = null
+    me = undefined
+    override = (url: URL, method: string) => {
+      if (url.pathname === '/api/schemas')
+        return json([
+          encounter,
+          { ...recording, charts: kindCharts },
+          selection,
+        ])
+      if (
+        url.pathname === '/api/schemas/recording/charts' &&
+        method === 'PUT'
+      ) {
+        put = calls[calls.length - 1].body!.charts as unknown[]
+        kindCharts = put
+        return json({ ...recording, charts: put })
+      }
+      if (url.pathname === '/api/me')
+        return me ? json(me) : new Response(null, { status: 404 })
+      if (url.pathname === '/api/records/summary' && method === 'POST') {
+        const body = calls[calls.length - 1].body!
+        const by = (body.group_by as string[])[0]
+        if (by === 'rate')
+          return json({
+            schema_name: 'recording',
+            group_columns: [column('rate', 'rate', 'recording')],
+            measure_columns: [count],
+            rows: [
+              group('48', 1, {
+                field: 'rate',
+                schema: 'recording',
+                op: 'eq',
+                value: '48',
+              }),
+              group('96', 2, {
+                field: 'rate',
+                schema: 'recording',
+                op: 'eq',
+                value: '96',
+              }),
+            ],
+            total: [3],
+            truncated: false,
+            limit: 1000,
+            timezone: null,
+          })
+        if (by === 'encounter.site')
+          return json({
+            schema_name: 'recording',
+            group_columns: [column('encounter.site', 'site', 'encounter')],
+            measure_columns: [count],
+            rows: [
+              group('Georges', 1, site('Georges')),
+              group('Stellwagen', 2, site('Stellwagen')),
+            ],
+            total: [3],
+            truncated: false,
+            limit: 1000,
+            timezone: null,
+          })
+        // No grouping: what the suggestions ask (how many different values).
+        return json({
+          schema_name: 'recording',
+          group_columns: [],
+          measure_columns: (body.measures as string[]).map((key) => ({
+            ...count,
+            key,
+            measure: key.split(':')[0],
+          })),
+          rows: [],
+          total: (body.measures as string[]).map((m) =>
+            m === 'distinct:rate' ? 2 : 400,
+          ),
+          truncated: false,
+          limit: 1000,
+          timezone: null,
+        })
+      }
+      return undefined
+    }
+  })
+  afterEach(() => setFieldTypesForTest(null))
+
+  const charts = () => screen.findByRole('region', { name: 'Charts' })
+  const bar = async (name: RegExp) =>
+    within(await charts()).findByRole('button', { name })
+
+  it('shows the records and the charts at once, the charts counting what is listed', async () => {
+    const filter = JSON.stringify({ field: 'rate', op: 'gt', value: '10' })
+    renderExplorer(
+      {},
+      `/collections/hb?schema=recording&q=9&filter=${encodeURIComponent(filter)}`,
+    )
+    // No switch between them: the table and the charts are both there.
+    expect(await screen.findByRole('table')).toBeInTheDocument()
+    expect(await charts()).toBeInTheDocument()
+    expect(screen.queryByRole('radio', { name: 'Summary' })).toBeNull()
+    expect(screen.queryByRole('radio', { name: 'Map' })).toBeNull()
+    expect(
+      await screen.findByText('How many recordings per site'),
+    ).toBeInTheDocument()
+    await bar(/Stellwagen/)
+    expect(asked('encounter.site')[0].body).toMatchObject({
+      collection: 'hb',
+      schema_name: 'recording',
+      search: '9',
+      filter: JSON.parse(filter),
+      measures: ['count'],
+    })
+  })
+
+  it('clicking a bar filters the records; the chart keeps its bars, the chosen lit', async () => {
+    const user = userEvent.setup()
+    renderExplorer({}, '/collections/hb?schema=recording')
+    await user.click(await bar(/Georges/))
+    await waitFor(() =>
+      expect(JSON.parse(search().get('filter')!)).toEqual(site('Georges')),
+    )
+    // The table follows, and so does the other chart ...
+    await waitFor(() =>
+      expect(JSON.parse(lastRecordCall().params.get('filter')!)).toEqual(
+        site('Georges'),
+      ),
+    )
+    await waitFor(() =>
+      expect(last(asked('rate')).body!.filter).toEqual(site('Georges')),
+    )
+    // ... but its own chart counts without its own condition.
+    expect(asked('encounter.site').every((c) => !c.body!.filter)).toBe(true)
+    expect(await bar(/Georges/)).toHaveAttribute('aria-pressed', 'true')
+    expect(await bar(/Stellwagen/)).toHaveAttribute('aria-pressed', 'false')
+    // A chip says it, and clicking the bar again takes it out.
+    expect(
+      screen.getByRole('button', { name: /Remove filter .*Georges/ }),
+    ).toBeInTheDocument()
+    await user.click(await bar(/Georges/))
+    await waitFor(() => expect(search().get('filter')).toBeNull())
+  })
+
+  it('a bar click and the filter builder edit the same filter', async () => {
+    const user = userEvent.setup()
+    renderExplorer({}, '/collections/hb?schema=recording')
+    await user.click(await bar(/Georges/))
+    await user.click(await bar(/Stellwagen/))
+    await waitFor(() =>
+      expect(JSON.parse(search().get('filter')!)).toEqual({
+        ...site('Georges'),
+        op: 'in',
+        value: ['Georges', 'Stellwagen'],
+      }),
+    )
+    // The builder shows that condition, and removing it there unlights the bars.
+    await user.click(screen.getByRole('button', { name: /Filter$/ }))
+    const editor = await screen.findByRole('region', { name: 'Edit filters' })
+    expect(within(editor).getByDisplayValue('is any of')).toBeInTheDocument()
+    await user.click(
+      screen.getByRole('button', { name: /Remove filter .*Georges/ }),
+    )
+    await waitFor(() => expect(search().get('filter')).toBeNull())
+    expect(await bar(/Georges/)).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('leaves a filter a chart cannot show as written, with nothing lit', async () => {
+    const complex = {
+      or: [
+        site('Georges'),
+        { field: 'rate', schema: 'recording', op: 'eq', value: '96' },
+      ],
+    }
+    renderExplorer(
+      {},
+      `/collections/hb?schema=recording&filter=${encodeURIComponent(JSON.stringify(complex))}`,
+    )
+    expect(await bar(/Georges/)).toHaveAttribute('aria-pressed', 'false')
+    expect(await bar(/Stellwagen/)).toHaveAttribute('aria-pressed', 'false')
+    // Both charts count the filtered records: the tree is sent whole.
+    expect(last(asked('encounter.site')).body!.filter).toEqual(complex)
+    expect(last(asked('rate')).body!.filter).toEqual(complex)
+  })
+
+  it('adds a chart in two choices with a live preview, saved for the kind at once', async () => {
+    const user = userEvent.setup()
+    kindCharts = [bySite]
+    renderExplorer({}, '/collections/hb?schema=recording')
+    await bar(/Georges/)
+    await user.click(screen.getByRole('button', { name: /Add chart/ }))
+    // The builder is at full width, in the address, with a live preview.
+    await waitFor(() => expect(search().get('chart')).toBe('new'))
+    await user.selectOptions(screen.getByLabelText('For each'), 'rate')
+    const preview = screen.getByRole('region', { name: 'Preview' })
+    expect(
+      within(preview).getByRole('heading', {
+        name: 'How many recordings per rate',
+      }),
+    ).toBeInTheDocument()
+    expect(await within(preview).findAllByText('96')).not.toHaveLength(0)
+    // What comes first, then how it is drawn: the ways that fit, bars first.
+    const what = screen.getByRole('region', { name: 'What' })
+    const how = screen.getByRole('region', { name: 'How' })
+    expect(
+      what.compareDocumentPosition(how) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(
+      within(how)
+        .getAllByRole('radio')
+        .map((r) => r.getAttribute('aria-label') ?? r.textContent),
+    ).toEqual(['Bars', 'Pie', 'Table'])
+    await user.click(within(how).getByRole('radio', { name: 'Pie' }))
+    await user.click(screen.getByRole('button', { name: 'Add chart' }))
+    await waitFor(() => expect(search().get('chart')).toBeNull())
+    // No second step: it is the kind's chart now, for every list of it.
+    await waitFor(() => expect(put).toHaveLength(2))
+    expect(put![1]).toMatchObject({
+      group_by: ['rate'],
+      measures: ['count'],
+      show: 'pie',
+    })
+    expect(search().get('charts')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Use for every/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Put back' })).toBeNull()
+    expect(
+      await screen.findByText('How many recordings per rate'),
+    ).toBeInTheDocument()
+  })
+
+  const menu = async (
+    user: ReturnType<typeof userEvent.setup>,
+    item: string,
+  ) => {
+    await user.click(
+      screen.getByRole('button', {
+        name: 'More for How many recordings per rate',
+      }),
+    )
+    await user.click(await screen.findByRole('menuitem', { name: item }))
+  }
+
+  it('removes a chart from its menu, not with a button on the card', async () => {
+    const user = userEvent.setup()
+    renderExplorer({}, '/collections/hb?schema=recording')
+    await bar(/Georges/)
+    expect(screen.queryByRole('button', { name: /^Remove/ })).toBeNull()
+    await menu(user, 'Remove')
+    await waitFor(() => expect(put).toHaveLength(1))
+    expect(put![0]).toMatchObject({ group_by: ['encounter.site'] })
+  })
+
+  it('edits a chart from its menu: its choices and a name of its own', async () => {
+    const user = userEvent.setup()
+    renderExplorer({}, '/collections/hb?schema=recording')
+    await bar(/Georges/)
+    await menu(user, 'Edit…')
+    await waitFor(() => expect(search().get('chart')).toBe('edit-b'))
+    expect(
+      screen.getByRole('heading', { name: 'Edit chart' }),
+    ).toBeInTheDocument()
+    // It opens on the chart as it is.
+    expect(screen.getByLabelText('For each')).toHaveValue('rate')
+    await user.type(screen.getByLabelText('Title'), 'Sample rates')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(put).toHaveLength(2))
+    // Changed in place: the same chart, the same position.
+    expect(put![1]).toMatchObject({
+      id: 'b',
+      title: 'Sample rates',
+      group_by: ['rate'],
+    })
+    await waitFor(() => expect(search().get('chart')).toBeNull())
+    expect(await screen.findByText('Sample rates')).toBeInTheDocument()
+  })
+
+  it('drags a chart by its title to another place', async () => {
+    renderExplorer({}, '/collections/hb?schema=recording')
+    await bar(/Georges/)
+    const rate = screen.getByText('How many recordings per rate')
+    const site = screen.getByText('How many recordings per site')
+    const transfer = { effectAllowed: '' }
+    fireEvent.dragStart(rate, { dataTransfer: transfer })
+    fireEvent.dragOver(site, { dataTransfer: transfer })
+    fireEvent.drop(site, { dataTransfer: transfer })
+    await waitFor(() => expect(put).toHaveLength(2))
+    expect((put as { id: string }[]).map((c) => c.id)).toEqual(['b', 'a'])
+  })
+
+  it('makes a chart larger and smaller from its menu', async () => {
+    const user = userEvent.setup()
+    renderExplorer({}, '/collections/hb?schema=recording')
+    await bar(/Georges/)
+    await menu(user, 'Larger')
+    await waitFor(() =>
+      expect(put![1]).toMatchObject({ id: 'b', size: 'large' }),
+    )
+    await menu(user, 'Smaller')
+    await waitFor(() => expect(put![1]).not.toHaveProperty('size'))
+  })
+
+  it('shows the charts to someone who may only read, with no way to change them', async () => {
+    me = {
+      account: { name: 'reader', kind: 'user', manage_url: null },
+      permissions: { actions: { read: ['project'] }, all: {} },
+    }
+    renderExplorer({}, '/collections/hb?schema=recording')
+    expect(await bar(/Georges/)).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /Add chart/ })).toBeNull(),
+    )
+    await userEvent.click(
+      screen.getByRole('button', {
+        name: 'More for How many recordings per rate',
+      }),
+    )
+    expect(screen.queryByRole('menuitem', { name: 'Remove' })).toBeNull()
+    expect(screen.queryByRole('menuitem', { name: 'Edit…' })).toBeNull()
+  })
+
+  it('shows no charts for a kind with none set: only a way to add one', async () => {
+    const user = userEvent.setup()
+    kindCharts = []
+    renderExplorer({}, '/collections/hb?schema=recording')
+    const column = await charts()
+    await screen.findByRole('table')
+    expect(within(column).queryByText(/How many/)).toBeNull()
+    expect(calls.some((c) => c.path === '/api/records/summary')).toBe(false)
+    // Building one offers nothing ready-made here (no fields of choices),
+    // and the two choices make it.
+    await user.click(within(column).getByRole('button', { name: /Add chart/ }))
+    await user.selectOptions(screen.getByLabelText('For each'), 'rate')
+    await user.click(screen.getByRole('button', { name: 'Add chart' }))
+    expect(await bar(/96/)).toBeInTheDocument()
+    expect(put).toHaveLength(1)
+  })
+
+  it('shows a chart with its numbers, in the address, and closes it', async () => {
+    const user = userEvent.setup()
+    renderExplorer({}, '/collections/hb?schema=recording')
+    await bar(/Georges/)
+    await user.click(
+      screen.getByRole('button', {
+        name: 'More for How many recordings per site',
+      }),
+    )
+    await user.click(
+      await screen.findByRole('menuitem', { name: 'See numbers' }),
+    )
+    await waitFor(() => expect(search().get('chart')).toBe('a'))
+    expect(
+      await screen.findByRole('button', { name: /Download numbers/ }),
+    ).toBeInTheDocument()
+    // The records are still on screen beneath it.
+    expect(screen.getAllByRole('table').length).toBeGreaterThan(1)
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(search().get('chart')).toBeNull())
+  })
+
+  it('folds the charts panel to a strip, or opens it at full width, remembered here', async () => {
+    const user = userEvent.setup()
+    const first = renderExplorer({}, '/collections/hb?schema=recording')
+    // Beside the records to start with; the records are always the page.
+    await user.click(
+      within(await charts()).getByRole('button', { name: 'Collapse charts' }),
+    )
+    expect(screen.queryByRole('region', { name: 'Charts' })).toBeNull()
+    expect(screen.getByRole('table')).toBeInTheDocument()
+    first.unmount()
+    const second = renderExplorer({}, '/collections/hb?schema=recording')
+    await screen.findByRole('table')
+    expect(screen.queryByRole('region', { name: 'Charts' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Charts' }))
+    // Full width is a screen over the same records, with a way back.
+    await user.click(
+      within(await charts()).getByRole('button', {
+        name: 'Charts at full width',
+      }),
+    )
+    expect(await bar(/Georges/)).toBeInTheDocument()
+    expect(screen.queryByRole('table')).toBeNull()
+    second.unmount()
+    renderExplorer({}, '/collections/hb?schema=recording')
+    expect(await bar(/Georges/)).toBeInTheDocument()
+    expect(screen.queryByRole('table')).toBeNull()
+    // The same place, the opposite arrow, puts them back beside the records.
+    await user.click(
+      screen.getByRole('button', { name: 'Charts beside the records' }),
+    )
+    expect(await screen.findByRole('table')).toBeInTheDocument()
+    expect(await charts()).toBeInTheDocument()
+  })
+
+  it('exports the charts on screen from the Export menu, one or all', async () => {
+    const user = userEvent.setup()
+    renderExplorer({}, '/collections/hb?schema=recording')
+    await bar(/Georges/)
+    await user.click(screen.getByRole('button', { name: /^Export/ }))
+    expect(
+      screen.getByRole('menuitem', { name: 'All 2 charts' }),
+    ).toBeInTheDocument()
+    await user.click(
+      screen.getByRole('menuitem', { name: 'How many recordings per rate' }),
+    )
+    await waitFor(() =>
+      expect(
+        calls.find(
+          (c) =>
+            c.path === '/api/records/summary' &&
+            c.params.get('format') === 'csv',
+        )?.body,
+      ).toMatchObject({ group_by: ['rate'], measures: ['count'] }),
+    )
+  })
+
+  it('keeps Columns beside the count of the records it is about', async () => {
+    renderExplorer({}, '/collections/hb?schema=recording')
+    await screen.findByRole('table')
+    const columns = screen.getByRole('button', { name: /Columns/ })
+    const count = screen.getByText(/recordings$/)
+    expect(count.parentElement!.contains(columns)).toBe(true)
+    // Not offered over the charts at full width.
+    await userEvent.click(
+      within(await charts()).getByRole('button', {
+        name: 'Charts at full width',
+      }),
+    )
+    expect(screen.queryByRole('button', { name: /Columns/ })).toBeNull()
+  })
+
+  it('a saved filter made from bars comes back as the same filter', async () => {
+    const user = userEvent.setup()
+    let saved: Record<string, unknown> | null = null
+    const inner = override!
+    override = (url, method) => {
+      if (url.pathname.endsWith('/recording/views') && method === 'POST') {
+        saved = calls[calls.length - 1].body!
+        return json({
+          ...EMPTY_TABLES,
+          id: 'v9',
+          schema_id: recording.id,
+          schema_name: 'recording',
+          ...saved,
+        })
+      }
+      if (url.pathname.endsWith('/recording/views') && method === 'GET')
+        return json(
+          saved
+            ? [
+                {
+                  ...EMPTY_TABLES,
+                  id: 'v9',
+                  schema_id: recording.id,
+                  schema_name: 'recording',
+                  ...saved,
+                },
+              ]
+            : [],
+        )
+      return inner(url, method)
+    }
+    renderExplorer({}, '/collections/hb?schema=recording')
+    await user.click(await bar(/Georges/))
+    await user.click(
+      await screen.findByRole('button', { name: /Save this filter/ }),
+    )
+    await user.type(screen.getByLabelText('Name'), 'Georges only')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(saved?.filter_tree).toEqual(site('Georges')))
+    // Dropped and applied again, it is the same filter and the bar is lit.
+    const chip = () => screen.findByRole('button', { name: /^Georges only$/ })
+    await user.click(await chip())
+    await waitFor(() => expect(search().get('filter')).toBeNull())
+    await user.click(await chip())
+    await waitFor(() =>
+      expect(JSON.parse(search().get('filter')!)).toEqual(site('Georges')),
+    )
+    expect(await bar(/Georges/)).toHaveAttribute('aria-pressed', 'true')
+  })
+})
+
+describe('a map as a chart', () => {
+  // The encounter has a location; a recording is placed where its encounter is.
+  const geoEncounter: Schema = {
+    ...encounter,
+    fields: [
+      ...encounter.fields,
+      {
+        ...encounter.fields[0],
+        id: 'encounter-place',
+        name: 'place',
+        type: 'geo',
+      },
+    ],
+  }
+  let saved: unknown[]
+  beforeEach(() => {
+    saved = []
+    setFieldTypesForTest({
+      types: [
+        {
+          type: 'geo',
+          label: 'Location',
+          description: '',
+          stored_as: '',
+          entry_hint: '',
+          example: '',
+          restrictions: [],
+          supports_default: false,
+          searchable: false,
+          measures: ['filled'],
+          grouping: null,
+          buckets: [],
+        },
+      ],
+      kinds: [],
+      summary_measures: [],
+    })
+    override = (url: URL, method: string) => {
+      if (url.pathname === '/api/schemas/recording/charts' && method === 'PUT')
+        saved = calls[calls.length - 1].body!.charts as unknown[]
+      if (
+        url.pathname === '/api/schemas' ||
+        url.pathname === '/api/schemas/recording/charts'
+      )
+        return json(
+          url.pathname === '/api/schemas'
+            ? [geoEncounter, { ...recording, charts: saved }, selection]
+            : { ...recording, charts: saved },
+        )
+      if (url.pathname === '/api/settings/map')
+        return json({ tile_url: null, attribution: null })
+      if (url.pathname === '/api/records/points' && method === 'POST')
+        return json({
+          schema_name: 'encounter',
+          field: 'place',
+          points: [
+            {
+              id: 'r1',
+              name: 'R1',
+              geometry: { type: 'Point', coordinates: [-70, 42] },
+            },
+          ],
+          total: 3,
+          truncated: true,
+          limit: 1,
+        })
+      return undefined
+    }
+  })
+  afterEach(() => setFieldTypesForTest(null))
+
+  it('is added as a chart where there is a location, and maps what is listed', async () => {
+    const user = userEvent.setup()
+    const filter = JSON.stringify({ field: 'rate', op: 'eq', value: '96' })
+    renderExplorer(
+      {},
+      `/collections/hb?schema=recording&q=96&filter=${encodeURIComponent(filter)}`,
+    )
+    await user.click(await screen.findByRole('button', { name: /Add chart/ }))
+    // What: the recordings, for each place. How: that is a map, nothing else.
+    await user.selectOptions(
+      screen.getByLabelText('For each'),
+      'encounter.place',
+    )
+    expect(screen.getByRole('radio', { name: 'Map' })).toBeChecked()
+    expect(screen.queryByRole('radio', { name: 'Bars' })).toBeNull()
+    expect(screen.queryByLabelText('Show')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Add chart' }))
+    expect(await screen.findByText('Where they are')).toBeInTheDocument()
+    await waitFor(() =>
+      expect(
+        calls.find((c) => c.path === '/api/records/points')?.body,
+      ).toMatchObject({
+        collection: 'hb',
+        schema_name: 'recording',
+        search: '96',
+        filter: JSON.parse(filter),
+        field: 'place',
+        field_schema: 'encounter',
+      }),
+    )
+    expect(
+      await within(await screen.findByRole('list', { name: 'map' })).findByText(
+        'R1',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByText('First 1 of 3')).toBeInTheDocument()
+  })
+
+  it('is not offered where there is no location anywhere', async () => {
+    override = null
+    renderExplorer({}, '/collections/hb?schema=selection')
+    await userEvent.click(
+      await screen.findByRole('button', { name: /Add chart/ }),
+    )
+    expect(screen.queryByRole('radio', { name: 'Map' })).toBeNull()
+    expect(screen.getByRole('radio', { name: 'Bars' })).toBeChecked()
   })
 })
 
@@ -1150,5 +2080,206 @@ describe('what this person may do', () => {
       'title',
       'You may not add, change and restore records, and save filters and exports here.',
     )
+  })
+
+  describe('searching one field', () => {
+    const fieldTypes = (searchable: string[]) => ({
+      types: ['string', 'reference'].map((type) => ({
+        type,
+        label: type,
+        description: '',
+        stored_as: '',
+        entry_hint: '',
+        example: '',
+        restrictions: [],
+        supports_default: true,
+        searchable: searchable.includes(type),
+        measures: ['filled'],
+        grouping: 'value' as const,
+        buckets: [],
+      })),
+      kinds: [],
+      summary_measures: [],
+    })
+    beforeEach(() => {
+      const two = schema('encounter', null, ['site', 'observer'])
+      two.fields.push({
+        ...two.fields[0],
+        id: 'enc-ref',
+        name: 'boat',
+        type: 'reference',
+      })
+      override = (url: URL) => {
+        if (url.pathname === '/api/schemas')
+          return json([two, recording, selection])
+        return undefined
+      }
+    })
+    beforeEach(() => setFieldTypesForTest(fieldTypes(['string'])))
+    afterEach(() => setFieldTypesForTest(null))
+
+    it('has no dropdown for it; a link that names a field still narrows the search', async () => {
+      renderExplorer({}, '/collections/hb?q=stell&qin=site')
+      await waitFor(() =>
+        expect(lastRecordCall().params.getAll('search_field')).toEqual([
+          'site',
+        ]),
+      )
+      expect(lastRecordCall().params.get('search')).toBe('stell')
+      expect(screen.queryByRole('combobox', { name: 'Search in' })).toBeNull()
+    })
+  })
+})
+
+describe('checks', () => {
+  const blankFilter = {
+    or: [
+      { field: 'rate', op: 'is_null', schema: 'recording' },
+      { field: 'rate', op: 'eq', value: '', schema: 'recording' },
+    ],
+  }
+  const report = {
+    records: 3,
+    records_with_issues: 2,
+    issues: [
+      {
+        name: 'breaks_rule',
+        label: 'Breaks a rule',
+        description: 'A stored value the rules refuse now.',
+      },
+      { name: 'blank', label: 'Required but empty', description: '' },
+    ],
+    kinds: [
+      {
+        schema_name: 'recording',
+        schema_label: 'Recording',
+        records: 3,
+        records_with_issues: 2,
+        issues: [
+          {
+            issue: 'breaks_rule',
+            field: 'rate',
+            field_label: 'Rate',
+            count: 2,
+            examples: [
+              {
+                record_id: 'r1',
+                record_name: 'R1',
+                message: "Field 'rate': 96 exceeds maximum (50)",
+              },
+            ],
+            filter: null,
+          },
+          {
+            issue: 'blank',
+            field: 'rate',
+            field_label: 'Rate',
+            count: 1,
+            examples: [],
+            filter: blankFilter,
+          },
+        ],
+        blanks: [
+          {
+            field: 'rate',
+            field_label: 'Rate',
+            required: true,
+            blank: 1,
+            filter: blankFilter,
+          },
+        ],
+      },
+    ],
+  }
+  beforeEach(() => {
+    override = (url: URL, method: string) => {
+      if (url.pathname === '/api/records/quality' && method === 'POST')
+        return json(report)
+      if (url.pathname === '/api/records/quality/records' && method === 'POST')
+        return json({
+          items: [
+            {
+              record_id: 'r1',
+              record_name: 'R1',
+              schema_name: 'recording',
+              field: 'rate',
+              message: "Field 'rate': 96 exceeds maximum (50)",
+            },
+            {
+              record_id: 'r2',
+              record_name: 'R2',
+              schema_name: 'recording',
+              field: 'rate',
+              message: "Field 'rate': 60 exceeds maximum (50)",
+            },
+          ],
+          total: 2,
+          offset: 0,
+          limit: 25,
+        })
+      return undefined
+    }
+  })
+
+  it('checks exactly what the list shows, and opens the records with an issue', async () => {
+    renderExplorer({}, '/collections/hb?schema=recording&q=9')
+    // A fact beside the count, counted before it is opened.
+    expect(screen.queryByRole('button', { name: 'Check data' })).toBeNull()
+    const button = await screen.findByRole('button', { name: '2 problems' })
+    await userEvent.click(button)
+    expect(search().get('show')).toBe('checks')
+    await waitFor(() =>
+      expect(
+        calls.find((c) => c.path === '/api/records/quality')?.body,
+      ).toMatchObject({
+        collection: 'hb',
+        schema_name: 'recording',
+        search: '9',
+      }),
+    )
+    expect(await screen.findByText(/of 3 records/)).toBeInTheDocument()
+    expect(screen.queryByText('How full each field is')).toBeNull()
+
+    // A line opens its records (held in the address), to tick and edit.
+    await userEvent.click(screen.getByText('Breaks a rule'))
+    expect(search().get('chk.issue')).toBe('breaks_rule')
+    expect(search().get('chk.field')).toBe('rate')
+    await waitFor(() =>
+      expect(
+        calls.find((c) => c.path === '/api/records/quality/records')?.body,
+      ).toMatchObject({
+        issue: 'breaks_rule',
+        field: 'rate',
+        kind: 'recording',
+      }),
+    )
+    const region = await screen.findByRole('region', {
+      name: 'Breaks a rule: Rate',
+    })
+    expect(within(region).getByText('R2')).toBeInTheDocument()
+    await userEvent.click(within(region).getAllByRole('checkbox')[1])
+    await userEvent.click(within(region).getByRole('button', { name: 'Edit…' }))
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('lists the records that leave a field empty in the explorer', async () => {
+    renderExplorer({}, '/collections/hb?schema=recording&show=checks')
+    await userEvent.click(await screen.findByText('Required but empty'))
+    const region = await screen.findByRole('region', {
+      name: 'Required but empty: Rate',
+    })
+    await userEvent.click(
+      within(region).getByRole('button', { name: 'Show in the list' }),
+    )
+    await waitFor(() => expect(search().get('show')).toBeNull())
+    expect(JSON.parse(search().get('filter')!)).toEqual(blankFilter)
+  })
+
+  it('goes back to the records from the checks', async () => {
+    renderExplorer({}, '/collections/hb?schema=recording&show=checks')
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Back to records' }),
+    )
+    await waitFor(() => expect(search().get('show')).toBeNull())
   })
 })

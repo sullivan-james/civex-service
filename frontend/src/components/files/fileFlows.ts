@@ -10,6 +10,7 @@ import {
 } from '../../api/fileAccess'
 import { transfersApi } from '../../api/transfers'
 import { runFileJob, type JobHandle } from '../../hooks/fileJobs'
+import { exportDest, folderMode } from '../../utils/exportFolder'
 import { errorMessage } from '../../lib/errors'
 import { describeAmounts } from '../../utils/amounts'
 import { percentDone } from '../../utils/transfers'
@@ -54,7 +55,7 @@ const plural = (n: number, word: string) =>
   `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`
 
 /** Run `work` as a job, and say plainly if it fails. */
-async function job(
+export async function job(
   ctx: FlowContext,
   title: string,
   work: (j: JobHandle) => Promise<void>,
@@ -67,7 +68,7 @@ async function job(
 }
 
 /** A plain id to tag a request with, so the server can say how far it has got. */
-const newProgressId = () =>
+export const newProgressId = () =>
   typeof crypto !== 'undefined' && crypto.randomUUID
     ? crypto.randomUUID()
     : `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
@@ -113,7 +114,7 @@ function watchProgress(j: JobHandle, id: string, every: number): () => void {
 }
 
 /** Run one request with its progress shown on the job while it works. */
-async function tracked<T>(
+export async function tracked<T>(
   ctx: FlowContext,
   j: JobHandle,
   run: (progressId: string) => Promise<T>,
@@ -125,6 +126,21 @@ async function tracked<T>(
   } finally {
     stop()
   }
+}
+
+/** Write one file civex makes (a copy of the project, a release's) onto a
+ * drive: a job like any other, so it carries on in the status bar with its
+ * progress after the dialog that asked for it has closed, and says where the
+ * file is when it is done. */
+export function saveCopy(
+  ctx: FlowContext,
+  title: string,
+  save: (progressId: string) => Promise<{ path: string }>,
+) {
+  return job(ctx, title, async (j) => {
+    const saved = await tracked(ctx, j, save)
+    ctx.toast.success(`Saved: ${saved.path}`)
+  })
 }
 
 /** The plan, when the server refused without sending one. */
@@ -147,7 +163,8 @@ export function openAsFolder(
     const out = await tracked(ctx, j, (progressId) =>
       fileAccessApi.tryExport(selection, {
         name,
-        mode: 'link',
+        dest: exportDest(name),
+        mode: folderMode(),
         allowPartial: false,
         open: true,
         progressId,
@@ -161,17 +178,6 @@ export function openAsFolder(
       plan: await planFor(selection, out.plan),
       message: out.plan ? undefined : out.message,
     })
-  })
-}
-
-/** Look at what a selection holds, then show the dialog (for "copy to a drive",
- * which always needs a choice of drive). */
-export function chooseCopy(ctx: FlowContext, selection: FileSelection) {
-  return job(ctx, 'Preparing files…', async (j) => {
-    const plan = await tracked(ctx, j, (progressId) =>
-      fileAccessApi.plan(selection, progressId),
-    )
-    ctx.problem({ kind: 'copy', plan, selection })
   })
 }
 
@@ -199,13 +205,18 @@ export function downloadZip(
         name,
       })
     }
-    const url = URL.createObjectURL(got.blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = got.filename ?? `${name}.zip`
-    link.click()
-    URL.revokeObjectURL(url)
+    saveBlob(got.blob, got.filename ?? `${name}.zip`)
   })
+}
+
+/** Hand a downloaded file to the browser to save, under `filename`. */
+export function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
 }
 
 /** Link what can be reached (the person has seen what can't). */
@@ -218,7 +229,8 @@ export function openAvailable(
     const out = await tracked(ctx, j, (progressId) =>
       fileAccessApi.tryExport(selection, {
         name,
-        mode: 'link',
+        dest: exportDest(name),
+        mode: folderMode(),
         allowPartial: true,
         open: true,
         progressId,
@@ -254,6 +266,7 @@ export function copyToDrive(
       await tracked(ctx, j, (progressId) =>
         fileAccessApi.export(selection, {
           name,
+          dest: exportDest(name),
           mode: 'copy',
           volume,
           allowPartial: true,
@@ -322,14 +335,14 @@ export function downloadReport(got: DownloadResult): string {
 }
 
 /** Everything that says where files are, asked again after they moved. */
-function refreshPlaces(ctx: FlowContext) {
+export function refreshPlaces(ctx: FlowContext) {
   for (const key of ['file-listing', 'store', 'records', 'record', 'remote'])
     void ctx.qc.invalidateQueries({ queryKey: [key] })
 }
 
 /** Follow a move until it finishes, showing how far it is. A move that stops
  * for a reason a person has to deal with ends the job with that reason. */
-async function waitForMove(
+export async function waitForMove(
   ctx: FlowContext,
   j: JobHandle,
   id: string,

@@ -13,6 +13,17 @@ import {
 import { useToast } from '../components/ui/ToastProvider'
 import { errorMessage } from '../lib/errors'
 
+/** Everything a saved view shows up in: its schema's list, the palette's
+ * every-filter list. */
+function invalidateViews(
+  qc: ReturnType<typeof useQueryClient>,
+  schemaName: string,
+) {
+  qc.invalidateQueries({ queryKey: ['views', schemaName] })
+  qc.invalidateQueries({ queryKey: ['all-views'] })
+  qc.invalidateQueries({ queryKey: ['dashboard'] })
+}
+
 export function useViews(schemaName: string) {
   return useQuery({
     queryKey: ['views', schemaName],
@@ -44,8 +55,8 @@ export function useCreateView(schemaName: string) {
   return useMutation({
     mutationFn: (body: CreateViewBody) => viewsApi.create(schemaName, body),
     onSuccess: (created) => {
-      qc.invalidateQueries({ queryKey: ['views', schemaName] })
-      toast.success(`View "${created.name}" saved`)
+      invalidateViews(qc, schemaName)
+      toast.success(`Filter “${created.name}” saved`)
     },
   })
 }
@@ -57,8 +68,8 @@ export function useUpdateView(schemaName: string, viewName: string) {
     mutationFn: (body: UpdateViewBody) =>
       viewsApi.update(schemaName, viewName, body),
     onSuccess: (updated) => {
-      qc.invalidateQueries({ queryKey: ['views', schemaName] })
-      toast.success(`View "${updated.name}" saved`)
+      invalidateViews(qc, schemaName)
+      toast.success(`Filter “${updated.name}” saved`)
     },
   })
 }
@@ -69,7 +80,7 @@ export function useDeleteView(schemaName: string) {
   return useMutation({
     mutationFn: (viewName: string) => viewsApi.delete(schemaName, viewName),
     onSuccess: (_data, viewName) => {
-      qc.invalidateQueries({ queryKey: ['views', schemaName] })
+      invalidateViews(qc, schemaName)
       toast.success(`View "${viewName}" deleted`)
     },
     onError: (err) => toast.error(errorMessage(err)),

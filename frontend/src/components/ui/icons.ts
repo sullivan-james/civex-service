@@ -1,6 +1,7 @@
 export {
   CalendarDays,
   Star,
+  MessageSquare,
   Plus,
   Search,
   Columns3,
@@ -60,6 +61,9 @@ export {
   Send,
   Square,
   PanelRightClose,
+  PanelRightOpen,
+  Maximize2,
+  Minimize2,
   FileText,
   MapPin,
   HardDrive,
@@ -67,6 +71,7 @@ export {
   House,
   Archive,
   Bookmark,
+  BookMarked,
   FolderTree,
   SlidersHorizontal,
 } from 'lucide-react'

@@ -36,7 +36,17 @@ from civex.domain.naming import slugify
 # Field types whose values can't be written into a name. Mirrored by
 # NON_NAMEABLE in frontend/src/utils/templates.ts.
 UNNAMEABLE_DTYPES = frozenset(
-    {"reference", "reference_list", "file", "file_list", "tags", "geo", "longtext"}
+    {
+        "reference",
+        "reference_list",
+        "file",
+        "file_list",
+        "tags",
+        "geo",
+        "longtext",
+        # Worked out on read, after a record's name is: not part of it.
+        "formula",
+    }
 )
 
 BUILTINS_RECORD = ("schema", "id")

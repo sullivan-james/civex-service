@@ -66,6 +66,8 @@ class ViewService:
         sort: list[dict[str, Any]] | None = None,
         files_layout: str = "tree",
     ) -> ViewDTO:
+        """Save a filter: which records (filter, sort), and the columns and
+        files layout a list of them opens with."""
         self._permissions.require_somewhere(permissions.WRITE_RECORDS)
         schema = self._schemas.get(schema_name)
         name = validate_free_name(name, "view name")
@@ -112,6 +114,7 @@ class ViewService:
         sort=...,
         files_layout=...,
     ) -> ViewDTO:
+        """Change what is given (`...` leaves a part as it is)."""
         self._permissions.require_somewhere(permissions.WRITE_RECORDS)
         schema = self._schemas.get(schema_name)
         view = self._views.get_by_name(schema.id, view_name)

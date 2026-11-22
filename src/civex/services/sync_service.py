@@ -54,6 +54,7 @@ from civex.domain.sync import (
     LoginStarted,
     DEFERRED,
     ENTITY_ORDER,
+    PROTOCOL_MAX,
     COPYING,
     DeviceCredentials,
     FILLING,
@@ -66,6 +67,7 @@ from civex.domain.sync import (
     SyncError,
     SyncProgress,
     agree,
+    kinds_for,
     plain_failure,
     protocol_mismatch,
     retiring_notice,
@@ -267,6 +269,19 @@ class SyncService:
             ),
             files_waiting=waiting,
         )
+
+    def history_position(self) -> tuple[int | None, int]:
+        """Where this copy is in the authority's numbered history, and how many
+        changes made here it hasn't been sent: the feed's head and 0 when this
+        project serves devices (after numbering its own edits); the last number
+        applied here and the unsent count when it follows one; (None, 0)
+        otherwise. What a release records as the point it was taken at."""
+        if self._config.sync.serve:
+            self._repo.sequence_local_entries()
+            return self._repo.head_seq(), 0
+        if self.configured:
+            return self._repo.meta().cursor, self._repo.count_pending()
+        return None, 0
 
     def files_waiting(self, limit: int = 5000) -> FilesWaiting:
         """Why files haven't gone to the server, from the inventory and each
@@ -618,7 +633,7 @@ class SyncService:
             if mode == "joined":
                 self._join(transport, hello, progress)
             elif mode == "seeded":
-                self._seed(transport, progress)
+                self._seed(transport, progress, hello.protocol_version)
             else:
                 self._repo.set_cursor(
                     hello.head_seq if mode == "empty" else self._repo.meta().cursor
@@ -1388,7 +1403,7 @@ class SyncService:
         done = 0
         head: int | None = None
         held: dict[str, set[str]] = {}
-        for kind in ENTITY_ORDER:
+        for kind in kinds_for(hello.protocol_version):
             # Things that sit under another of their kind that has not arrived
             # yet (it was made later, on a clock that was ahead): the database
             # refuses them until it has, so they wait for it, by its id.
@@ -1783,7 +1798,10 @@ class SyncService:
             after = snapshot_cursor(snaps[-1])
 
     def _seed(
-        self, transport: SyncTransport, progress: ProgressFn | None = None
+        self,
+        transport: SyncTransport,
+        progress: ProgressFn | None = None,
+        protocol: int = PROTOCOL_MAX,
     ) -> None:
         """Give an empty authority everything this project holds. Each thing is
         sent as a create with an id made from the project and the thing, so an
@@ -1830,7 +1848,9 @@ class SyncService:
                 progress(SyncProgress(FILLING, sent, total and max(total, sent), kind))
             batch = []
 
-        for kind in ENTITY_ORDER:
+        # Only the kinds the authority reads (one on an older protocol has no
+        # Analytics page to take, say).
+        for kind in kinds_for(protocol):
             for snap in self._seed_snapshots(kind):
                 now = datetime.now(timezone.utc)
                 batch.append(

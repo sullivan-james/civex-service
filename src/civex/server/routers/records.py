@@ -7,14 +7,29 @@ from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Qu
 from civex.context import AppContext, context_factory
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.query import RecordQuery
+from civex.domain.summary import (
+    SummaryRequest,
+    parse_group_by,
+    parse_measure,
+    table_of,
+)
+from civex.domain.tables import check_format, extension, media_type
 from civex.server.background import run_pending_jobs
 from civex.server.deps import get_ctx
 from civex.server.downloads import new_temp_path, serve, temp_paths
 from civex.server.models import (
+    BulkEditPlanResponse,
+    BulkEditRequest,
+    BulkEditResponse,
     CreateRecordRequest,
     MoveRecordsRequest,
     MoveRecordsResponse,
     PaginatedRecordResponse,
+    QualityFindingResponse,
+    QualityRecordsRequest,
+    QualityRecordsResponse,
+    QualityReportResponse,
+    RecordQueryRequest,
     RecordMovePlanResponse,
     RecordLabelResponse,
     RecordLabelsRequest,
@@ -24,12 +39,19 @@ from civex.server.models import (
     OrphansResponse,
     RecordRef,
     RecordResponse,
+    RecordSelectionRequest,
+    RecordPointsRequest,
+    RecordPointsResponse,
+    RecordSummaryRequest,
+    RecordSummaryResponse,
     RestorePlanResponse,
     ReferrerGroupResponse,
     UpdateRecordRequest,
 )
 from civex.server.query_params import record_query
+from civex.server.routers.file_access import report_progress
 from civex.services.archive import write_zip
+from civex.services.progress import Progress
 from civex.services.table_files import write_table
 
 router = APIRouter(tags=["records"])
@@ -38,7 +60,16 @@ router = APIRouter(tags=["records"])
 @router.get("/records", response_model=list[RecordResponse])
 def search_records_global(
     schema: str = Query(..., description="Schema name to search within"),
-    search: Optional[str] = Query(default=None),
+    search: Optional[str] = Query(
+        default=None,
+        description="Text to look for in the records' values, as for "
+        "listing records; a record id prefix matches too.",
+    ),
+    search_field: list[str] = Query(
+        default=[],
+        description="Repeatable field name of 'schema': look for 'search' "
+        "only in these. Omitted, every searchable field.",
+    ),
     limit: int = Query(default=20, le=100),
     reachable_from: Optional[str] = Query(
         default=None,
@@ -54,6 +85,7 @@ def search_records_global(
             search=search or None,
             limit=limit,
             reachable_from=reachable_from or None,
+            search_fields=search_field or None,
         )
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
@@ -143,6 +175,24 @@ def list_records(
     are AND-combined with the 'filter' tree, if both are given.
     """
     query.dataset = dataset_name
+    return _page(ctx, query, columns, child_counts, limit, offset)
+
+
+@router.get("/records/all", response_model=PaginatedRecordResponse)
+def list_all_records(
+    query: RecordQuery = Depends(record_query),
+    columns: list[str] = _COLUMNS,
+    child_counts: bool = _CHILD_COUNTS,
+    limit: int = Query(default=50, le=1000),
+    offset: int = Query(default=0, ge=0),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """List records in every collection, paginated: of one schema, or with
+    no 'schema' of every kind at once (with 'within', everything beneath that
+    record). A list of every kind can be searched, filtered by '@open_notes'
+    and sorted by '@kind', '@collection', '@updated_at' or '@created_at'; a
+    filter or sort on a field needs a 'schema' and is refused without one."""
+    query.dataset = None
     return _page(ctx, query, columns, child_counts, limit, offset)
 
 
@@ -448,6 +498,19 @@ def restore_selected_records(
     )
 
 
+@router.get("/records/{record_id}/purge-plan")
+def purge_plan(record_id: str, ctx: AppContext = Depends(get_ctx)):
+    """What permanently deleting this record removes: how many records (it and
+    everything beneath it), and, of the files they cite, how many each release
+    keeps (`kept_by_releases`, by release name): those stay on the drives
+    until the release is yanked."""
+    try:
+        ids = ctx.record_svc.purge_set(record_id)
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    return {"records": len(ids), "kept_by_releases": ctx.release_svc.kept_for(ids)}
+
+
 @router.delete("/records/{record_id}/purge", status_code=204)
 def purge_record(record_id: str, ctx: AppContext = Depends(get_ctx)):
     try:
@@ -470,24 +533,133 @@ def bulk_delete_records(
     return {"deleted": deleted}
 
 
-def _move_selection(body: MoveRecordsRequest) -> dict:
+def _selection(body: RecordSelectionRequest, verb: str) -> dict:
+    """The `ids` or `query` a request's selection is, for the service."""
     if body.ids is not None:
         return {"ids": body.ids}
     if not body.collection:
         raise HTTPException(
             422,
-            detail="Choose the records to move: 'ids', or a query with 'collection'.",
+            detail=f"Choose the records to {verb}: 'ids', or a query with "
+            "'collection'.",
         )
-    return {
-        "query": RecordQuery(
-            dataset=body.collection,
-            schema=body.schema_name,
-            within=body.within,
-            filter_tree=body.filter,
-            where=body.where,
-            search=body.search,
+    return {"query": body.to_query()}
+
+
+@router.post("/records/summary", response_model=RecordSummaryResponse)
+def summarise_records(
+    body: RecordSummaryRequest,
+    format: Optional[str] = Query(
+        default=None,
+        description="Answer with the summary as a table file instead: csv, tsv, "
+        "xlsx, json or jsonl. A last row holds the totals.",
+    ),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Summarise the records a query lists (the same selectors as listing
+    them): group them by field values, of their own kind or of a kind above
+    it, and work out measures over each group and over them all. Dates group
+    by year, month, week or day (a date known only to the year keeps a group
+    of its own), numbers by value or in ranges, a list field by each item.
+    Each group carries the filter condition that lists exactly its records.
+    Worked out in the database in one statement, however many records."""
+    try:
+        request = SummaryRequest(
+            group_by=[parse_group_by(g) for g in body.group_by],
+            measures=[parse_measure(m) for m in body.measures],
+            limit=body.limit,
         )
-    }
+        result = ctx.record_svc.summarise(body.to_query(), request)
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except (ValueError, ValidationError) as e:
+        raise HTTPException(422, detail=str(e))
+    if format is None:
+        return RecordSummaryResponse.from_dto(result)
+    try:
+        check_format(format)
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    columns, rows = table_of(result)
+    with temp_paths() as tmp:
+        path = new_temp_path(extension(format))
+        tmp.append(path)
+        write_table(path, format, columns, [rows], sheet="Summary")
+        tmp.remove(path)
+        return serve(
+            path, media_type(format), f"{result.schema}-summary{extension(format)}"
+        )
+
+
+@router.post("/records/quality", response_model=QualityReportResponse)
+def check_records(body: RecordQueryRequest, ctx: AppContext = Depends(get_ctx)):
+    """Check the records a query lists (the same selectors as listing them)
+    for what needs a look, per kind and field: values their field's rules now
+    refuse (a rule tightened after they were entered), required fields left
+    empty, records sharing a unique key, links to records that are gone, and
+    files that are nowhere. Each line counts exactly and names a few records;
+    every field's empty count is given too. Nothing is changed."""
+    try:
+        report = ctx.quality_svc.check(body.to_query())
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except (ValueError, ValidationError) as e:
+        raise HTTPException(422, detail=str(e))
+    return QualityReportResponse.from_dto(report)
+
+
+@router.post("/records/quality/records", response_model=QualityRecordsResponse)
+def records_with_issue(body: QualityRecordsRequest, ctx: AppContext = Depends(get_ctx)):
+    """The records a query lists that have one issue (on one field, of one
+    kind, when given), a page at a time, each with what is wrong: what a line
+    of the check opens, to look at the records or tick them and edit them."""
+    try:
+        found, total = ctx.quality_svc.records_with(
+            body.to_query(),
+            body.issue,
+            field=body.field,
+            schema=body.kind,
+            limit=body.limit,
+            offset=body.offset,
+        )
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except (ValueError, ValidationError) as e:
+        raise HTTPException(422, detail=str(e))
+    return QualityRecordsResponse(
+        items=[
+            QualityFindingResponse(
+                record_id=f.record_id,
+                record_name=f.record_name,
+                schema_name=f.schema,
+                field=f.field,
+                message=f.message,
+            )
+            for f in found
+        ],
+        total=total,
+        offset=body.offset,
+        limit=body.limit,
+    )
+
+
+@router.post("/records/points", response_model=RecordPointsResponse)
+def record_points(body: RecordPointsRequest, ctx: AppContext = Depends(get_ctx)):
+    """Where the records a query lists are, for a map (the same selectors as
+    listing them): each record with a value in the location field `field`,
+    with its id, its name and the geometry. The field may be of a kind above
+    the one listed (`field_schema`): each record is then placed where the
+    record above it is. Oldest first, at most `limit`; `total` counts them
+    all. A fixed number of statements, however many records."""
+    try:
+        result = ctx.record_svc.points(
+            body.to_query(), body.field, body.field_schema, body.limit
+        )
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    return RecordPointsResponse.from_dto(result)
 
 
 @router.post("/records/move/plan", response_model=RecordMovePlanResponse)
@@ -497,7 +669,9 @@ def plan_move_records(body: MoveRecordsRequest, ctx: AppContext = Depends(get_ct
     the way, such as references that would break or a uniqueness key already
     taken there. The same rule as the move itself."""
     try:
-        plan = ctx.record_svc.plan_move(body.to, body.parent, **_move_selection(body))
+        plan = ctx.record_svc.plan_move(
+            body.to, body.parent, **_selection(body, "move")
+        )
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except (ValueError, ValidationError) as e:
@@ -514,7 +688,7 @@ def move_records(body: MoveRecordsRequest, ctx: AppContext = Depends(get_ctx)):
     whole (422, saying why) when anything is in the way; `POST
     /records/move/plan` says so beforehand."""
     try:
-        result = ctx.record_svc.move(body.to, body.parent, **_move_selection(body))
+        result = ctx.record_svc.move(body.to, body.parent, **_selection(body, "move"))
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except (ValueError, ValidationError) as e:
@@ -523,6 +697,55 @@ def move_records(body: MoveRecordsRequest, ctx: AppContext = Depends(get_ctx)):
     return MoveRecordsResponse(
         roots=result.roots, records=result.records, collection=result.collection
     )
+
+
+@router.post("/records/bulk-edit/plan", response_model=BulkEditPlanResponse)
+def plan_bulk_edit(
+    body: BulkEditRequest,
+    ctx: AppContext = Depends(get_ctx),
+    progress: Progress | None = Depends(report_progress),
+):
+    """What setting (or clearing) these fields on the chosen records would do,
+    without doing it: how many would change, how many already hold the values,
+    which can't take them and why (a value its field won't take, a uniqueness
+    key taken, a field the record hasn't got of its own), and how many
+    workflow runs it would start. The same rule as the edit itself."""
+    try:
+        plan = ctx.record_svc.plan_bulk_edit(
+            body.changes, progress=progress, **_selection(body, "edit")
+        )
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except (ValueError, ValidationError) as e:
+        raise HTTPException(422, detail=str(e))
+    return BulkEditPlanResponse.from_dto(plan)
+
+
+@router.post("/records/bulk-edit", response_model=BulkEditResponse)
+def bulk_edit_records(
+    body: BulkEditRequest,
+    background_tasks: BackgroundTasks,
+    ctx: AppContext = Depends(get_ctx),
+    progress: Progress | None = Depends(report_progress),
+):
+    """Set (or, with null, clear) these fields on every chosen record. Each
+    record is saved as an edit of just those fields, held to the same rules
+    as any edit and logged in its history; the lot is one event in Activity.
+    A record that can't take the change is left as it is and named in the
+    answer, and the others go ahead (`POST /records/bulk-edit/plan` says so
+    beforehand). Tag the request with `X-Civex-Progress` to follow it."""
+    try:
+        result = ctx.record_svc.bulk_edit(
+            body.changes, progress=progress, **_selection(body, "edit")
+        )
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except (ValueError, ValidationError) as e:
+        raise HTTPException(422, detail=str(e))
+    ctx.commit()
+    if result.runs:
+        background_tasks.add_task(run_pending_jobs, context_factory(ctx.project))
+    return BulkEditResponse.from_dto(result)
 
 
 @router.delete("/collections/{dataset_name}/records")

@@ -186,6 +186,127 @@ def schema_remove_unique(
     console.print(f"[success]Removed the unique ({', '.join(fields)}).[/success]")
 
 
+charts_app = typer.Typer(help="The charts a list of a kind of record opens with")
+app.add_typer(charts_app, name="charts")
+
+
+def _chart_line(chart: dict) -> str:
+    if "map" in chart:
+        what = f"a map of {chart['map']}"
+    else:
+        what = ", ".join(chart.get("measures", ["count"]))
+        if chart.get("group_by"):
+            what += " by " + ", ".join(chart["group_by"])
+    title = f'"{chart["title"]}": ' if chart.get("title") else ""
+    return f"  {chart['id']}  {title}{what}"
+
+
+@charts_app.command("list")
+def schema_charts_list(name: str = typer.Argument(..., help="Schema name")) -> None:
+    """List the charts a list of this kind opens with, in order, with the id
+    each is removed by."""
+    ctx = _ctx()
+    try:
+        charts = ctx.schema_svc.get(name).charts
+    except NotFoundError as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+    if not charts:
+        console.print(f"'{name}' has no charts.")
+        return
+    for chart in charts:
+        console.print(_chart_line(chart))
+
+
+@charts_app.command("add")
+def schema_charts_add(
+    name: str = typer.Argument(..., help="Schema name"),
+    by: Optional[list[str]] = typer.Option(
+        None,
+        "--by",
+        "-b",
+        help="One bar for each value of a field (repeatable, up to 3), as "
+        "'civex record summarise --by' takes it: site, taken:month, depth:5",
+    ),
+    measure: Optional[list[str]] = typer.Option(
+        None,
+        "--measure",
+        "-m",
+        help="What each bar shows (repeatable), as 'civex record summarise "
+        "--measure' takes it; 'count' when none is given. 'inside:KIND' counts "
+        "the records of a kind beneath.",
+    ),
+    map_field: Optional[str] = typer.Option(
+        None, "--map", help="A map of this location field instead of bars"
+    ),
+    title: Optional[str] = typer.Option(None, "--title", help="The chart's title"),
+) -> None:
+    """Add a chart to the ones a list of this kind opens with: bars (--by and
+    --measure) or a map (--map). Everyone sees it; it is in the schema's
+    history and syncs."""
+    import uuid
+
+    ctx = _ctx()
+    try:
+        chart: dict = {"id": uuid.uuid4().hex[:12]}
+        if title:
+            chart["title"] = title
+        if map_field:
+            chart["map"] = map_field
+        else:
+            chart["group_by"] = list(by or [])
+            chart["measures"] = list(measure or ["count"])
+        current = ctx.schema_svc.get(name).charts
+        ctx.schema_svc.set_charts(name, [*current, chart])
+        ctx.commit()
+    except (NotFoundError, ValidationError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+    console.print(f"[success]Added chart {chart['id']} to '{name}'.[/success]")
+
+
+@charts_app.command("remove")
+def schema_charts_remove(
+    name: str = typer.Argument(..., help="Schema name"),
+    chart: str = typer.Argument(..., help="The chart's id, as 'list' shows it"),
+) -> None:
+    """Remove one chart from the ones a list of this kind opens with."""
+    ctx = _ctx()
+    try:
+        current = ctx.schema_svc.get(name).charts
+        kept = [c for c in current if c["id"] != chart]
+        if len(kept) == len(current):
+            console.print(f"[error]'{name}' has no chart '{chart}'.[/error]")
+            raise typer.Exit(1)
+        ctx.schema_svc.set_charts(name, kept)
+        ctx.commit()
+    except (NotFoundError, ValidationError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+    console.print(f"[success]Removed chart {chart}.[/success]")
+
+
+@charts_app.command("clear")
+def schema_charts_clear(name: str = typer.Argument(..., help="Schema name")) -> None:
+    """Remove every chart set for this kind."""
+    ctx = _ctx()
+    try:
+        ctx.schema_svc.set_charts(name, [])
+        ctx.commit()
+    except (NotFoundError, ValidationError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+    console.print(f"[success]'{name}' has no charts now.[/success]")
+
+
 def _parse_bbox(text: str) -> list[float]:
     try:
         parts = [float(x) for x in text.split(",")]
@@ -213,7 +334,7 @@ def _typed_restrictions(
     wrong type the way the older flags do."""
     out: dict = {}
     for flag, value, types, key in (
-        ("--unit", unit, ("float",), "unit"),
+        ("--unit", unit, ("float", "formula"), "unit"),
         ("--precision", precision, ("date",), "precision"),
         ("--geometry-types", geometry_types, ("geo",), "geometry_types"),
         ("--bbox", bbox, ("geo",), "bbox"),
@@ -234,6 +355,39 @@ def _typed_restrictions(
     return out
 
 
+_EXPRESSION_HELP = (
+    'The formula (--type formula): field names, numbers, "text", '
+    "+ - * / // % **, comparisons, and/or/not, a if condition else b, and "
+    "functions such as round(x, 2), days_between(start, end) and "
+    'concat(a, "-", b). Worked out when a record is read, never stored.'
+)
+
+
+def _formula_restrictions(
+    dtype: str,
+    expression: Optional[str],
+    result: Optional[str],
+    decimals: Optional[int],
+) -> dict:
+    """Restrictions for the formula flags, refusing them on another type."""
+    given = {
+        k: v
+        for k, v in (
+            ("expression", expression),
+            ("result", result),
+            ("decimals", decimals),
+        )
+        if v is not None
+    }
+    if given and dtype != "formula":
+        console.print(
+            "[error]--expression/--result/--decimals are only valid for "
+            "--type formula.[/error]"
+        )
+        raise typer.Exit(1)
+    return given
+
+
 @app.command("add-field")
 def schema_add_field(
     schema_name: str = typer.Argument(..., help="Schema to add the field to"),
@@ -252,7 +406,9 @@ def schema_add_field(
         ...,
         "--type",
         "-t",
-        help="Field type: integer | float | string | boolean | date | datetime | geo | file | file_list | reference",
+        help="Field type: integer | float | string | longtext | boolean | date | "
+        "datetime | geo | file | file_list | reference | reference_list | tags | "
+        "url | formula",
     ),
     required: bool = typer.Option(
         False, "--required/--optional", help="Whether the field is required"
@@ -325,6 +481,18 @@ def schema_add_field(
         "capture group is the value. Give it more than once to try several "
         "patterns in order.",
     ),
+    expression: Optional[str] = typer.Option(
+        None, "--expression", "-e", help=_EXPRESSION_HELP
+    ),
+    result: Optional[str] = typer.Option(
+        None,
+        "--result",
+        help="What a formula gives: float | integer | string | boolean | date | "
+        "datetime. Left out, it is worked out from the formula.",
+    ),
+    decimals: Optional[int] = typer.Option(
+        None, "--decimals", help="Decimal places for a formula giving a float"
+    ),
 ) -> None:
     """Add a field to a schema.
 
@@ -341,6 +509,7 @@ def schema_add_field(
       --type date --precision month
       --type geo --geometry-types Point --bbox "-12,48,4,62"
       --type datetime --from-file audio --filename-pattern "YYYYMMDD[-_]HHmmSS"
+      --type formula --expression "mass / height ** 2" --decimals 1
     """
     restrictions: dict = {}
 
@@ -400,6 +569,7 @@ def schema_add_field(
     restrictions.update(
         _typed_restrictions(dtype, unit, precision, geometry_types, bbox)
     )
+    restrictions.update(_formula_restrictions(dtype, expression, result, decimals))
     if from_file is not None or filename_pattern is not None:
         if not (from_file and filename_pattern):
             console.print(
@@ -572,6 +742,18 @@ def schema_update_field(
         "regular expression whose first capture group is the value. Give it "
         "more than once to try several patterns in order.",
     ),
+    expression: Optional[str] = typer.Option(
+        None, "--expression", "-e", help=_EXPRESSION_HELP
+    ),
+    result: Optional[str] = typer.Option(
+        None,
+        "--result",
+        help="What a formula gives: float | integer | string | boolean | date | "
+        "datetime.",
+    ),
+    decimals: Optional[int] = typer.Option(
+        None, "--decimals", help="Decimal places for a formula giving a float"
+    ),
     clear_restrictions: bool = typer.Option(
         False, "--clear-restrictions", help="Remove all restrictions"
     ),
@@ -592,6 +774,9 @@ def schema_update_field(
             bbox,
             from_file,
             filename_pattern,
+            expression,
+            result,
+            decimals,
         ]
     )
 
@@ -676,6 +861,9 @@ def schema_update_field(
             new_restrictions.update(
                 _typed_restrictions(dtype, unit, precision, geometry_types, bbox)
             )
+            new_restrictions.update(
+                _formula_restrictions(dtype, expression, result, decimals)
+            )
             if from_file is not None or filename_pattern is not None:
                 # Either flag alone changes that part of the rule already
                 # there; the service refuses a rule left incomplete.
@@ -694,6 +882,29 @@ def schema_update_field(
                 )
                 typer.confirm("Relabel the unit anyway?", abort=True)
 
+        if new_restrictions:
+            # Changing a rule doesn't re-check what is stored: say what it
+            # would leave behind (the data check's count), and ask.
+            check = ctx.quality_svc.check_field(
+                schema_name, field_name, restrictions=new_restrictions
+            )
+            if check.breaks_rule:
+                console.print(
+                    f"[warning]{check.breaks_rule} record(s) hold a value these "
+                    "rules refuse. They are kept as they are; a later edit of that "
+                    "value must put it right, e.g.:[/warning]"
+                )
+                for example in check.examples:
+                    console.print(
+                        f"  {example.record_id[:8]}  "
+                        f"{example.record_name or ''}  {example.message}"
+                    )
+                console.print(
+                    f"See them all with: civex record check -s {schema_name} "
+                    f"--issue breaks_rule --field {field_name}"
+                )
+                typer.confirm("Change the rules anyway?", abort=True)
+
         updated = ctx.schema_svc.update_field(
             schema_name,
             field_name,
@@ -711,6 +922,67 @@ def schema_update_field(
     except (NotFoundError, AlreadyExistsError, ValidationError) as e:
         console.print(f"[error]{e}[/error]")
         raise typer.Exit(1)
+
+
+@app.command("preview-formula")
+def schema_preview_formula(
+    schema_name: str = typer.Argument(..., help="Schema the formula is on"),
+    expression: str = typer.Argument(..., help=_EXPRESSION_HELP),
+    record: Optional[str] = typer.Option(
+        None,
+        "--record",
+        "-r",
+        help="Work it out for this record (its id or the start of it). Left "
+        "out, the schema's most recently changed record.",
+    ),
+    result: Optional[str] = typer.Option(
+        None,
+        "--result",
+        help="What it gives: float | integer | string | boolean | date | datetime",
+    ),
+    decimals: Optional[int] = typer.Option(
+        None, "--decimals", help="Decimal places for a float"
+    ),
+    field: Optional[str] = typer.Option(
+        None,
+        "--field",
+        help="The formula field being changed, if it exists already",
+    ),
+) -> None:
+    """Try a formula without saving it.
+
+    Checks it as adding the field would (the fields it reads exist, their
+    kinds fit, no formulas read each other in a circle), then works it out
+    for one record and prints what it gives. Exits 1 when the formula can't
+    be saved.
+    """
+    ctx = _ctx()
+    try:
+        preview = ctx.record_svc.preview_formula(
+            schema_name,
+            expression,
+            result=result,
+            decimals=decimals,
+            field=field,
+            record_id=record,
+        )
+    except (NotFoundError, ValidationError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+    if preview.problem:
+        console.print(f"[error]{preview.problem}[/error]")
+        raise typer.Exit(1)
+    where = (
+        f"For {preview.record_name or str(preview.record_id)[:8]}"
+        if preview.record_id
+        else "With no record to try it on"
+    )
+    shown = "(blank)" if preview.value is None else repr(preview.value)
+    console.print(f"{where}: {shown}  [dim]({preview.result})[/dim]")
+    if preview.error:
+        console.print(f"[warning]Can't be worked out: {preview.error}[/warning]")
 
 
 @app.command("remove-field")

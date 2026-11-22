@@ -1,6 +1,7 @@
 import { api, ApiError } from './client'
 import { apiUrl } from '../utils/host'
 import { UploadConnectionError, type UploadInfo } from './files'
+import { filenameOf, progressHeaders } from './fileAccess'
 import type { Field } from './schemas'
 import { auditUrl, type AuditView, type PaginatedAuditLog } from './audit'
 import {
@@ -10,12 +11,9 @@ import {
 } from './query'
 import type { FilterTreeWire } from '../utils/filterTree'
 
-/** Which records to move and where: exactly `ids`, or every record the query
- * (`collection` with the list's selectors) shows. */
-export interface MoveRecordsRequest {
-  to: string
-  /** The record in `to` they go inside; omit for its top level. */
-  parent?: string | null
+/** Which records: exactly `ids`, or every record the query (`collection`
+ * with the list's selectors) shows. */
+export interface RecordSelectionBody {
   ids?: string[] | null
   collection?: string | null
   schema_name?: string | null
@@ -23,6 +21,233 @@ export interface MoveRecordsRequest {
   filter?: FilterTreeWire | null
   where?: string[]
   search?: string | null
+  search_fields?: string[] | null
+}
+
+/** The records a person chose in a list: the rows ticked, or everything the
+ * list's query shows. */
+export type RecordSelection =
+  { ids: string[] } | { query: RecordQueryParams; collection: string }
+
+/** A selection as the request body every bulk action takes. */
+export function selectionBody(selection: RecordSelection): RecordSelectionBody {
+  if ('ids' in selection) return { ids: selection.ids }
+  return queryBody(selection.query, selection.collection)
+}
+
+/** A list's query as the request body every query endpoint takes (no
+ * collection: every collection). */
+export function queryBody(
+  q: RecordQueryParams,
+  collection?: string | null,
+): RecordSelectionBody {
+  return {
+    collection: collection ?? null,
+    schema_name: q.schema ?? null,
+    within: q.within ?? null,
+    filter: q.filter ?? null,
+    where: q.where ?? [],
+    search: q.search ?? null,
+    search_fields: q.search_fields ?? null,
+  }
+}
+
+/** Summarise the records a query lists: `group_by` and `measures` are
+ * written as the CLI and the explorer's address write them (`site.region`,
+ * `taken:month`, `depth:5`; `count`, `mean:depth`). */
+export interface SummaryRequest extends RecordSelectionBody {
+  group_by: string[]
+  measures: string[]
+  limit?: number
+}
+
+export interface SummaryGroupColumn {
+  key: string
+  field: string
+  schema_name: string
+  label: string
+  type: string
+  bucket: string | null
+  bin: number | null
+  unit: string | null
+}
+
+export interface SummaryMeasureColumn {
+  key: string
+  measure: string
+  label: string
+  field: string | null
+  schema_name: string | null
+  type: string | null
+  unit: string | null
+}
+
+/** One group's value for one grouping. `lower`/`upper` bound a range or a
+ * period (upper excluded); `precision` is set for a date less precise than
+ * the period grouped by. */
+export interface SummaryGroupValue {
+  value: unknown
+  label: string
+  lower: unknown
+  upper: unknown
+  precision: string | null
+}
+
+export interface SummaryRow {
+  groups: SummaryGroupValue[]
+  values: unknown[]
+  /** The filter condition listing exactly this group's records (null when a
+   * filter can't say it: an item of a list). */
+  where: FilterTreeWire | null
+}
+
+export interface RecordSummary {
+  schema_name: string
+  group_columns: SummaryGroupColumn[]
+  measure_columns: SummaryMeasureColumn[]
+  rows: SummaryRow[]
+  total: unknown[]
+  truncated: boolean
+  limit: number
+  timezone: string | null
+}
+
+/** Where the records a query lists are, for a map: `field` is a location
+ * field of the kind listed, or (`field_schema`) of a kind above it. */
+/** Data checks (`POST /records/quality`): what needs a look in the records a
+ * query lists, per kind and field. */
+export interface QualityExample {
+  record_id: string
+  record_name: string | null
+  message: string
+}
+
+export interface QualityIssue {
+  issue: string
+  field: string
+  field_label: string
+  count: number
+  examples: QualityExample[]
+  /** Lists exactly these records in the explorer, when a filter can say it. */
+  filter: FilterTreeWire | null
+}
+
+export interface QualityBlanks {
+  field: string
+  field_label: string
+  required: boolean
+  blank: number
+  filter: FilterTreeWire | null
+}
+
+export interface QualityKind {
+  schema_name: string
+  schema_label: string
+  records: number
+  records_with_issues: number
+  issues: QualityIssue[]
+  blanks: QualityBlanks[]
+}
+
+export interface QualityIssueKind {
+  name: string
+  label: string
+  description: string
+}
+
+export interface QualityReport {
+  records: number
+  records_with_issues: number
+  kinds: QualityKind[]
+  issues: QualityIssueKind[]
+}
+
+export interface QualityRecordsRequest extends RecordSelectionBody {
+  issue: string
+  field?: string | null
+  kind?: string | null
+  limit?: number
+  offset?: number
+}
+
+export interface QualityFinding {
+  record_id: string
+  record_name: string | null
+  schema_name: string
+  field: string
+  message: string
+}
+
+export interface QualityRecords {
+  items: QualityFinding[]
+  total: number
+  offset: number
+  limit: number
+}
+
+export interface PointsRequest extends RecordSelectionBody {
+  field: string
+  field_schema?: string
+  limit?: number
+}
+
+export interface RecordPoint {
+  id: string
+  name: string | null
+  /** GeoJSON, WGS84 ([lon, lat]). */
+  geometry: { type: string; coordinates?: unknown; geometries?: unknown }
+}
+
+export interface RecordPoints {
+  schema_name: string
+  field: string
+  points: RecordPoint[]
+  /** How many listed records have a value; more than `points` when truncated. */
+  total: number
+  truncated: boolean
+  limit: number
+}
+
+/** Which records to move and where. */
+export interface MoveRecordsRequest extends RecordSelectionBody {
+  to: string
+  /** The record in `to` they go inside; omit for its top level. */
+  parent?: string | null
+}
+
+/** Which records to edit, and the value each field gets (null clears it). */
+export interface BulkEditRequest extends RecordSelectionBody {
+  changes: Record<string, unknown>
+}
+
+export interface BulkEditSkip {
+  record_id: string
+  name: string | null
+  reason: string
+}
+
+/** What a bulk edit would do. A record takes every change or none. */
+export interface BulkEditPlan {
+  fields: string[]
+  records: number
+  changing: number
+  unchanged: number
+  /** Exact count; `skipped_records` names the first of them. */
+  skipped: number
+  skipped_records: BulkEditSkip[]
+  /** Workflow runs the edit would start. */
+  runs: number
+  workflows: string[]
+  automation_paused: boolean
+  can_apply: boolean
+}
+
+export interface BulkEditResult {
+  changed: number
+  unchanged: number
+  skipped: number
+  skipped_records: BulkEditSkip[]
+  runs: number
 }
 
 export interface RecordMovePlan {
@@ -71,9 +296,12 @@ export interface CivexRecord {
   reference_collections?: Record<string, string> | null
   /** Only when requested: live child count per child schema name. */
   child_counts?: Record<string, number> | null
-  /** Only when `columns` were requested: the columns this record's own
-   * `data` can't answer (inherited fields, `ref.field` joins). */
+  /** Values this record's own `data` doesn't hold: its formula fields
+   * (always), and, when `columns` were requested, inherited fields and
+   * `ref.field` joins. */
   derived?: Record<string, unknown> | null
+  /** Why a formula is blank for this record, by field name. */
+  formula_errors?: Record<string, string> | null
   /** Only on a single-record fetch: the parent chain, root first. */
   ancestors?: RecordRef[] | null
   /** Only on a single-record fetch of a live record: the deleted records
@@ -83,6 +311,10 @@ export interface CivexRecord {
   /** Values this record still holds for fields deleted from its schema. They
    * come back in `data` when the field is restored. */
   deleted_fields?: DeletedFieldValue[] | null
+  /** How many of its threads of notes are not yet resolved. */
+  open_notes?: number | null
+  /** The first line of the latest thread not yet resolved. */
+  latest_note?: string | null
 }
 
 export interface RestoreSelectedResult {
@@ -177,6 +409,11 @@ export const recordsApi = {
     api.get<PaginatedRecords>(
       `/collections/${encodeURIComponent(datasetName)}/records${recordQueryString(params)}`,
     ),
+
+  /** Records across every collection: of one schema (`params.schema`), or
+   * of every kind at once. */
+  listAll: (params?: ListParams) =>
+    api.get<PaginatedRecords>(`/records/all${recordQueryString(params)}`),
 
   /** A schema's records across every collection -- what a saved view browses. */
   listBySchema: (schemaName: string, params?: ListParams) =>
@@ -313,6 +550,54 @@ export const recordsApi = {
   move: (body: MoveRecordsRequest) =>
     api.post<MoveRecordsResult>('/records/move', body),
 
+  /** What setting (or clearing) fields on the chosen records would do: how
+   * many change, how many already hold the values, which can't and why, and
+   * how many workflow runs would start. The same rule as the edit. */
+  /** Group the records a query lists and work out measures over each group. */
+  summary: (body: SummaryRequest) =>
+    api.post<RecordSummary>('/records/summary', body),
+
+  /** What needs a look in the records a query lists (nothing is changed). */
+  quality: (body: RecordSelectionBody) =>
+    api.post<QualityReport>('/records/quality', body),
+
+  /** The records a query lists that have one issue, a page at a time. */
+  qualityRecords: (body: QualityRecordsRequest) =>
+    api.post<QualityRecords>('/records/quality/records', body),
+
+  /** Where the records a query lists are (id, name, geometry), for a map. */
+  points: (body: PointsRequest) =>
+    api.post<RecordPoints>('/records/points', body),
+
+  /** The same summary as a table file (a last row of totals). */
+  summaryFile: async (body: SummaryRequest, format: string) => {
+    const res = await fetch(
+      apiUrl(`/records/summary?format=${encodeURIComponent(format)}`),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    )
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}))
+      throw new ApiError(detail.detail, res.status, detail)
+    }
+    return { blob: await res.blob(), filename: filenameOf(res) }
+  },
+
+  bulkEditPlan: (body: BulkEditRequest) =>
+    api.post<BulkEditPlan>('/records/bulk-edit/plan', body),
+
+  /** Sets the fields on every chosen record that can take them; the others
+   * are named in the answer. Tag it with a progress id to follow it. */
+  bulkEdit: (body: BulkEditRequest, progressId?: string) =>
+    api.post<BulkEditResult>(
+      '/records/bulk-edit',
+      body,
+      progressHeaders(progressId),
+    ),
+
   /** `reachableFrom` (a collection name) limits results to records a record
    * there may reference: its own collection's and global collections'. */
   searchBySchema: (
@@ -362,6 +647,13 @@ export const recordsApi = {
     }),
 
   purge: (id: string) => api.delete<void>(`/records/${id}/purge`),
+
+  /** What a permanent delete would take (the record and those deleted with
+   * it), and which releases keep files of theirs, so the files stay. */
+  purgePlan: (id: string) =>
+    api.get<{ records: number; kept_by_releases: Record<string, number> }>(
+      `/records/${id}/purge-plan`,
+    ),
 
   audit: (id: string, offset = 0, limit = 50, view?: AuditView) =>
     api.get<PaginatedAuditLog>(auditUrl(`/records/${id}`, offset, limit, view)),

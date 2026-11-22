@@ -80,12 +80,11 @@ export default function NewRecordPage() {
   )
 
   // Where Cancel goes when there is no history to return to: the parent's
-  // Contains tab for a child record, else the collection's list.
+  // page for a child record, else the collection's list.
   const fallbackHref = parentParam
-    ? `/records/${parentParam}?${new URLSearchParams({
-        tab: 'contains',
-        ...(schemaName ? { schema: schemaName } : {}),
-      })}`
+    ? `/records/${parentParam}${
+        schemaName ? `?${new URLSearchParams({ schema: schemaName })}` : ''
+      }`
     : `/collections/${id}${
         schemaName ? `?${new URLSearchParams({ schema: schemaName })}` : ''
       }`

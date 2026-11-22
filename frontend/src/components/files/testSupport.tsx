@@ -156,7 +156,7 @@ export const transfer = (over: Record<string, unknown> = {}) => ({
 
 /** In the open export dialog: past the first step (what) to the method, then go. */
 export async function finishExport(
-  method: 'folder' | 'copy' | 'zip' = 'folder',
+  method: 'folder' | 'zip' = 'folder',
   steps = 1,
 ) {
   const { screen, within } = await import('@testing-library/react')
@@ -168,11 +168,11 @@ export async function finishExport(
   }
   for (let i = 0; i < steps; i++)
     await userEvent.click(await box().findByRole('button', { name: /^next:/i }))
-  const [radio, button] = {
-    folder: [/open as a folder/i, /^open folder$/i],
-    copy: [/put on a drive/i, /^put on drive$/i],
-    zip: [/download as a zip/i, /^download$/i],
-  }[method]
+  // Two ways out: a folder (links, or copies when asked for) or a zip.
+  const [radio, button] =
+    method === 'zip'
+      ? [/download a zip/i, /^download$/i]
+      : [/save to a folder/i, /^save to folder$/i]
   await userEvent.click(await box().findByRole('radio', { name: radio }))
   await userEvent.click(box().getByRole('button', { name: button }))
 }

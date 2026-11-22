@@ -32,8 +32,9 @@ export interface TemplateField {
   reach?: TemplateField[]
 }
 
-/** One value a template can use: what is written, and how it is shown. */
-interface Choice {
+/** One value a template (or a formula) can use: what is written, and how it
+ * is shown. */
+export interface Choice {
   /** Written between the braces. */
   name: string
   /** In the picker, under its group. */
@@ -65,10 +66,23 @@ function useDebounced<T>(value: T, ms: number): T {
 }
 
 /** Every value `fields` offers, grouped by where it comes from: this type, each
- * type above it, and each reference (its own or one above) one hop on. */
-function choicesFor(fields: TemplateField[]): Choice[] {
+ * type above it, and each reference (its own or one above) one hop on.
+ * `usable` says which types can be used (a name template's by default), for
+ * this record's fields and, through `reachable`, a linked record's. */
+export function choicesFor(
+  fields: TemplateField[],
+  {
+    usable = (f: TemplateField) => !NON_NAMEABLE.has(f.dtype),
+    reachable = usable,
+    builtins = true,
+  }: {
+    usable?: (f: TemplateField) => boolean
+    reachable?: (f: TemplateField) => boolean
+    builtins?: boolean
+  } = {},
+): Choice[] {
   const out: Choice[] = []
-  const nameable = (f: TemplateField) => !NON_NAMEABLE.has(f.dtype)
+  const nameable = usable
   for (const f of fields.filter(nameable))
     out.push({
       name: f.name,
@@ -78,7 +92,7 @@ function choicesFor(fields: TemplateField[]): Choice[] {
       dtype: f.dtype,
     })
   for (const ref of fields.filter((f) => f.dtype === 'reference'))
-    for (const target of (ref.reach ?? []).filter(nameable))
+    for (const target of (ref.reach ?? []).filter(reachable))
       out.push({
         name: `${ref.name}.${target.name}`,
         label: target.label,
@@ -88,7 +102,7 @@ function choicesFor(fields: TemplateField[]): Choice[] {
           : `Via ${ref.label}`,
         dtype: target.dtype,
       })
-  for (const b of BUILTINS)
+  for (const b of builtins ? BUILTINS : [])
     out.push({
       name: b.name,
       label: b.label,
@@ -110,9 +124,11 @@ function grouped(choices: Choice[]) {
 function InsertPicker({
   choices,
   onPick,
+  written,
 }: {
   choices: Choice[]
   onPick: (choice: Choice) => void
+  written: (name: string) => string
 }) {
   return (
     <TriggerPopover
@@ -127,6 +143,7 @@ function InsertPicker({
       {(close) => (
         <PickerPanel
           choices={choices}
+          written={written}
           onPick={(c) => {
             onPick(c)
             close()
@@ -140,9 +157,11 @@ function InsertPicker({
 function PickerPanel({
   choices,
   onPick,
+  written,
 }: {
   choices: Choice[]
   onPick: (choice: Choice) => void
+  written: (name: string) => string
 }) {
   const [q, setQ] = useState('')
   const needle = q.trim().toLowerCase()
@@ -188,13 +207,47 @@ function PickerPanel({
               >
                 <span className="truncate">{c.label}</span>
                 <span className="shrink-0 font-mono text-xs text-fg-subtle">
-                  {`{${c.name}}`}
+                  {written(c.name)}
                 </span>
               </ListButton>
             ))}
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+const braced = (name: string) => `{${name}}`
+
+/** The values that can be put in at the cursor: chips grouped by where each
+ * comes from, or, when there are many, a searchable list. Shared by name
+ * templates and formulas; `written` is how a value appears in the text. */
+export function ValueInserter({
+  choices,
+  onPick,
+  written = braced,
+}: {
+  choices: Choice[]
+  onPick: (choice: Choice) => void
+  written?: (name: string) => string
+}) {
+  if (choices.length > INLINE_LIMIT)
+    return <InsertPicker choices={choices} onPick={onPick} written={written} />
+  return (
+    <div className="space-y-1" role="group" aria-label="Add a value">
+      {grouped(choices).map((g) => (
+        <div key={g.title} className="flex flex-wrap items-center gap-1">
+          <span className="w-28 shrink-0 truncate text-xs text-fg-subtle">
+            {g.title}
+          </span>
+          {g.items.map((c) => (
+            <Tooltip key={c.name} content={written(c.name)}>
+              <Chip onClick={() => onPick(c)}>{c.label}</Chip>
+            </Tooltip>
+          ))}
+        </div>
+      ))}
     </div>
   )
 }
@@ -271,8 +324,6 @@ export function TemplateBuilder({
     placeholderData: (previous) => previous,
   })
 
-  const inline = choices.length <= INLINE_LIMIT
-
   return (
     <div className="min-w-0 space-y-3">
       <div className="flex min-w-0 items-center gap-2">
@@ -306,24 +357,7 @@ export function TemplateBuilder({
         )}
       </div>
 
-      {inline ? (
-        <div className="space-y-1" role="group" aria-label="Add a value">
-          {grouped(choices).map((g) => (
-            <div key={g.title} className="flex flex-wrap items-center gap-1">
-              <span className="w-28 shrink-0 truncate text-xs text-fg-subtle">
-                {g.title}
-              </span>
-              {g.items.map((c) => (
-                <Tooltip key={c.name} content={`{${c.name}}`}>
-                  <Chip onClick={() => insert(c.name)}>{c.label}</Chip>
-                </Tooltip>
-              ))}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <InsertPicker choices={choices} onPick={(c) => insert(c.name)} />
-      )}
+      <ValueInserter choices={choices} onPick={(c) => insert(c.name)} />
 
       {variables.length > 0 && (
         <ul className="divide-y divide-border rounded-md border border-border">

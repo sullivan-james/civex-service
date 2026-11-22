@@ -222,15 +222,8 @@ class WorkflowJobService:
             )
             return []
         jobs: list[WorkflowJobDTO] = []
-        for wf in self._load_workflows():
-            if wf.triggers is None or not wf.enabled:
-                continue
-            trigger_def = getattr(wf.triggers, event, None)
-            if trigger_def is None or trigger_def.schema_name != record.schema_name:
-                continue
-            if trigger_def.fields and changed_fields is not None:
-                if not any(f in changed_fields for f in trigger_def.fields):
-                    continue
+        for wf in self.triggered_by(record.schema_name, event, changed_fields):
+            trigger_def = getattr(wf.triggers, event)
             watched = trigger_def.fields or []
             detail = {
                 "changes": [
@@ -252,6 +245,27 @@ class WorkflowJobService:
             )
             jobs.append(job)
         return jobs
+
+    def triggered_by(
+        self, schema_name: str, event: str, changed_fields: set[str] | None = None
+    ) -> list[WorkflowDef]:
+        """The enabled workflows `event` on a record of `schema_name` starts,
+        with `changed_fields` (for `record_updated`) held to a trigger's
+        `fields:` list. The one matching rule: `trigger_for_record` enqueues a
+        run for each, and a plan (a bulk edit's) counts them without enqueuing.
+        Pausing and the chain depth are the caller's to ask."""
+        matched: list[WorkflowDef] = []
+        for wf in self._load_workflows():
+            if wf.triggers is None or not wf.enabled:
+                continue
+            trigger_def = getattr(wf.triggers, event, None)
+            if trigger_def is None or trigger_def.schema_name != schema_name:
+                continue
+            if trigger_def.fields and changed_fields is not None:
+                if not any(f in changed_fields for f in trigger_def.fields):
+                    continue
+            matched.append(wf)
+        return matched
 
     def enqueue_manual(
         self,

@@ -16,7 +16,8 @@ sidesteps the problem.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone as _tz
+from datetime import datetime, timedelta, timezone as _tz
+from functools import lru_cache
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from civex.domain.exceptions import ValidationError
@@ -75,3 +76,46 @@ def parse_datetime(raw: str, tz: str | None = None) -> str:
     if dt.tzinfo is None:
         dt = localize(dt, tz) if tz else dt.replace(tzinfo=_tz.utc)
     return dt.astimezone(_tz.utc).isoformat()
+
+
+# The years `offset_changes` looks at: a value outside them keeps the offset
+# of the nearest end (a zone's rules beyond 2100 are a guess anyway).
+OFFSET_YEARS = (1900, 2100)
+
+
+@lru_cache(maxsize=32)
+def offset_changes(tz: str) -> tuple[int, tuple[tuple[datetime, int], ...]]:
+    """*tz*'s offset from UTC in minutes before its first change in
+    `OFFSET_YEARS`, then each change: the UTC instant it happens at (naive)
+    and the offset from then on. What a database without time zones (SQLite)
+    needs to read a stored UTC instant as wall time in *tz*: one CASE over
+    these instants, the same answers as `ZoneInfo`. Worked out once a zone
+    (a day at a time, then to the minute inside the day it changes)."""
+    zone = ZoneInfo(tz)
+
+    def offset(at: datetime) -> int:
+        delta = at.replace(tzinfo=_tz.utc).astimezone(zone).utcoffset()
+        return int(delta.total_seconds() // 60) if delta else 0
+
+    start = datetime(OFFSET_YEARS[0], 1, 1)
+    end = datetime(OFFSET_YEARS[1], 1, 1)
+    first = current = offset(start)
+    changes: list[tuple[datetime, int]] = []
+    day = start
+    while day < end:
+        nxt = day + timedelta(days=1)
+        if offset(nxt) != current:
+            lo, hi = day, nxt  # offset(lo) == current, offset(hi) != current
+            while hi - lo > timedelta(minutes=1):
+                mid = lo + (hi - lo) / 2
+                mid = mid.replace(second=0, microsecond=0)
+                if mid <= lo:
+                    mid = lo + timedelta(minutes=1)
+                if offset(mid) == current:
+                    lo = mid
+                else:
+                    hi = mid
+            current = offset(hi)
+            changes.append((hi, current))
+        day = nxt
+    return first, tuple(changes)

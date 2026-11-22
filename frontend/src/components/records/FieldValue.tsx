@@ -7,6 +7,7 @@ import { formatDate, formatDateTime } from '../../utils/dates'
 import { formatLocation, isGeometry } from '../../utils/geo'
 import { describeGeometry } from '../../utils/geoDraft'
 import type { Field } from '../../api/schemas'
+import { shownAs } from '../../utils/formulas'
 
 /** The name a file was uploaded with, when its download name differs. */
 function originalName(ref: FileRef): string | undefined {
@@ -17,7 +18,7 @@ function originalName(ref: FileRef): string | undefined {
 
 export function FieldValue({
   value,
-  field,
+  field: given,
   referenceLabels,
   referenceCollections,
 }: {
@@ -28,6 +29,8 @@ export function FieldValue({
   referenceLabels?: Record<string, string | null> | null
   referenceCollections?: Record<string, string> | null
 }) {
+  // A formula is shown as a value of the type it gives.
+  const field = given && shownAs(given)
   const timeZone = useFieldTimeZone(field)
   if (value === null || value === undefined)
     return field?.type === 'geo' ? (

@@ -11,18 +11,23 @@ from civex.server.deps import get_ctx
 from civex.server.models import (
     AddFieldRequest,
     CreateSchemaRequest,
+    FieldCheckRequest,
+    FieldCheckResponse,
     FieldResponse,
     FieldTypesResponse,
     FromFilenamePreviewRequest,
     FromFilenamePreviewResponse,
     FromFilenameResult,
     NameIssueResponse,
+    PreviewFormulaRequest,
+    PreviewFormulaResponse,
     PreviewNameRequest,
     PreviewNameResponse,
     ReorderFieldsRequest,
     RestorePlanResponse,
     SchemaDeleteImpactResponse,
     SchemaResponse,
+    SetChartsRequest,
     SetUniqueKeysRequest,
     UpdateFieldRequest,
     UpdateSchemaRequest,
@@ -98,6 +103,40 @@ def preview_name(
     except ValidationError as e:
         return PreviewNameResponse(name=None, error=str(e))
     return PreviewNameResponse(name=rendered)
+
+
+@router.post("/{name}/fields/preview-formula", response_model=PreviewFormulaResponse)
+def preview_formula(
+    name: str, body: PreviewFormulaRequest, ctx: AppContext = Depends(get_ctx)
+):
+    """What a formula field would give, saving nothing: checked as saving it
+    would be, then worked out for a record of the schema (`record_id`, or the
+    most recently changed one) or over `values`. A formula that can't be saved
+    is answered with `problem`, and one that can't be worked out for that
+    record with `error`, not an HTTP error, so the field editor can show
+    either as the person types."""
+    try:
+        dto = ctx.record_svc.preview_formula(
+            name,
+            body.expression,
+            result=body.result,
+            decimals=body.decimals,
+            field=body.field,
+            record_id=body.record_id,
+            values=body.values,
+        )
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    return PreviewFormulaResponse(
+        value=dto.value,
+        error=dto.error,
+        problem=dto.problem,
+        result=dto.result,
+        record_id=str(dto.record_id) if dto.record_id else None,
+        record_name=dto.record_name,
+    )
 
 
 @router.post("", response_model=SchemaResponse, status_code=201)
@@ -272,6 +311,29 @@ def restore_field(name: str, field_id: uuid.UUID, ctx: AppContext = Depends(get_
     return FieldResponse.from_dto(dto)
 
 
+@router.post("/{name}/fields/{field_name}/check", response_model=FieldCheckResponse)
+def check_field(
+    name: str,
+    field_name: str,
+    body: FieldCheckRequest,
+    ctx: AppContext = Depends(get_ctx),
+):
+    """What the values already stored for a field make of its rules as they
+    would be (or as they are, given nothing): how many records' values those
+    rules refuse, how many leave it empty if it were required, and a few of
+    them named. Changing a rule never re-checks stored values, so the field
+    editor asks this before saving. Every collection; nothing is changed."""
+    try:
+        check = ctx.quality_svc.check_field(
+            name, field_name, restrictions=body.restrictions, required=body.required
+        )
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    return FieldCheckResponse.from_dto(check)
+
+
 @router.patch("/{name}/fields/{field_name}", response_model=FieldResponse)
 def update_field(
     name: str,
@@ -333,6 +395,23 @@ def set_unique_keys(
     """
     try:
         dto = ctx.schema_svc.set_unique_keys(name, body.keys)
+        ctx.commit()
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    return SchemaResponse.from_dto(dto)
+
+
+@router.put("/{name}/charts", response_model=SchemaResponse)
+def set_charts(name: str, body: SetChartsRequest, ctx: AppContext = Depends(get_ctx)):
+    """Replace the charts a list of this kind opens with, in order. Each is
+    bars (groupings and measures over the kind's fields or those of a kind
+    above) or a map of a location field. An empty list leaves it with none.
+    Needs the right to write records somewhere, like a saved filter; the change is
+    in the schema's history and syncs with it."""
+    try:
+        dto = ctx.schema_svc.set_charts(name, [c.to_dict() for c in body.charts])
         ctx.commit()
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))

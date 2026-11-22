@@ -11,7 +11,10 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from civex.domain.audit_diff import entry_snapshots
+from civex.domain.query import RecordQuery
 from civex.domain.dtos import (
+    POINTS_DEFAULT_LIMIT,
+    RecordPoints,
     ExportDefinitionDTO,
     AuditBatchDTO,
     AuditEventDTO,
@@ -20,6 +23,8 @@ from civex.domain.dtos import (
     FieldDTO,
     NameIssue,
     RecordDTO,
+    RecordBulkEditPlanDTO,
+    RecordBulkEditResultDTO,
     RecordMovePlanDTO,
     ReferrerGroupDTO,
     RestoreAllPlanDTO,
@@ -75,6 +80,75 @@ class FieldResponse(BaseModel):
         )
 
 
+class ChartModel(BaseModel):
+    """A chart: bars (what the records are grouped by and what each bar
+    shows) or a map of a location field. The same shape for a kind's charts,
+    the explorer and the Analytics page's cards."""
+
+    id: str = Field(description="The chart's id, unique in its list.")
+    title: str | None = Field(
+        default=None, description="Its title; None names it for what it shows."
+    )
+    size: Literal["small", "large"] = Field(
+        default="small",
+        description="How big its card is: the usual size, or large (the full "
+        "width of where it is shown, and taller).",
+    )
+    map: str | None = Field(
+        default=None,
+        description="A map: the location field ('field', or 'kind.field' for "
+        "a kind above). A map has no groupings or measures.",
+    )
+    group_by: list[str] = Field(
+        default_factory=list,
+        description="Up to 3 groupings, as POST /records/summary takes them "
+        "('field', 'kind.field', with ':month' or ':5' and the like).",
+    )
+    measures: list[str] = Field(
+        default_factory=lambda: ["count"],
+        description="What each bar shows, as POST /records/summary takes them "
+        "('count', 'mean:depth', 'inside:recording').",
+    )
+    sort: dict[str, str] | None = Field(
+        default=None,
+        description="{column, direction}: its table sorted by one of its "
+        "groupings' or measures' keys, 'asc' or 'desc'. None: the groups' order.",
+    )
+    show: Literal["chart", "bars", "line", "pie", "table"] = Field(
+        default="chart",
+        description="How it is drawn: 'chart' picks from what it groups by (a "
+        "line over time for dates, bars otherwise), or bars, a line, a pie or "
+        "its table of numbers.",
+    )
+    chart_measure: str | None = Field(
+        default=None,
+        description="The measure the chart draws (one of `measures`); None: "
+        "the first that is a number.",
+    )
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> ChartModel:
+        return cls(**d)
+
+    def to_dict(self) -> dict[str, Any]:
+        """As the service takes it: a map carries only its field."""
+        if self.map is not None:
+            out: dict[str, Any] = {"id": self.id, "map": self.map}
+            if self.title:
+                out["title"] = self.title
+            if self.size != "small":
+                out["size"] = self.size
+            return out
+        return self.model_dump(exclude_none=True, exclude={"map"})
+
+
+class SetChartsRequest(BaseModel):
+    charts: list[ChartModel] = Field(
+        description="Every chart a list of this kind opens with, in order "
+        "(this replaces the list; an empty list leaves it with none)."
+    )
+
+
 class SchemaResponse(BaseModel):
     id: str
     name: str
@@ -103,6 +177,11 @@ class SchemaResponse(BaseModel):
             "record (or the same collection, for a top-level record)."
         ),
     )
+    charts: list[ChartModel] = Field(
+        default_factory=list,
+        description="The charts a list of this kind opens with, in order. "
+        "Empty: it has none.",
+    )
     deleted_at: datetime | None = Field(
         default=None,
         description="When this schema was soft-deleted. Null means live.",
@@ -119,6 +198,7 @@ class SchemaResponse(BaseModel):
             display_template=dto.display_template,
             fields=[FieldResponse.from_dto(f) for f in dto.fields],
             unique_keys=dto.unique_key_names,
+            charts=[ChartModel.from_dict(c) for c in dto.charts],
             deleted_at=dto.deleted_at,
         )
 
@@ -206,6 +286,59 @@ class PreviewNameResponse(BaseModel):
     error: str | None = Field(
         default=None, description="Why the template is not valid, if it is not."
     )
+
+
+class PreviewFormulaRequest(BaseModel):
+    expression: str = Field(
+        description="The formula to try, e.g. 'mass / height ** 2' or "
+        "'days_between(start, end)'."
+    )
+    result: (
+        Literal["float", "integer", "string", "boolean", "date", "datetime"] | None
+    ) = Field(
+        default=None,
+        description="What it gives; null works it out from the formula.",
+    )
+    decimals: int | None = Field(
+        default=None, description="Decimal places for a decimal result."
+    )
+    field: str | None = Field(
+        default=None,
+        description="The formula field being edited, if it exists already (a "
+        "formula can't read itself).",
+    )
+    record_id: str | None = Field(
+        default=None,
+        description="Work it out for this record (of the schema). With neither "
+        "this nor 'values', the schema's most recently changed record.",
+    )
+    values: dict[str, Any] | None = Field(
+        default=None,
+        description="Or work it out over these values (by field name, as stored).",
+    )
+
+
+class PreviewFormulaResponse(BaseModel):
+    value: Any = Field(
+        default=None,
+        description="What the formula gives, as a field of its result type holds "
+        "it; null when blank or when it can't be worked out.",
+    )
+    error: str | None = Field(
+        default=None,
+        description="Why it can't be worked out for that record (divided by "
+        "zero, a value of the wrong kind), if so.",
+    )
+    problem: str | None = Field(
+        default=None,
+        description="Why the formula can't be saved (an unknown field, kinds "
+        "that don't fit, a circle of formulas), if so.",
+    )
+    result: str | None = Field(default=None, description="The result type it gives.")
+    record_id: str | None = Field(
+        default=None, description="The record it was worked out for, if any."
+    )
+    record_name: str | None = Field(default=None, description="That record's name.")
 
 
 class SchemaDeleteImpactResponse(BaseModel):
@@ -567,23 +700,10 @@ class RestoreSelectedResponse(BaseModel):
     left: int = Field(description="Chosen records still deleted, and why not.")
 
 
-class MoveRecordsRequest(BaseModel):
-    """Which records to move, and where to. Either exactly `ids`, or every
-    record the query (`collection`, `schema_name`, `within`, `filter`, `where`,
-    `search`) lists: the same selectors as listing records, so "move all N
-    matching" moves exactly what a list with those filters shows."""
+class RecordQueryRequest(BaseModel):
+    """Every record a query (`collection`, `schema_name`, `within`, `filter`,
+    `where`, `search`) lists: the same selectors as listing records."""
 
-    to: str = Field(description="The collection to move them to.")
-    parent: str | None = Field(
-        default=None,
-        description="The record (id or prefix) in that collection they go inside. "
-        "Omit to put them at its top level.",
-    )
-    ids: list[str] | None = Field(
-        default=None,
-        description="Exactly these records (ids or prefixes), each with "
-        "everything beneath it. The query fields are then ignored.",
-    )
     collection: str | None = Field(
         default=None, description="With a query: the collection the records are in."
     )
@@ -598,7 +718,510 @@ class MoveRecordsRequest(BaseModel):
         default=None, description="A filter tree, as for listing records."
     )
     where: list[str] = Field(default_factory=list, description="'field=value' terms.")
-    search: str | None = Field(default=None, description="Full-text search.")
+    search: str | None = Field(
+        default=None, description="Text to look for in the records' values."
+    )
+    search_fields: list[str] | None = Field(
+        default=None,
+        description="Look for 'search' only in these fields of 'schema_name'.",
+    )
+
+    def to_query(self) -> RecordQuery:
+        return RecordQuery(
+            dataset=self.collection,
+            schema=self.schema_name,
+            within=self.within,
+            filter_tree=self.filter,
+            where=self.where,
+            search=self.search,
+            search_fields=self.search_fields,
+        )
+
+
+class RecordSelectionRequest(RecordQueryRequest):
+    """Which records: either exactly `ids`, or every record the query
+    (`collection`, `schema_name`, `within`, `filter`, `where`, `search`)
+    lists: the same selectors as listing records, so "all N matching" is
+    exactly what a list with those filters shows."""
+
+    ids: list[str] | None = Field(
+        default=None,
+        description="Exactly these records (ids or prefixes). The query fields "
+        "are then ignored.",
+    )
+
+
+class NoteResponse(BaseModel):
+    """A note left on a record, or a reply in a note's thread."""
+
+    id: str
+    record_id: str = Field(description="The record the note is on.")
+    thread_id: str | None = Field(
+        default=None,
+        description="For a reply, the note that starts its thread; null for a "
+        "note that starts one.",
+    )
+    body: str = Field(description="The note's text (plain).")
+    author: str | None = Field(default=None, description="Who wrote it.")
+    created_at: datetime
+    edited_at: datetime | None = Field(
+        default=None, description="When its words were last changed, if ever."
+    )
+    resolved_at: datetime | None = Field(
+        default=None, description="When it was marked resolved; null while open."
+    )
+    resolved_by: str | None = Field(
+        default=None,
+        description="Who resolved it. A thread is resolved as a whole, on the "
+        "note that starts it.",
+    )
+    deleted_at: datetime | None = Field(
+        default=None, description="When it was deleted; null while it is there."
+    )
+    replies: list[NoteResponse] = Field(
+        default_factory=list,
+        description="A thread's replies, oldest first (listed on the note that "
+        "starts it, when a record's notes are listed; empty otherwise).",
+    )
+
+    @classmethod
+    def from_dto(cls, dto: Any) -> NoteResponse:
+        return cls(
+            id=str(dto.id),
+            record_id=str(dto.record_id),
+            thread_id=str(dto.thread_id) if dto.thread_id else None,
+            body=dto.body,
+            author=dto.author,
+            created_at=dto.created_at,
+            edited_at=dto.edited_at,
+            resolved_at=dto.resolved_at,
+            resolved_by=dto.resolved_by,
+            deleted_at=dto.deleted_at,
+            replies=[cls.from_dto(r) for r in getattr(dto, "replies", [])],
+        )
+
+
+class NoteRequest(BaseModel):
+    """A note's text."""
+
+    body: str = Field(description="Plain text, at most 4000 characters.")
+
+
+class NoteResolveRequest(BaseModel):
+    """Resolve a note's thread, or open it again."""
+
+    resolved: bool = Field(
+        default=True, description="True to mark it resolved, false to reopen it."
+    )
+
+
+class OpenNotesResponse(BaseModel):
+    """Threads not yet resolved among the records a query lists."""
+
+    notes: int = Field(description="Open threads (a note and its replies count once).")
+    records: int = Field(description="Records with at least one open thread.")
+
+
+class RecordSummaryRequest(RecordQueryRequest):
+    """Summarise the records a query lists: group them by field values and
+    work out measures over each group. `schema_name` is required (the kind
+    summarised); `collection` may be left out for every collection."""
+
+    group_by: list[str] = Field(
+        default_factory=list,
+        description="Up to 3 groupings, each 'field' or 'schema.field' (a field "
+        "of a kind above), then optionally ':year', ':month', ':week' or ':day' "
+        "for a date, or ':<width>' for a number in ranges that wide (e.g. "
+        "'depth:5'). A list field (tags, links) groups by each item.",
+    )
+    measures: list[str] = Field(
+        default_factory=lambda: ["count"],
+        description="What to work out: 'count' (records), or 'measure:field' "
+        "with measure one of filled, distinct, min, max, mean, sum (which a "
+        "field allows is its type's 'measures' in GET /schemas/field-types).",
+    )
+    limit: int = Field(
+        default=1000,
+        description="The most groups returned; past it the answer is 'truncated'.",
+    )
+
+
+class QualityRecordsRequest(RecordQueryRequest):
+    """The records a query lists that have one issue, a page at a time."""
+
+    issue: str = Field(
+        description="The kind of issue: breaks_rule, blank, duplicate_key, "
+        "broken_reference or missing_file."
+    )
+    field: str | None = Field(
+        default=None,
+        description="Only this field's issue (a uniqueness key is named by its "
+        "fields, comma-separated). Omitted, any field.",
+    )
+    kind: str | None = Field(
+        default=None,
+        description="Only records of this kind (when the query lists several).",
+    )
+    limit: int = Field(default=50, ge=1, le=1000, description="The most records.")
+    offset: int = Field(default=0, ge=0, description="How many to skip.")
+
+
+class QualityExampleResponse(BaseModel):
+    record_id: str = Field(description="The record.")
+    record_name: str | None = Field(description="Its name, as lists show it.")
+    message: str = Field(description="What is wrong with it, in plain words.")
+
+
+class QualityIssueResponse(BaseModel):
+    issue: str = Field(description="The kind of issue (see 'issues').")
+    field: str = Field(
+        description="The field's name, or a uniqueness key's fields comma-separated."
+    )
+    field_label: str = Field(description="The field (or key) as a person reads it.")
+    count: int = Field(description="How many times it was found (exact).")
+    examples: list[QualityExampleResponse] = Field(
+        description="A few of the records (at most 5)."
+    )
+    filter: dict[str, Any] | None = Field(
+        description="A filter tree listing exactly these records, when one can "
+        "say it (an empty field); else list them with /records/quality/records."
+    )
+
+
+class QualityBlanksResponse(BaseModel):
+    field: str = Field(description="The field's name.")
+    field_label: str = Field(description="The field as a person reads it.")
+    required: bool = Field(description="Whether the field is marked required.")
+    blank: int = Field(description="How many records leave it empty.")
+    filter: dict[str, Any] | None = Field(
+        description="A filter tree listing those records, when one can say it."
+    )
+
+
+class QualityKindResponse(BaseModel):
+    schema_name: str = Field(description="The kind of record.")
+    schema_label: str = Field(description="The kind as a person reads it.")
+    records: int = Field(description="How many of the records checked are this kind.")
+    records_with_issues: int = Field(description="How many of them have any issue.")
+    issues: list[QualityIssueResponse] = Field(
+        description="One line per issue and field, issues in a fixed order."
+    )
+    blanks: list[QualityBlanksResponse] = Field(
+        description="Every own field of the kind and how many leave it empty "
+        "(an issue only where the field is required)."
+    )
+
+
+class QualityIssueKindResponse(BaseModel):
+    name: str = Field(description="The issue's name.")
+    label: str = Field(description="A few words, as a heading.")
+    description: str = Field(description="What it means, in one sentence.")
+
+
+class QualityReportResponse(BaseModel):
+    records: int = Field(description="How many records were checked.")
+    records_with_issues: int = Field(description="How many have any issue.")
+    kinds: list[QualityKindResponse] = Field(description="Per kind of record.")
+    issues: list[QualityIssueKindResponse] = Field(
+        description="Every kind of issue a check looks for, in order."
+    )
+
+    @classmethod
+    def from_dto(cls, r: Any) -> QualityReportResponse:
+        from civex.domain.quality import ISSUES
+
+        def example(e: Any) -> QualityExampleResponse:
+            return QualityExampleResponse(
+                record_id=e.record_id, record_name=e.record_name, message=e.message
+            )
+
+        return cls(
+            records=r.records,
+            records_with_issues=r.records_with_issues,
+            kinds=[
+                QualityKindResponse(
+                    schema_name=k.schema,
+                    schema_label=k.schema_label,
+                    records=k.records,
+                    records_with_issues=k.records_with_issues,
+                    issues=[
+                        QualityIssueResponse(
+                            issue=i.issue,
+                            field=i.field,
+                            field_label=i.field_label,
+                            count=i.count,
+                            examples=[example(e) for e in i.examples],
+                            filter=i.filter,
+                        )
+                        for i in k.issues
+                    ],
+                    blanks=[
+                        QualityBlanksResponse(
+                            field=b.field,
+                            field_label=b.field_label,
+                            required=b.required,
+                            blank=b.blank,
+                            filter=b.filter,
+                        )
+                        for b in k.blanks
+                    ],
+                )
+                for k in r.kinds
+            ],
+            issues=[
+                QualityIssueKindResponse(
+                    name=i.name, label=i.label, description=i.description
+                )
+                for i in ISSUES.values()
+            ],
+        )
+
+
+class QualityFindingResponse(BaseModel):
+    record_id: str = Field(description="The record.")
+    record_name: str | None = Field(description="Its name, as lists show it.")
+    schema_name: str = Field(description="Its kind.")
+    field: str = Field(description="The field (or key) the issue is in.")
+    message: str = Field(description="What is wrong, in plain words.")
+
+
+class QualityRecordsResponse(BaseModel):
+    items: list[QualityFindingResponse] = Field(description="This page of records.")
+    total: int = Field(description="How many records have the issue.")
+    offset: int = Field(description="Where this page starts.")
+    limit: int = Field(description="The most records on a page.")
+
+
+class FieldCheckRequest(BaseModel):
+    restrictions: dict[str, Any] | None = Field(
+        default=None,
+        description="The rules the field would have (omitted: as they are now).",
+    )
+    required: bool | None = Field(
+        default=None, description="Whether it would be required (omitted: as now)."
+    )
+
+
+class FieldCheckResponse(BaseModel):
+    schema_name: str = Field(description="The kind of record.")
+    field: str = Field(description="The field.")
+    breaks_rule: int = Field(
+        description="How many records hold a value those rules refuse."
+    )
+    blank: int = Field(
+        description="How many leave the field empty, when it would be required."
+    )
+    examples: list[QualityExampleResponse] = Field(
+        description="A few of those records (at most 5)."
+    )
+
+    @classmethod
+    def from_dto(cls, c: Any) -> FieldCheckResponse:
+        return cls(
+            schema_name=c.schema,
+            field=c.field,
+            breaks_rule=c.breaks_rule,
+            blank=c.blank,
+            examples=[
+                QualityExampleResponse(
+                    record_id=e.record_id, record_name=e.record_name, message=e.message
+                )
+                for e in c.examples
+            ],
+        )
+
+
+class RecordPointsRequest(RecordQueryRequest):
+    """Where the records a query lists are, for a map. `schema_name` is
+    required (the kind listed); `collection` may be left out for every
+    collection."""
+
+    field: str = Field(description="The location (geo) field to map.")
+    field_schema: str | None = Field(
+        default=None,
+        description="The kind whose field it is, when it is a kind above "
+        "'schema_name' (each record is then placed where the record above it "
+        "is). Left out: the listed kind's own field, else the nearest kind "
+        "above that has one by that name.",
+    )
+    limit: int = Field(
+        default=POINTS_DEFAULT_LIMIT,
+        description="The most records returned (oldest first); past it the "
+        "answer is 'truncated' and 'total' says how many there are.",
+    )
+
+
+class RecordPointResponse(BaseModel):
+    id: str = Field(description="The record's id.")
+    name: str | None = Field(description="The record's name, as lists show it.")
+    geometry: dict[str, Any] = Field(
+        description="The field's value: a GeoJSON geometry in WGS84 ([lon, lat])."
+    )
+
+
+class RecordPointsResponse(BaseModel):
+    schema_name: str = Field(description="The kind whose field was mapped.")
+    field: str = Field(description="The field mapped.")
+    points: list[RecordPointResponse] = Field(
+        description="One per record with a value, oldest first."
+    )
+    total: int = Field(description="How many listed records have a value.")
+    truncated: bool = Field(description="Whether some were left out ('limit').")
+    limit: int = Field(description="The most records returned.")
+
+    @classmethod
+    def from_dto(cls, r: RecordPoints) -> "RecordPointsResponse":
+        return cls(
+            schema_name=r.schema,
+            field=r.field,
+            points=[
+                RecordPointResponse(id=str(p.id), name=p.name, geometry=p.geometry)
+                for p in r.points
+            ],
+            total=r.total,
+            truncated=r.truncated,
+            limit=r.limit,
+        )
+
+
+class SummaryGroupColumnResponse(BaseModel):
+    key: str = Field(description="The grouping as asked for, e.g. 'site.region'.")
+    field: str = Field(description="The field's name.")
+    schema_name: str = Field(description="The kind of record whose field it is.")
+    label: str = Field(description="The column's heading.")
+    type: str = Field(description="The field's type.")
+    bucket: str | None = Field(description="The period a date is grouped by.")
+    bin: float | None = Field(description="The width of a number's ranges.")
+    unit: str | None = Field(description="The field's unit, if it has one.")
+
+
+class SummaryMeasureColumnResponse(BaseModel):
+    key: str = Field(description="The measure as asked for, e.g. 'mean:depth'.")
+    measure: str = Field(description="count, filled, distinct, min, max, mean or sum.")
+    label: str = Field(description="The column's heading.")
+    field: str | None = Field(description="The field's name (none for count).")
+    schema_name: str | None = Field(description="The kind of record whose field it is.")
+    type: str | None = Field(description="The field's type.")
+    unit: str | None = Field(
+        description="The unit of a smallest, largest, average or total."
+    )
+
+
+class SummaryGroupValueResponse(BaseModel):
+    value: Any = Field(
+        description="What the records hold: a number, text, true/false, a record "
+        "id, or a period such as '2019-06'. Null for the records with no value."
+    )
+    label: str = Field(description="How the value reads.")
+    lower: Any = Field(
+        default=None,
+        description="Where a range or period starts (a number, or an ISO date).",
+    )
+    upper: Any = Field(
+        default=None,
+        description="Where a range or period ends (not included).",
+    )
+    precision: str | None = Field(
+        default=None,
+        description="Set when a date is less precise than the period grouped by: "
+        "'year' (only the year is known) or 'month'.",
+    )
+
+
+class SummaryRowResponse(BaseModel):
+    groups: list[SummaryGroupValueResponse] = Field(
+        description="The group's value for each grouping, in order."
+    )
+    values: list[Any] = Field(description="Each measure's value, in order.")
+    where: dict[str, Any] | None = Field(
+        description="A filter tree listing exactly this group's records (add it "
+        "to the query's filter), or null when a filter can't say it (an item "
+        "of a list)."
+    )
+
+
+class RecordSummaryResponse(BaseModel):
+    schema_name: str = Field(description="The kind of record summarised.")
+    group_columns: list[SummaryGroupColumnResponse] = Field(
+        description="The groupings, in order."
+    )
+    measure_columns: list[SummaryMeasureColumnResponse] = Field(
+        description="The measures, in order."
+    )
+    rows: list[SummaryRowResponse] = Field(
+        description="One per group, ordered by the groupings' values (no value last)."
+    )
+    total: list[Any] = Field(
+        description="Each measure over every record listed, each counted once."
+    )
+    truncated: bool = Field(description="Whether there were more groups than 'limit'.")
+    limit: int = Field(description="The most groups returned.")
+    timezone: str | None = Field(
+        description="The zone dates and times were grouped in, when any were."
+    )
+
+    @classmethod
+    def from_dto(cls, r: Any) -> RecordSummaryResponse:
+        return cls(
+            schema_name=r.schema,
+            group_columns=[
+                SummaryGroupColumnResponse(
+                    key=c.key,
+                    field=c.field,
+                    schema_name=c.schema,
+                    label=c.label,
+                    type=c.dtype,
+                    bucket=c.bucket,
+                    bin=c.bin,
+                    unit=c.unit,
+                )
+                for c in r.group_columns
+            ],
+            measure_columns=[
+                SummaryMeasureColumnResponse(
+                    key=c.key,
+                    measure=c.measure,
+                    label=c.label,
+                    field=c.field,
+                    schema_name=c.schema,
+                    type=c.dtype,
+                    unit=c.unit,
+                )
+                for c in r.measure_columns
+            ],
+            rows=[
+                SummaryRowResponse(
+                    groups=[
+                        SummaryGroupValueResponse(
+                            value=g.value,
+                            label=g.label,
+                            lower=g.lower,
+                            upper=g.upper,
+                            precision=g.precision,
+                        )
+                        for g in row.groups
+                    ],
+                    values=row.values,
+                    where=row.where,
+                )
+                for row in r.rows
+            ],
+            total=r.total,
+            truncated=r.truncated,
+            limit=r.limit,
+            timezone=r.timezone,
+        )
+
+
+class MoveRecordsRequest(RecordSelectionRequest):
+    """Which records to move (each with everything beneath it), and where to."""
+
+    to: str = Field(description="The collection to move them to.")
+    parent: str | None = Field(
+        default=None,
+        description="The record (id or prefix) in that collection they go inside. "
+        "Omit to put them at its top level.",
+    )
 
 
 class RecordMovePlanResponse(BaseModel):
@@ -631,6 +1254,61 @@ class MoveRecordsResponse(BaseModel):
         description="Records moved in all, with everything beneath them."
     )
     collection: str = Field(description="Where they are now.")
+
+
+class BulkEditRequest(RecordSelectionRequest):
+    """Which records to edit, and the fields to set on every one of them."""
+
+    changes: dict[str, Any] = Field(
+        description="Field name -> the value every chosen record gets, as a "
+        "record's data holds it (null clears the field). A record's own fields "
+        "only: an inherited field's value is on the record above."
+    )
+
+
+class BulkEditSkipResponse(BaseModel):
+    record_id: str
+    name: str | None = Field(default=None, description="The record's name.")
+    reason: str = Field(description="Why it is left as it is, in plain words.")
+
+
+class BulkEditPlanResponse(BaseModel):
+    """What a bulk edit would do. A record takes every change or none; the
+    ones that can't are skipped (counted exactly, the first 200 named) and
+    the rest go ahead."""
+
+    fields: list[str] = Field(description="The fields being set or cleared.")
+    records: int = Field(description="Chosen records (live ones).")
+    changing: int = Field(description="Records that would change.")
+    unchanged: int = Field(description="Records that already hold every value.")
+    skipped: int = Field(description="Records that can't take the change.")
+    skipped_records: list[BulkEditSkipResponse] = Field(
+        description="The first of the skipped records, each with why."
+    )
+    runs: int = Field(description="Workflow runs the edit would start.")
+    workflows: list[str] = Field(description="The workflows those runs are of.")
+    automation_paused: bool = Field(
+        description="Automation is paused, so no runs would start."
+    )
+    can_apply: bool = Field(description="True when any record would change.")
+
+    @classmethod
+    def from_dto(cls, dto: RecordBulkEditPlanDTO) -> BulkEditPlanResponse:
+        return cls(**dto.to_dict())
+
+
+class BulkEditResponse(BaseModel):
+    changed: int = Field(description="Records changed.")
+    unchanged: int = Field(description="Records that already held every value.")
+    skipped: int = Field(description="Records left as they were.")
+    skipped_records: list[BulkEditSkipResponse] = Field(
+        description="The first of the skipped records, each with why."
+    )
+    runs: int = Field(description="Workflow runs queued.")
+
+    @classmethod
+    def from_dto(cls, dto: RecordBulkEditResultDTO) -> BulkEditResponse:
+        return cls(**dto.to_dict())
 
 
 class RecordLabelsRequest(BaseModel):
@@ -742,10 +1420,16 @@ class RecordResponse(BaseModel):
     )
     derived: dict[str, Any] | None = Field(
         default=None,
-        description="Only when 'columns' were requested: the requested "
-        "columns this record's own 'data' can't answer -- fields inherited "
-        "from an ancestor record, and 'ref_field.target_field' joins -- keyed "
-        "by column.",
+        description="Values this record's own 'data' doesn't hold, keyed by "
+        "column: its formula fields, worked out when read (always), and, "
+        "when 'columns' were requested, fields inherited from an ancestor "
+        "record and 'ref_field.target_field' joins.",
+    )
+    formula_errors: dict[str, str] | None = Field(
+        default=None,
+        description="For a formula field left blank because it can't be worked "
+        "out for this record (divided by zero, a value of the wrong kind), "
+        "why, by field name. Null when every formula worked.",
     )
     ancestors: list[RecordRef] | None = Field(
         default=None,
@@ -765,6 +1449,16 @@ class RecordResponse(BaseModel):
         "deleted from its schema. Nothing is lost: restoring the field "
         "(`POST /schemas/{schema_name}/fields/{id}/restore`) puts each back in "
         "`data`. Null when there are none.",
+    )
+    open_notes: int | None = Field(
+        default=None,
+        description="How many threads of notes on this record are not yet "
+        "resolved (GET /records/{record_id}/notes lists them).",
+    )
+    latest_note: str | None = Field(
+        default=None,
+        description="The first line of the latest thread not yet resolved; "
+        "null when none is open.",
     )
 
     @classmethod
@@ -786,9 +1480,12 @@ class RecordResponse(BaseModel):
             reference_collections=dto.reference_collections,
             child_counts=dto.child_counts,
             derived=dto.derived,
+            formula_errors=dto.formula_errors,
             deleted_fields=[DeletedFieldValue(**d) for d in dto.deleted_fields]
             if dto.deleted_fields
             else None,
+            open_notes=dto.open_notes,
+            latest_note=dto.latest_note,
         )
 
 
@@ -936,6 +1633,11 @@ class FileInfoResponse(BaseModel):
         "while they can be restored, but don't count as using it.",
     )
     jobs: int = Field(description="Workflow runs that took it as an input.")
+    releases: list[str] = Field(
+        default_factory=list,
+        description="The releases that keep it, by name: it stays while any "
+        "of them does, and yanking them gives it up.",
+    )
     collections: list[CollectionUseResponse]
     uses: list[RecordUseResponse] = Field(
         default_factory=list,
@@ -1976,6 +2678,28 @@ class RevertResultResponse(BaseModel):
     )
 
 
+class BatchRevertRequest(BaseModel):
+    force: bool = Field(
+        default=False,
+        description="Also overwrite fields that were edited since the bulk edit.",
+    )
+
+
+class BatchRevertResponse(BaseModel):
+    batch_id: str
+    entries: int = Field(description="Changes in the bulk edit.")
+    applied: int = Field(description="Changes undone (or that would be).")
+    conflicts: int = Field(
+        description="Changes with a field edited since; without `force` those "
+        "fields are left as they are now."
+    )
+    same: int = Field(description="Changes with nothing left to undo.")
+    left: int = Field(description="Changes that can't be undone.")
+    reasons: list[dict[str, str]] = Field(
+        description="The first of those left, as `record_id` and `reason`."
+    )
+
+
 class PaginatedAuditLogResponse(BaseModel):
     items: list[AuditLogResponse]
     total: int
@@ -2454,7 +3178,8 @@ class RestrictionDescriptorResponse(BaseModel):
         description=(
             "Which editor to show: number, integer, bytes, choices, accept, "
             "filename_template, schema, timezone, date_bound, datetime_bound, "
-            "unit, precision, geometry_types or bbox."
+            "unit, precision, geometry_types, bbox, from_filename, formula "
+            "(an expression), formula_result (what it gives) or decimals."
         )
     )
     help: str = Field(description="One sentence of guidance; may be empty.")
@@ -2475,6 +3200,24 @@ class FieldTypeDescriptorResponse(BaseModel):
     supports_default: bool = Field(
         description="Whether a default value can be set when creating the field."
     )
+    searchable: bool = Field(
+        description="Whether a text search looks in values of this type."
+    )
+    measures: list[str] = Field(
+        description="What a summary can work out over a field of this type "
+        "(besides 'count', which counts records)."
+    )
+    grouping: str | None = Field(
+        description="How a summary groups by a field of this type: 'value', "
+        "'bin' (or ranges of a width), 'bucket' (or a period: 'buckets'), 'each' "
+        "(each item of a list), or null (it can't)."
+    )
+    buckets: list[str] = Field(description="The periods a 'bucket' grouping offers.")
+    computed: bool = Field(
+        default=False,
+        description="Worked out from other fields when read, never stored (a "
+        "formula): it can't be typed in, filtered or sorted by.",
+    )
 
 
 class FieldKindResponse(BaseModel):
@@ -2487,6 +3230,12 @@ class FieldKindResponse(BaseModel):
     )
 
 
+class SummaryMeasureResponse(BaseModel):
+    key: str = Field(description="The measure's name, as a summary request writes it.")
+    label: str = Field(description="Its plain name.")
+    help: str = Field(description="What it is, in a sentence.")
+
+
 class FieldTypesResponse(BaseModel):
     types: list[FieldTypeDescriptorResponse] = Field(
         description="Every field type, with the rules each can carry."
@@ -2494,12 +3243,16 @@ class FieldTypesResponse(BaseModel):
     kinds: list[FieldKindResponse] = Field(
         description="The 'what kind of data is this?' picker, in display order."
     )
+    summary_measures: list[SummaryMeasureResponse] = Field(
+        description="Every measure a summary can work out, in the order offered."
+    )
 
     @classmethod
     def build(cls) -> FieldTypesResponse:
         from dataclasses import asdict
 
         from civex.domain.field_descriptors import FIELD_KINDS, FIELD_TYPES
+        from civex.domain.summary import MEASURE_HELP, MEASURES
 
         return cls(
             types=[
@@ -2507,6 +3260,10 @@ class FieldTypesResponse(BaseModel):
                 for d in FIELD_TYPES.values()
             ],
             kinds=[FieldKindResponse.model_validate(asdict(k)) for k in FIELD_KINDS],
+            summary_measures=[
+                SummaryMeasureResponse(key=k, label=label, help=MEASURE_HELP[k])
+                for k, label in MEASURES.items()
+            ],
         )
 
 
@@ -2578,7 +3335,13 @@ class FileSelectionRequest(BaseModel):
         default=None, description="A filter tree, as for listing records."
     )
     where: list[str] = Field(default_factory=list, description="'field=value' terms.")
-    search: str | None = Field(default=None, description="Full-text search.")
+    search: str | None = Field(
+        default=None, description="Text to look for in the records' values."
+    )
+    search_fields: list[str] | None = Field(
+        default=None,
+        description="Look for 'search' only in these fields of 'schema_name'.",
+    )
     record_ids: list[str] | None = Field(
         default=None,
         description="Exactly these records (the rows ticked in a list); the other "

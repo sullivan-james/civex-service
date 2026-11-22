@@ -495,6 +495,10 @@ def store_where(
             + (f": {used}" if used else "")
             + (f"; {info.jobs} workflow run(s)" if info.jobs else "")
         )
+        if info.releases:
+            console.print(
+                f"  [dim]kept by release(s) {escape(', '.join(info.releases))}[/dim]"
+            )
         if info.deleted_records:
             console.print(
                 f"  [dim]and kept by {info.deleted_records} deleted record(s), "

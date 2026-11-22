@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Select, Input, Button, IconButton, SegmentedControl } from '../ui'
 import { X } from '../ui/icons'
 import {
@@ -36,10 +37,15 @@ const TYPED_INPUT = new Set([
   'url',
 ])
 
+/** Shown under a condition whose field has values to pick from: the values
+ * with how many records hold each (the explorer passes a chart). */
+type ValuesOf = (field: FilterableField) => ReactNode
+
 interface FilterBuilderProps {
   root: FilterGroupNode
   fields: FilterableField[]
   onChange: (root: FilterGroupNode) => void
+  values?: ValuesOf
 }
 
 const RELATION_HINT: Record<FieldRelation, string> = {
@@ -53,13 +59,19 @@ const RELATION_HINT: Record<FieldRelation, string> = {
  * wire format by the caller. A condition may test a field of the listed
  * schema, of an ancestor (its parent record) or of a descendant (matches
  * when any child record does) -- joined columns aren't filterable. */
-export function FilterBuilder({ root, fields, onChange }: FilterBuilderProps) {
+export function FilterBuilder({
+  root,
+  fields,
+  onChange,
+  values,
+}: FilterBuilderProps) {
   return (
     <GroupEditor
       root={root}
       node={root}
       fields={fields}
       onChange={onChange}
+      values={values}
       isRoot
     />
   )
@@ -174,11 +186,13 @@ function ConditionEditor({
   node,
   fields,
   onChange,
+  values,
 }: {
   root: FilterGroupNode
   node: FilterConditionNode
   fields: FilterableField[]
   onChange: (root: FilterGroupNode) => void
+  values?: ValuesOf
 }) {
   const field = findFilterField(fields, node)
 
@@ -268,7 +282,22 @@ function ConditionEditor({
         size="sm"
         onClick={() => onChange(removeNodeById(root, node.id))}
       />
+      {field && values && hasValuesToPick(field) && (
+        <div className="basis-full">{values(field)}</div>
+      )}
     </div>
+  )
+}
+
+/** A field whose values are a short, known set: choices or yes/no, of the
+ * kind listed or one above it. */
+function hasValuesToPick(field: FilterableField): boolean {
+  const choices = field.restrictions?.choices
+  return (
+    field.relation !== 'descendant' &&
+    (field.type === 'enum' ||
+      field.type === 'boolean' ||
+      (Array.isArray(choices) && choices.length > 0))
   )
 }
 
@@ -300,12 +329,14 @@ function GroupEditor({
   node,
   fields,
   onChange,
+  values,
   isRoot = false,
 }: {
   root: FilterGroupNode
   node: FilterGroupNode
   fields: FilterableField[]
   onChange: (root: FilterGroupNode) => void
+  values?: ValuesOf
   isRoot?: boolean
 }) {
   function setOp(op: 'and' | 'or') {
@@ -358,6 +389,7 @@ function GroupEditor({
                 node={child}
                 fields={fields}
                 onChange={onChange}
+                values={values}
               />
             ) : (
               <ConditionEditor
@@ -366,6 +398,7 @@ function GroupEditor({
                 node={child}
                 fields={fields}
                 onChange={onChange}
+                values={values}
               />
             ),
           )}

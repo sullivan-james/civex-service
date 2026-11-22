@@ -111,3 +111,47 @@ def test_search_is_not_shadowed_by_the_record_id_route(client: TestClient) -> No
     _seed(client)
     # Would be a 404/422 from GET /records/{record_id} if routed there.
     assert _search(client, "wren").status_code == 200
+
+
+def test_search_matches_values_not_keys_or_file_hashes(client: TestClient) -> None:
+    """The jump-to box, the schema-wide list and a collection's list share the
+    one rule: a value contains the text."""
+    _seed(client)
+    client.post("/api/schemas/recording/fields", json={"name": "audio", "type": "file"})
+    upload = client.post("/api/files", files={"file": ("song.wav", b"bytes")})
+    assert upload.status_code == 201, upload.text
+    ref = upload.json()
+    rec = _record(client, "whales", "recording", name="Blue whale", audio=ref)
+    sha = ref["sha256"][:6]
+    assert _search(client, sha).json() == []
+    assert (
+        client.get("/api/records", params={"schema": "recording", "search": sha}).json()
+        == []
+    )
+    listed = client.get("/api/collections/whales/records", params={"search": sha})
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["items"] == []
+    assert [r["id"] for r in _search(client, "song.wav").json()] == [rec["id"]]
+
+
+def test_search_field_narrows_the_search_to_one_field(client: TestClient) -> None:
+    _seed(client)
+    client.post(
+        "/api/schemas/recording/fields", json={"name": "site", "type": "string"}
+    )
+    north = _record(client, "whales", "recording", name="Song", site="Humpback bay")
+    params = {"schema": "recording", "search": "humpback"}
+    everywhere = client.get("/api/collections/whales/records", params=params)
+    assert north["id"] in {r["id"] for r in everywhere.json()["items"]}
+    in_name = client.get(
+        "/api/collections/whales/records", params={**params, "search_field": "name"}
+    )
+    assert north["id"] not in {r["id"] for r in in_name.json()["items"]}
+    in_site = client.get(
+        "/api/records", params={**params, "search_field": "site"}
+    ).json()
+    assert [r["id"] for r in in_site] == [north["id"]]
+    bad = client.get(
+        "/api/collections/whales/records", params={**params, "search_field": "nope"}
+    )
+    assert bad.status_code == 422

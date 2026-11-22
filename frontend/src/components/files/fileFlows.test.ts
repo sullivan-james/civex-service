@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { QueryClient } from '@tanstack/react-query'
 import { downloadFiles, moveFiles, type FlowContext } from './fileFlows'
-import { exported, fakeServer, json, plan, transfer } from './testSupport'
+import { exported, fakeServer, json, transfer } from './testSupport'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -111,7 +111,7 @@ describe('moving files onto a drive', () => {
 
 import { renderHook } from '@testing-library/react'
 import { useFileJobs } from '../../hooks/fileJobs'
-import { chooseCopy, openAsFolder } from './fileFlows'
+import { openAsFolder } from './fileFlows'
 
 /** A request that stays open until released, so there is something to follow. */
 function gate() {
@@ -276,24 +276,6 @@ describe('following a request while it runs', () => {
     await new Promise((r) => setTimeout(r, 40))
 
     expect(calls.length).toBe(after)
-  })
-
-  it('also follows a plan made to choose a drive to copy to', async () => {
-    const calls = fakeServer({
-      '/api/file-access/plan': plan(),
-      '/api/file-access/progress': () =>
-        json({ phase: 'x', done: 0, total: 0 }),
-    })
-    const { ctx, problem } = context()
-
-    await chooseCopy(ctx, SELECTION)
-
-    expect(calls[0].headers['x-civex-progress']).toMatch(
-      /^[A-Za-z0-9_-]{8,64}$/,
-    )
-    expect(problem).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: 'copy' }),
-    )
   })
 
   it('sends the tag with the body still understood as JSON', async () => {

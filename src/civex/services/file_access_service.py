@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections import Counter
 
+import copy
 import dataclasses
 import json
 import os
@@ -25,15 +26,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-from civex import __version__, file_modes
+from civex import __version__, file_modes, fs_locations
 from civex.domain.dtos import FileRef, RecordDTO
 from civex.domain import features
+from civex.domain.field_descriptors import COMPUTED_DTYPES
 from civex.domain.exceptions import (
     FeatureUnavailableError,
     NotFoundError,
     ValidationError,
 )
 from civex.domain.sync import not_on_server_yet
+from civex.domain import geo as geo_rules
 from civex.domain import tables as table_rules
 from civex.domain import templating
 from civex.domain.naming import display_label
@@ -95,6 +98,14 @@ MISSING_NOTE = "MISSING.txt"
 GENERATED = "generated"
 # Records per page when a table works out derived columns.
 TABLE_PAGE = 500
+# How a file reaches a typed table: where it is on this computer, or its name.
+FILES_PATH = "path"
+FILES_NAME = "name"
+FILE_FORMS = (FILES_PATH, FILES_NAME)
+# How a link to another record reaches a typed table: its name, or its id.
+REFERENCES_NAME = "name"
+REFERENCES_ID = "id"
+REFERENCE_FORMS = (REFERENCES_NAME, REFERENCES_ID)
 _NOT_ON_DISK = "The file is not on the drive where it should be."
 _SHOWN_RECORDS = 10  # record names listed per unreachable group
 
@@ -145,6 +156,17 @@ class FileAccessService:
         self.why_not_here: Callable[[list[str]], dict[str, tuple[str, str]]] | None = (
             None
         )
+
+    def with_records(self, records: Any) -> "FileAccessService":
+        """This service reading its records from `records` instead of the live
+        ones: anything with the record calls it makes (`get_many`, `get`,
+        `file_values`, `ancestor_trails`, `stream_records`, `count_records`,
+        `beneath`, `with_derived`), such as a release's frozen records
+        (`release_records.FrozenRecords`). Everything else (the path rule,
+        plans, folders, zips, the drives) is the same."""
+        other = copy.copy(self)
+        other._records = records
+        return other
 
     def _drives(self) -> VolumeStore:
         """The drives files can be laid out on; a host without any answers
@@ -528,7 +550,7 @@ class FileAccessService:
         found: dict[str, list[RecordDTO]] = {}
         for kind in wanted:
             query = dataclasses.replace(
-                selection.query, schema=kind, filter_tree=None, where=[], search=None
+                selection.query.for_kind(kind), filter_tree=None, where=[], search=None
             )
             found[str(kind)] = [
                 r for page in self._records.stream_records(query) for r in page
@@ -743,6 +765,316 @@ class FileAccessService:
             made.append((table.path, path))
         return made
 
+    # -- typed rows for Python (civex.open) ----------------------------------
+
+    def typed_rows(
+        self,
+        query: RecordQuery,
+        *,
+        columns: list[str] | None = None,
+        geo: str = table_rules.GEO_SPLIT,
+        files: str = FILES_PATH,
+        references: str = REFERENCES_NAME,
+        page_size: int = TABLE_PAGE,
+    ) -> Iterator[list[dict[str, Any]]]:
+        """The records `query` lists (one kind: `query.schema`), a page at a
+        time, as rows of Python values: the table an export would write, made
+        by the same `table_rows` with the same columns (`columns`: field names,
+        fields of the records above, `ref.field` joins, `META_COLUMNS`; None =
+        the id and every field), each cell in `domain/tables`' Python form
+        rather than as text. `geo` is `split` (the GeoJSON dict, plus
+        `<column>_lat`/`<column>_lon` for points), `geojson` or `wkt`; `files`
+        is `path` (where the file is on this computer, else its name) or
+        `name`; `references` is `name` (the record's name) or `id`. Nothing is
+        changed and nothing downloaded."""
+        return self._typed(query, columns, geo, files, references, page_size)[2]
+
+    def frame(
+        self,
+        query: RecordQuery,
+        *,
+        columns: list[str] | None = None,
+        geo: str = table_rules.GEO_SPLIT,
+        files: str = FILES_PATH,
+        references: str = REFERENCES_NAME,
+    ) -> Any:
+        """`typed_rows` as a pandas DataFrame, each column of its type: whole
+        numbers `Int64` (blanks stay blank), decimals `float64`, true/false
+        `boolean`, dates and times `datetime64` (times in UTC), choices
+        `category`, text `string`, lists and locations as objects. A decimal
+        field's unit is in `df.attrs["units"]` ({column: unit}) and every
+        column's civex type in `df.attrs["types"]`. Read a page at a time, so
+        the memory used is the DataFrame's own."""
+        pd = _pandas()
+        names, types, pages = self._typed(
+            query, columns, geo, files, references, TABLE_PAGE
+        )
+        values: dict[str, list[Any]] = {n: [] for n in names}
+        for page in pages:
+            for row in page:
+                for n in names:
+                    values[n].append(row.get(n))
+        df = pd.DataFrame(
+            {n: _pandas_column(pd, values[n], *types[n]) for n in names},
+            columns=names,
+        )
+        df.attrs["units"] = {
+            n: r["unit"]
+            for n, (dtype, r) in types.items()
+            if dtype == "float" and r.get("unit")
+        }
+        df.attrs["types"] = {n: dtype for n, (dtype, _) in types.items()}
+        return df
+
+    def _typed(
+        self,
+        query: RecordQuery,
+        wanted: list[str] | None,
+        geo_form: str,
+        files: str,
+        references: str,
+        page_size: int,
+    ) -> tuple[
+        list[str],
+        dict[str, tuple[str, dict[str, Any]]],
+        Iterator[list[dict[str, Any]]],
+    ]:
+        """The column names of a typed table, each one's civex type and
+        restrictions (what it is converted by), and its rows: checked before
+        anything is read, so a wrong argument says so at once."""
+        if not query.schema:
+            raise ValidationError("A table is of one kind of record: name its schema.")
+        if geo_form not in table_rules.GEO_FORMS:
+            raise ValidationError(f"geo is one of: {', '.join(table_rules.GEO_FORMS)}.")
+        if files not in FILE_FORMS:
+            raise ValidationError(f"files is one of: {', '.join(FILE_FORMS)}.")
+        if references not in REFERENCE_FORMS:
+            raise ValidationError(
+                f"references is one of: {', '.join(REFERENCE_FORMS)}."
+            )
+        kind = query.schema
+        columns = self._columns_for(kind, wanted)
+        if wanted is not None:
+            unknown = [c for c in dict.fromkeys(wanted) if c not in columns]
+            if unknown:
+                raise ValidationError(
+                    f"'{kind}' has no column "
+                    + ", ".join(f"'{c}'" for c in unknown)
+                    + " (a field, a field of a record above, a reference's "
+                    "`ref.field`, or one of: "
+                    + ", ".join(table_rules.META_COLUMNS)
+                    + ")."
+                )
+        types = self._column_types(kind, columns, references)
+        names: list[str] = []
+        for c in columns:
+            names.append(c)
+            if geo_form == table_rules.GEO_SPLIT and types[c][0] == "geo":
+                for part in (f"{c}_lat", f"{c}_lon"):
+                    if part not in columns:
+                        names.append(part)
+                        types[part] = ("float", {})
+        return (
+            names,
+            types,
+            self._typed_pages(
+                query, kind, columns, types, geo_form, files, references, page_size
+            ),
+        )
+
+    def _column_types(
+        self, kind: str, columns: list[str], references: str
+    ) -> dict[str, tuple[str, dict[str, Any]]]:
+        """Each column's civex type and restrictions: a record column's from
+        `META_DTYPES`, a field's own, a join's from the field it reaches."""
+        fields = {
+            rf.field.name: rf.field
+            for rf in self._schemas.collect_fields(self._schemas.get(kind))
+        }
+        out: dict[str, tuple[str, dict[str, Any]]] = {}
+        for c in columns:
+            if c in table_rules.META_COLUMNS:
+                out[c] = (table_rules.META_DTYPES[c], {})
+                continue
+            found = fields.get(c)
+            if found is None:  # `ref.field`
+                ref_name, _, target_name = c.partition(".")
+                ref = fields[ref_name]
+                target_schema = (
+                    ref.restrictions.get("schema") if ref.dtype == "reference" else None
+                )
+                found = (
+                    next(
+                        (
+                            rf.field
+                            for rf in self._schemas.collect_fields(
+                                self._schemas.get(target_schema)
+                            )
+                            if rf.field.name == target_name
+                        ),
+                        None,
+                    )
+                    if target_schema
+                    else None
+                )
+                if found is None:
+                    raise ValidationError(
+                        f"'{c}' reaches no field: '{ref_name}' must be a link to "
+                        "one kind of record that has a field "
+                        f"'{target_name}'."
+                    )
+            rules = dict(found.restrictions or {})
+            if found.dtype in COMPUTED_DTYPES:
+                # A formula's column is of the type it gives, with its unit.
+                out[c] = (
+                    rules.get("result") or "string",
+                    {"unit": rules["unit"]} if rules.get("unit") else {},
+                )
+                continue
+            out[c] = (found.dtype, rules)
+        return out
+
+    def _typed_pages(
+        self,
+        query: RecordQuery,
+        kind: str,
+        columns: list[str],
+        types: dict[str, tuple[str, dict[str, Any]]],
+        geo_form: str,
+        files: str,
+        references: str,
+        page_size: int,
+    ) -> Iterator[list[dict[str, Any]]]:
+        selection = FileSelection(query=query, files=files == FILES_PATH)
+        fields = [c for c in columns if c not in table_rules.META_COLUMNS]
+        file_columns = [c for c in fields if types[c][0] in ("file", "file_list")]
+        ref_columns = [
+            c for c in fields if types[c][0] in ("reference", "reference_list")
+        ]
+        geo_columns = [c for c in columns if types[c][0] == "geo"]
+        for page in self._records.stream_records(query, page_size=page_size):
+            page = self._records.with_derived(kind, page, fields)
+            derived = {(kind, str(r.id)): r.derived or {} for r in page}
+
+            def raw(record: RecordDTO, c: str) -> Any:
+                known = derived[(kind, str(record.id))]
+                return known[c] if c in known else record.data.get(c)
+
+            plan = FilePlan(
+                items=[],
+                paths=self._local_paths(page, file_columns, raw)
+                if files == FILES_PATH
+                else {},
+            )
+            names = (
+                self._reference_names(page, ref_columns, raw)
+                if references == REFERENCES_NAME
+                else {}
+            )
+            table = PlannedTable(
+                name="",
+                kind=kind,
+                rows=len(page),
+                columns=columns,
+                format="json",
+                members=page,
+            )
+            out: list[dict[str, Any]] = []
+            for rows in self.table_rows(selection, plan, table, derived):
+                for row in rows:
+                    for c in ref_columns:
+                        row[c] = _named(row[c], names)
+                    typed = {
+                        c: table_rules.cell(
+                            v, table_rules.PYTHON, *types[c], geo_form=geo_form
+                        )
+                        for c, v in row.items()
+                    }
+                    for c in geo_columns:
+                        lat_lon = geo_rules.point_lat_lon(row[c])
+                        for part, v in zip(("_lat", "_lon"), lat_lon or (None, None)):
+                            if c + part in types and c + part not in columns:
+                                typed[c + part] = v
+                    out.append(typed)
+            yield out
+
+    def _local_paths(
+        self,
+        page: list[RecordDTO],
+        file_columns: list[str],
+        raw: Callable[[RecordDTO, str], Any],
+    ) -> dict[tuple[str, str], list[str]]:
+        """(record id, column) -> each file's path on this computer, or its name
+        when it isn't on a drive that can be read now (unplugged, only on the
+        server, files in a bucket). A record's own files say where they are
+        already (`location`); one from a record above is looked up by content,
+        once for the page."""
+        if self._volumes is None or not file_columns:
+            return {}
+        volumes = self._volumes
+        cells = [
+            (r, c, [v for v in _as_list(raw(r, c)) if isinstance(v, dict)])
+            for r in page
+            for c in file_columns
+        ]
+        unstamped = {
+            ref["sha256"]
+            for _, _, refs in cells
+            for ref in refs
+            if "location" not in ref and ref.get("sha256")
+        }
+        located = self._store.locate_volumes(unstamped) if unstamped else {}
+        reachable = _memo(lambda v: self._store.volume_status(v).reachable)
+
+        def volume_of(ref: dict[str, Any]) -> str | None:
+            location = ref.get("location")
+            if location is not None:
+                return location.get("volume") if location.get("available") else None
+            volume = located.get(ref.get("sha256") or "")
+            return volume if volume and reachable(volume) else None
+
+        out: dict[tuple[str, str], list[str]] = {}
+        for record, c, refs in cells:
+            paths = []
+            for ref in refs:
+                volume = volume_of(ref)
+                paths.append(
+                    str(volumes.path_on(ref["sha256"], volume))
+                    if volume
+                    else _file_name(ref)
+                )
+            if paths:
+                out[(str(record.id), c)] = paths
+        return out
+
+    def _reference_names(
+        self,
+        page: list[RecordDTO],
+        ref_columns: list[str],
+        raw: Callable[[RecordDTO, str], Any],
+    ) -> dict[str, str]:
+        """Record id -> its name, for every record a page's reference columns
+        point at: the labels the records came with, and one lookup for those a
+        record above or a join reached."""
+        names: dict[str, str] = {}
+        wanted: set[str] = set()
+        for record in page:
+            labels = record.reference_labels or {}
+            for c in ref_columns:
+                for target in _as_list(raw(record, c)):
+                    if not isinstance(target, str):
+                        continue
+                    if labels.get(target):
+                        names[target] = str(labels[target])
+                    else:
+                        wanted.add(target)
+        wanted -= set(names)
+        if wanted:
+            for found in self._records.get_many(sorted(wanted)):
+                if found.natural_name:
+                    names[str(found.id)] = found.natural_name
+        return names
+
     def _schema_display(self, schema_name: str) -> str:
         """A kind of record as a person reads it ("Selection", "Contour File")."""
         try:
@@ -792,13 +1124,10 @@ class FileAccessService:
             ]
             if allowed is None or anchor.schema_name in allowed:
                 found.append(anchor)
-            queries = [dataclasses.replace(query, schema=name) for name in below]
+            queries = [query.for_kind(name) for name in below]
         elif allowed and not query.schema:
             # Several kinds, whole collection: each kind in turn.
-            queries = [
-                dataclasses.replace(query, schema=name)
-                for name in selection.schemas or []
-            ]
+            queries = [query.for_kind(name) for name in selection.schemas or []]
         else:
             queries = [query]
             if selection.with_within and query.within and query.schema:
@@ -861,9 +1190,7 @@ class FileAccessService:
         kinds = {r.schema_name for r in beneath}
         listed: set[uuid.UUID] = set()
         for kind in kinds:
-            for page in self._records.stream_records(
-                dataclasses.replace(query, schema=kind)
-            ):
+            for page in self._records.stream_records(query.for_kind(kind)):
                 listed.update(r.id for r in page)
         return [r for r in beneath if r.id in listed]
 
@@ -908,6 +1235,35 @@ class FileAccessService:
         gives the same folder, so opening a view again refreshes it instead of
         piling up copies."""
         return self.exports_root(location) / safe_segment(name, "files")
+
+    def save_to(
+        self,
+        folder: str | None,
+        filename: str,
+        write: Callable[[Path], Any],
+    ) -> Path:
+        """Put one file civex makes (a copy of the project, a release's) in a
+        folder of this computer: any folder a person chose (an external drive,
+        a shared folder; it need not be one of the project's drives), or the
+        project's own exports folder when none is named. `write(path)` makes
+        it; it appears under its name only once whole. Answers where it is."""
+        if folder:
+            root = Path(fs_locations.normalise(folder))
+            if not root.is_dir():
+                raise NotFoundError(f"There is no folder '{folder}'.")
+        else:
+            root = self.exports_root(PROJECT)
+            root.mkdir(parents=True, exist_ok=True)
+        dest = root / safe_segment(filename, "file")
+        part = dest.with_name(dest.name + ".part")
+        try:
+            write(part)
+            file_modes.replace(part, dest)
+        except PermissionError:
+            raise ValidationError(f"'{root}' can't be written to.") from None
+        finally:
+            part.unlink(missing_ok=True)
+        return dest
 
     def _check_writable(self, location: str) -> None:
         if location == PROJECT:
@@ -1547,7 +1903,71 @@ def _record_column(record: RecordDTO, column: str) -> Any:
         return str(record.id)
     if column == "schema":
         return record.schema_name
+    if column == "parent_record_id":
+        return str(record.parent_record_id) if record.parent_record_id else None
     return getattr(record, column).isoformat()
+
+
+def _as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    return value if isinstance(value, list) else [value]
+
+
+def _named(value: Any, names: dict[str, str]) -> Any:
+    """A reference value (an id, or a list of them) as the records' names; an
+    id whose record has no name (or is gone) stays the id."""
+    if isinstance(value, list):
+        return [names.get(v, v) if isinstance(v, str) else v for v in value]
+    return names.get(value, value) if isinstance(value, str) else value
+
+
+def _pandas() -> Any:
+    """pandas, imported only when a DataFrame is asked for (it is slow to
+    import, and nothing else here needs it)."""
+    try:
+        import pandas
+    except ImportError as exc:
+        raise ImportError(
+            "A DataFrame needs pandas, which isn't installed in this Python: "
+            "`pip install pandas` (or `typed_rows`, which needs nothing)."
+        ) from exc
+    return pandas
+
+
+# A civex type -> the pandas dtype its column is given.
+_PANDAS_DTYPES = {
+    "integer": "Int64",
+    "float": "float64",
+    "boolean": "boolean",
+    "enum": "category",
+    "string": "string",
+    "longtext": "string",
+    "url": "string",
+    "file": "string",
+    "reference": "string",
+}
+
+
+def _pandas_column(
+    pd: Any, values: list[Any], dtype: str, restrictions: dict[str, Any]
+) -> Any:
+    """One column as a pandas Series of its type. A column holding a value
+    that isn't of its type (a legacy row) is left as plain objects, never
+    coerced to blank."""
+    series = pd.Series(values, dtype=object)
+    try:
+        if dtype == "datetime":
+            return pd.to_datetime(series, utc=True)
+        if dtype == "date":
+            if all(v is None or type(v).__name__ == "date" for v in values):
+                return pd.to_datetime(series)
+            return series.astype("string")
+        if dtype in _PANDAS_DTYPES:
+            return series.astype(_PANDAS_DTYPES[dtype])
+    except (TypeError, ValueError, OverflowError):
+        return series
+    return series
 
 
 def _display_filename(value: Any) -> Any:

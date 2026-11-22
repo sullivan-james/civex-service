@@ -217,6 +217,7 @@ class Loopback:
         self._svc()
         stored = self._authority.file_svc.store_bytes(source.read(size), "upload")
         assert stored.sha256 == sha256
+        self._authority.authority_svc.received_file(sha256)
         self._authority.commit()
 
     def file_chunks(self, sha256):

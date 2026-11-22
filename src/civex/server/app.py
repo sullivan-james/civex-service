@@ -32,7 +32,9 @@ from civex.server.routers import (
     legal,
     plugins,
     record_files,
+    notes,
     records,
+    releases,
     remote,
     retention,
     schemas,
@@ -45,6 +47,7 @@ from civex.server.routers import (
     updates,
     views,
     workflows,
+    dashboard,
 )
 from civex.server.security import LocalGuardMiddleware
 
@@ -134,6 +137,21 @@ _OPENAPI_TAGS = [
             "Create, read, update, delete, and bulk-import the individual rows "
             "of data that live inside a dataset. Record data is validated "
             "against its schema's field types and restrictions on every write."
+        ),
+    },
+    {
+        "name": "notes",
+        "description": (
+            "Notes on records, in threads: leave one, reply, resolve a "
+            "thread. In history and sync; find what is open with the "
+            "records' `@open_notes` filter."
+        ),
+    },
+    {
+        "name": "releases",
+        "description": (
+            "Frozen, citable copies of the data: a named version with a content "
+            "hash, a citation, and a bundle that can be read back into a project."
         ),
     },
     {
@@ -408,6 +426,8 @@ def api_routers(
         (datasets.router, None),
         (bundle.router, None),
         (plugins.router, features_.PLUGIN_EDITOR),
+        (notes.router, None),
+        (releases.router, None),
         (records.router, None),
         (record_files.router, None),
         (export_definitions.router, None),
@@ -433,6 +453,7 @@ def api_routers(
         (analytics.router, None),
         (views.router, None),
         (views.all_views_router, None),
+        (dashboard.router, None),
     ]
     return [(r, f) for r, f in routers if f is None or f in features]
 

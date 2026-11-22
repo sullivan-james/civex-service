@@ -67,3 +67,32 @@ def test_find_by_field_needs_a_schema(project_dir: Path) -> None:
     )
     assert result.exit_code == 0
     assert "S01" in result.output
+
+
+def test_find_searches_values_and_one_field(
+    project_dir: Path, ctx, make_schema, make_collection, make_record
+) -> None:
+    make_schema("trial", fields=[("subject", "string"), ("note", "string")])
+    make_collection("study")
+    make_record("study", "trial", {"subject": "S01", "note": "fasted"})
+    make_record("study", "trial", {"subject": "S02", "note": "S01 again"})
+
+    def found(*args: str) -> str:
+        result = runner.invoke(
+            app, ["record", "find", "--in", "study", "--schema", "trial", *args]
+        )
+        assert result.exit_code == 0, result.output
+        return result.output
+
+    assert "fasted" in found("--search", "FAST")
+    assert "S02" not in found("--search", "fast")
+    both = found("--search", "s01")
+    assert "fasted" in both and "S02" in both
+    only = found("--search", "s01", "--search-field", "subject")
+    assert "fasted" in only and "S02" not in only
+
+    result = runner.invoke(
+        app, ["record", "find", "--in", "study", "-q", "x", "--search-field", "subject"]
+    )
+    assert result.exit_code == 1
+    assert "choose a schema" in result.output

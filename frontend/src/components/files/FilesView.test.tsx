@@ -266,7 +266,7 @@ describe('FilesView', () => {
       screen.getByRole('checkbox', { name: 'Tick Encounter 7/s1/table.txt' }),
     )
     await userEvent.click(
-      screen.getByRole('button', { name: 'Move to drive…' }),
+      screen.getByRole('button', { name: 'Change storage drive…' }),
     )
     await waitFor(() =>
       expect(calls.some((c) => c.path === '/api/file-access/gather')).toBe(

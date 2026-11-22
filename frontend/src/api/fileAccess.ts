@@ -39,6 +39,8 @@ export interface FileSelection {
   filter?: FilterTreeWire
   where?: string[]
   search?: string
+  /** Look for `search` only in these fields of `schema_name`. */
+  search_fields?: string[]
   record_ids?: string[]
   fields?: string[]
   /** tree: a folder per record above each file (the default); flat: all in
@@ -140,6 +142,9 @@ export interface ExportOptions {
   mode: ExportMode
   /** For a copy: the drive to copy onto (the project folder if left out). */
   volume?: string
+  /** Make it in this folder of the computer instead (any folder: it wins
+   * over `name` and `volume`). */
+  dest?: string
   allowPartial: boolean
   open: boolean
 }
@@ -234,7 +239,7 @@ export interface FileProgress {
 const PROGRESS_HEADER = 'X-Civex-Progress'
 
 /** The file name a download response carries, if it says. */
-function filenameOf(res: Response): string | null {
+export function filenameOf(res: Response): string | null {
   const header = res.headers.get('Content-Disposition') ?? ''
   const star = /filename\*=UTF-8''([^;]+)/i.exec(header)
   if (star) return decodeURIComponent(star[1])
@@ -242,7 +247,7 @@ function filenameOf(res: Response): string | null {
 }
 
 /** Headers that tag a request with a progress id (JSON, as every body here is). */
-const tagged = (progressId?: string) =>
+export const progressHeaders = (progressId?: string) =>
   progressId
     ? { 'Content-Type': 'application/json', [PROGRESS_HEADER]: progressId }
     : undefined
@@ -268,6 +273,7 @@ export function selectionFor(
     filter: query.filter ?? undefined,
     where: query.where,
     search: query.search || undefined,
+    search_fields: query.search ? query.search_fields : undefined,
   }
 }
 
@@ -391,7 +397,7 @@ export const fileAccessApi = {
     api.post<FilePlanSummary>(
       '/file-access/plan',
       { ...selection, include_items: false },
-      tagged(progressId),
+      progressHeaders(progressId),
     ),
 
   /** How far the request tagged with this id has got. 404 until it has begun. */
@@ -420,10 +426,11 @@ export const fileAccessApi = {
         name: options.name,
         mode: options.mode,
         volume: options.volume,
+        dest: options.dest,
         allow_partial: options.allowPartial,
         open: options.open,
       },
-      tagged(options.progressId),
+      progressHeaders(options.progressId),
     ),
 
   /** The same files and tables, as a zip with the same paths (or the table
@@ -436,7 +443,9 @@ export const fileAccessApi = {
   ) => {
     const res = await fetch(apiUrl('/file-access/zip'), {
       method: 'POST',
-      headers: tagged(progressId) ?? { 'Content-Type': 'application/json' },
+      headers: progressHeaders(progressId) ?? {
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({ ...selection, allow_partial: allowPartial, name }),
     })
     if (!res.ok) {
@@ -453,7 +462,11 @@ export const fileAccessApi = {
 
   /** Bring the picked files that are only on the server to this computer. */
   download: (pick: FilePick, progressId?: string) =>
-    api.post<DownloadResult>('/file-access/download', pick, tagged(progressId)),
+    api.post<DownloadResult>(
+      '/file-access/download',
+      pick,
+      progressHeaders(progressId),
+    ),
 
   /** Remove this computer's copies of the picked files the server holds;
    * `dryRun` only counts. */
@@ -479,7 +492,7 @@ export const fileAccessApi = {
     api.post<GatherResult>(
       '/file-access/gather',
       { ...selection, volume },
-      tagged(progressId),
+      progressHeaders(progressId),
     ),
 
   /** `export`, but a refusal the server explains comes back as a value to act on

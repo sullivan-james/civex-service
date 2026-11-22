@@ -31,6 +31,7 @@ from typing import Any, Callable, Iterator
 
 from civex import __version__
 from civex.domain import bundle as spec
+from civex.domain.field_descriptors import COMPUTED_DTYPES
 from civex.domain.bundle import (
     BundleError,
     BundleFiles,
@@ -44,17 +45,16 @@ from civex.domain.exceptions import (
     ValidationError,
     VolumeUnavailableError,
 )
+from civex.domain.query import RecordQuery
 from civex.services.dataset_service import DatasetService
 from civex.services.file_service import FileService
 from civex.services.progress import Progress
-from civex.services.record_service import RecordService
+from civex.services.record_service import MAX_REPORTED, RecordService
 from civex.services.schema_service import SchemaService
 
 # Records written per commit while importing: a commit per record made a large
 # import dominated by fsyncs.
 IMPORT_BATCH = 1000
-# How many skipped records an import result names (the count is exact).
-MAX_REPORTED = 200
 _CHUNK = 1024 * 1024
 
 
@@ -161,6 +161,10 @@ class BundleService:
         self._civex_dir = civex_dir
         # `history_svc.batch`: everything an import writes is one event.
         self._batch = batch
+        # The ids of the records the last walk chose (a query's or exactly
+        # some), None when it took whole collections.
+        self.written_ids: list[uuid.UUID] | None = None
+        self._cited: dict[str, int] = {}
 
     # -- export ------------------------------------------------------------
 
@@ -240,8 +244,17 @@ class BundleService:
         plan = BundlePlan(include_files=options.include_files)
         schemas = self._export_schemas()
         plan.schemas = len(schemas)
+        chosen = (
+            self._chosen_records(options.query, options.record_ids, options.below)
+            if options.include_records
+            and (options.query is not None or options.record_ids is not None)
+            else None
+        )
+        self.written_ids = [r.id for r in chosen] if chosen is not None else None
         datasets = (
-            self._selected_collections(options) if options.include_records else []
+            self._selected_collections(options, chosen)
+            if options.include_records
+            else []
         )
         collections = [
             {
@@ -254,7 +267,9 @@ class BundleService:
         ]
         plan.collections = [d.name for d in datasets]
         cited: dict[str, int] = {}
-        total = sum(d.record_count for d in datasets)
+        total = (
+            len(chosen) if chosen is not None else sum(d.record_count for d in datasets)
+        )
         if progress:
             progress.phase("Writing records", total)
         out = (
@@ -263,25 +278,26 @@ class BundleService:
             else None
         )
         try:
-            for dataset in datasets:
-                for page in self._records.iter_find(dataset.name):
-                    for record in page:
-                        for ref in spec.file_refs(record.data):
-                            cited.setdefault(ref["sha256"], int(ref.get("size") or 0))
-                        if out is not None:
-                            line = RecordLine(
-                                id=record.id,
-                                collection=dataset.name,
-                                schema=record.schema_name,
-                                parent=record.parent_record_id,
-                                data=record.data,
-                                created_at=record.created_at.isoformat(),
-                                updated_at=record.updated_at.isoformat(),
-                            )
-                            out.write((line.to_json() + "\n").encode("utf-8"))
-                    plan.records += len(page)
-                    if progress:
-                        progress.advance(plan.records)
+            names = {d.id: d.name for d in datasets}
+            for page in self._pages(datasets, chosen):
+                for record in page:
+                    data = spec.plain_data(record.data)
+                    for ref in spec.file_refs(data):
+                        cited.setdefault(ref["sha256"], int(ref.get("size") or 0))
+                    if out is not None:
+                        line = RecordLine(
+                            id=record.id,
+                            collection=names[record.dataset_id],
+                            schema=record.schema_name,
+                            parent=record.parent_record_id,
+                            data=data,
+                            created_at=record.created_at.isoformat(),
+                            updated_at=record.updated_at.isoformat(),
+                        )
+                        out.write((line.to_json() + "\n").encode("utf-8"))
+                plan.records += len(page)
+                if progress:
+                    progress.advance(plan.records)
         finally:
             if out is not None:
                 out.close()
@@ -301,8 +317,60 @@ class BundleService:
             )
         return plan, schemas, collections
 
-    def _selected_collections(self, options: ExportOptions):
+    def _pages(self, datasets, chosen: list[Any] | None) -> Iterator[list[Any]]:
+        """The records to write, a page at a time: the chosen ones (the records
+        above them first), else every record of each collection."""
+        if chosen is not None:
+            for at in range(0, len(chosen), 500):
+                yield chosen[at : at + 500]
+            return
+        for dataset in datasets:
+            # As kept: the bundle holds the records, and asks no drive where
+            # a file is.
+            yield from self._records.stream_records(
+                RecordQuery(dataset=dataset.name), as_stored=True
+            )
+
+    def _chosen_records(
+        self, query: Any, record_ids: list[str] | None, below: bool = False
+    ) -> list[Any]:
+        """The records a query lists (or exactly these), with every record
+        above them (so each has its parent in the bundle), parents first,
+        and with `below` every record beneath them too. A few queries per
+        page of records and one per level above and beneath them."""
+        listed = (
+            self._records.get_many(record_ids, as_stored=True)
+            if record_ids is not None
+            else [
+                r
+                for page in self._records.stream_records(query, as_stored=True)
+                for r in page
+            ]
+        )
+        trails = self._records.ancestor_trails(listed)
+        seen: set[Any] = set()
+        out: list[Any] = []
+        for record in listed:
+            for above in trails.get(record.id, []):
+                if above.id not in seen:
+                    seen.add(above.id)
+                    out.append(above)
+        for record in listed:
+            if record.id not in seen:
+                seen.add(record.id)
+                out.append(record)
+        if below:
+            for record in self._records.beneath(listed, as_stored=True):
+                if record.id not in seen:
+                    seen.add(record.id)
+                    out.append(record)
+        return out
+
+    def _selected_collections(self, options: ExportOptions, chosen=None):
         every = self._datasets.list_all(with_count=True)
+        if chosen is not None:
+            used = {r.dataset_id for r in chosen}
+            return [d for d in every if d.id in used]
         if options.collections is None:
             return every
         by_name = {d.name: d for d in every}
@@ -323,6 +391,7 @@ class BundleService:
                     "parent": names.get(s.parent_id) if s.parent_id else None,
                     "display_template": s.display_template,
                     "unique_keys": s.unique_key_names,
+                    "charts": s.charts,
                     "fields": [
                         {
                             "name": f.name,
@@ -421,6 +490,36 @@ class BundleService:
             self._import_records(zf, manifest, result, progress)
         self._import_members(zf, result)
 
+    def _import_formulas(self, fields: list[tuple[str, dict[str, Any]]]) -> None:
+        """Add formula fields once every other field exists: a round adds each
+        whose fields are all there now (one may read another formula), and a
+        round that adds none raises the first one's reason."""
+        waiting = list(fields)
+        while waiting:
+            left: list[tuple[str, dict[str, Any]]] = []
+            problem: ValidationError | None = None
+            for schema_name, f in waiting:
+                try:
+                    self._schemas.add_field(
+                        schema_name,
+                        f["name"],
+                        f["type"],
+                        restrictions=f.get("restrictions") or {},
+                        label=f.get("label"),
+                        allow_legacy_name=True,
+                        auto_name=False,
+                    )
+                    self._commit()
+                except AlreadyExistsError:
+                    continue
+                except ValidationError as e:
+                    left.append((schema_name, f))
+                    problem = problem or e
+            if len(left) == len(waiting):
+                assert problem is not None
+                raise problem
+            waiting = left
+
     def _import_schemas(
         self, schemas: list[dict[str, Any]], result: ImportResult
     ) -> None:
@@ -428,8 +527,12 @@ class BundleService:
         One already here is reported and only gains fields it lacks. Name
         templates, and a file field's `filename_template`, can name fields
         defined later (or, through a reference, on another schema), so they are
-        set once every schema and field exists."""
+        set once every schema and field exists. So are formula fields, which
+        can read fields of the records above and of linked records, and each
+        other: they are added last, in rounds, until every one that can be
+        has been."""
         created: set[str] = set()
+        formula_fields: list[tuple[str, dict[str, Any]]] = []
         for s in spec.sort_schemas(schemas):
             try:
                 self._schemas.create(
@@ -445,6 +548,9 @@ class BundleService:
             except AlreadyExistsError:
                 result.schemas_existing.append(s["name"])
             for f in s.get("fields", []):
+                if f["type"] in COMPUTED_DTYPES:
+                    formula_fields.append((s["name"], f))
+                    continue
                 restrictions = {
                     k: v
                     for k, v in (f.get("restrictions") or {}).items()
@@ -470,6 +576,7 @@ class BundleService:
                         s["name"], f["name"], restrictions=f["restrictions"]
                     )
                     self._commit()
+        self._import_formulas(formula_fields)
         for s in schemas:
             if s["name"] in created and s.get("display_template"):
                 self._schemas.update(s["name"], display_template=s["display_template"])
@@ -477,6 +584,13 @@ class BundleService:
         for s in schemas:
             if s["name"] in created and s.get("unique_keys"):
                 self._schemas.set_unique_keys(s["name"], s["unique_keys"])
+                self._commit()
+        for s in schemas:
+            if s["name"] in created and s.get("charts"):
+                try:
+                    self._schemas.set_charts(s["name"], s["charts"])
+                except (NotFoundError, ValidationError):
+                    continue  # a chart of a field this project lacks: left out
                 self._commit()
         result.schemas_new = len(created)
 

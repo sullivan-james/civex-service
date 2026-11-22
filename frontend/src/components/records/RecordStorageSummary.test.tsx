@@ -43,6 +43,16 @@ const listing = (summary: unknown[]) => ({
 })
 
 describe('RecordStorageSummary', () => {
+  it('says nothing while every file can be reached', async () => {
+    const calls = fakeServer({
+      '/api/file-access/files': listing([place('archive', 'drive', 82)]),
+    })
+    show('?show=files')
+    await vi.waitFor(() => expect(calls.length).toBeGreaterThan(0))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(screen.queryByRole('group')).toBeNull()
+  })
+
   it('is silent for a record with no files, with what it contains', async () => {
     const calls = fakeServer({ '/api/file-access/files': listing([]) })
     show()
@@ -61,7 +71,7 @@ describe('RecordStorageSummary', () => {
         place('field', 'unreachable', 2),
       ]),
     })
-    show('?tab=contains&show=files')
+    show('?show=files')
 
     const note = await screen.findByRole('group', {
       name: "Where this record's files are stored",
@@ -71,13 +81,17 @@ describe('RecordStorageSummary', () => {
     )
     expect(
       within(note).getByRole('link', { name: 'Show all files' }),
-    ).toHaveAttribute('href', '/?tab=contains&show=files')
+    ).toHaveAttribute('href', '/?show=files')
     expect(calls[0].body).toMatchObject({ within: 'enc7' })
   })
 
   it('moves them onto a drive with the one move dialog', async () => {
     const calls = fakeServer({
-      '/api/file-access/files': listing([place('field', 'drive', 3)]),
+      // Shown because one file can't be reached.
+      '/api/file-access/files': listing([
+        place('field', 'drive', 3),
+        place('lost', 'unreachable', 1),
+      ]),
       '/api/store/volumes': [volume('field'), volume('archive')],
       '/api/file-access/gather': () =>
         json({
@@ -96,7 +110,7 @@ describe('RecordStorageSummary', () => {
     show()
 
     await userEvent.click(
-      await screen.findByRole('button', { name: 'Move to drive…' }),
+      await screen.findByRole('button', { name: 'Change storage drive…' }),
     )
     // One sentence about where they end up, not how (copies kept for others).
     expect(

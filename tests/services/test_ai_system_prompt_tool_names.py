@@ -19,7 +19,7 @@ from civex.services.ai.tools.registry import TOOL_REGISTRY
 # create_record, add_schema_field, ...) -- matches real tool-name
 # references while staying unlikely to match ordinary prose.
 _TOOL_NAME_RE = re.compile(
-    r"\b(?:list|get|save|create|update|delete|query|add)_[a-z][a-z_]*\b"
+    r"\b(?:list|get|save|create|update|delete|query|add|summarise|describe)_[a-z][a-z_]*\b"
 )
 
 

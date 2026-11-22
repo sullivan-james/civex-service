@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react'
-import type { MoveRecordsRequest } from '../../api/records'
-import type { RecordQueryParams } from '../../api/query'
+import {
+  selectionBody,
+  type MoveRecordsRequest,
+  type RecordSelection,
+} from '../../api/records'
 import type { Schema } from '../../api/schemas'
 import { useCollections } from '../../hooks/useCollections'
 import { useMovePlan, useMoveRecords } from '../../hooks/useRecords'
@@ -20,8 +23,7 @@ import {
 import { RecordSearchPicker } from '../records/RecordSearchPicker'
 
 /** The records to move: the rows ticked, or everything the list's query shows. */
-export type MoveSelection =
-  { ids: string[] } | { query: RecordQueryParams; collection: string }
+export type MoveSelection = RecordSelection
 
 /** Move the chosen records to another collection, or inside another record
  * there, after the server says what that does (how many go, with everything
@@ -40,8 +42,10 @@ export function MoveRecordsDialog({
   selection: MoveSelection
   /** How many records are chosen, for the title. */
   count: number
-  /** The kind of record listed: decides whether they need a record to go inside. */
-  listed: Schema
+  /** The kind of record listed: decides whether they need a record to go
+   * inside. None for a list of every kind: they go to the top of the
+   * collection, and the plan says which can't. */
+  listed: Schema | null
   schemas: Schema[]
   /** The collection the list shows. */
   from: string
@@ -53,8 +57,8 @@ export function MoveRecordsDialog({
     () => (collections ?? []).filter((c) => !c.deleted_at),
     [collections],
   )
-  const holder = listed.parent_id
-    ? schemas.find((s) => s.id === listed.parent_id)
+  const holder = listed?.parent_id
+    ? schemas.find((s) => s.id === listed?.parent_id)
     : undefined
   // Another collection by default (once the list has arrived): that is what
   // the dialog is for. Within the same one, a record can still be moved
@@ -73,20 +77,11 @@ export function MoveRecordsDialog({
       ? {
           to: target,
           parent: parent ?? null,
-          ...('ids' in selection
-            ? { ids: selection.ids }
-            : {
-                collection: selection.collection,
-                schema_name: selection.query.schema ?? null,
-                within: selection.query.within ?? null,
-                filter: selection.query.filter ?? null,
-                where: selection.query.where ?? [],
-                search: selection.query.search ?? null,
-              }),
+          ...selectionBody(selection),
         }
       : null
   const plan = useMovePlan(body)
-  const kind = listed.label ?? listed.name
+  const kind = listed ? (listed.label ?? listed.name) : 'record'
   const canMove = !!plan.data?.can_move && !move.isPending
 
   function confirm() {

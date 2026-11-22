@@ -9,7 +9,6 @@ import { fieldSaveErrors } from './saveErrors'
 import { isPendingFile, pendingFile, type PendingFile } from './pendingFiles'
 import { formatBytes, toInputProps } from '../../utils/restrictions'
 import { formatDate, formatInstantDate } from '../../utils/dates'
-import { fromFilenameRule } from '../../utils/filenameExtract'
 import { displayLabel } from '../../utils/naming'
 import { isGeometry, parseLocation, type Geometry } from '../../utils/geo'
 import { LocatorMap } from '../ui/LocatorMap'
@@ -20,6 +19,7 @@ import {
   FileDropZone,
   FormError,
   IconButton,
+  Tooltip,
 } from '../ui'
 import { Paperclip, X } from '../ui/icons'
 import { DynamicField, type FileRef } from './DynamicField'
@@ -56,8 +56,12 @@ function sameValue(a: unknown, b: unknown) {
 }
 
 /** The draft as the API wants it; `undefined` clears the field, `null`
- * means the draft is unusable and the edit should be dropped. */
-function toSaved(field: Field, draft: unknown): unknown | undefined | null {
+ * means the draft is unusable and the edit should be dropped. The one
+ * conversion from an input's draft to a stored value (also a bulk edit's). */
+export function toSaved(
+  field: Field,
+  draft: unknown,
+): unknown | undefined | null {
   if (isEmpty(draft)) return undefined
   if (field.type === 'integer') {
     const n = parseInt(draft as string, 10)
@@ -244,12 +248,8 @@ function FileControl({
           </div>
         ),
       )}
-      {items.length === 0 && (
-        <span className="inline-flex items-center rounded-full bg-attention-subtle px-3 py-1 text-xs font-semibold text-attention-emphasis">
-          empty
-        </span>
-      )}
       <FileDropZone
+        compact
         multiple={multiple}
         accept={accept}
         disabled={uploading || !!cannotAdd}
@@ -257,12 +257,7 @@ function FileControl({
         inputLabel={`Add ${label}`}
         onFiles={pick}
       >
-        {multiple ? undefined : items.length ? (
-          <span>
-            Drop a file here or <span className="text-accent">browse</span> to
-            replace it
-          </span>
-        ) : undefined}
+        {multiple ? 'Add files' : items.length ? 'Replace' : 'Add file'}
       </FileDropZone>
       {current && <UploadProgress state={current} onCancel={cancel} />}
       {stopped && !current && (
@@ -465,18 +460,11 @@ export function EditableValue({
 }
 
 /** What the schema demands of a field, as short phrases: "0–100", "≤ 5 MB".
- * `fields` (the record's) names the file field a value is read from. */
-export function restrictionHints(field: Field, fields?: Field[]): string[] {
+ * (That a value is read from a file's name is not said here: it is the
+ * schema's business, and the value can be edited like any other.) */
+export function restrictionHints(field: Field): string[] {
   const r = (field.restrictions ?? {}) as Record<string, unknown>
   const hints: string[] = []
-  const rule = fromFilenameRule(r)
-  if (rule) {
-    const source = fields?.find((f) => f.name === rule.field)
-    const name = source ? displayLabel(source.name, source.label) : rule.field
-    hints.push(
-      `Filled from ${name}'s name when the file changes; you can still edit it.`,
-    )
-  }
   const range = (lo: unknown, hi: unknown, from = '≥', to = '≤') => {
     if (lo !== undefined && hi !== undefined) hints.push(`${lo} – ${hi}`)
     else if (lo !== undefined) hints.push(`${from} ${lo}`)
@@ -549,9 +537,17 @@ export function RecordFieldGrid({
   footer,
   fileSaver,
   holdFiles,
+  computed,
 }: {
   fields: Field[]
   data: Record<string, unknown>
+  /** The record's formula fields as worked out when it was read (`derived`)
+   * and why any is blank (`formula_errors`); without it (a record not added
+   * yet) a formula says it is worked out once there is a record. */
+  computed?: {
+    values?: Record<string, unknown> | null
+    errors?: Record<string, string> | null
+  }
   /** Stores a file into a field and saves the record as one request (the
    * record page); without it a file is saved through `onSave`. */
   fileSaver?: FileSaver
@@ -579,7 +575,7 @@ export function RecordFieldGrid({
       <dl className="grid grid-cols-[minmax(8rem,14rem)_1fr] items-start gap-x-6 gap-y-3">
         {fields.map((field) => {
           const numeric = field.type === 'integer' || field.type === 'float'
-          const hints = restrictionHints(field, fields)
+          const hints = restrictionHints(field)
           return (
             <div key={field.name} className="contents">
               <dt
@@ -608,7 +604,9 @@ export function RecordFieldGrid({
               <dd
                 className={`min-w-0 break-words text-fg ${numeric ? 'font-mono' : ''}`}
               >
-                {readOnly ? (
+                {field.type === 'formula' ? (
+                  <FormulaValue field={field} computed={computed} />
+                ) : readOnly ? (
                   <div className="min-h-8 py-1" title={readOnly}>
                     <FieldValue
                       value={data[field.name]}
@@ -665,5 +663,40 @@ export function RecordFieldGrid({
       </dl>
       {footer}
     </>
+  )
+}
+
+/** A formula field on a record: shown, never edited, with the formula on
+ * hover, and why it is blank when it can't be worked out. */
+function FormulaValue({
+  field,
+  computed,
+}: {
+  field: Field
+  computed?: {
+    values?: Record<string, unknown> | null
+    errors?: Record<string, string> | null
+  }
+}) {
+  const expression = String(field.restrictions?.expression ?? '')
+  const problem = computed?.errors?.[field.name]
+  return (
+    <div className="min-h-8 py-1">
+      <Tooltip content={`Worked out: ${expression}`}>
+        <span className="inline-flex items-baseline gap-1.5">
+          {computed ? (
+            <FieldValue value={computed.values?.[field.name]} field={field} />
+          ) : (
+            <span className="font-sans text-fg-subtle">
+              Worked out once the record is added
+            </span>
+          )}
+          <span className="font-sans text-xs text-fg-subtle">ƒ</span>
+        </span>
+      </Tooltip>
+      {problem && (
+        <p className="font-sans text-xs text-warning">Blank: {problem}</p>
+      )}
+    </div>
   )
 }

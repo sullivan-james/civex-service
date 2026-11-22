@@ -98,6 +98,9 @@ class TransferSpec:
     # at the target, and a copy other records point at stays. Empty: every
     # record that uses the files.
     record_ids: list[str] = field(default_factory=list)
+    # files: the releases (by id) whose copies these are, pointed at the
+    # target like `record_ids`.
+    release_ids: list[str] = field(default_factory=list)
     verify: str = VERIFY_COPY
     # drain: stop new files being written to the sources while it runs, and put
     # them back as they were afterwards (otherwise a busy volume never empties).

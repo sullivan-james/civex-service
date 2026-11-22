@@ -9,7 +9,12 @@ export type SortParam = { field: string; dir: 'asc' | 'desc' }
  * dropdowns. Changing anything but the page returns to page one. */
 export function useListParams(ns: string, picks: string[], pageSize = 25) {
   const [sp, setSp] = useSearchParams()
-  const [field = '', dir = 'asc'] = (sp.get(`${ns}sort`) ?? '').split(':')
+  // `column:direction`; a column's key may hold a colon itself (a summary's
+  // `mean:depth`), so the direction is what follows the last one.
+  const rawSort = sp.get(`${ns}sort`) ?? ''
+  const cut = rawSort.lastIndexOf(':')
+  const field = cut < 0 ? rawSort : rawSort.slice(0, cut)
+  const dir = cut < 0 ? 'asc' : rawSort.slice(cut + 1)
   const page = Math.max(0, Number(sp.get(`${ns}page`) ?? 1) - 1) || 0
   const size = Number(sp.get(`${ns}size`)) || pageSize
 

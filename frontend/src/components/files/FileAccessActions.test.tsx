@@ -86,16 +86,20 @@ const next = () =>
   userEvent.click(screen.getByRole('button', { name: /^next/i }))
 
 /** Files → Export files… → (what, layout as they are) → pick a method → go. */
-async function exportVia(method: 'folder' | 'copy' | 'zip') {
+async function exportVia(method: 'folder' | 'zip') {
   await choose(/^export…/i)
   await next()
-  const names = {
-    folder: [/open as a folder/i, /^open folder$/i],
-    copy: [/put on a drive/i, /^put on drive$/i],
-    zip: [/download as a zip/i, /^download$/i],
-  }[method]
-  await userEvent.click(screen.getByRole('radio', { name: names[0] }))
-  await userEvent.click(screen.getByRole('button', { name: names[1] }))
+  const zip = method === 'zip'
+  await userEvent.click(
+    screen.getByRole('radio', {
+      name: zip ? /download a zip/i : /save to a folder/i,
+    }),
+  )
+  await userEvent.click(
+    screen.getByRole('button', {
+      name: zip ? /^download$/i : /^save to folder$/i,
+    }),
+  )
 }
 
 const unreachable = (over: Record<string, unknown> = {}) =>
@@ -189,10 +193,10 @@ describe('exports saved for the schema', () => {
 
     await choose(/contour files/i)
     await userEvent.click(
-      screen.getByRole('radio', { name: /open as a folder/i }),
+      screen.getByRole('radio', { name: /save to a folder/i }),
     )
     await userEvent.click(
-      screen.getByRole('button', { name: /^open folder$/i }),
+      screen.getByRole('button', { name: /^save to folder$/i }),
     )
 
     await waitFor(() => expect(mine(calls)).toHaveLength(1))
@@ -394,7 +398,7 @@ describe('when files cannot be reached', () => {
       json(exported({ linked: 3, missing: [{ path: 'a', reason: 'x' }] }))
 
     await userEvent.click(
-      await screen.findByRole('button', { name: /open the 3 available/i }),
+      await screen.findByRole('button', { name: /save the 3 available/i }),
     )
 
     await waitFor(() => expect(mine(calls)).toHaveLength(2))
@@ -423,7 +427,7 @@ describe('when files cannot be reached', () => {
     )
     // Nothing is missing now: the same dialog offers to open it all.
     expect(
-      await screen.findByRole('button', { name: /^open folder$/i }),
+      await screen.findByRole('button', { name: /^save to folder$/i }),
     ).toBeTruthy()
     expect(screen.queryByText(/can’t be reached/i)).toBeNull()
     expect(screen.getAllByRole('dialog')).toHaveLength(1)
@@ -492,6 +496,18 @@ describe('when files are spread over several drives', () => {
   })
 })
 
+/** Choose a drive once the list of drives has loaded (it arrives after the
+ * refusal that offers it). */
+async function pickDrive(name: string) {
+  const select = await screen.findByRole('combobox', { name: 'Which drive' })
+  await waitFor(() =>
+    expect(
+      Array.from((select as HTMLSelectElement).options).map((o) => o.value),
+    ).toContain(name),
+  )
+  await userEvent.selectOptions(select, name)
+}
+
 describe('when the folder cannot be made on its drive', () => {
   it('says why, and offers to put the files on another drive', async () => {
     answer = () =>
@@ -506,10 +522,7 @@ describe('when the folder cannot be made on its drive', () => {
     expect(screen.getByRole('alert').textContent).toMatch(/can’t be written/i)
     // Never a choice of links or copies: only which drive.
     expect(screen.queryByRole('radio')).toBeNull()
-    await userEvent.selectOptions(
-      screen.getByRole('combobox', { name: 'Which drive' }),
-      'default',
-    )
+    await pickDrive('default')
     answer = () => json(exported({ location: 'default', linked: 0, copied: 4 }))
     await userEvent.click(
       screen.getByRole('button', { name: /put 4 files on default/i }),
@@ -538,10 +551,7 @@ describe('when the folder cannot be made on its drive', () => {
     })
     renderIt()
     await exportVia('folder')
-    await userEvent.selectOptions(
-      await screen.findByRole('combobox', { name: 'Which drive' }),
-      'archive',
-    )
+    await pickDrive('archive')
 
     const alerts = await screen.findAllByRole('alert')
 
@@ -558,49 +568,42 @@ describe('when the folder cannot be made on its drive', () => {
   })
 })
 
-describe('Put on a drive', () => {
-  it('is a method of the export, with the drive chosen beside it', async () => {
+describe('a folder of your own', () => {
+  afterEach(() => localStorage.clear())
+
+  it('gets ordinary files, with nothing asked about how', async () => {
+    localStorage.setItem('export.folder', JSON.stringify('/mnt/usb/out'))
     const calls = serve()
     renderIt()
 
-    await choose(/^export…/i)
-    await next()
-    await userEvent.click(
-      screen.getByRole('radio', { name: /put on a drive/i }),
-    )
-    await userEvent.selectOptions(
-      await screen.findByRole('combobox', { name: /which drive/i }),
-      'archive',
-    )
-    await userEvent.click(
-      screen.getByRole('button', { name: /^put on drive$/i }),
-    )
-
-    await waitFor(() =>
-      expect(callPaths(calls)).toContain('/api/file-access/export'),
-    )
-    expect(
-      calls.find((c) => c.path === '/api/file-access/export')!.body,
-    ).toMatchObject({ mode: 'copy', volume: 'archive' })
-  })
-
-  it('copies into the project folder when no drive is chosen', async () => {
-    const calls = serve()
-    renderIt()
-
-    await exportVia('copy')
+    await exportVia('folder')
 
     await waitFor(() =>
       expect(callPaths(calls)).toContain('/api/file-access/export'),
     )
     const body = calls.find((c) => c.path === '/api/file-access/export')!.body
     expect(body.mode).toBe('copy')
-    expect(body.volume).toBeUndefined()
+    expect(String(body.dest).startsWith('/mnt/usb/out/')).toBe(true)
+    expect(screen.queryByRole('checkbox', { name: /cop/i })).toBeNull()
+  })
+
+  it('is a quick look in civex’s own folder when none is chosen', async () => {
+    const calls = serve()
+    renderIt()
+
+    await exportVia('folder')
+
+    await waitFor(() =>
+      expect(callPaths(calls)).toContain('/api/file-access/export'),
+    )
+    const body = calls.find((c) => c.path === '/api/file-access/export')!.body
+    expect(body.mode).toBe('link')
+    expect(body.dest).toBeUndefined()
   })
 })
 
 describe('one dialog for every way of getting the files', () => {
-  it('offers the three methods together, and no menu items for them', async () => {
+  it('offers two ways out, and no menu items for them', async () => {
     serve()
     renderIt()
 
@@ -608,10 +611,8 @@ describe('one dialog for every way of getting the files', () => {
     await next()
 
     expect(
-      screen
-        .getAllByRole('radio', { name: /folder|drive|zip/i })
-        .map((r) => r.getAttribute('aria-label')),
-    ).toEqual(['Open as a folder', 'Put on a drive', 'Download as a zip'])
+      screen.getAllByRole('radio').map((r) => r.getAttribute('aria-label')),
+    ).toEqual(['Save to a folder', 'Download a zip'])
   })
 
   it('walks through what, then how, with the one layout choice beside the preview', async () => {

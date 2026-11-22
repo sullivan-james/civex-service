@@ -5,11 +5,12 @@ import {
   type QueryClient,
   type QueryKey,
 } from '@tanstack/react-query'
-import { schemasApi, type Schema, type Field } from '../api/schemas'
+import { schemasApi, type Chart, type Schema, type Field } from '../api/schemas'
 import { displayLabel } from '../utils/naming'
 import { useToast } from '../components/ui/ToastProvider'
 import { invalidateRecordNames } from './useRecordName'
 import { errorMessage } from '../lib/errors'
+import { useDebouncedValue } from './useDebouncedValue'
 
 /**
  * Applies `updater` to every cached schema (list entries and single-schema
@@ -96,6 +97,17 @@ export function useSetUniqueKeys(name: string) {
   return useMutation({
     mutationFn: (keys: string[][]) => schemasApi.setUniqueKeys(name, keys),
     onSuccess: () => toast.success(`Uniqueness rules for "${name}" saved`),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['schemas'] }),
+  })
+}
+
+/** Replace the charts a list of this kind opens with. */
+export function useSetCharts(name: string) {
+  const qc = useQueryClient()
+  const toast = useToast()
+  return useMutation({
+    mutationFn: (charts: Chart[]) => schemasApi.setCharts(name, charts),
+    onError: (e) => toast.error(errorMessage(e)),
     onSettled: () => qc.invalidateQueries({ queryKey: ['schemas'] }),
   })
 }
@@ -319,5 +331,30 @@ export function useReorderFields(schemaName: string) {
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['schemas'] })
     },
+  })
+}
+
+/** What a field's rules as they would be (`body`; `null`: not asked) make of
+ * the values already stored: how many records' values they refuse and how
+ * many leave it empty if it were required. Asked once the rules stop
+ * changing, since a rule never re-checks what is stored. */
+export function useFieldCheck(
+  schemaName: string,
+  fieldName: string,
+  body: {
+    restrictions?: Record<string, unknown> | null
+    required?: boolean
+  } | null,
+) {
+  const key = useDebouncedValue(
+    body === null ? null : JSON.stringify(body),
+    400,
+  )
+  return useQuery({
+    queryKey: ['schemas', schemaName, 'field-check', fieldName, key],
+    queryFn: () =>
+      schemasApi.checkField(schemaName, fieldName, JSON.parse(key!)),
+    enabled: key !== null,
+    staleTime: 0,
   })
 }

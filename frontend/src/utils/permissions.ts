@@ -41,6 +41,13 @@ export function can(
   return !!collectionId && scopes.includes(`collection:${collectionId}`)
 }
 
+/** Whether an action may be done anywhere at all: what a thing shared by the
+ * whole project needs (a saved filter, the Analytics page), like the server's
+ * `Permissions.can_somewhere`. */
+export function canSomewhere(allowed: Allowed, action: Action): boolean {
+  return (allowed[action] ?? []).length > 0
+}
+
 /** Why a control is off: the one sentence beside a disabled control. */
 export function notAllowed(
   action: Action,

@@ -17,7 +17,7 @@ import {
   PinButton,
   TimeZoneSelect,
   TableSkeleton,
-  TabNav,
+  Subheading,
   TabPanel,
   useTabParam,
 } from '../components/ui'
@@ -44,9 +44,10 @@ const COLLECTION_TABS = [
   { id: 'activity' },
 ] as const
 
-/** A collection is a workspace over its records: the explorer does all the
- * browsing (hierarchy, search, filters, bulk actions); this page adds the
- * collection's own details and lifecycle around it. */
+/** A collection's page is its records: the explorer does all the browsing
+ * (hierarchy, search, filters, charts, bulk actions), with no tab row above
+ * it. Exports, Activity and the collection's own details are in the header's
+ * menu. */
 export default function CollectionDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -185,19 +186,21 @@ export default function CollectionDetailPage() {
               />
             </>
           }
-          tabs={
-            <TabNav
-              label="Collection"
-              value={shownTab}
-              onChange={setTab}
-              tabs={[
-                { id: 'records' as const, label: 'Records' },
-                { id: 'exports' as const, label: 'Exports' },
-                { id: 'activity' as const, label: 'Activity' },
-              ]}
-            />
-          }
           secondaryActions={[
+            // The page is its records; the rest is a step away in this menu
+            // (and still in the address, so old `?tab=` links work).
+            {
+              label: 'Files',
+              onClick: () =>
+                setParams((prev) => {
+                  const out = new URLSearchParams(prev)
+                  out.delete('tab')
+                  out.set('show', 'files')
+                  return out
+                }),
+            },
+            { label: 'Exports', onClick: () => setTab('exports') },
+            { label: 'Activity', onClick: () => setTab('activity') },
             {
               label: 'Edit details',
               onClick: startEditing,
@@ -269,6 +272,20 @@ export default function CollectionDetailPage() {
             </div>
           )}
 
+          {shownTab !== 'records' && (
+            <div className="flex items-center gap-3">
+              <Subheading as="h2">
+                {shownTab === 'exports' ? 'Exports' : 'Activity'}
+              </Subheading>
+              <Button
+                size="sm"
+                variant="link"
+                onClick={() => setTab('records')}
+              >
+                Back to records
+              </Button>
+            </div>
+          )}
           <TabPanel id="records" value={shownTab}>
             <RecordsExplorer
               dataset={collection.name}

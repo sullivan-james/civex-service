@@ -3,12 +3,13 @@ import { Link } from 'react-router'
 import { DataTable, Badge, type DataTableColumn } from '../ui'
 import { displayLabel } from '../../utils/naming'
 import { formatRecent } from '../../lib/utils'
-import { formatFieldDate } from '../../utils/dates'
+import { formatFieldDate, formatInstantDate } from '../../utils/dates'
 import { TimeZoneContext } from './timeZoneContext'
 import { ReferenceLink } from './ReferenceLink'
 import { FileCell } from './FileCell'
 import { fileRefsIn } from '../../utils/fileRefs'
 import type { Schema } from '../../api/schemas'
+import { openNotesText } from '../../utils/notes'
 
 export interface RecordsTableColumn {
   name: string
@@ -26,9 +27,14 @@ export interface RecordsTableRow {
   natural_name?: string | null
   schema_name?: string
   created_at?: string
+  updated_at?: string
+  /** The collection it is in (by name). */
+  collection?: string | null
   reference_labels?: Record<string, string | null> | null
   reference_collections?: Record<string, string> | null
   child_counts?: Record<string, number> | null
+  open_notes?: number | null
+  latest_note?: string | null
 }
 
 export interface RecordsTableSort {
@@ -51,6 +57,8 @@ export interface RecordsTableProps {
   schemas?: Schema[]
   showSchemaColumn?: boolean
   showIdColumn?: boolean
+  /** What the first column (the record's name, else its id) is headed. */
+  idHeader?: string
   showAddedColumn?: boolean
   /** Renders the ID cell as a link when provided; plain text otherwise. */
   recordLink?: (row: RecordsTableRow) => string
@@ -59,6 +67,9 @@ export interface RecordsTableProps {
   onSortChange?: (columnName: string) => void
   /** An extra last column -- e.g. links down to a row's children. */
   trailing?: { header: string; render: (row: RecordsTableRow) => ReactNode }
+  /** A last row about every record listed, not just this page: what the
+   * first column says ("All 240") and a cell per column name. */
+  totals?: { label: string; cells: Record<string, string> }
 }
 
 function formatCellValue(value: unknown): string {
@@ -73,12 +84,39 @@ function Dash() {
 function CellValue({
   col,
   row,
+  schemas,
 }: {
   col: RecordsTableColumn
   row: RecordsTableRow
+  schemas?: Schema[]
 }) {
   // The collection's zone: a column carries no field restrictions.
   const timeZone = useContext(TimeZoneContext)
+  // What every record has, not one of its values: its kind, its collection,
+  // when it was last changed (a list of every kind shows these).
+  if (col.type === 'kind') {
+    const schema = schemas?.find((s) => s.name === row.schema_name)
+    return (
+      <Badge variant="accent">
+        {displayLabel(row.schema_name ?? '', schema?.label)}
+      </Badge>
+    )
+  }
+  if (col.type === 'collection')
+    return row.collection ? <>{row.collection}</> : <Dash />
+  if (col.type === 'updated')
+    return row.updated_at ? <>{formatInstantDate(row.updated_at)}</> : <Dash />
+  // The record's open threads of notes, not one of its values.
+  if (col.type === 'notes') {
+    const text = openNotesText(row.open_notes, row.latest_note)
+    return text ? (
+      <span className="block max-w-xs truncate" title={text}>
+        {text}
+      </span>
+    ) : (
+      <Dash />
+    )
+  }
   const value = row.data[col.name]
   if (value === undefined || value === null) return <Dash />
   if (col.type === 'reference' && typeof value === 'string')
@@ -135,18 +173,20 @@ export function RecordsTable({
   schemas,
   showSchemaColumn = false,
   showIdColumn = true,
+  idHeader = 'ID',
   showAddedColumn = true,
   recordLink,
   selection,
   sort,
   onSortChange,
   trailing,
+  totals,
 }: RecordsTableProps) {
   const cols: DataTableColumn<RecordsTableRow>[] = []
   if (showIdColumn)
     cols.push({
       key: '__id',
-      header: 'ID',
+      header: idHeader,
       width: '8rem',
       render: (r) =>
         r.natural_name ?? <span className="font-mono">{r.id.slice(0, 8)}</span>,
@@ -176,7 +216,7 @@ export function RecordsTable({
       header: col.label,
       headerTitle: col.name,
       sortable: col.sortable !== false,
-      render: (r) => <CellValue col={col} row={r} />,
+      render: (r) => <CellValue col={col} row={r} schemas={schemas} />,
     })
   if (showAddedColumn)
     cols.push({
@@ -213,6 +253,18 @@ export function RecordsTable({
       sort={sort}
       onSortChange={onSortChange}
       emptyTitle="No records"
+      footer={
+        totals && (
+          <tr className="bg-canvas-subtle text-xs text-fg-muted">
+            {selection && <td />}
+            {cols.map((c, i) => (
+              <td key={c.key} className="px-4 py-2">
+                {i === 0 ? totals.label : (totals.cells[c.key] ?? null)}
+              </td>
+            ))}
+          </tr>
+        )
+      }
     />
   )
 }

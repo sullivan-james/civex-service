@@ -19,13 +19,15 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Iterator
+from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from civex.domain.dtos import RecordUse
+from civex.domain import release as release_rules
 from civex.config import Config, ConfigStore
 from civex.domain import features
 from civex.domain.exceptions import FeatureUnavailableError
 from civex.domain.permissions import Permissions
+from civex.domain.query import RecordQuery
 from civex.project import Project
 
 if TYPE_CHECKING:
@@ -48,6 +50,7 @@ if TYPE_CHECKING:
     from civex.services.transfer_service import TransferService
     from civex.services.plugin_service import PluginService
     from civex.services.policy_service import PolicyService
+    from civex.services.quality_service import QualityService
     from civex.services.record_service import RecordService
     from civex.services.retention_service import RetentionService
     from civex.services.schema_service import SchemaService
@@ -61,6 +64,9 @@ if TYPE_CHECKING:
     from civex.services.sync_authority import SyncAuthorityService
     from civex.services.sync_service import SyncService
     from civex.services.view_service import ViewService
+    from civex.services.dashboard_service import DashboardService
+    from civex.services.note_service import NoteService
+    from civex.services.release_service import ReleaseService
     from civex.services.workflow_job_service import WorkflowJobService
     from civex.services.workflow_service import WorkflowService
 
@@ -110,6 +116,11 @@ class AppContext:
     container_plugin_svc: ContainerPluginService
     policy_svc: PolicyService
     view_svc: ViewService
+    dashboard_svc: DashboardService
+    # Notes people leave on records (`domain/notes`).
+    note_svc: NoteService
+    # Frozen, citable copies of the data (`domain/release`).
+    release_svc: ReleaseService
     export_def_svc: ExportDefinitionService
     bundle_svc: BundleService
     sync_repo: LocalSyncRepository
@@ -118,6 +129,8 @@ class AppContext:
     sync_svc: SyncService
     library_svc: LibraryService
     compaction_svc: HistoryCompactionService
+    # Data checks: what in the records needs a look (`domain/quality`).
+    quality_svc: QualityService
     # Where files are kept: drives or a bucket (`features.STORE_ADMIN`).
     bucket_svc: BucketService
     project: Project
@@ -189,6 +202,47 @@ class AppContext:
         finally:
             self.close()
 
+    def frame(
+        self,
+        collection: str | None,
+        schema: str,
+        *,
+        where: dict[str, Any] | list[str] | None = None,
+        search: str | None = None,
+        search_fields: list[str] | None = None,
+        within: str | None = None,
+        **options: Any,
+    ) -> Any:
+        """The records of `schema` in `collection` (None: every collection)
+        as a pandas DataFrame with typed columns: `file_access_svc.frame`
+        over the query these arguments make. `where` is a filter tree (the
+        explorer's) or `["field=value", ...]`; `within` a record id (only
+        what is beneath it). `options` are `frame`'s: `columns`, `geo`,
+        `files`, `references`."""
+        return self.file_access_svc.frame(
+            _frame_query(collection, schema, where, search, search_fields, within),
+            **options,
+        )
+
+    def rows(
+        self,
+        collection: str | None,
+        schema: str,
+        *,
+        where: dict[str, Any] | list[str] | None = None,
+        search: str | None = None,
+        search_fields: list[str] | None = None,
+        within: str | None = None,
+        **options: Any,
+    ) -> list[dict[str, Any]]:
+        """`frame`'s rows as a list of dicts of Python values, without
+        pandas (`file_access_svc.typed_rows`, all pages)."""
+        pages = self.file_access_svc.typed_rows(
+            _frame_query(collection, schema, where, search, search_fields, within),
+            **options,
+        )
+        return [row for page in pages for row in page]
+
     @contextmanager
     def all_or_nothing(self) -> Iterator[None]:
         """Keep everything done inside it, or, when it raises, nothing: a SQL
@@ -229,6 +283,26 @@ class AppContext:
             yield
         finally:
             nested.rollback()
+
+
+def _frame_query(
+    collection: str | None,
+    schema: str,
+    where: dict[str, Any] | list[str] | None,
+    search: str | None,
+    search_fields: list[str] | None,
+    within: str | None,
+) -> RecordQuery:
+    """The query `AppContext.frame`/`rows` take apart as keyword arguments."""
+    return RecordQuery(
+        dataset=collection,
+        schema=schema,
+        within=within,
+        filter_tree=where if isinstance(where, dict) else None,
+        where=list(where) if isinstance(where, list) else [],
+        search=search,
+        search_fields=search_fields,
+    )
 
 
 # How a background host opens a context when it needs one: a fresh session
@@ -314,6 +388,10 @@ def build_context(
         LocalExportDefinitionRepository,
     )
     from civex.repositories.local.view_repo import LocalViewRepository
+    from civex.repositories.local.dashboard_repo import LocalDashboardRepository
+    from civex.repositories.local.note_repo import LocalNoteRepository
+    from civex.services.dashboard_service import DashboardService
+    from civex.services.note_service import NoteService
     from civex.services.ai.service import AiService
     from civex.services.ai_usage_service import AiUsageService
     from civex.services.analytics_service import AnalyticsService
@@ -328,6 +406,7 @@ def build_context(
     from civex.services.transfer_service import TransferService
     from civex.services.plugin_service import PluginService
     from civex.services.policy_service import PolicyService
+    from civex.services.quality_service import QualityService
     from civex.services.record_service import RecordService
     from civex.services.retention_service import RetentionService
     from civex.services.schema_service import SchemaService
@@ -382,6 +461,15 @@ def build_context(
         job_svc,
         audit_repo,
         permissions=may,
+    )
+    schema_svc.use_chart_check(record_svc.check_chart)
+    note_svc = NoteService(
+        LocalNoteRepository(session),
+        record_repo,
+        record_svc.resolve,
+        audit_repo,
+        permissions=may,
+        actor=project.actor,
     )
     dataset_svc = DatasetService(
         dataset_repo,
@@ -489,6 +577,9 @@ def build_context(
     from civex.services.sync_service import SyncService
     from civex.services.sync_transport import build_transport
 
+    from civex.repositories.local.release_repo import LocalReleaseRepository
+
+    release_repo = LocalReleaseRepository(session)
     sync_repo = LocalSyncRepository(session)
     applier = SyncApplier(sync_repo, audit_repo)
     device_keys = DeviceKeys(sync_repo)
@@ -502,6 +593,8 @@ def build_context(
         # The same answer a person at a browser gets, asked of each change a
         # device pushes (the local user's refuses nothing).
         policy=may,
+        notes=note_svc,
+        releases=lambda: ctx.release_svc,
         capabilities=CAPABILITIES
         + ((DIRECT_FILES,) if features.DIRECT_FILES in project.features else ()),
     )
@@ -538,6 +631,43 @@ def build_context(
     )
     file_access_svc.why_not_here = lambda shas: _sync().not_here_reasons(shas)
 
+    from civex.services.release_service import ReleaseService
+
+    bundle_svc = BundleService(
+        schema_svc,
+        dataset_svc,
+        record_svc,
+        file_svc,
+        session.commit,
+        config.civex_dir,
+        batch=history_svc.batch,
+    )
+    release_svc = ReleaseService(
+        release_repo,
+        bundle_svc,
+        file_store,
+        audit_repo,
+        permissions=may,
+        actor=project.actor,
+        collections=lambda: {
+            d.id: d.name for d in dataset_svc.list_all(with_count=False)
+        },
+        refs=LocalFileReferenceRepository(session),
+    )
+    release_svc.position = lambda: _sync().history_position()
+    release_svc.fetch = lambda sha: _sync().fetch_file(sha)
+    release_svc.keeps_files = lambda: not _sync().fetches_files
+    release_svc.files = file_access_svc
+    release_svc.locate = record_svc.locate_pointed
+    release_svc.savepoint = lambda: ctx.all_or_nothing()
+    release_svc.structure = lambda: release_rules.structure_of(
+        schema_svc.list_all(), dataset_svc.list_all(with_count=False)
+    )
+    release_svc.records_by_id = lambda ids: record_svc.get_many(ids)
+    release_svc.read_back = lambda shas, progress=None: file_store.verify(
+        shas, progress
+    )
+
     from civex.repositories.local.library_repo import LocalLibraryRepository
     from civex.services.library_service import LibraryService
 
@@ -563,6 +693,7 @@ def build_context(
         audit_svc=audit_repo,
         history_svc=history_svc,
         compaction_svc=HistoryCompactionService(audit_repo, LocalDbSpace(engine)),
+        quality_svc=QualityService(record_svc, schema_svc, permissions=may),
         retention_svc=retention_svc,
         ai_svc=ai_svc,
         ai_usage_svc=ai_usage_svc,
@@ -572,16 +703,18 @@ def build_context(
         container_plugin_svc=container_plugin_svc,
         policy_svc=policy_svc,
         view_svc=view_svc,
-        export_def_svc=export_def_svc,
-        bundle_svc=BundleService(
+        dashboard_svc=DashboardService(
+            LocalDashboardRepository(session),
             schema_svc,
-            dataset_svc,
             record_svc,
-            file_svc,
-            session.commit,
-            config.civex_dir,
-            batch=history_svc.batch,
+            dataset_repo,
+            audit_repo,
+            permissions=may,
         ),
+        note_svc=note_svc,
+        release_svc=release_svc,
+        export_def_svc=export_def_svc,
+        bundle_svc=bundle_svc,
         sync_repo=sync_repo,
         authority_svc=authority_svc,
         device_keys=device_keys,

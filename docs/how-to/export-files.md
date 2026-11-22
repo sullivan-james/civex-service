@@ -140,8 +140,12 @@ collection's **Exports** tab. It takes exactly what the list shows, or the rows
 you ticked. From a list, it starts as the table on screen. **Add files or more
 tables…** opens the full builder (What · Finish), with a live preview of the
 folder tree; tick **Put all the files in one folder** beside it to drop the
-folder for each record. Finish with **Open as a folder**, **Put on a drive** or
-**Download as a zip**. Files on a drive that isn't plugged in are listed in the
+folder for each record. Finish with **Save to a folder** (any folder of this computer:
+**Choose…** opens the folder browser, and the choice is remembered) or
+**Download a zip**. A folder you chose gets ordinary files of your own. With
+none chosen the folder is a quick look inside civex: it opens at once and takes
+no space, and its files are read-only because they are the stored files
+themselves. Files on a drive that isn't plugged in are listed in the
 preview, with what to do, before anything is made.
 
 Saved exports are on the **Exports** page in the sidebar. Its **Made** tab lists

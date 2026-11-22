@@ -14,7 +14,7 @@ from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.tables import FORMATS
 from civex.services.archive import build_download
 
-app = typer.Typer(help="Export saved views")
+app = typer.Typer(help="Saved filters: show, export")
 
 
 @app.command("export")
@@ -71,4 +71,35 @@ def view_export(
         raise typer.Exit(1)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
+        ctx.close()
+
+
+@app.command("show")
+def view_show(
+    schema_name: str = typer.Argument(..., help="Schema the view belongs to"),
+    view_name: str = typer.Argument(..., help="View name"),
+) -> None:
+    """Show a saved filter: its filter, columns and sort."""
+    import json
+
+    ctx = _ctx()
+    try:
+        view = ctx.view_svc.get(schema_name, view_name)
+        console.print(f"[bold]{view.name}[/bold] ({view.schema_name})")
+        console.print(
+            "Filter: " + (json.dumps(view.filter_tree) if view.filter_tree else "none")
+        )
+        if view.columns:
+            console.print("Columns: " + ", ".join(view.columns))
+        if view.sort:
+            console.print(
+                "Sort: "
+                + ", ".join(
+                    f"{s['field']} {s.get('direction', 'asc')}" for s in view.sort
+                )
+            )
+    except (NotFoundError, ValidationError) as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
         ctx.close()

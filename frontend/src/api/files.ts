@@ -113,6 +113,8 @@ export interface FileInfo {
   /** Deleted records that still reference it: they keep it while they can
    * be restored, but don't count as using it. */
   deleted_records?: number
+  /** The releases that keep it, by name. */
+  releases?: string[]
   uses?: {
     id: string
     name: string

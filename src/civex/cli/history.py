@@ -10,6 +10,7 @@ from rich.table import Table
 from civex.cli.utils import get_ctx as _ctx
 from civex.console import console
 from civex.domain.dtos import (
+    BatchRevertDTO,
     REVERT_APPLY,
     REVERT_CONFLICT,
     REVERT_SAME,
@@ -223,6 +224,76 @@ def history_revert(
         console.print(f"[success]Put back: {', '.join(result.applied)}.[/success]")
     else:
         console.print("[success]Reverted.[/success]")
+
+
+@app.command("undo-edit")
+def history_undo_edit(
+    batch_id: Optional[str] = typer.Argument(
+        None,
+        help="The bulk edit to undo (its id in history). Omit with --last",
+    ),
+    last: bool = typer.Option(False, "--last", help="Undo the most recent bulk edit"),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Also overwrite fields that were edited since the bulk edit",
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+) -> None:
+    """Undo a whole bulk edit, such as one made with civex record set.
+
+    Every change in it is undone as a single revert would undo it, and the
+    undo is one new event in history, so it can be undone too. Fields
+    edited since are left alone unless --force is given; a record deleted
+    since, or one that no longer takes its old value, is left and listed.
+    """
+    if (batch_id is None) == (not last):
+        console.print("[error]Give the bulk edit's id, or --last.[/error]")
+        raise typer.Exit(1)
+    ctx = _ctx()
+    try:
+        if last:
+            found, _ = ctx.history_svc.events(
+                where={"field": "how", "op": "eq", "value": "edit"}, limit=1
+            )
+            if not found or found[0].batch is None:
+                console.print("[error]There is no bulk edit to undo.[/error]")
+                raise typer.Exit(1)
+            batch_id = str(found[0].batch.id)
+            label = found[0].batch.label
+            if label:
+                console.print(f"Last bulk edit: {escape(label)}")
+        assert batch_id is not None
+        plan = ctx.history_svc.revert_batch(batch_id, force=force)
+        _print_batch_revert(plan, "would be")
+        if not plan.applied:
+            console.print("[warning]Nothing to undo.[/warning]")
+            raise typer.Exit(1)
+        if not yes:
+            typer.confirm(f"Undo {plan.applied} changes?", abort=True)
+        result = ctx.history_svc.revert_batch(batch_id, force=force, dry_run=False)
+        ctx.commit()
+    except CivexError as e:
+        console.print(f"[error]{e}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+    _print_batch_revert(result, "were")
+
+
+def _print_batch_revert(plan: BatchRevertDTO, verb: str) -> None:
+    console.print(f"{plan.applied} of {plan.entries} changes {verb} undone.")
+    if plan.same:
+        console.print(f"{plan.same} had nothing left to undo.")
+    if plan.conflicts:
+        console.print(
+            f"[warning]{plan.conflicts} met a later edit; those fields are "
+            "left as they are unless --force.[/warning]"
+        )
+    if plan.left:
+        console.print(f"[warning]{plan.left} can't be undone:[/warning]")
+        for r in plan.reasons[:20]:
+            console.print(f"  {r['record_id'][:8]}  {escape(r['reason'])}")
 
 
 @app.command("compact")

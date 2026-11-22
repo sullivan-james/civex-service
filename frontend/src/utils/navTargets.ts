@@ -38,11 +38,27 @@ export function viewTarget(
   return {
     key: targetKeys.view(schema.name, viewName),
     kind: 'view',
+    saved: 'filter',
     label: viewName,
     to: schemaRecordsPath(schema.id, viewName),
     context: schema.name,
     schema: schema.name,
     view: viewName,
+  }
+}
+
+/** A saved export: its own page, where it is changed and run. */
+export function exportTarget(def: {
+  schema_name: string
+  name: string
+}): NavTarget {
+  return {
+    key: `export:${def.schema_name}/${def.name}`,
+    kind: 'export',
+    saved: 'export',
+    label: def.name,
+    to: `/exports/${encodeURIComponent(def.schema_name)}/${encodeURIComponent(def.name)}`,
+    context: def.schema_name,
   }
 }
 

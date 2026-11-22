@@ -36,14 +36,24 @@ def record_query(
         default=None,
         description="Record id (or prefix): only records of 'schema' that "
         "descend from it, at any depth -- an encounter's selections, not just "
-        "its recordings. Requires 'schema'.",
+        "its recordings. Without 'schema', every record beneath it, of any "
+        "kind.",
     ),
     parent_record_id: Optional[str] = Query(
         default=None,
         description="Record id (or prefix): direct children only, of any schema.",
     ),
     search: Optional[str] = Query(
-        default=None, description="Full-text search across all field values"
+        default=None,
+        description="Text to look for, case-insensitively, in the records' "
+        "values: text, numbers, list items and file names (never field ids, "
+        "file hashes or sizes, references or geometries). A record whose id "
+        "starts with it (4 or more hex digits) matches too.",
+    ),
+    search_field: list[str] = Query(
+        default=[],
+        description="Repeatable field name: look for 'search' only in these "
+        "fields of 'schema' (required). Omitted, every searchable field.",
     ),
     where: list[str] = Query(
         default=[],
@@ -72,8 +82,9 @@ def record_query(
     sort: list[str] = Query(
         default=[],
         description="Repeatable '[schema.]field[:asc|desc]'. Nulls sort last "
-        "either way. Needs 'schema'; 'schema.' names an ancestor whose field "
-        "to sort by.",
+        "either way. A field needs 'schema'; 'schema.' names an ancestor whose "
+        "field to sort by. '@kind', '@collection', '@updated_at' and "
+        "'@created_at' sort any list, of one kind or of every kind.",
     ),
 ) -> RecordQuery:
     try:
@@ -85,6 +96,7 @@ def record_query(
         within=within or None,
         parent_record_id=parent_record_id or None,
         search=search or None,
+        search_fields=search_field or None,
         where=where,
         filter_tree=tree,
         sort=_parse_sort(sort),

@@ -106,14 +106,21 @@ class FileInfoService:
 
     def info(self, sha256: str) -> FileInfo:
         """Every place the content is, its size, and the records, collections
-        and workflow runs that use it. Raises NotFoundError for content that is
+        workflow runs and releases that use it. Raises NotFoundError for content that is
         neither stored anywhere nor used by anything."""
         copies = self._store.copies_of(sha256)
         pointing = self._refs.copy_users([sha256])
         for copy in copies:
             copy.records = len(pointing.get((sha256, copy.volume), ()))
         by_collection, jobs, deleted = self._refs.usage(sha256)
-        if not copies and not by_collection and not jobs and not deleted:
+        releases = self._refs.releases_using([sha256]).get(sha256, [])
+        if (
+            not copies
+            and not by_collection
+            and not jobs
+            and not deleted
+            and not releases
+        ):
             raise NotFoundError(f"No file with hash {sha256} is stored or used.")
 
         collections = []
@@ -147,4 +154,5 @@ class FileInfoService:
             collections=collections,
             uses=uses,
             deleted_records=deleted,
+            releases=releases,
         )

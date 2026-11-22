@@ -20,8 +20,12 @@ export function RecordPageFrame({
   action,
   secondaryActions,
   tabs,
+  hierarchy = true,
   children,
 }: {
+  /** Keep the collection's kinds beside the page. A record's own page says
+   * what is inside it itself, so it leaves them out. */
+  hierarchy?: boolean
   /** Collection name, once loaded. */
   collection: string | undefined
   collectionId: string
@@ -52,7 +56,7 @@ export function RecordPageFrame({
   }
   return (
     <WithHierarchy
-      dataset={collection}
+      dataset={hierarchy ? collection : undefined}
       collectionId={collectionId}
       recordId={recordId}
     >

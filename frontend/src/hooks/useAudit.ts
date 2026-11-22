@@ -39,16 +39,55 @@ export function useRevertEntry(onDone?: () => void) {
       onDone?.()
     },
     onError: (error) => toast.error(errorMessage(error)),
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: ['record'] })
-      qc.invalidateQueries({ queryKey: ['records'] })
-      qc.invalidateQueries({ queryKey: ['record-audit'] })
-      qc.invalidateQueries({ queryKey: ['audit'] })
-      qc.invalidateQueries({ queryKey: ['trash'] })
-      qc.invalidateQueries({ queryKey: ['records-deleted'] })
-      qc.invalidateQueries({ queryKey: ['collections'] })
-      invalidateRecordNames(qc)
+    onSettled: () => refreshAfterRevert(qc),
+  })
+}
+
+/** Everything a revert can change: the record, lists it appears in, its
+ * history and the trash. */
+function refreshAfterRevert(qc: ReturnType<typeof useQueryClient>) {
+  for (const key of [
+    'record',
+    'records',
+    'record-audit',
+    'audit',
+    'trash',
+    'records-deleted',
+    'collections',
+  ])
+    qc.invalidateQueries({ queryKey: [key] })
+  invalidateRecordNames(qc)
+}
+
+/** What undoing a whole bulk edit would do. */
+export function useBatchRevertPlan(batchId: string, force: boolean) {
+  return useQuery({
+    queryKey: ['audit-batch-revert-plan', batchId, force],
+    queryFn: () => auditApi.batchRevertPlan(batchId, force),
+    // Describes the records as they are now, so never reuse an old one.
+    gcTime: 0,
+    placeholderData: keepPreviousData,
+  })
+}
+
+/** Undo a whole bulk edit; refreshes what a single revert refreshes. */
+export function useRevertBatch(onDone?: () => void) {
+  const qc = useQueryClient()
+  const toast = useToast()
+  return useMutation({
+    mutationFn: (vars: { batchId: string; force: boolean }) =>
+      auditApi.revertBatch(vars.batchId, vars.force),
+    onSuccess: (result) => {
+      const n = (c: number) =>
+        `${c.toLocaleString()} record${c === 1 ? '' : 's'}`
+      toast.success(
+        `Undid the edit on ${n(result.applied)}` +
+          (result.left ? `. ${n(result.left)} could not be undone.` : ''),
+      )
+      onDone?.()
     },
+    onError: (error) => toast.error(errorMessage(error)),
+    onSettled: () => refreshAfterRevert(qc),
   })
 }
 

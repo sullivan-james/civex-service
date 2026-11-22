@@ -19,7 +19,7 @@ import { schemaTreeHasFiles } from '../utils/hierarchy'
 import { useAvailableExports } from '../hooks/useExportDefinitions'
 import { describeDefinition } from '../utils/exportBuilder'
 import {
-  Badge,
+  Button,
   DetailSkeleton,
   ErrorState,
   Page,
@@ -30,6 +30,7 @@ import {
   useTabParam,
 } from '../components/ui'
 import { ReferencedBy } from '../components/records/ReferencedBy'
+import { displayLabel } from '../utils/naming'
 import { RecordsExplorer } from '../components/explorer/RecordsExplorer'
 import { CollectionTimeZone } from '../components/records/CollectionTimeZone'
 import { RecordPageFrame } from '../components/records/RecordPageFrame'
@@ -50,7 +51,6 @@ import { underRecord } from '../utils/auditFilter'
 import { DeletedFieldValues } from '../components/records/DeletedFieldValues'
 import { RecordFieldGrid } from '../components/records/RecordFieldGrid'
 import { usePermissions } from '../hooks/useMe'
-import { AddFieldRow } from '../components/schemas/AddFieldRow'
 import { MergeView } from '../components/sync/MergeView'
 import { ReviewStepper } from '../components/sync/ReviewStepper'
 import { RecordConflicts } from '../components/sync/RecordConflicts'
@@ -62,11 +62,16 @@ import {
   useResolveConflict,
 } from '../hooks/useRemote'
 import { Slot } from '../components/host/Slot'
+import { NotesPanel } from '../components/notes/NotesPanel'
+
+/** How many fields a record with things inside it shows before "Show all". */
+const FIELDS_FIRST = 6
 
 const RECORD_TABS = [
   { id: 'fields' },
   { id: 'resolve' },
   { id: 'contains' },
+  { id: 'notes' },
   { id: 'referenced' },
   { id: 'runs' },
   { id: 'history' },
@@ -76,6 +81,8 @@ export default function RecordDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [showDeleted, setShowDeleted] = useState(false)
+  const [allFieldsShown, setAllFieldsShown] = useState(false)
   const [tab, setTab] = useTabParam(RECORD_TABS, 'fields')
 
   const { data: record, isLoading, error } = useRecord(id, 3000)
@@ -159,10 +166,31 @@ export default function RecordDetailPage() {
   // the rows just settled are still on screen.
   const showResolve =
     conflictsAbout.length > 0 || (mergeConflicts?.length ?? 0) > 0
+  // What a record contains is under its fields, not a tab of its own; an
+  // old `?tab=contains` link lands there.
   const shownTab =
-    (tab === 'contains' && !showContains) || (tab === 'resolve' && !showResolve)
-      ? 'fields'
-      : tab
+    tab === 'contains' || (tab === 'resolve' && !showResolve) ? 'fields' : tab
+  // A record with things inside it is mostly visited to reach them: its
+  // fields fold to the first few, with the rest one click away. Never
+  // while a field needs attention (a clash to settle, a save refused).
+  const allFields: SchemaField[] =
+    schema?.fields ??
+    Object.keys(record.data).map(
+      (name) =>
+        ({
+          name,
+          label: null,
+          type: 'string',
+          required: false,
+          id: name,
+        }) as SchemaField,
+    )
+  const canFold =
+    showContains &&
+    allFields.length > FIELDS_FIRST + 2 &&
+    conflictsAbout.length === 0 &&
+    !updateRecord.error
+  const foldFields = canFold && !allFieldsShown
   // A failed save is shown under the field it was for.
   const saveErrors = fieldSaveErrors(
     updateRecord.error,
@@ -206,26 +234,44 @@ export default function RecordDetailPage() {
         collection={collection?.name}
         collectionId={record.dataset_id}
         recordId={record.id}
+        hierarchy={false}
         path={record.ancestors ?? []}
         current={record.natural_name ?? record.id.slice(0, 8)}
         currentSchema={record.schema_name}
         title={
-          <span className="inline-flex items-center gap-2">
-            {record.natural_name ?? (
-              <span className="font-mono">{record.id.slice(0, 8)}</span>
-            )}
-            {schema ? (
-              <Link to={`/schemas/${schema.id}`}>
-                <Badge variant="accent">{record.schema_name}</Badge>
-              </Link>
-            ) : (
-              <Badge variant="accent">{record.schema_name}</Badge>
-            )}
+          // What kind of thing this is comes first, then which one.
+          <span className="flex flex-col gap-1">
+            <span className="text-sm font-medium text-fg-muted">
+              {schema ? (
+                <Link className="hover:underline" to={`/schemas/${schema.id}`}>
+                  {displayLabel(schema.name, schema.label)}
+                </Link>
+              ) : (
+                displayLabel(record.schema_name)
+              )}
+            </span>
+            <span>
+              {record.natural_name ?? (
+                <span className="font-mono">{record.id.slice(0, 8)}</span>
+              )}
+            </span>
           </span>
         }
         action={
           <>
             <Slot name="record.header" props={{ recordId: record.id }} />
+            {!!record.open_notes && (
+              <Button
+                size="sm"
+                variant="ghost"
+                to={`/records/${record.id}?tab=notes`}
+                title="Threads of notes not yet resolved"
+              >
+                {record.open_notes === 1
+                  ? '1 open note'
+                  : `${record.open_notes} open notes`}
+              </Button>
+            )}
             {/* Every file under this record, by name and folder: an Encounter
                 holds none itself, but its Recordings and Selections do. */}
             {schema && schemas && schemaTreeHasFiles(schema, schemas) && (
@@ -258,6 +304,28 @@ export default function RecordDetailPage() {
           </>
         }
         secondaryActions={[
+          // The files of this record and of what is inside it.
+          ...(showContains
+            ? [{ label: 'Files', onClick: () => navigate('?show=files') }]
+            : []),
+          // Which fields a kind has is the schema's page, not a record's.
+          ...(schema
+            ? [
+                {
+                  label: 'Edit fields',
+                  onClick: () => navigate(`/schemas/${schema.id}`),
+                },
+              ]
+            : []),
+          // Rarely wanted: the values of fields deleted since.
+          ...((record.deleted_fields ?? []).length > 0
+            ? [
+                {
+                  label: showDeleted ? 'Hide deleted fields' : 'Deleted fields',
+                  onClick: () => setShowDeleted((on) => !on),
+                },
+              ]
+            : []),
           {
             label: 'Delete record…',
             variant: 'danger' as const,
@@ -279,15 +347,13 @@ export default function RecordDetailPage() {
                     },
                   ]
                 : []),
-              ...(showContains
-                ? [
-                    {
-                      id: 'contains' as const,
-                      label: `Contains (${descendantTotal.toLocaleString()})`,
-                    },
-                  ]
-                : []),
-              { id: 'referenced' as const, label: 'Referenced by' },
+              {
+                id: 'notes' as const,
+                label: record.open_notes
+                  ? `Notes (${record.open_notes})`
+                  : 'Notes',
+              },
+              { id: 'referenced' as const, label: 'Linked from' },
               { id: 'runs' as const, label: 'Runs' },
               { id: 'history' as const, label: 'History' },
             ]}
@@ -327,26 +393,16 @@ export default function RecordDetailPage() {
               <RecordStorageSummary
                 recordId={record.id}
                 name={record.natural_name ?? record.id.slice(0, 8)}
-                filesHref={
-                  showContains ? '?tab=contains&show=files' : undefined
-                }
+                filesHref={showContains ? '?show=files' : undefined}
               />
             </div>
             <RecordFieldGrid
-              fields={
-                schema?.fields ??
-                Object.keys(record.data).map(
-                  (name) =>
-                    ({
-                      name,
-                      label: null,
-                      type: 'string',
-                      required: false,
-                      id: name,
-                    }) as SchemaField,
-                )
-              }
+              fields={foldFields ? allFields.slice(0, FIELDS_FIRST) : allFields}
               data={record.data}
+              computed={{
+                values: record.derived,
+                errors: record.formula_errors,
+              }}
               referenceLabels={record.reference_labels}
               referenceCollections={record.reference_collections}
               onSave={saveField}
@@ -359,22 +415,40 @@ export default function RecordDetailPage() {
               errors={saveErrors}
               onDismissError={() => updateRecord.reset()}
               marked={conflictLayout.marked}
-              footer={
-                schema && <AddFieldRow schema={schema} allSchemas={schemas} />
-              }
             />
-            <DeletedFieldValues fields={record.deleted_fields ?? []} />
+            {canFold && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="mt-2"
+                aria-expanded={allFieldsShown}
+                onClick={() => setAllFieldsShown((on) => !on)}
+              >
+                {allFieldsShown
+                  ? 'Show fewer'
+                  : `Show all ${allFields.length} fields`}
+              </Button>
+            )}
+            {showDeleted && (
+              <DeletedFieldValues fields={record.deleted_fields ?? []} />
+            )}
           </UploadCollectionContext.Provider>
+          {showContains && collection && (
+            <section
+              aria-label="Inside this record"
+              className="mt-8 space-y-3 border-t border-border pt-6"
+            >
+              <RecordsExplorer
+                dataset={collection.name}
+                root={{ id: record.id }}
+                pollMs={hasActiveJobs ? 2000 : 5000}
+              />
+            </section>
+          )}
         </TabPanel>
 
-        <TabPanel id="contains" value={shownTab}>
-          {collection && (
-            <RecordsExplorer
-              dataset={collection.name}
-              root={{ id: record.id }}
-              pollMs={hasActiveJobs ? 2000 : 5000}
-            />
-          )}
+        <TabPanel id="notes" value={shownTab}>
+          <NotesPanel recordId={record.id} collectionId={record.dataset_id} />
         </TabPanel>
 
         <TabPanel id="referenced" value={shownTab}>

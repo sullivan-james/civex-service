@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { FilterControls } from './FilterControls'
+import { ToastProvider } from '../ui/ToastProvider'
 import type { FilterTreeWire } from '../../utils/filterTree'
 import type { FilterableField } from '../../utils/hierarchy'
 
@@ -154,5 +155,121 @@ describe('FilterControls', () => {
     rerender(current)
 
     expect(screen.getByRole('textbox', { name: 'Value' })).toHaveValue('ab')
+  })
+})
+
+describe('clearing', () => {
+  it('takes every filter out at once, and is not offered when there are none', async () => {
+    const onChange = vi.fn()
+    const { rerender } = renderControls(
+      {
+        and: [
+          { field: 'note', op: 'eq', value: 'x' },
+          { field: 'age', op: 'gt', value: 3 },
+        ],
+      },
+      onChange,
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
+    expect(onChange).toHaveBeenCalledWith(null)
+    rerender(null)
+    expect(screen.queryByRole('button', { name: 'Clear filters' })).toBeNull()
+  })
+})
+
+describe('values to pick from', () => {
+  it('shows how many of the listed records hold each value, and picks one', async () => {
+    const user = userEvent.setup()
+    const asked: Record<string, unknown>[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input), 'http://x')
+        if (url.pathname !== '/api/records/summary') return json([])
+        asked.push(JSON.parse(String(init!.body)))
+        const row = (value: string, n: number) => ({
+          groups: [
+            { value, label: value, lower: null, upper: null, precision: null },
+          ],
+          values: [n],
+          where: { field: 'ward', schema: 'visit', op: 'eq', value },
+        })
+        return json({
+          schema_name: 'visit',
+          group_columns: [
+            {
+              key: 'ward',
+              field: 'ward',
+              schema_name: 'visit',
+              label: 'Ward',
+              type: 'string',
+              bucket: null,
+              bin: null,
+              unit: null,
+            },
+          ],
+          measure_columns: [
+            {
+              key: 'count',
+              measure: 'count',
+              label: 'Records',
+              field: null,
+              schema_name: null,
+              type: null,
+              unit: null,
+            },
+          ],
+          rows: [row('north', 12), row('south', 30)],
+          total: [42],
+          truncated: false,
+          limit: 1000,
+          timezone: null,
+        })
+      }),
+    )
+    const onChange = vi.fn()
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const wire: FilterTreeWire = {
+      field: 'ward',
+      schema: 'visit',
+      op: 'eq',
+      value: 'north',
+    }
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <FilterControls
+            wire={wire}
+            fields={[
+              ...FIELDS,
+              field('ward', 'string', { choices: ['north', 'south'] }),
+            ]}
+            listedSchema="visit"
+            records={{ collection: 'c', schema_name: 'visit', filter: wire }}
+            onChange={onChange}
+          />
+        </ToastProvider>
+      </QueryClientProvider>,
+    )
+    await user.click(screen.getByRole('button', { name: /Filter$/ }))
+    // Nothing is asked until the values are opened.
+    expect(asked).toHaveLength(0)
+    await user.click(screen.getByRole('button', { name: 'Values' }))
+    const south = await screen.findByRole('button', { name: /south.*30/ })
+    expect(screen.getByRole('button', { name: /north.*12/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    // Counted among the listed records, without this field's own condition.
+    expect(asked[0]).toMatchObject({ collection: 'c', filter: null })
+    await user.click(south)
+    expect(onChange).toHaveBeenCalledWith({
+      field: 'ward',
+      schema: 'visit',
+      op: 'in',
+      value: ['north', 'south'],
+    })
   })
 })

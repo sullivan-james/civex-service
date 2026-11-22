@@ -92,7 +92,7 @@ export function FilesDialog({
     ? 'Download these files'
     : onDrive
       ? 'Put these files on a drive'
-      : 'Open these files as a folder'
+      : 'Save these files to a folder'
   const some =
     missing > 0 ? ` the ${plan.available.toLocaleString()} available` : ''
   const label = zip
@@ -100,8 +100,8 @@ export function FilesDialog({
     : onDrive
       ? `Put${some || ` ${plural(plan.available, 'file')}`} on ${drive.target === PROJECT ? 'the project folder' : drive.target}`
       : missing > 0
-        ? `Open${some}`
-        : 'Open folder'
+        ? `Save${some}`
+        : 'Save to folder'
   const disabled =
     checking ||
     plan.available === 0 ||

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { bundleApi, type BundleImportResult } from '../../api/bundle'
 import { errorMessage } from '../../lib/errors'
 import { pluralise } from '../../lib/utils'
@@ -13,11 +13,15 @@ import {
   ModalFooter,
   ModalHeader,
   Spinner,
+  useToast,
 } from '../ui'
+import { useSaveChoice } from '../files/SaveToDrive'
+import { saveCopy } from '../files/fileFlows'
 
-/** Export the project as a bundle: one file another civex can read. Shows
- * what would go in (the server's plan, asked again as the choice changes) and
- * whether to carry the stored files, then starts the download. */
+/** Copy the project for another one: one file another civex can read. Shows
+ * what would go in (the server's plan, asked again as the choice changes),
+ * whether to carry the stored files, and where it goes: into a folder of
+ * this computer (the default: civex runs here) or through the browser. */
 export function ExportBundleDialog({ onClose }: { onClose: () => void }) {
   const [files, setFiles] = useState(true)
   const plan = useQuery({
@@ -25,22 +29,34 @@ export function ExportBundleDialog({ onClose }: { onClose: () => void }) {
     queryFn: () => bundleApi.plan({ files }),
   })
   const p = plan.data
+  const toast = useToast()
+  const save = useSaveChoice()
+  const qc = useQueryClient()
+
+  function go() {
+    if (save.how === 'download') bundleApi.download({ files })
+    else {
+      // In the background: the status bar shows it, with its progress.
+      const options = { files, folder: save.folder }
+      void saveCopy(
+        { toast, qc, problem: () => undefined },
+        'Copying the project…',
+        (progressId) => bundleApi.save(options, progressId),
+      )
+    }
+    onClose()
+  }
 
   return (
     <Modal onClose={onClose} size="sm">
-      <ModalHeader onClose={onClose}>Export a bundle</ModalHeader>
+      <ModalHeader onClose={onClose}>Copy to another project</ModalHeader>
       <ModalBody>
         <div className="space-y-3 text-sm">
-          <p className="text-fg-muted">
-            One file another civex can read into a project: every schema, every
-            collection and its records (their ids kept), and the project&apos;s
-            workflows and plugins.
-          </p>
           {plan.error ? (
             <FormError message={errorMessage(plan.error)} />
           ) : !p ? (
             <p className="flex items-center gap-2 text-fg-muted">
-              <Spinner /> Working out what would go in…
+              <Spinner /> Counting…
             </p>
           ) : (
             <dl className="space-y-1" data-testid="bundle-plan">
@@ -67,19 +83,13 @@ export function ExportBundleDialog({ onClose }: { onClose: () => void }) {
               can&apos;t be reached now will be left out.
             </p>
           )}
+          {save.picker}
         </div>
       </ModalBody>
       <ModalFooter>
         <Button onClick={onClose}>Cancel</Button>
-        <Button
-          variant="primary"
-          disabled={!p}
-          onClick={() => {
-            bundleApi.download({ files })
-            onClose()
-          }}
-        >
-          Download
+        <Button variant="primary" disabled={!p || save.blocked} onClick={go}>
+          {save.how === 'folder' ? 'Save' : 'Download'}
         </Button>
       </ModalFooter>
     </Modal>
@@ -106,7 +116,7 @@ export function BundleImportResultModal({
   const and = (n: number, what: string) => (n ? `, ${n} ${what}` : '')
   return (
     <Modal onClose={onClose} size="sm">
-      <ModalHeader onClose={onClose}>Import complete</ModalHeader>
+      <ModalHeader onClose={onClose}>Brought in</ModalHeader>
       <ModalBody>
         <dl className="text-sm space-y-1">
           <Row
@@ -123,7 +133,7 @@ export function BundleImportResultModal({
           />
           <Row
             label="Files"
-            value={`${result.files_added} added${and(result.files_missing, 'not in the bundle or here')}${and(result.files_refused, 'refused')}`}
+            value={`${result.files_added} added${and(result.files_missing, 'not in the copy or here')}${and(result.files_refused, 'refused')}`}
           />
           <Row label="Workflows" value={result.workflows} />
           <Row label="Plugins" value={result.plugins} />

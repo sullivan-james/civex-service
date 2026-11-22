@@ -16,8 +16,9 @@ from __future__ import annotations
 import logging
 
 import uuid
+from types import SimpleNamespace
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 from civex import __version__
 from civex.domain import hlc
@@ -78,8 +79,16 @@ class SyncAuthorityService:
         authenticator: Authenticator,
         policy: SyncPolicy | None = None,
         capabilities: tuple[str, ...] = CAPABILITIES,
+        notes: Any = None,
+        releases: Any = None,
     ) -> None:
         self._repo = repo
+        # () -> ReleaseService: whether a pushed release is one a person could
+        # have made, and that a made one's content stays as it is.
+        self._releases = releases
+        # NoteService: where a pushed note's record is, and whether its text
+        # is one a person's note could have.
+        self._notes = notes
         # The optional features this authority offers (`Hello.capabilities`):
         # what every authority does, plus what its host adds (`direct_files`
         # when its store hands out presigned URLs).
@@ -171,6 +180,12 @@ class SyncAuthorityService:
     # ------------------------------------------------------------------
     # Accepting changes
     # ------------------------------------------------------------------
+
+    def received_file(self, sha256: str) -> None:
+        """A file a device sent has been stored here: if it is a release's
+        bundle, the release owns the files it cites from now on."""
+        if self._releases is not None:
+            self._releases().index_waiting(sha256)
 
     def push(self, who: Principal, entries: list[SyncEntry]) -> PushResult:
         """Settle each change, in the order sent. Stops at the first that has
@@ -409,6 +424,10 @@ class SyncAuthorityService:
     def _take(self, who: Principal, entry: SyncEntry) -> OpResult:
         """Merge the change into what is held, write it, and record it."""
         kind, eid = entry.entity_type, entry.entity_id
+        if kind == "release" and entry.action in ("delete", "purge"):
+            raise ValidationError(
+                "A release is never deleted: it can be withdrawn, or yanked"
+            )
         head = self._applier.head(kind, eid)
         cascade = self._cascade_before(entry, head)
         conflicts: list[dict[str, Any]] = []
@@ -466,7 +485,14 @@ class SyncAuthorityService:
             if kind == "record":
                 final = self._records.placed_with_parent(final)
                 self._records.check_incoming(final, head)
+            elif kind == "note" and self._notes is not None:
+                self._check_note(who, final)
+            elif kind == "release" and self._releases is not None:
+                self._releases().check_incoming(final, head)
             self._applier.apply_state(kind, eid, final)
+            if kind == "release" and self._releases is not None:
+                # Its bundle may be here already (files go on their own).
+                self._releases().index_waiting(str(final.get("bundle_sha256")))
         elif entry.action == "delete":
             if head is not None and head.get("deleted_at"):
                 # Already deleted (another device got there first). Both are
@@ -525,6 +551,24 @@ class SyncAuthorityService:
                 c.get("message") for c in conflicts if c["kind"] == "edit_vs_delete"
             )
         return OpResult(entry.id, status, message, conflicts, seq)
+
+    def _check_note(self, who: Principal, state: dict[str, Any]) -> None:
+        """A note goes in only on a record held here, with text a person's note
+        could have, from a caller who may write records in that record's
+        collection (`action_for` can't know it from the note alone)."""
+        collection = self._notes.collection_of(state)
+        if self._policy is not None:
+            refusal = self._policy.refuses(
+                who,
+                cast(Any, SimpleNamespace)(
+                    entity_type="record",
+                    action="update",
+                    new_data={"dataset_id": str(collection)},
+                    old_data=None,
+                ),
+            )
+            if refusal:
+                raise ValidationError(refusal)
 
     def _added_beneath(self, record_id: uuid.UUID) -> bool:
         """Whether a live record sits under this one that the action being

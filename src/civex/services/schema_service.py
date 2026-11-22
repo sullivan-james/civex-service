@@ -5,8 +5,9 @@ from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 
 import uuid
-from typing import Any
+from typing import Any, Callable
 
+from civex.domain.charts import Chart, parse_charts
 from civex.domain.dtos import (
     BlockerDTO,
     DeletedField,
@@ -19,10 +20,11 @@ from civex.domain.dtos import (
     SchemaDTO,
 )
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
-from civex.domain import filename_extract
+from civex.domain import filename_extract, formulas
 from civex.domain import geo as geo_domain
 from civex.domain import partial_dates, templating, units
 from civex.domain.field_descriptors import (
+    COMPUTED_DTYPES,
     FIELD_TYPES,
     RestrictionDescriptor,
     restriction_keys,
@@ -56,6 +58,7 @@ VALID_DTYPES = frozenset(
         "tags",
         "geo",
         "longtext",
+        "formula",
     ]
 )
 
@@ -81,6 +84,19 @@ def _check_control_value(desc: RestrictionDescriptor, value: Any) -> None:
             isinstance(c, str) and c.strip() for c in value
         ):
             problem = "a list of non-empty text values"
+    elif desc.control == "formula":
+        if not isinstance(value, str) or not value.strip():
+            problem = "an expression"
+    elif desc.control == "formula_result":
+        if value not in formulas.RESULT_TYPES:
+            problem = "one of: " + ", ".join(formulas.RESULT_TYPES)
+    elif desc.control == "decimals":
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or not 0 <= value <= formulas.MAX_DECIMALS
+        ):
+            problem = f"a whole number from 0 to {formulas.MAX_DECIMALS}"
     elif desc.control in ("schema", "accept"):
         if not isinstance(value, str) or not value.strip():
             problem = "non-empty text"
@@ -232,12 +248,30 @@ def _validate_from_filename(
             raise ValidationError(f"from_filename: {e}") from None
 
 
+def _template_names(fields: list[ResolvedField]) -> set[str]:
+    """The field names a name template may use: every field but a formula,
+    which is worked out after a record's name and file names are."""
+    return {rf.field.name for rf in fields if rf.field.dtype not in COMPUTED_DTYPES}
+
+
 def _suggest(name: str) -> str | None:
     """Slugified alternative for a legacy name, or None if nothing survives."""
     try:
         return slugify(name)
     except ValidationError:
         return None
+
+
+def _check_computed(dtype: str, required: bool, default_value: Any) -> None:
+    """A formula holds no value, so it can't be required or have a default."""
+    if dtype not in COMPUTED_DTYPES:
+        return
+    if required:
+        raise ValidationError(
+            "A formula can't be required: it is worked out, never typed in"
+        )
+    if default_value is not None:
+        raise ValidationError("A formula can't have a default value")
 
 
 class SchemaResolver:
@@ -297,6 +331,7 @@ class SchemaService:
         self._records = record_repo
         # What the caller may do; asked before any change to the structure.
         self._permissions = permissions
+        self._check_chart: Callable[[str, Chart], None] | None = None
 
     def create(
         self,
@@ -402,6 +437,7 @@ class SchemaService:
         _validate_restriction_keys(dtype, restrictions)
         if not allow_legacy_name:  # see create() for why restore opts out
             validate_name(field_name, "field name")
+        _check_computed(dtype, required, default_value)
 
         schema = self.get(schema_name)
 
@@ -411,13 +447,15 @@ class SchemaService:
             )
 
         known_fields = self.collect_fields(schema)
-        known_field_names = {rf.field.name for rf in known_fields}
-        if restrictions:
-            restrictions = dict(restrictions)
+        known_field_names = _template_names(known_fields)
+        if restrictions or dtype in COMPUTED_DTYPES:
+            restrictions = dict(restrictions or {})
             _validate_filename_template(
                 restrictions, known_field_names, self._reference_targets(schema)
             )
             _validate_from_filename(dtype, restrictions, known_fields)
+            if dtype in COMPUTED_DTYPES:
+                self._validate_formula(schema, field_name, restrictions)
 
         field = self._repo.add_field(
             schema_id=schema.id,
@@ -469,7 +507,7 @@ class SchemaService:
             if self._repo.get_by_name(new_name):
                 raise AlreadyExistsError(f"Schema '{new_name}' already exists")
         if display_template is not ... and display_template:
-            names = {rf.field.name for rf in self.collect_fields(schema)}
+            names = _template_names(self.collect_fields(schema))
             try:
                 templating.validate(
                     display_template,
@@ -557,6 +595,108 @@ class SchemaService:
             )
         return updated
 
+    def use_chart_check(self, check: Callable[[str, Chart], None]) -> None:
+        """How a chart is held to a kind's fields: the record service's
+        `check_chart` (the rule a chart is drawn by), handed over where the
+        services are wired since it sits above this one."""
+        self._check_chart = check
+
+    def set_charts(self, name: str, charts: list[dict[str, Any]]) -> SchemaDTO:
+        """Replace the charts a list of this kind opens with (in order; an
+        empty list leaves it with none). Shared by everyone, like a saved
+        filter, so it takes the right to write records somewhere, not to
+        change the structure. Each is checked as it would
+        be drawn: its fields are the kind's own or those of a kind above."""
+        self._permissions.require_somewhere(permissions.WRITE_RECORDS)
+        schema = self.get(name)
+        parsed = parse_charts(charts)
+        for chart in parsed:
+            if self._check_chart is not None:
+                self._check_chart(schema.name, chart)
+        stored = [c.to_dict() for c in parsed]
+        if stored == schema.charts:
+            return schema
+        updated = self._repo.update(
+            schema.id, name=None, description=None, charts=stored
+        )
+        if self._audit:
+            self._audit.log_change(
+                "update", "schema", updated.id, schema.to_dict(), updated.to_dict()
+            )
+        return updated
+
+    def _rewrite_charts(self, owner: SchemaDTO, old: str, new: str | None) -> None:
+        """Keep charts in step with a field of `owner` renamed (`new`) or
+        deleted (None): on `owner` and every kind beneath it, a chart naming
+        the field is rewritten, or dropped when the field is gone. Each kind
+        changed is an entry in history, like a rewritten template."""
+        for schema in [owner] + [s for s, _ in self.descendants(owner)]:
+            current = self._repo.get_by_id(schema.id)
+            if current is None or not current.charts:
+                continue
+            shadowed = schema.id != owner.id and any(
+                f.name == old for f in current.fields
+            )
+
+            def names(key: str) -> tuple[str, str, str]:
+                name, sep, how = key.partition(":")
+                above, _, field = name.rpartition(".")
+                hit = field == old and (
+                    above == owner.name or (not above and not shadowed)
+                )
+                if not hit or new is None:
+                    return key, key if not hit else "", ""
+                return key, ((above + ".") if above else "") + new + sep + how, ""
+
+            kept: list[dict[str, Any]] = []
+            for chart in current.charts:
+                out = dict(chart)
+                gone = False
+                swaps: dict[str, str] = {}
+                if "map" in chart:
+                    _, to, _ = names(chart["map"])
+                    gone = not to
+                    out["map"] = to
+                else:
+                    groups = []
+                    for g in chart.get("group_by", []):
+                        _, to, _ = names(g)
+                        gone = gone or not to
+                        swaps[g] = to
+                        groups.append(to)
+                    measures = []
+                    for m in chart.get("measures", []):
+                        kind, sep, name = m.partition(":")
+                        to = m
+                        if sep and kind != "inside":
+                            _, renamed, _ = names(name)
+                            gone = gone or not renamed
+                            to = kind + sep + renamed
+                        swaps[m] = to
+                        measures.append(to)
+                    out["group_by"], out["measures"] = groups, measures
+                    if out.get("chart_measure"):
+                        out["chart_measure"] = swaps.get(
+                            out["chart_measure"], out["chart_measure"]
+                        )
+                    if out.get("sort"):
+                        column = out["sort"]["column"]
+                        out["sort"] = {
+                            **out["sort"],
+                            "column": swaps.get(column, column),
+                        }
+                if not gone:
+                    kept.append(out)
+            if kept == current.charts:
+                continue
+            updated = self._repo.update(
+                current.id, name=None, description=None, charts=kept
+            )
+            if self._audit:
+                self._audit.log_change(
+                    "update", "schema", current.id, current.to_dict(), updated.to_dict()
+                )
+
     def _reference_targets(self, schema: SchemaDTO) -> dict[str, set[str]]:
         """For each single-record reference field on `schema` (own or inherited)
         that names its target schema, the field names of that target schema.
@@ -571,7 +711,7 @@ class SchemaService:
                 target_schema = self.get(target)
             except NotFoundError:
                 continue
-            out[f.name] = {t.field.name for t in self.collect_fields(target_schema)}
+            out[f.name] = _template_names(self.collect_fields(target_schema))
         return out
 
     def preview_name(
@@ -586,7 +726,7 @@ class SchemaService:
         for this schema. `kind` is "record" (a record's name) or "file" (a
         download name: the stem only, shown with an example extension)."""
         schema = self.get(schema_name)
-        names = {rf.field.name for rf in self.collect_fields(schema)}
+        names = _template_names(self.collect_fields(schema))
         builtins_allowed = (
             templating.BUILTINS_FILE if kind == "file" else templating.BUILTINS_RECORD
         )
@@ -755,6 +895,205 @@ class SchemaService:
                     "update", "field", f.id, f.to_dict(), changed.to_dict()
                 )
 
+    def formula_kinds(
+        self, schema: SchemaDTO, leave_out: str | None = None
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        """What a formula on `schema` may read: each name (own and inherited
+        fields, `link.field` through a link to one kind) with its kind inside
+        a formula (`formulas.KIND_OF_DTYPE`), and with the field type it is
+        read as (a formula's being its result). `leave_out` is the formula
+        being checked, which can't read itself. A field of a linked record
+        that is itself a formula is left out: a link reaches stored values
+        only, one step."""
+        kinds: dict[str, str] = {}
+        dtypes: dict[str, str] = {}
+
+        def add(name: str, f: FieldDTO, allow_formula: bool) -> None:
+            if f.dtype in COMPUTED_DTYPES:
+                result = (f.restrictions or {}).get("result")
+                if allow_formula and result in formulas.KIND_OF_RESULT:
+                    kinds[name] = formulas.KIND_OF_RESULT[result]
+                    dtypes[name] = result
+            elif f.dtype in formulas.KIND_OF_DTYPE:
+                kinds[name] = formulas.KIND_OF_DTYPE[f.dtype]
+                dtypes[name] = f.dtype
+
+        for rf in self.collect_fields(schema):
+            f = rf.field
+            if f.name == leave_out or f.name in kinds:
+                continue
+            add(f.name, f, True)
+            target = (f.restrictions or {}).get("schema")
+            if f.dtype == "reference" and isinstance(target, str):
+                try:
+                    target_schema = self.get(target)
+                except NotFoundError:
+                    continue
+                for t in self.collect_fields(target_schema):
+                    add(f"{f.name}.{t.field.name}", t.field, False)
+        return kinds, dtypes
+
+    def check_formula(
+        self,
+        schema_name: str,
+        restrictions: dict[str, Any],
+        field_name: str | None = None,
+    ) -> dict[str, Any]:
+        """A formula field's rules as saving them would leave them (the result
+        type filled in), or ValidationError: the one check behind saving a
+        formula and previewing one. `field_name` is the formula being edited,
+        if any."""
+        rules = dict(restrictions)
+        _validate_restriction_keys("formula", rules)
+        self._validate_formula(self.get(schema_name), field_name or "", rules)
+        return rules
+
+    def _validate_formula(
+        self, schema: SchemaDTO, field_name: str, restrictions: dict[str, Any]
+    ) -> None:
+        """Check a formula field's rules before it is saved, filling in its
+        `result` when none is given: the expression reads only fields it can
+        (`formula_kinds`), its kinds fit, what it gives fits `result`, and no
+        formulas of the schema read each other in a circle."""
+        expression = restrictions.get("expression")
+        if not expression:
+            raise ValidationError("A formula field needs an expression")
+        try:
+            formula = formulas.parse(expression)
+        except ValidationError as e:
+            raise ValidationError(f"expression: {e}") from None
+        if field_name and any(n.partition(".")[0] == field_name for n in formula.names):
+            raise ValidationError(
+                f"expression: a formula can't use itself ('{field_name}')"
+            )
+        kinds, _ = self.formula_kinds(schema, leave_out=field_name)
+        try:
+            kind = formulas.infer(formula, kinds)
+        except ValidationError as e:
+            raise ValidationError(f"expression: {e}") from None
+        result = restrictions.get("result")
+        if result is None:
+            result = formulas.RESULT_OF_KIND.get(kind, "string")
+            restrictions["result"] = result
+        elif not formulas.fits(kind, result):
+            raise ValidationError(
+                f"The formula gives {formulas.kind_words(kind)}, which can't be "
+                f"shown as {result}"
+            )
+        if result != "float":
+            extra = [k for k in ("unit", "decimals") if k in restrictions]
+            if extra:
+                raise ValidationError(
+                    f"{' and '.join(extra)} only apply to a formula giving a "
+                    "decimal number"
+                )
+        restrictions["expression"] = formula.source
+        self._check_formula_cycle(schema, field_name, formula)
+
+    def _check_formula_cycle(
+        self, schema: SchemaDTO, field_name: str, formula: formulas.Formula
+    ) -> None:
+        """Refuse a formula that, through the schema's other formulas, ends up
+        reading itself. Only the schema's own formulas can: a formula above
+        can't read a field below it, and a link reaches no formula."""
+        reads: dict[str, set[str]] = {}
+        for f in schema.fields:
+            if f.dtype not in COMPUTED_DTYPES or f.name == field_name:
+                continue
+            try:
+                other = formulas.parse((f.restrictions or {}).get("expression", ""))
+            except ValidationError:
+                continue
+            reads[f.name] = set(other.names)
+        if not field_name:
+            # A formula not saved yet: none of the others can read it.
+            field_name = "\0"
+        reads[field_name] = set(formula.names)
+        path: list[str] = []
+
+        def visit(name: str) -> None:
+            if name in path:
+                circle = path[path.index(name) :] + [name]
+                raise ValidationError(
+                    "expression: formulas can't read each other in a circle ("
+                    + " → ".join(circle)
+                    + ")"
+                )
+            path.append(name)
+            for used in reads.get(name, ()):
+                if used in reads:
+                    visit(used)
+            path.pop()
+
+        visit(field_name)
+
+    def _formula_holders(
+        self, target_field: FieldDTO
+    ) -> list[tuple[FieldDTO, list[str | None]]]:
+        """Every formula field that reads `target_field`, with how (`via` as in
+        `_template_holders`: None for directly, or the link field it is
+        reached through). Resolved by field identity through the inheritance
+        chain, so a child's own field shadowing an inherited one is left
+        alone."""
+        schemas = self._repo.list_all()
+        if not any(f.dtype in COMPUTED_DTYPES for s in schemas for f in s.fields):
+            return []
+        found: list[tuple[FieldDTO, list[str | None]]] = []
+        for schema in schemas:
+            own = [f for f in schema.fields if f.dtype in COMPUTED_DTYPES]
+            if not own:
+                continue
+            resolved = {rf.field.name: rf.field for rf in self.collect_fields(schema)}
+            for f in own:
+                try:
+                    formula = formulas.parse(
+                        (f.restrictions or {}).get("expression", "")
+                    )
+                except ValidationError:
+                    continue
+                vias: list[str | None] = []
+                for name in formula.names:
+                    base, _, sub = name.partition(".")
+                    hit = resolved.get(base)
+                    if hit is not None and hit.id == target_field.id:
+                        if None not in vias:
+                            vias.append(None)
+                        continue
+                    target = (hit.restrictions or {}).get("schema") if hit else None
+                    if sub and hit and hit.dtype == "reference" and target:
+                        try:
+                            through = {
+                                rf.field.name: rf.field.id
+                                for rf in self.collect_fields(self.get(target))
+                            }
+                        except NotFoundError:
+                            continue
+                        if through.get(sub) == target_field.id and base not in vias:
+                            vias.append(base)
+                if vias:
+                    found.append((f, vias))
+        return found
+
+    def _rewrite_formulas(
+        self,
+        holders: list[tuple[FieldDTO, list[str | None]]],
+        old: str,
+        new: str,
+    ) -> None:
+        """Rename `old` to `new` in every formula in `holders`: each is an edit
+        of that field, logged like any other."""
+        for f, vias in holders:
+            restrictions = dict(f.restrictions or {})
+            expression = restrictions["expression"]
+            for via in vias:
+                expression = formulas.rename(expression, old, new, via)
+            restrictions["expression"] = expression
+            changed = self._repo.update_field(f.id, restrictions=restrictions)
+            if self._audit:
+                self._audit.log_change(
+                    "update", "field", f.id, f.to_dict(), changed.to_dict()
+                )
+
     def restore_field_plan(
         self, schema_name: str, field_id: uuid.UUID
     ) -> RestorePlanDTO:
@@ -832,6 +1171,16 @@ class SchemaService:
             raise NotFoundError(
                 f"Field '{field_name}' not found on schema '{schema_name}'"
             )
+        users = [f for f, _ in self._formula_holders(field) if f.id != field.id]
+        if users:
+            raise ValidationError(
+                f"'{field_name}' is used by the formula"
+                + ("s " if len(users) > 1 else " ")
+                + ", ".join(f"'{f.name}'" for f in users)
+                + ". Change or delete "
+                + ("those" if len(users) > 1 else "that formula")
+                + " first."
+            )
         holders = self._template_holders(field)
         rule_holders = self._filename_rule_holders(field)
         # A uniqueness policy can't outlive one of its fields.
@@ -853,8 +1202,16 @@ class SchemaService:
         self._rewrite_templates(
             holders, lambda tpl, via: templating.remove_field(tpl, field_name, via)
         )
+        self._rewrite_charts(schema, field_name, None)
         # A field filled from this file's name has nothing to read any more.
         self._rewrite_filename_rules(rule_holders, None)
+
+    @staticmethod
+    def check_restrictions(dtype: str, restrictions: dict[str, Any]) -> None:
+        """Refuse restrictions a field of `dtype` can't have (unknown keys,
+        values of the wrong shape): what `add_field`/`update_field` check
+        first, for a caller asking about rules before saving them."""
+        _validate_restriction_keys(dtype, restrictions)
 
     @_one_action
     def update_field(
@@ -883,15 +1240,22 @@ class SchemaService:
                 raise AlreadyExistsError(
                     f"Field '{new_name}' already exists on schema '{schema_name}'"
                 )
+        _check_computed(
+            field.dtype,
+            bool(required),
+            None if default_value is ... else default_value,
+        )
         if restrictions is not None:
             _validate_restriction_keys(field.dtype, restrictions)
             known_fields = self.collect_fields(schema)
-            known_field_names = {rf.field.name for rf in known_fields}
+            known_field_names = _template_names(known_fields)
             restrictions = dict(restrictions)
             _validate_filename_template(
                 restrictions, known_field_names, self._reference_targets(schema)
             )
             _validate_from_filename(field.dtype, restrictions, known_fields)
+            if field.dtype in COMPUTED_DTYPES:
+                self._validate_formula(schema, field_name, restrictions)
         old_dict = field.to_dict()
         kwargs: dict[str, Any] = dict(
             name=new_name, required=required, restrictions=restrictions
@@ -902,6 +1266,7 @@ class SchemaService:
             kwargs["label"] = label or None
         holders = self._template_holders(field) if renaming else []
         rule_holders = self._filename_rule_holders(field) if renaming else []
+        formula_holders = self._formula_holders(field) if renaming else []
         updated = self._repo.update_field(field.id, **kwargs)
         if renaming:
             assert new_name is not None  # implied by `renaming`
@@ -912,6 +1277,8 @@ class SchemaService:
                 ),
             )
             self._rewrite_filename_rules(rule_holders, new_name)
+            self._rewrite_formulas(formula_holders, field_name, new_name)
+            self._rewrite_charts(schema, field_name, new_name)
         if self._audit:
             self._audit.log_change(
                 "update", "field", updated.id, old_dict, updated.to_dict()

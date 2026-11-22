@@ -164,6 +164,8 @@ IDENTITY_KEYS = frozenset(
         "dataset_id",
         "parent_id",
         "parent_record_id",
+        "record_id",  # a note's: the record it is on
+        "thread_id",  # a reply's: the note it answers
         "dtype",  # a field's: how its values (and restrictions) read
         # Whether it was deleted when changed: an edit to something live that
         # meets a delete elsewhere keeps it; one made to something already

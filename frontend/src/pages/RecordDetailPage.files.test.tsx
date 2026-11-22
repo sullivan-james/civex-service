@@ -198,3 +198,48 @@ describe('files on a record page', () => {
     expect(screen.queryByRole('button', { name: /^export$/i })).toBeNull()
   })
 })
+
+describe('what a record contains', () => {
+  it('is under its fields, not a tab of its own', async () => {
+    renderPage(FILES_BELOW)
+    const inside = await screen.findByRole('region', {
+      name: 'Inside this record',
+    })
+    // The page says what kind of thing this is, above its name.
+    expect(screen.getByRole('link', { name: 'Encounter' })).toBeInTheDocument()
+    expect(inside).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: /Contains/ })).toBeNull()
+    // The fields are on the same screen, above it.
+    expect(screen.getByText('Stellwagen')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'History' })).toBeInTheDocument()
+  })
+})
+
+describe('a record with many fields and things inside it', () => {
+  const MANY = [
+    schema(
+      'encounter',
+      null,
+      Array.from(
+        { length: 10 },
+        (_, i) => [`f${i}`, 'string'] as [string, string],
+      ),
+    ),
+    schema('recording', 'encounter', [['rate', 'integer']]),
+  ]
+
+  it('shows its first fields, the rest a click away, and no list of kinds beside it', async () => {
+    renderPage(MANY)
+    await screen.findByRole('region', { name: 'Inside this record' })
+    expect(screen.getByText('F0')).toBeInTheDocument()
+    expect(screen.queryByText('F9')).toBeNull()
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Show all 10 fields' }),
+    )
+    expect(screen.getByText('F9')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Show fewer' }))
+    expect(screen.queryByText('F9')).toBeNull()
+    // What is inside is said by the page itself.
+    expect(screen.queryByRole('button', { name: 'All kinds' })).toBeNull()
+  })
+})

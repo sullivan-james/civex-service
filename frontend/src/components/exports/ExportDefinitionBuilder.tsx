@@ -200,9 +200,7 @@ export function ExportBuilder({
         : 'Save export'
     : method === 'zip'
       ? 'Download'
-      : method === 'copy'
-        ? 'Put on drive'
-        : 'Open folder'
+      : 'Save to folder'
 
   return (
     <div className="space-y-8 p-2">

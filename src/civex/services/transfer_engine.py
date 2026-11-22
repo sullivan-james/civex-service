@@ -39,6 +39,7 @@ from civex.domain.placement import (
     Scope,
     file_step,
     keeping,
+    moving,
 )
 from civex.domain.rates import RateWindow, eta_seconds
 from civex.domain.transfers import (
@@ -387,7 +388,9 @@ def scope_of(spec: TransferSpec) -> Scope:
         return Scope(drives=frozenset(spec.sources))
     if spec.kind == KIND_CONSOLIDATE:
         return Scope(collections=frozenset(spec.collection_ids))
-    return Scope(records=frozenset(spec.record_ids))
+    return Scope(
+        records=frozenset(spec.record_ids), releases=frozenset(spec.release_ids)
+    )
 
 
 def plan_steps(
@@ -420,7 +423,7 @@ def plan_steps(
         pointers = refs.pointers(shas)
         for sha in shas:
             owners: list[Pointer] = pointers.get(sha, [])
-            mine = [p for p in owners if scope.covers(p)]
+            mine = moving(owners, scope)
             mine_on = {p.volume for p in mine if p.volume}
             # Copy from the copy the move's own owners use, if it can.
             rows = sorted(

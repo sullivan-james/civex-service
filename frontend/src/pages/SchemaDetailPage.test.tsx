@@ -42,7 +42,7 @@ function renderPage(path = '/schemas/s1') {
 
 describe('SchemaDetailPage', () => {
   beforeEach(() => {
-    setFieldTypesForTest({ types: [], kinds: [] })
+    setFieldTypesForTest({ types: [], kinds: [], summary_measures: [] })
     vi.spyOn(schemasApi, 'get').mockResolvedValue(schema)
     vi.spyOn(schemasApi, 'list').mockResolvedValue([schema])
     vi.spyOn(schemasApi, 'getAudit').mockResolvedValue({
