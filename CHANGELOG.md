@@ -48,10 +48,24 @@ from the next tag forward.
   refused changes wait and print `civex sync resolve --all --take retry --kind
   rejected`.
 
+### Added
+
+- **`civex files missing`** lists files records cite that this project never
+  stored and nothing can supply (no copy here, none on the server), by
+  collection and field. `--ignore <hash|all>` stops the warnings (the records keep
+  citing them; reversible with `--unignore`, and forgotten by itself when the file
+  turns up). `--remove <hash|all> [--dry-run]` clears them from the records as
+  ordinary edits (history, sync), one event in Activity; a record whose required
+  field would be left empty is left as it is and named. Never touches a file that
+  exists here or that the server holds. Also `GET/POST /api/remote/files/missing`
+  (`/ignore`, `/unignore`, `/remove`), an Ignore action on the app's missing-files
+  notice, and an "Ignored" line in `civex sync status`.
+
 ### Breaking
 
 - Migration `a3c7e1d9f5b4` adds `code`, `retries` and `retried_at` to
-  `sync_conflicts` (nullable / defaulted; applied automatically).
+  `sync_conflicts`, and `c8d2f4a6b1e7` adds `ignored_missing_files` (applied
+  automatically).
 
 ## v2.1.0 — big collections stay fast, hosting hooks, partitioned PostgreSQL (2026-11-22)
 

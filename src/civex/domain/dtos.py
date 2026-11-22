@@ -1328,6 +1328,47 @@ class BulkEditSkipDTO:
 
 
 @dataclass
+class MissingFileGroupDTO:
+    """Records of one kind in one collection whose one field cites files nothing
+    can supply: how many records and how many distinct files."""
+
+    collection: str | None
+    schema: str
+    field: str
+    records: int = 0
+    files: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "collection": self.collection,
+            "schema": self.schema,
+            "field": self.field,
+            "records": self.records,
+            "files": self.files,
+        }
+
+
+@dataclass
+class MissingFilesRemovalDTO:
+    """What taking files out of the records citing them did (or, planned, would
+    do): records changed, the groups they fall in, and records left as they are
+    with the reason (a required field that would be left empty)."""
+
+    changed: int = 0
+    groups: list[MissingFileGroupDTO] = field(default_factory=list)
+    skipped: list[BulkEditSkipDTO] = field(default_factory=list)
+    skipped_count: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "changed": self.changed,
+            "groups": [g.to_dict() for g in self.groups],
+            "skipped": [s.to_dict() for s in self.skipped],
+            "skipped_count": self.skipped_count,
+        }
+
+
+@dataclass
 class RecordBulkEditPlanDTO:
     """What setting (or clearing) some fields on many records would do,
     worked out without doing it. A record takes every change or none: one

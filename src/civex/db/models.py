@@ -1126,6 +1126,20 @@ class ServerFile(Base):
     sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
 
 
+class IgnoredMissingFile(Base):
+    """A file records cite that this project never stored and nothing can
+    supply, which a person chose to stop being told about (`civex files
+    missing --ignore`). The references stay. Forgotten when the file turns up
+    here, and by `--unignore`."""
+
+    __tablename__ = "ignored_missing_files"
+
+    sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    ignored_at: Mapped[datetime] = mapped_column(
+        _UTCDateTime(), nullable=False, default=_now
+    )
+
+
 class ServerLack(Base):
     """Device: a file the authority said it hasn't got, when last asked (it
     answered that it lacks it, or a download found nothing there). With no copy

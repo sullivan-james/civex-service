@@ -49,6 +49,7 @@ from civex.domain.exceptions import (
 )
 from civex.domain.file_refs import without_file_locations
 from civex.domain.hosts import is_loopback
+from civex.domain.dtos import MissingFileGroupDTO, MissingFilesRemovalDTO
 from civex.domain.sync import (
     REFUSAL_PERMISSION,
     is_lock_contention,
@@ -215,6 +216,31 @@ class SyncStatus:
     files_to_send: int = 0
     # Why those haven't gone (`SyncService.files_waiting`), when there are any.
     files_waiting: FilesWaiting | None = None
+    # Missing files a person chose to stop being told about.
+    files_ignored: int = 0
+
+
+@dataclass
+class MissingFilesReport:
+    """Files records here cite that this project never stored and that nothing
+    can supply (no copy on any drive here, and the authority hasn't got it
+    either): `shas`, with where records cite them (`groups`), and `ignored`,
+    those a person chose to stop hearing about."""
+
+    shas: list[str] = field(default_factory=list)
+    ignored: list[str] = field(default_factory=list)
+    groups: list[MissingFileGroupDTO] = field(default_factory=list)
+    # False when a remote is set but couldn't be asked whether it holds them:
+    # the list is then only what is missing here.
+    server_checked: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "shas": self.shas,
+            "ignored": self.ignored,
+            "groups": [g.to_dict() for g in self.groups],
+            "server_checked": self.server_checked,
+        }
 
 
 @dataclass
@@ -232,6 +258,8 @@ class FilesWaiting:
     # them), and the collections whose records cite them, as (name, records).
     never_stored: int = 0
     never_stored_in: list[tuple[str, int]] = field(default_factory=list)
+    # Missing files a person chose to stop being told about.
+    ignored: int = 0
 
 
 class SyncService:
@@ -289,6 +317,7 @@ class SyncService:
             interval_seconds=self._config.sync.interval_seconds,
             serving=self._config.sync.serve,
             download_files=self._config.sync.download_files,
+            files_ignored=len(self._repo.ignored_missing()),
             files_to_fetch=self.files_to_fetch(),
             files_to_send=(
                 waiting.ready + sum(n for _, n, _ in waiting.offline) if waiting else 0
@@ -333,12 +362,117 @@ class SyncService:
             else:
                 offline[volumes[0]] = offline.get(volumes[0], 0) + 1
         waiting.offline = [(v, n, status[v].reason) for v, n in sorted(offline.items())]
+        ignored = self._repo.ignored_missing()
+        absent = {s for s, v in copies.items() if not v and s in lacking}
+        waiting.ignored = len(absent & ignored)
+        waiting.missing -= waiting.ignored
         if waiting.missing:
-            absent = {s for s, v in copies.items() if not v and s in lacking}
-            never = self._repo.never_stored(absent)
+            never = self._repo.never_stored(absent - ignored)
             waiting.never_stored = len(never)
             waiting.never_stored_in = self._citing_collections(never)
         return waiting
+
+    # -- files nothing can supply -----------------------------------------
+
+    def _forget_found(self) -> set[str]:
+        """The files chosen to be ignored, less any that have since turned up
+        here (they are not ignored any more, and go to the server as usual)."""
+        ignored = self._repo.ignored_missing()
+        found = ignored - self._repo.never_stored(ignored)
+        if found:
+            self._repo.unignore_missing(found)
+            self._commit()
+        return ignored - found
+
+    def missing_files(self, include_ignored: bool = False) -> MissingFilesReport:
+        """The files live records cite that this project has never stored, that
+        no drive here holds, and (with a remote set) that the authority hasn't
+        got either: the ones nothing can supply, with where records cite them.
+        Never a file that exists anywhere here or on the server. A remote that
+        can't be reached leaves `server_checked` false."""
+        ignored = self._forget_found()
+        candidates: list[str] = []
+        after = ""
+        while page := self._repo.referenced_shas(after, FILE_CHECK_PAGE):
+            after = page[-1]
+            candidates.extend(
+                s
+                for s in self._repo.never_stored(page)
+                if self._files.size_of(s) is None
+            )
+        report = MissingFilesReport()
+        if candidates and self.configured and self.fetches_files:
+            try:
+                transport = self._transport()
+                lacking: set[str] = set()
+                for at in range(0, len(candidates), FILE_CHECK_PAGE):
+                    lacking.update(
+                        transport.missing_files(candidates[at : at + FILE_CHECK_PAGE])
+                    )
+                candidates = [s for s in candidates if s in lacking]
+            except SyncError:
+                report.server_checked = False
+        report.ignored = sorted(s for s in candidates if s in ignored)
+        report.shas = sorted(s for s in candidates if s not in ignored)
+        shown = set(candidates) if include_ignored else set(report.shas)
+        if shown:
+            plan = self._records.remove_files(
+                shown, [str(r) for r in self._repo.citing_records(shown)], dry_run=True
+            )
+            for planned in plan:
+                report.groups = planned.groups
+        return report
+
+    def ignore_missing(self, shas: list[str]) -> int:
+        """Stop warning about these missing files (the references stay). Only
+        files `missing_files` lists can be ignored."""
+        report = self.missing_files()
+        if not report.server_checked:
+            raise SyncError(
+                "The server couldn't be asked whether it has these files, so none "
+                "was ignored. Try again when it can be reached."
+            )
+        chosen = set(shas) & set(report.shas)
+        self._repo.ignore_missing(chosen)
+        self._commit()
+        return len(chosen)
+
+    def ignored_missing(self) -> set[str]:
+        return self._repo.ignored_missing()
+
+    def unignore_missing(self, shas: list[str]) -> int:
+        n = self._repo.unignore_missing(shas)
+        self._commit()
+        return n
+
+    def remove_missing(
+        self, shas: list[str], dry_run: bool = False
+    ) -> MissingFilesRemovalDTO:
+        """Take missing files out of the records citing them (the field no longer
+        points at them), as one batch of ordinary edits: validated, in the
+        history, synced, undone whole from Activity. Only files `missing_files`
+        lists (never one that exists here or that the authority holds), and
+        never when the authority couldn't be asked. A required field that would
+        be left empty leaves its record as it is, named in the result. Raises
+        `SyncError` when the authority can't be asked."""
+        report = self.missing_files(include_ignored=True)
+        if not report.server_checked:
+            raise SyncError(
+                "The server couldn't be asked whether it has these files, so none "
+                "was removed. Try again when it can be reached."
+            )
+        chosen = set(shas) & (set(report.shas) | set(report.ignored))
+        result = MissingFilesRemovalDTO()
+        if not chosen:
+            return result
+        ids = [str(r) for r in self._repo.citing_records(chosen)]
+        for result in self._records.remove_files(chosen, ids, dry_run=dry_run):
+            if not dry_run:
+                self._commit()
+        if not dry_run:
+            self._repo.unignore_missing(chosen)
+            self._commit()
+        return result
 
     def _citing_collections(self, shas: set[str]) -> list[tuple[str, int]]:
         """The collections whose live records cite these files, as (name,
@@ -1272,6 +1406,7 @@ class SyncService:
         report = FileSendReport()
         if not self.fetches_files:
             return report
+        self._forget_found()
         shas: list[str] = []
         after = ""
         while page := self._repo.referenced_shas(
@@ -1291,6 +1426,9 @@ class SyncService:
         """One line for the files the authority lacks that can't be read here:
         how many, a few ids, and (for those this project never stored) which
         collections cite them. Each file is at DEBUG."""
+        report.owed = [s for s in report.owed if s not in self._repo.ignored_missing()]
+        if not report.owed:
+            return
         report.never_stored = sorted(self._repo.never_stored(report.owed))
         report.never_stored_in = self._citing_collections(set(report.never_stored))
         where = ", ".join(f"{n} in {name}" for name, n in report.never_stored_in[:5])

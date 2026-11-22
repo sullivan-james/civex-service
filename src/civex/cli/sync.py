@@ -222,7 +222,7 @@ def _never_stored(waiting) -> None:  # noqa: ANN001 — FilesWaiting
         f"[dim]{waiting.never_stored} of them were never stored in this project "
         f"(records cite them without their contents). Records affected: {where}. "
         "Attach the file to those records again, or sync from the computer "
-        "that has it.[/dim]"
+        "that has it. `civex files missing` lists, ignores or removes them.[/dim]"
     )
 
 
@@ -537,6 +537,11 @@ def status() -> None:
         console.print(f"[warning]Last problem  {escape(s.last_error)}[/warning]")
     if s.files_waiting and s.files_waiting.missing:
         _files_owed_missing(s.files_waiting)
+    if s.files_ignored:
+        console.print(
+            f"Ignored     {s.files_ignored} missing file(s) "
+            "(`civex files missing --unignore all` warns again)"
+        )
 
 
 @app.command("connect")

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Generator, Iterable, Iterator
 from zoneinfo import ZoneInfo
 
+from civex.domain.bundle import plain_data
 from civex.domain.charts import Chart
 from civex.domain.cursor import decode_cursor, encode_cursor
 from civex.domain import permissions
@@ -26,6 +27,8 @@ from civex.domain.dtos import (
     FieldValueDTO,
     FileRef,
     BulkEditSkipDTO,
+    MissingFileGroupDTO,
+    MissingFilesRemovalDTO,
     RecordBulkEditPlanDTO,
     RecordBulkEditResultDTO,
     RecordDTO,
@@ -410,6 +413,19 @@ def _audit_batch(audit: AuditRepository | None, kind: str, many: bool):
 BULK_EDIT_PAGE = 500
 # How many skipped records a bulk change names (the count is exact).
 MAX_REPORTED = 200
+
+
+def _cites(value: Any, shas: set[str]) -> bool:
+    return isinstance(value, dict) and value.get("sha256") in shas
+
+
+def _cited_among(value: Any, shas: set[str]) -> set[str]:
+    """Which of `shas` a file or file-list value cites."""
+    if isinstance(value, dict):
+        return {value["sha256"]} if _cites(value, shas) else set()
+    if isinstance(value, list):
+        return {v["sha256"] for v in value if _cites(v, shas)}
+    return set()
 
 
 # Field types a save keeps a catalog for (which record holds which file, which
@@ -4413,6 +4429,115 @@ class RecordService:
                 yield so_far()
         if not chosen:
             yield so_far()
+
+    def remove_files(
+        self,
+        shas: set[str],
+        record_ids: list[str],
+        *,
+        dry_run: bool = False,
+    ) -> Generator[MissingFilesRemovalDTO, None, None]:
+        """Take these files out of the records citing them: a file field that
+        held one is cleared, a list loses the entries. Each record is saved as
+        an ordinary edit of those fields (`patch`: checks, history, triggers,
+        sync), the lot as one batch in Activity that `revert_batch` undoes whole.
+        A record whose change would leave a required field empty is left as it
+        is and named. `dry_run` only works out the same report. Chunks of
+        `BULK_EDIT_PAGE` records; the caller commits after each yield, as for
+        `bulk_edit_chunks`."""
+        shapes = self._schema_svc.resolver()
+        result = MissingFilesRemovalDTO()
+        groups: dict[tuple[str | None, str, str], MissingFileGroupDTO] = {}
+        group_files: dict[tuple[str | None, str, str], set[str]] = {}
+        datasets: dict[uuid.UUID, DatasetDTO | None] = {}
+        chosen = [uuid.UUID(r) for r in record_ids]
+        batch = (
+            self._audit.batch("edit", "remove missing files")
+            if self._audit is not None and not dry_run and len(chosen) > 1
+            else nullcontext()
+        )
+        with batch:
+            for start in range(0, len(chosen), BULK_EDIT_PAGE):
+                page = chosen[start : start + BULK_EDIT_PAGE]
+                for raw in self._records.list_by_ids(page):
+                    if raw.deleted_at is not None:
+                        continue
+                    shape = shapes(raw.schema_id)
+                    if shape is None:
+                        continue
+                    if raw.dataset_id not in datasets:
+                        datasets[raw.dataset_id] = self._datasets.get_by_id(
+                            raw.dataset_id, include_deleted=True, with_count=False
+                        )
+                    dataset = datasets[raw.dataset_id]
+                    changes: dict[str, Any] = {}
+                    cited: dict[str, set[str]] = {}
+                    blocked: str | None = None
+                    for name, value in self._ids_to_names(raw.data, shape).items():
+                        gone = _cited_among(value, shas)
+                        if not gone:
+                            continue
+                        left = (
+                            None
+                            if isinstance(value, dict)
+                            else [v for v in value if not _cites(v, shas)]
+                        )
+                        spec = shape.by_name.get(name)
+                        if spec is not None and spec.required and not left:
+                            blocked = (
+                                f"'{spec.label or name}' is required and would be "
+                                "left empty"
+                            )
+                            break
+                        changes[name] = (
+                            left
+                            if left is None
+                            else [plain_data({"v": x})["v"] for x in left]
+                        )
+                        cited[name] = gone
+                    if blocked:
+                        result.skipped_count += 1
+                        if len(result.skipped) < MAX_REPORTED:
+                            result.skipped.append(
+                                BulkEditSkipDTO(
+                                    record_id=raw.id,
+                                    name=self._with_names(raw, shapes).natural_name,
+                                    reason=blocked,
+                                )
+                            )
+                        continue
+                    if not changes:
+                        continue
+                    if not dry_run:
+                        try:
+                            self.patch(str(raw.id), changes)
+                        except ValidationError as e:
+                            result.skipped_count += 1
+                            if len(result.skipped) < MAX_REPORTED:
+                                result.skipped.append(
+                                    BulkEditSkipDTO(raw.id, None, str(e))
+                                )
+                            continue
+                    result.changed += 1
+                    for name, gone in cited.items():
+                        key = (
+                            dataset.name if dataset else None,
+                            shape.schema.name,
+                            name,
+                        )
+                        group = groups.setdefault(
+                            key, MissingFileGroupDTO(key[0], key[1], key[2])
+                        )
+                        group.records += 1
+                        group_files.setdefault(key, set()).update(gone)
+                result.groups = sorted(
+                    (
+                        dataclasses.replace(g, files=len(group_files[k]))
+                        for k, g in groups.items()
+                    ),
+                    key=lambda g: (-g.records, g.schema, g.field),
+                )
+                yield result
 
     def _save_checked(
         self,

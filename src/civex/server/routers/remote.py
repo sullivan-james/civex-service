@@ -117,6 +117,56 @@ class OfflineDriveFiles(BaseModel):
     reason: str = Field(description="Why the drive can't be read, in its own words.")
 
 
+class MissingFileGroupResponse(BaseModel):
+    collection: str | None
+    schema_name: str = Field(description="The kind of record.")
+    field: str
+    records: int
+    files: int
+
+
+class MissingFilesResponse(BaseModel):
+    shas: list[str] = Field(
+        description="Files records cite that this project never stored and "
+        "nothing can supply (no copy here, none on the server)."
+    )
+    ignored: list[str] = Field(
+        description="Those a person chose to stop hearing about."
+    )
+    groups: list[MissingFileGroupResponse] = Field(
+        description="Where records cite them, by collection and field."
+    )
+    server_checked: bool = Field(
+        description="False when the server could not be asked whether it has them."
+    )
+
+
+class MissingFilesRequest(BaseModel):
+    shas: list[str] | None = Field(
+        default=None, description="Which files; leave out for every one."
+    )
+    dry_run: bool = Field(default=False, description="Remove only: change nothing.")
+
+
+class MissingFilesDone(BaseModel):
+    count: int = Field(description="Files ignored or forgotten.")
+
+
+class SkippedRecord(BaseModel):
+    record_id: str
+    name: str | None
+    reason: str
+
+
+class MissingFilesRemoved(BaseModel):
+    changed: int = Field(description="Records the files were cleared from.")
+    groups: list[MissingFileGroupResponse]
+    skipped: list[SkippedRecord] = Field(
+        description="Records left as they are (a required field would be empty)."
+    )
+    skipped_count: int
+
+
 class FilesWaitingResponse(BaseModel):
     ready: int = Field(description="Files sending can move now.")
     offline: list[OfflineDriveFiles] = Field(
@@ -125,6 +175,12 @@ class FilesWaitingResponse(BaseModel):
     missing: int = Field(
         description="Files on no drive here that the server said it hasn't got "
         "either: nothing here can send them (not in `files_to_send`)."
+    )
+    never_stored: int = Field(
+        default=0, description="Of `missing`, those this project never stored."
+    )
+    ignored: int = Field(
+        default=0, description="Missing files a person chose to stop hearing about."
     )
 
 
@@ -375,6 +431,8 @@ def _status(ctx: AppContext) -> RemoteStatusResponse:
                     for v, n, r in w.offline
                 ],
                 missing=w.missing,
+                never_stored=w.never_stored,
+                ignored=w.ignored,
             )
             if (w := s.files_waiting)
             else None
@@ -471,6 +529,98 @@ def send_files_now(ctx: AppContext = Depends(get_ctx)):
         raise HTTPException(400, detail="This project is not following an authority")
     sync_jobs.send_now()
     return {"requested": True}
+
+
+def _missing_response(report) -> MissingFilesResponse:  # noqa: ANN001
+    return MissingFilesResponse(
+        shas=report.shas,
+        ignored=report.ignored,
+        groups=[
+            MissingFileGroupResponse(
+                collection=g.collection,
+                schema_name=g.schema,
+                field=g.field,
+                records=g.records,
+                files=g.files,
+            )
+            for g in report.groups
+        ],
+        server_checked=report.server_checked,
+    )
+
+
+@router.get("/files/missing", response_model=MissingFilesResponse)
+def missing_files(ctx: AppContext = Depends(get_ctx)):
+    """Files records cite that this project never stored and nothing can supply,
+    by collection and field."""
+    try:
+        return _missing_response(ctx.sync_svc.missing_files())
+    except SyncError as e:
+        raise _refuse(e)
+
+
+@router.post(
+    "/files/missing/ignore",
+    response_model=MissingFilesDone,
+    dependencies=[requires(REMOTE_DIAL)],
+)
+def ignore_missing_files(body: MissingFilesRequest, ctx: AppContext = Depends(get_ctx)):
+    """Stop warning about these missing files (the records keep citing them)."""
+    try:
+        shas = body.shas if body.shas is not None else ctx.sync_svc.missing_files().shas
+        return MissingFilesDone(count=ctx.sync_svc.ignore_missing(shas))
+    except SyncError as e:
+        raise _refuse(e)
+
+
+@router.post(
+    "/files/missing/unignore",
+    response_model=MissingFilesDone,
+    dependencies=[requires(REMOTE_DIAL)],
+)
+def unignore_missing_files(
+    body: MissingFilesRequest, ctx: AppContext = Depends(get_ctx)
+):
+    """Warn about ignored files again."""
+    shas = (
+        body.shas if body.shas is not None else sorted(ctx.sync_svc.ignored_missing())
+    )
+    return MissingFilesDone(count=ctx.sync_svc.unignore_missing(shas))
+
+
+@router.post(
+    "/files/missing/remove",
+    response_model=MissingFilesRemoved,
+    dependencies=[requires(REMOTE_DIAL)],
+)
+def remove_missing_files(body: MissingFilesRequest, ctx: AppContext = Depends(get_ctx)):
+    """Clear these missing files from the records citing them: ordinary edits
+    (history, sync), one event in Activity. A record whose required field would
+    be left empty is left as it is and named."""
+    try:
+        report = ctx.sync_svc.missing_files(include_ignored=True)
+        shas = body.shas if body.shas is not None else report.shas + report.ignored
+        result = ctx.sync_svc.remove_missing(shas, dry_run=body.dry_run)
+    except SyncError as e:
+        raise _refuse(e)
+    return MissingFilesRemoved(
+        changed=result.changed,
+        groups=[
+            MissingFileGroupResponse(
+                collection=g.collection,
+                schema_name=g.schema,
+                field=g.field,
+                records=g.records,
+                files=g.files,
+            )
+            for g in result.groups
+        ],
+        skipped=[
+            SkippedRecord(record_id=str(s.record_id), name=s.name, reason=s.reason)
+            for s in result.skipped
+        ],
+        skipped_count=result.skipped_count,
+    )
 
 
 @router.patch("", response_model=RemoteStatusResponse)

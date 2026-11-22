@@ -137,6 +137,15 @@ export function useSendFilesNow() {
   return useMutation({ mutationFn: remoteApi.sendFilesNow, onSuccess: refresh })
 }
 
+/** Stop warning about files records cite that nothing can supply. */
+export function useIgnoreMissingFiles() {
+  const refresh = useRefreshing()
+  return useMutation({
+    mutationFn: remoteApi.ignoreMissingFiles,
+    onSuccess: refresh,
+  })
+}
+
 export function useSyncNow() {
   const refresh = useRefreshing()
   return useMutation({ mutationFn: remoteApi.syncNow, onSuccess: refresh })

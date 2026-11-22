@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from civex.db.models import (
+    IgnoredMissingFile,
     StoredObject,
     SyncLoginRequest,
     AuditBatch,
@@ -281,6 +282,44 @@ class LocalSyncRepository:
         now = datetime.now(timezone.utc)
         self._s.add_all(ServerLack(sha256=sha, asked_at=now) for sha in listed)
         self._s.flush()
+
+    def ignored_missing(self) -> set[str]:
+        """The files a person chose to stop being told are missing."""
+        return set(self._s.scalars(select(IgnoredMissingFile.sha256)))
+
+    def ignore_missing(self, shas: Iterable[str]) -> None:
+        listed = sorted(set(shas) - self.ignored_missing())
+        now = datetime.now(timezone.utc)
+        self._s.add_all(IgnoredMissingFile(sha256=s, ignored_at=now) for s in listed)
+        self._s.flush()
+
+    def unignore_missing(self, shas: Iterable[str]) -> int:
+        listed = sorted(set(shas))
+        n = 0
+        for at in range(0, len(listed), 500):
+            n += (
+                self._s.query(IgnoredMissingFile)
+                .filter(IgnoredMissingFile.sha256.in_(listed[at : at + 500]))
+                .delete(synchronize_session=False)
+            )
+        return n
+
+    def citing_records(self, shas: Iterable[str]) -> dict[uuid.UUID, set[str]]:
+        """The live records citing any of these files, each with which."""
+        listed = sorted(set(shas))
+        out: dict[uuid.UUID, set[str]] = {}
+        for at in range(0, len(listed), 500):
+            for record_id, sha in self._s.execute(
+                select(FileReference.record_id, FileReference.sha256)
+                .join(Record, Record.id == FileReference.record_id)
+                .where(
+                    FileReference.sha256.in_(listed[at : at + 500]),
+                    Record.deleted_at.is_(None),
+                )
+            ):
+                if record_id is not None:
+                    out.setdefault(record_id, set()).add(sha)
+        return out
 
     def never_stored(self, shas: Iterable[str]) -> set[str]:
         """Of these files, those this project has no inventory row for on any
