@@ -21,6 +21,23 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
+## Unreleased
+
+No database migrations.
+
+### Changes
+
+- `civex.db.migrate.schema_status(engine)` reports whether a database is at
+  this civex's head, behind it, or from a newer civex, without migrating,
+  stamping or locking anything. It uses one connection and one read of
+  `alembic_version` (head is computed once per process), and examines
+  whichever schema the engine's connections default to, so a host routing
+  tenants with a PostgreSQL `search_path` can ask about each one cheaply, for
+  example to report a fleet's state before a release or to refuse a stale
+  tenant. Part of the public surface for hosts, with `ensure_schema_current`
+  and `missing_structure`. `civex db status` and `civex serve`'s pre-flight
+  use it too.
+
 ## v2.0.1 — updating right after a release, a quicker desktop app (2026-11-19)
 
 No database migrations.
