@@ -13,6 +13,7 @@ machine, or a bucket with `[store.s3]`).
 from __future__ import annotations
 
 import os
+import time
 import uuid
 
 from contextlib import contextmanager
@@ -244,6 +245,61 @@ class AppContext:
         return [row for page in pages for row in page]
 
     @contextmanager
+    def chunked_writes(self) -> Iterator[Callable[[], None]]:
+        """For work that changes a great many rows (a bulk edit): it writes a
+        chunk, calls the `turn` this yields, writes the next. `turn` commits
+        (so SQLite's one write lock is held for a chunk, never for the whole
+        job) and, when another writer asked for the lock meanwhile, waits
+        `GIVE_WAY_SECONDS` before going on, so a person's save goes in between
+        two chunks instead of waiting for the job, or failing after
+        `busy_timeout`.
+
+        It is the gate index builds give way through (`db/index_gate`), not a
+        second one: while the work runs, every other connection's write
+        touches the wait file (`upkeep`), and `quiet_for` says whether one
+        has since the last turn. The work's own connection is marked as the
+        builder's is, so its own writes ask nothing. PostgreSQL locks rows,
+        not the database: there `turn` only commits."""
+        from civex.db import index_gate
+
+        bind = self._session.get_bind()
+        db = (
+            index_gate.sqlite_file(bind.url.database)  # type: ignore[union-attr]
+            if bind.dialect.name == "sqlite"
+            else None
+        )
+        if db is None:
+            yield self.commit
+            return
+        marked: list[Any] = []
+
+        def mark() -> None:
+            conn = self._session.connection()
+            conn.info[index_gate.BUILDER] = True
+            marked.append(conn)
+
+        def unmark() -> None:
+            while marked:
+                marked.pop().info.pop(index_gate.BUILDER, None)
+
+        began = [time.time()]
+
+        def turn() -> None:
+            self.commit()
+            unmark()
+            if index_gate.quiet_for(db) <= time.time() - began[0]:
+                time.sleep(GIVE_WAY_SECONDS)
+            began[0] = time.time()
+            mark()
+
+        with index_gate.upkeep(db):
+            mark()
+            try:
+                yield turn
+            finally:
+                unmark()
+
+    @contextmanager
     def all_or_nothing(self) -> Iterator[None]:
         """Keep everything done inside it, or, when it raises, nothing: a SQL
         SAVEPOINT, rolled back on an exception and released otherwise.
@@ -308,6 +364,11 @@ def _frame_query(
 # How a background host opens a context when it needs one: a fresh session
 # each time, on whichever project the host serves.
 ContextFactory = Callable[[], "AppContext"]
+
+# How long chunked work waits, after a chunk, when another writer asked for
+# the database meanwhile: longer than SQLite's longest pause between a waiting
+# writer's tries (100 ms), so the writer gets the lock.
+GIVE_WAY_SECONDS = 0.15
 
 
 def local_context() -> AppContext:

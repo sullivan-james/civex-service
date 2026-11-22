@@ -18,6 +18,7 @@ from sqlalchemy import (
     or_,
     select,
     String,
+    type_coerce,
     update,
 )
 from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
@@ -750,6 +751,66 @@ class LocalRecordRepository:
         self._s.flush()
         return _to_dto(row)
 
+    def update_many(
+        self, rows: list[tuple[uuid.UUID, dict[str, Any]]], stamp: datetime
+    ) -> None:
+        """Save many records' data at once, each changed at `stamp`: one
+        statement for the lot (the driver runs it once per row), where
+        `update` is a read and a write per record. For changes that leave
+        every file and every link to another record as it was: the catalogs
+        kept in step by a single save's events (`file_references`,
+        `record_references`) are not touched here."""
+        if not rows:
+            return
+        self._s.execute(
+            update(Record),
+            [{"id": rid, "data": data, "updated_at": stamp} for rid, data in rows],
+        )
+        # Copies of these records the session holds are out of date now.
+        changed = {rid for rid, _ in rows}
+        for held in list(self._s.identity_map.values()):
+            if isinstance(held, Record) and held.id in changed:
+                self._s.expire(held)
+
+    def field_rows(
+        self,
+        field_ids: list[str],
+        query: ResolvedQuery | None = None,
+        ids: list[uuid.UUID] | None = None,
+    ) -> list[tuple[Any, Any, Any, dict[str, Any]]]:
+        """For every live record `query` lists (or among `ids`): its id, its
+        schema and its collection (each as the database keeps it) and its
+        values for `field_ids` alone (those it has). What a plan of an edit to
+        those fields has to read of each record, in one statement however
+        many (a few, for a great many ids), instead of the records."""
+        columns = [
+            type_coerce(Record.id, String),
+            type_coerce(Record.schema_id, String),
+            type_coerce(Record.dataset_id, String),
+            *[_field_value(f, self._pg) for f in field_ids],
+        ]
+        if query is not None:
+            batches = [_base_query(self._s, query, self._pg).with_entities(*columns)]
+        else:
+            wanted = list(ids or [])
+            batches = [
+                self._s.query(*columns).filter(
+                    Record.id.in_(wanted[i : i + _MANY_IDS]),
+                    Record.deleted_at.is_(None),
+                )
+                for i in range(0, len(wanted), _MANY_IDS)
+            ]
+        out: list[tuple[Any, Any, Any, dict[str, Any]]] = []
+        for batch in batches:
+            for rid, schema_id, dataset_id, *values in batch:
+                held = {}
+                for field_id, value in zip(field_ids, values):
+                    value = _loaded(value, self._pg)
+                    if value is not None:
+                        held[field_id] = value
+                out.append((rid, schema_id, dataset_id, held))
+        return out
+
     def open_notes_of(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, tuple[int, str]]:
         """For each of these records with threads of notes not yet resolved:
         how many, and the text of the latest one's first note (records with
@@ -1050,6 +1111,29 @@ class LocalRecordRepository:
         bulk_delete_jobs(self._s, WorkflowJob.record_id == id)
         self._s.delete(row)
         self._s.flush()
+
+
+# Ids named in one statement (well inside SQLite's and PostgreSQL's limits
+# on bound values).
+_MANY_IDS = 20_000
+
+
+def _field_value(field_id: str, pg: bool) -> Any:
+    """A record's value for one field, read alone: parsed on PostgreSQL, and
+    as JSON text on SQLite, for `_loaded` to parse (the text `null` where the
+    record has none, which it doesn't parse)."""
+    if pg:
+        return Record.data[field_id]
+    return type_coerce(
+        func.json_quote(func.json_extract(Record.data, f'$."{field_id}"')), String
+    )
+
+
+def _loaded(value: Any, pg: bool) -> Any:
+    """A value `_field_value` read, as the value (None: the record has none)."""
+    if pg or value is None:
+        return value
+    return None if value == "null" else json.loads(value)
 
 
 def _descends(ancestor_id: uuid.UUID, hops: int):

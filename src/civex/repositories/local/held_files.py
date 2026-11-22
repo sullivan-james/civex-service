@@ -10,7 +10,6 @@ no drive is asked anything.
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from sqlalchemy import String, and_, case, false, func, literal, or_, select
@@ -29,6 +28,8 @@ from civex.domain.query import ResolvedSet, TextSearch
 from civex.repositories.local.record_repo import (
     _base_query,
     _exists_up,
+    _field_value,
+    _loaded,
     text_match,
 )
 
@@ -171,7 +172,7 @@ def held_files(
             type_coerce(Record.created_at, String),
             pointers,
             found,
-            *[_value(field_id, pg) for field_id, _ in fields],
+            *[_field_value(field_id, pg) for field_id, _ in fields],
         )
     )
     out: list[HeldFile] = []
@@ -182,10 +183,9 @@ def held_files(
             digest, _, volume = entry.partition("@")
             at[digest] = volume
         for (_, field_name), value in zip(fields, values):
+            value = _loaded(value, pg)
             if value is None:
                 continue
-            if isinstance(value, str):
-                value = json.loads(value)
             for ref in value if isinstance(value, list) else (value,):
                 if not isinstance(ref, dict):
                     continue
@@ -219,14 +219,6 @@ def held_files(
     if following:
         out = _with_server(session, out)
     return out
-
-
-def _value(field_id: str, pg: bool) -> Any:
-    """A record's value for one field: as JSON text on SQLite (NULL where the
-    record has none, so nothing is parsed for it), parsed on PostgreSQL."""
-    if pg:
-        return Record.data[field_id]
-    return type_coerce(func.json_extract(Record.data, f'$."{field_id}"'), String)
 
 
 def _with_copies(session: Session, held: list[HeldFile]) -> list[HeldFile]:

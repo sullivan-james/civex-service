@@ -19,6 +19,7 @@ from typing import Any
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 
+from civex.db import index_gate
 
 SQLITE_BUSY_TIMEOUT_MS = 30_000
 
@@ -32,5 +33,16 @@ def enable_sqlite_foreign_keys(engine: Engine) -> Engine:
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
             cursor.close()
+
+        db = index_gate.sqlite_file(engine.url.database)
+        if db is not None:
+
+            @event.listens_for(engine, "before_cursor_execute")
+            def _give_writes_their_turn(
+                conn: Any, cursor: Any, statement: str, *args: Any
+            ) -> None:
+                # A save asks a running index build to give way (index_gate).
+                if not conn.info.get(index_gate.BUILDER):
+                    index_gate.note_write(db, statement)
 
     return engine
