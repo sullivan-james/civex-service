@@ -22,6 +22,7 @@ from civex.cli.library import app as library_app
 from civex.cli.utils import cli_load_config, get_ctx as _ctx
 from civex.console import console
 from civex.domain.exceptions import CivexError
+from civex.services.sync_lock import SyncBusy
 from civex.domain.sync import COPYING, FILLING, INVITE_HOURS, SyncError, SyncProgress
 
 app = typer.Typer(
@@ -134,6 +135,18 @@ def _describe(report) -> None:  # noqa: ANN001 — SyncReport
         )
     if report.rejected:
         console.print(f"[warning]{report.rejected} change(s) were refused.[/warning]")
+    if report.retried:
+        console.print(
+            f"[dim]{report.retried} change(s) refused earlier for permission "
+            "were sent again.[/dim]"
+        )
+    if report.open_rejected:
+        console.print(
+            f"[warning]{report.open_rejected} refused change(s) are still "
+            "waiting. After fixing the cause (a permission, a value), "
+            "`civex sync resolve --all --take retry --kind rejected` sends them "
+            "again; `civex sync conflicts` shows why.[/warning]"
+        )
     if report.waiting:
         console.print(
             f"[dim]{report.waiting} change(s) are waiting; they go on the next sync.[/dim]"
@@ -164,6 +177,8 @@ def now() -> None:
             raise typer.Exit(1)
         _describe(c.sync_svc.sync())
         _files_owed(c)
+    except SyncBusy as e:
+        console.print(f"[warning]{escape(str(e))}[/warning]")
     except (SyncError, CivexError) as e:
         raise _fail(e)
     finally:
@@ -180,12 +195,35 @@ def _files_owed(c) -> None:  # noqa: ANN001 — AppContext
             "nor on the server, so nothing can send them: `civex files list --on "
             "missing` lists them.[/yellow]"
         )
+        _never_stored(status.files_waiting)
     if owed:
         console.print(
             f"[dim]{owed} file(s) aren't on the server yet: `civex sync send` "
             "sends them now (the app and `civex sync watch` send them in the "
             "background).[/dim]"
         )
+
+
+def _files_owed_missing(waiting) -> None:  # noqa: ANN001 — FilesWaiting
+    console.print(
+        f"[warning]Missing     {waiting.missing} file(s) records cite are "
+        "neither on this computer nor on the server[/warning]"
+    )
+    _never_stored(waiting)
+
+
+def _never_stored(waiting) -> None:  # noqa: ANN001 — FilesWaiting
+    if not waiting or not waiting.never_stored:
+        return
+    where = ", ".join(
+        f"{n} in {escape(name)}" for name, n in waiting.never_stored_in[:8]
+    )
+    console.print(
+        f"[dim]{waiting.never_stored} of them were never stored in this project "
+        f"(records cite them without their contents). Records affected: {where}. "
+        "Attach the file to those records again, or sync from the computer "
+        "that has it.[/dim]"
+    )
 
 
 @app.command("send")
@@ -497,6 +535,8 @@ def status() -> None:
     console.print(f"Last synced {s.last_synced_at or 'never'}")
     if s.last_error:
         console.print(f"[warning]Last problem  {escape(s.last_error)}[/warning]")
+    if s.files_waiting and s.files_waiting.missing:
+        _files_owed_missing(s.files_waiting)
 
 
 @app.command("connect")

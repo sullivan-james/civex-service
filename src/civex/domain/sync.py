@@ -326,6 +326,13 @@ DEFERRED = "deferred"  # not yet (a file hasn't arrived); send it again later
 
 RETRY_STATUSES = frozenset({DEFERRED})
 
+# Why a refusal (`REJECTED`) was made, in the `code` of its `conflicts` item
+# (absent from an older authority). A permission refusal can go through once the
+# device may do it, so a device sends it again later; any other would only fail
+# again.
+REFUSAL_PERMISSION = "permission"
+REFUSAL_INVALID = "invalid"
+
 ACTIONS = frozenset({"create", "update", "delete", "restore", "purge"})
 # A delete's time becomes the `deleted_at` of what it deletes, so a device whose
 # clock is further ahead than this is refused rather than stamping the future.
@@ -768,6 +775,35 @@ class SyncError(RuntimeError):
         self.detail = detail
 
 
+def is_lock_contention(error: BaseException) -> bool:
+    """Whether a database error only says another process is using the database
+    right now (SQLite's "database is locked"/"busy", PostgreSQL's lock and
+    deadlock failures): trying again soon is the fix, nothing is wrong with the
+    database. Looks through `__cause__`/`__context__` chains."""
+    seen = 0
+    while error is not None and seen < 8:
+        text = str(getattr(error, "orig", None) or error).lower()
+        if type(error).__module__.split(".")[0] in ("sqlalchemy", "sqlite3", "psycopg"):
+            if (
+                "database is locked" in text
+                or "database table is locked" in text
+                or "database is busy" in text
+                or "could not obtain lock" in text
+                or "deadlock detected" in text
+                or "lock timeout" in text
+            ):
+                return True
+        error = error.__cause__ or error.__context__  # type: ignore[assignment]
+        seen += 1
+    return False
+
+
+LOCK_CONTENTION_MESSAGE = (
+    "Another civex process is using this project right now, so syncing waited. "
+    "It will try again shortly."
+)
+
+
 def plain_failure(error: Exception) -> SyncError:
     """Any failure while syncing or connecting as a `SyncError` a person can
     read: one sentence saying what to do, with the technical text kept as its
@@ -776,6 +812,8 @@ def plain_failure(error: Exception) -> SyncError:
     if isinstance(error, SyncError):
         return error
     technical = f"{type(error).__name__}: {error}"
+    if is_lock_contention(error):
+        return SyncError(LOCK_CONTENTION_MESSAGE, retryable=True, detail=technical)
     if type(error).__module__.split(".")[0] == "sqlalchemy":
         return SyncError(
             "This computer's database isn't in the shape this civex expects, so "
@@ -1005,6 +1043,11 @@ class SyncConflictDTO:
     created_at: str
     resolved_at: str | None
     resolution: str | None  # mine | theirs | value | edited | delete | retry
+    # For a refusal: why (`REFUSAL_PERMISSION`, ...) when the authority said, and
+    # how often it has been sent again by itself since.
+    code: str | None = None
+    retries: int = 0
+    retried_at: str | None = None
     # What the value was before either side changed it, and who wrote the one that
     # stayed, and when.
     base: Any = None

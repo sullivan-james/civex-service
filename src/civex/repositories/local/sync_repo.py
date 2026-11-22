@@ -123,6 +123,10 @@ class LocalSyncRepository:
     def __init__(self, session: Session) -> None:
         self._s = session
 
+    def rollback(self) -> None:
+        """Drop what the session holds that was not committed."""
+        self._s.rollback()
+
     @contextmanager
     def savepoint(self) -> Iterator[None]:
         """Everything written inside is kept or dropped together. A rule the
@@ -277,6 +281,41 @@ class LocalSyncRepository:
         now = datetime.now(timezone.utc)
         self._s.add_all(ServerLack(sha256=sha, asked_at=now) for sha in listed)
         self._s.flush()
+
+    def never_stored(self, shas: Iterable[str]) -> set[str]:
+        """Of these files, those this project has no inventory row for on any
+        drive: never stored here (as against stored once and since gone)."""
+        listed = sorted(set(shas))
+        had: set[str] = set()
+        for at in range(0, len(listed), 500):
+            had.update(
+                self._s.scalars(
+                    select(StoredObject.sha256)
+                    .where(StoredObject.sha256.in_(listed[at : at + 500]))
+                    .distinct()
+                )
+            )
+        return set(listed) - had
+
+    def collections_citing(self, shas: Iterable[str]) -> dict[uuid.UUID, int]:
+        """The live records citing any of these files, counted by collection."""
+        listed = sorted(set(shas))
+        ids: dict[uuid.UUID, uuid.UUID] = {}
+        for at in range(0, len(listed), 500):
+            for record_id, dataset_id in self._s.execute(
+                select(Record.id, Record.dataset_id)
+                .join(FileReference, FileReference.record_id == Record.id)
+                .where(
+                    FileReference.sha256.in_(listed[at : at + 500]),
+                    Record.deleted_at.is_(None),
+                )
+                .distinct()
+            ):
+                ids[record_id] = dataset_id
+        counts: dict[uuid.UUID, int] = {}
+        for dataset_id in ids.values():
+            counts[dataset_id] = counts.get(dataset_id, 0) + 1
+        return counts
 
     def server_lacks_of(self, shas: set[str]) -> set[str]:
         """Of these files, those the authority said it hasn't got, when asked."""
@@ -719,8 +758,10 @@ class LocalSyncRepository:
         theirs_actor: str | None = None,
         theirs_at: str | None = None,
         theirs_device: str | None = None,
+        code: str | None = None,
     ) -> SyncConflictDTO:
         row = SyncConflict(
+            code=code,
             kind=kind,
             entity_type=entity_type,
             entity_id=entity_id,
@@ -817,6 +858,16 @@ class LocalSyncRepository:
         row.resolution = "retrying"
         self._s.flush()
 
+    def note_auto_retry(self, id: uuid.UUID) -> None:
+        """A refusal has been sent again by the device itself: counted, and
+        timed, so the next try waits longer."""
+        row = self._s.get(SyncConflict, id)
+        if row is None:
+            return
+        row.retries = (row.retries or 0) + 1
+        row.retried_at = datetime.now(timezone.utc)
+        self._s.flush()
+
     def renew_refusal(
         self,
         id: uuid.UUID,
@@ -824,12 +875,14 @@ class LocalSyncRepository:
         message: str | None,
         yours: Any,
         field: str | None = None,
+        code: str | None = None,
     ) -> None:
         """The same thing refused again: the open item says so (the latest
         change and why), rather than another item beside it."""
         row = self._s.get(SyncConflict, id)
         if row is None:
             return
+        row.code = code
         row.op_id = op_id
         row.message = message
         row.yours = yours
@@ -1630,4 +1683,7 @@ def _conflict_dto(row: SyncConflict) -> SyncConflictDTO:
         created_at=_iso(row.created_at) or "",
         resolved_at=_iso(row.resolved_at),
         resolution=row.resolution,
+        code=row.code,
+        retries=row.retries or 0,
+        retried_at=_iso(row.retried_at),
     )
