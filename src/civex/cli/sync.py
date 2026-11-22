@@ -374,6 +374,11 @@ def files(
             f"{s.files_to_fetch} kept file(s) not downloaded yet "
             "(`civex sync fetch` downloads them now)."
         )
+    if s.files_missing:
+        console.print(
+            f"{s.files_missing} file(s) are missing everywhere: the server hasn't "
+            "got them either (`civex files missing` lists them)."
+        )
 
 
 @app.command("keep")
@@ -537,6 +542,11 @@ def status() -> None:
         console.print(f"[warning]Last problem  {escape(s.last_error)}[/warning]")
     if s.files_waiting and s.files_waiting.missing:
         _files_owed_missing(s.files_waiting)
+    if s.files_missing:
+        console.print(
+            f"Missing     {s.files_missing} file(s) the server hasn't got either "
+            "(`civex files missing`)"
+        )
     if s.files_ignored:
         console.print(
             f"Ignored     {s.files_ignored} missing file(s) "

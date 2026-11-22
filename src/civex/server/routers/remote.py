@@ -59,6 +59,12 @@ class RemoteStatusResponse(BaseModel):
     files_to_fetch: int = Field(
         description="Files records here cite that aren't on this computer yet."
     )
+    files_missing: int = Field(
+        default=0,
+        description="Files records here cite that no drive here holds and the "
+        "server said it hasn't got either (less any ignored): missing "
+        "everywhere, so not downloading. `civex files missing` lists them.",
+    )
     files_to_send: int = Field(
         default=0,
         description="Files records here cite that the server hasn't said it "
@@ -422,6 +428,7 @@ def _status(ctx: AppContext) -> RemoteStatusResponse:
         running=s.running,
         download_files=s.download_files,
         files_to_fetch=s.files_to_fetch,
+        files_missing=s.files_missing,
         files_to_send=s.files_to_send,
         files_waiting=(
             FilesWaitingResponse(

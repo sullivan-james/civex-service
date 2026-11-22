@@ -61,10 +61,22 @@ from the next tag forward.
   (`/ignore`, `/unignore`, `/remove`), an Ignore action on the app's missing-files
   notice, and an "Ignored" line in `civex sync status`.
 
+### Fixed
+
+- A project holding file references nobody has the bytes of no longer shows
+  "Downloading files 0 of N" forever. A file the server said it hasn't got is
+  remembered in the project (not in worker memory), asked for again only after a
+  wait that doubles from 10 minutes up to a day, and at once when a change to a
+  record citing it arrives. It is counted as "N files are missing everywhere"
+  (`files_missing` in `/api/remote`, `civex sync status`, Settings, pointing to
+  `civex files missing`), not as downloading, and `--ignore` hides it from both
+  counts. No wire change.
+
 ### Breaking
 
 - Migration `a3c7e1d9f5b4` adds `code`, `retries` and `retried_at` to
-  `sync_conflicts`, and `c8d2f4a6b1e7` adds `ignored_missing_files` (applied
+  `sync_conflicts`, `c8d2f4a6b1e7` adds `ignored_missing_files`, and `e7a1c5d9b3f2` adds
+  `misses` and `retry_at` to `server_lacks` (applied
   automatically).
 
 ## v2.1.0 — big collections stay fast, hosting hooks, partitioned PostgreSQL (2026-11-22)

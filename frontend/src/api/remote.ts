@@ -13,6 +13,9 @@ export interface RemoteStatus {
   download_files: 'all' | 'opened'
   /** Files the records here cite that aren't on this computer yet. */
   files_to_fetch: number
+  /** Files records here cite that nothing can supply: not on a drive here, and
+   * the server said it hasn't got them either. Not downloading. */
+  files_missing?: number
   /** Files records here cite that the server hasn't said it holds yet. */
   files_to_send: number
   /** Why those haven't gone; null when there are none. */

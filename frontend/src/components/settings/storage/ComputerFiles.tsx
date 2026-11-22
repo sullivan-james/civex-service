@@ -23,6 +23,7 @@ export function ComputerFilesDefault() {
   const { data: s } = useRemoteStatus()
   const update = useUpdateRemote()
   if (!s) return null
+  const missing = s.files_missing ?? 0
   return (
     <div className="flex flex-wrap items-center gap-3 text-sm">
       <span className="text-fg-muted">On this computer, by default</span>
@@ -41,6 +42,11 @@ export function ComputerFilesDefault() {
           ? 'Every file this computer keeps is here.'
           : `${s.files_to_fetch.toLocaleString()} file${s.files_to_fetch === 1 ? '' : 's'} this computer keeps ${s.files_to_fetch === 1 ? "isn't" : "aren't"} downloaded yet. They download in the background while Civex is running.`}
       </span>
+      {missing > 0 && (
+        <span className="text-fg-muted">
+          {`${missing.toLocaleString()} file${missing === 1 ? ' is' : 's are'} missing everywhere: the server doesn't have ${missing === 1 ? 'it' : 'them'} either. Run "civex files missing" to see ${missing === 1 ? 'it' : 'them'}.`}
+        </span>
+      )}
     </div>
   )
 }

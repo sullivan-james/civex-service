@@ -1145,12 +1145,20 @@ class ServerLack(Base):
     answered that it lacks it, or a download found nothing there). With no copy
     here either, nothing can send it: the file is missing, not merely waiting.
     A file never asked about is in neither table (not known to be missing).
-    Removed when the authority confirms the file; cleared with `server_files`."""
+    Removed when the authority confirms the file, or the feed shows a record
+    citing it change; cleared with `server_files`."""
 
     __tablename__ = "server_lacks"
 
     sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
     asked_at: Mapped[datetime] = mapped_column(
+        _UTCDateTime(), nullable=False, default=_now
+    )
+    # How many times in a row it said so, and when it may be asked again (the
+    # wait doubles each time: 10 minutes, then 20, up to a day), so a file
+    # nobody has is not requested over and over, across restarts.
+    misses: Mapped[int] = mapped_column(nullable=False, default=1)
+    retry_at: Mapped[datetime] = mapped_column(
         _UTCDateTime(), nullable=False, default=_now
     )
 

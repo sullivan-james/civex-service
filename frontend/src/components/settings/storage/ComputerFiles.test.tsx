@@ -65,6 +65,16 @@ function show(ui: React.ReactNode) {
 }
 
 describe('files on this computer', () => {
+  it('says files nothing can supply are missing, not downloading', async () => {
+    status = { ...status, files_to_fetch: 0, files_missing: 46 }
+    show(<ComputerFilesDefault />)
+    expect(
+      await screen.findByText(/46 files are missing everywhere/),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/civex files missing/)).toBeInTheDocument()
+    expect(screen.queryByText(/download in the background/)).toBeNull()
+  })
+
   it('says how many kept files are not here yet, and sets the default', async () => {
     show(<ComputerFilesDefault />)
     expect(

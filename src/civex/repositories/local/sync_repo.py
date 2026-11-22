@@ -10,7 +10,7 @@ import json
 import uuid
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import (
@@ -118,6 +118,16 @@ def _kept_owner():  # type: ignore[no-untyped-def]
     return (
         FileReference.record_id.is_not(None) & Record.deleted_at.is_(None)
     ) | FileReference.release_id.is_not(None)
+
+
+LACK_RETRY_FIRST = timedelta(minutes=10)
+LACK_RETRY_MAX = timedelta(days=1)
+
+
+def lack_wait(misses: int) -> timedelta:
+    """How long after the `misses`th time the authority said it hasn't got a
+    file before it is asked for it again."""
+    return min(LACK_RETRY_FIRST * 2 ** min(max(misses, 1) - 1, 12), LACK_RETRY_MAX)
 
 
 class LocalSyncRepository:
@@ -274,14 +284,42 @@ class LocalSyncRepository:
         self._s.flush()
 
     def note_server_lacks(self, shas: Iterable[str]) -> None:
-        """The authority has just said it hasn't got these files."""
+        """The authority has just said it hasn't got these files: noted, and
+        not asked about again until later (`LACK_RETRY_FIRST`, doubling each
+        time it says so again, up to `LACK_RETRY_MAX`)."""
         listed = sorted(set(shas))
-        if not listed:
-            return
-        self._clear_lacks(set(listed))
         now = datetime.now(timezone.utc)
-        self._s.add_all(ServerLack(sha256=sha, asked_at=now) for sha in listed)
+        for at in range(0, len(listed), 500):
+            page = listed[at : at + 500]
+            rows = {
+                r.sha256: r
+                for r in self._s.scalars(
+                    select(ServerLack).where(ServerLack.sha256.in_(page))
+                )
+            }
+            for sha in page:
+                row = rows.get(sha)
+                if row is None:
+                    row = ServerLack(sha256=sha, misses=0)
+                    self._s.add(row)
+                row.misses += 1
+                row.asked_at = now
+                row.retry_at = now + lack_wait(row.misses)
         self._s.flush()
+
+    def forget_lacks(self, shas: Iterable[str]) -> None:
+        """Ask the authority about these files again at the next pass (they may
+        have reached it)."""
+        self._clear_lacks(set(shas))
+        self._s.flush()
+
+    def forget_record_lacks(self, record_id: uuid.UUID) -> None:
+        """`forget_lacks` for the files a record cites."""
+        self.forget_lacks(
+            self._s.scalars(
+                select(FileReference.sha256).where(FileReference.record_id == record_id)
+            ).all()
+        )
 
     def ignored_missing(self) -> set[str]:
         """The files a person chose to stop being told are missing."""
@@ -379,30 +417,51 @@ class LocalSyncRepository:
                 .execution_options(synchronize_session=False)
             )
 
-    def _not_here(self, collections: set[uuid.UUID] | None = None):  # type: ignore[no-untyped-def]
+    def _not_here(  # type: ignore[no-untyped-def]
+        self, collections: set[uuid.UUID] | None = None, lacks: str = "hide"
+    ):
         """Files live records or releases here own that no drive here is
         recorded to hold (a deleted record's files are fetched if it comes back
         and is opened, not in the background), each with a collection that
         uses it (none for a release's); with `collections`, only files records
         in those use, and releases'. A release that came from another device
-        owns only its bundle here, so that is what it brings."""
+        owns only its bundle here, so that is what it brings.
+
+        `lacks` says what to do with files the authority said it hasn't got:
+        `hide` leaves out every one (and those a person ignored): what is
+        downloading; `wait` leaves out those not yet due to be asked again:
+        what a download pass may request; `only` is just the ones missing
+        everywhere (less the ignored); `all` leaves out nothing."""
         stored = stored_files()
         record = Record.deleted_at.is_(None) & FileReference.record_id.is_not(None)
         if collections is not None:
             record = record & Record.dataset_id.in_(collections)
-        return (
+        query = (
             select(
                 FileReference.sha256.label("sha"),
                 func.min(Record.dataset_id).label("cid"),
             )
             .outerjoin(Record, Record.id == FileReference.record_id)
             .outerjoin(stored, stored.c.sha == FileReference.sha256)
+            .outerjoin(ServerLack, ServerLack.sha256 == FileReference.sha256)
             .where(
                 stored.c.sha.is_(None), record | FileReference.release_id.is_not(None)
             )
-            .group_by(FileReference.sha256)
-            .subquery()
         )
+        if lacks == "wait":
+            query = query.where(
+                ServerLack.sha256.is_(None)
+                | (ServerLack.retry_at <= datetime.now(timezone.utc))
+            )
+        elif lacks != "all":
+            ignored = select(IgnoredMissingFile.sha256)
+            query = query.where(FileReference.sha256.not_in(ignored))
+            query = query.where(
+                ServerLack.sha256.is_not(None)
+                if lacks == "only"
+                else ServerLack.sha256.is_(None)
+            )
+        return query.group_by(FileReference.sha256).subquery()
 
     def files_not_here(
         self,
@@ -414,17 +473,21 @@ class LocalSyncRepository:
         """Files the records here cite (or releases keep) that no drive here
         holds (another device added them), in hash order after `after`, each
         with a collection that uses it (to choose the drive it is written to).
-        With `shas`, only those; with `collections`, only files records in
-        those collections use."""
-        q = self._not_here(collections)
+        With `shas`, only those (asked for by name, so whatever the authority
+        said before); with `collections`, only files records in those
+        collections use. Left out: files the authority said it hasn't got,
+        until it is time to ask again."""
+        q = self._not_here(collections, "all" if shas is not None else "wait")
         query = select(q.c.sha, q.c.cid).where(q.c.sha > after)
         if shas is not None:
             query = query.where(q.c.sha.in_(shas))
         rows = self._s.execute(query.order_by(q.c.sha).limit(limit))
         return [(sha, collection) for sha, collection in rows]
 
-    def count_files_not_here(self, collections: set[uuid.UUID] | None = None) -> int:
-        q = self._not_here(collections)
+    def count_files_not_here(
+        self, collections: set[uuid.UUID] | None = None, lacks: str = "hide"
+    ) -> int:
+        q = self._not_here(collections, lacks)
         return int(self._s.execute(select(func.count()).select_from(q)).scalar_one())
 
     def added_by(self, shas: list[str]) -> dict[str, str | None]:

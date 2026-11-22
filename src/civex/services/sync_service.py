@@ -218,6 +218,9 @@ class SyncStatus:
     files_waiting: FilesWaiting | None = None
     # Missing files a person chose to stop being told about.
     files_ignored: int = 0
+    # files records here cite that the server said it hasn't got and no drive
+    # here holds (less the ignored): missing everywhere, not downloading
+    files_missing: int = 0
 
 
 @dataclass
@@ -319,6 +322,7 @@ class SyncService:
             download_files=self._config.sync.download_files,
             files_ignored=len(self._repo.ignored_missing()),
             files_to_fetch=self.files_to_fetch(),
+            files_missing=self.files_missing(),
             files_to_send=(
                 waiting.ready + sum(n for _, n, _ in waiting.offline) if waiting else 0
             ),
@@ -412,6 +416,10 @@ class SyncService:
                         transport.missing_files(candidates[at : at + FILE_CHECK_PAGE])
                     )
                 candidates = [s for s in candidates if s in lacking]
+                # Noted, so they are not counted as downloading or asked for
+                # again until their wait is over.
+                self._repo.note_server_lacks(candidates)
+                self._commit()
             except SyncError:
                 report.server_checked = False
         report.ignored = sorted(s for s in candidates if s in ignored)
@@ -1265,6 +1273,7 @@ class SyncService:
         try:
             with self._repo.savepoint():
                 self._applier.apply_entry(entry)
+            self._recheck_cited_lacks(entry)
         except ValidationError as e:
             self._repo.add_conflict(
                 kind="not_applied",
@@ -1277,6 +1286,14 @@ class SyncService:
                 device_name=entry.actor,
                 message=f"Could not apply a change from the server: {e}",
             )
+
+    def _recheck_cited_lacks(self, entry: SyncEntry) -> None:
+        """A change from the authority to a record that cites a file it said
+        it hadn't got is the sign the file may have arrived there (the wire has
+        no news of uploads): it is asked for again at the next pass, not at the
+        end of its wait."""
+        if entry.entity_type == "record" and self.fetches_files:
+            self._repo.forget_record_lacks(entry.entity_id)
 
     def _catch_up(self) -> set[tuple[str, uuid.UUID]]:
         """Apply what was held back for things that are free now: each from its
@@ -1810,6 +1827,23 @@ class SyncService:
         if not self.fetches_files:
             return 0
         return self._repo.count_files_not_here(self._kept_collections())
+
+    def files_to_try(self) -> int:
+        """What a background download pass has to request: `files_to_fetch`,
+        plus the files the server said it hadn't got that are due to be asked
+        about again (see `LACK_RETRY_FIRST`)."""
+        if not self.fetches_files:
+            return 0
+        return self._repo.count_files_not_here(self._kept_collections(), "wait")
+
+    def files_missing(self) -> int:
+        """How many files records here cite that no drive here holds and the
+        server said it hasn't got: missing everywhere, so nothing is
+        downloading them (`civex files missing` lists them). Files a person
+        chose to ignore are not counted."""
+        if not self.fetches_files:
+            return 0
+        return self._repo.count_files_not_here(None, "only")
 
     def collection_mode(self, collection_id: str) -> str:
         """Whether a collection's files are kept on this computer (`keep`) or

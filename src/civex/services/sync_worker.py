@@ -128,8 +128,6 @@ class SyncWorker:
         # them hasn't sent them yet): not asked for again until the next look
         # for files. And how far the current run of downloads has got, for the
         # progress shown (the number to fetch when it began, and done since).
-        self._absent: set[str] = set()
-        self._absent_since = 0.0
         self._files_total = 0
         self._files_done = 0
         # The run of uploads under way, over as many passes as it takes, so
@@ -277,10 +275,9 @@ class SyncWorker:
         waiting = now < self._files_backoff_until and not asked
         if waiting or ctx.sync_repo.meta().history_from:
             return
-        if now - self._absent_since >= FILE_CHECK_EVERY:
-            self._absent.clear()
-            self._absent_since = now
-        left = ctx.sync_svc.files_to_fetch() - len(self._absent)
+        # What the server said it hasn't got is remembered by the project (and
+        # asked about again on a backoff), so it is not counted or requested here.
+        left = ctx.sync_svc.files_to_try()
         if left <= 0:
             if self._files_total:
                 self._files_total = self._files_done = 0
@@ -318,7 +315,6 @@ class SyncWorker:
 
         try:
             report = ctx.sync_svc.fetch_files(
-                skip=self._absent,
                 seconds=FILES_SECONDS,
                 progress=tell,
                 on_bytes=arrived,
@@ -331,7 +327,6 @@ class SyncWorker:
             self._on_files(None)
             self._files_backoff_until = now + MAX_BACKOFF / 5
             return
-        self._absent.update(report.absent)
         if not report.stopped:  # all that could be fetched now is here
             self._files_total = self._files_done = 0
             self._on_files(None)
