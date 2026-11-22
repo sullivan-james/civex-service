@@ -406,6 +406,14 @@ export const fileAccessApi = {
       `/file-access/progress/${encodeURIComponent(progressId)}`,
     ),
 
+  /** Ask the request tagged with this id to stop (work done a chunk at a
+   * time stops before its next chunk and keeps what it has done). */
+  stopProgress: (progressId: string) =>
+    api.post<void>(
+      `/file-access/progress/${encodeURIComponent(progressId)}/cancel`,
+      {},
+    ),
+
   /** The plan with its first `limit` files, so a person can see the folder it
    * would make before making it. */
   preview: (selection: FileSelection, limit = 40) =>

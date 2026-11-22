@@ -2106,7 +2106,7 @@ class FileAccessService:
         moving: list[str] = []
         records = sorted({i.record_id for i in items})
         if progress:
-            progress.phase("Working out what moves", len(on_drives))
+            progress.phase("Finding files", len(on_drives))
         for n, step in enumerate(self._steps(on_drives, volume, records), 1):
             plan.freed_bytes += len(step.drop) * size[step.sha256]
             if step.step == STEP_THERE:

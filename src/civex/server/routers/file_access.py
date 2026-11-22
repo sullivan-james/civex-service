@@ -530,6 +530,7 @@ def zip_files(
                 plan,
                 scratch,
                 name=safe_filename(body.name) if body.name else None,
+                progress=progress,
             )
         except FileNotFoundError as e:
             raise HTTPException(404, detail=f"A file is no longer stored: {e}")

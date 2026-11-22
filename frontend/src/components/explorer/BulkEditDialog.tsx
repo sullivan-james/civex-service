@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   selectionBody,
   type BulkEditPlan,
   type BulkEditRequest,
   type RecordSelection,
 } from '../../api/records'
-import { fileAccessApi } from '../../api/fileAccess'
 import type { Field as SchemaField, Schema } from '../../api/schemas'
-import { useBulkEdit, useBulkEditPlan } from '../../hooks/useRecords'
+import { useBulkEditPlan } from '../../hooks/useRecords'
 import { useDebouncedValue } from '../../hooks/useDebouncedValue'
 import { errorMessage } from '../../lib/errors'
 import { pluralise } from '../../lib/utils'
@@ -15,7 +15,7 @@ import { displayLabel } from '../../utils/naming'
 import { bulkEditableFields } from '../../utils/bulkEdit'
 import { DynamicField } from '../records/DynamicField'
 import { toSaved } from '../records/RecordFieldGrid'
-import { newProgressId } from '../files/fileFlows'
+import { editRecords } from './bulkEditFlow'
 import {
   Button,
   Field,
@@ -25,12 +25,12 @@ import {
   ModalBody,
   ModalFooter,
   ModalHeader,
-  ProgressBar,
   SegmentedControl,
   Select,
   Spinner,
 } from '../ui'
 import { Plus, X } from '../ui/icons'
+import { useToast } from '../ui/ToastProvider'
 
 type Mode = 'set' | 'clear'
 interface Row {
@@ -100,36 +100,30 @@ export function BulkEditDialog({
     [settledKey],
   )
   const plan = useBulkEditPlan(settled)
-  const edit = useBulkEdit()
-  const [progressId, setProgressId] = useState<string | null>(null)
-  const progress = useEditProgress(edit.isPending ? progressId : null)
+  const toast = useToast()
+  const qc = useQueryClient()
   const kind = displayLabel(listed.name, listed.label)
   const current = settledKey === bodyKey
-  const canApply = !!plan.data?.can_apply && current && !edit.isPending
+  const canApply = !!plan.data?.can_apply && current
 
   function update(i: number, next: Partial<Row>) {
     setRows((rs) => rs.map((r, j) => (j === i ? { ...r, ...next } : r)))
   }
   const unused = fields.filter((f) => !rows.some((r) => r.field === f.name))
 
+  /** The edit runs as a job (the status bar shows how far it has got, and
+   * can stop it), so the dialog is done as soon as it is asked for. */
   function confirm() {
     if (!settled) return
-    const id = newProgressId()
-    setProgressId(id)
-    edit.mutate(
-      { body: settled, progressId: id },
-      {
-        onSuccess: () => {
-          onDone()
-          onClose()
-        },
-      },
+    void editRecords({ toast, qc, problem: () => undefined }, settled).then(
+      onDone,
     )
+    onClose()
   }
 
   return (
-    <Modal onClose={onClose} size="md" dismissible={!edit.isPending}>
-      <ModalHeader onClose={edit.isPending ? undefined : onClose}>
+    <Modal onClose={onClose} size="md">
+      <ModalHeader onClose={onClose}>
         Edit {pluralise(count, kind.toLowerCase())}
       </ModalHeader>
       <ModalBody>
@@ -212,67 +206,25 @@ export function BulkEditDialog({
               <Plus className="h-4 w-4" aria-hidden /> Another field
             </Button>
           )}
-          {edit.isPending ? (
-            <div className="space-y-1 text-sm">
-              <p className="flex items-center gap-2 text-fg-muted">
-                <Spinner /> Changing records…
-              </p>
-              {progress && progress.total > 0 && (
-                <ProgressBar
-                  fraction={progress.done / progress.total}
-                  label="Records changed"
-                  className="w-full"
-                />
-              )}
-            </div>
-          ) : (
-            <PlanText
-              waiting={!bodyKey}
-              loading={!plan.data}
-              stale={!current || plan.isFetching}
-              error={plan.error}
-              plan={plan.data}
-            />
-          )}
-          <FormError message={edit.error ? errorMessage(edit.error) : null} />
+          <PlanText
+            waiting={!bodyKey}
+            loading={!plan.data}
+            stale={!current || plan.isFetching}
+            error={plan.error}
+            plan={plan.data}
+          />
         </div>
       </ModalBody>
       <ModalFooter>
-        <Button onClick={onClose} disabled={edit.isPending}>
-          Cancel
-        </Button>
+        <Button onClick={onClose}>Cancel</Button>
         <Button onClick={confirm} disabled={!canApply}>
-          {edit.isPending
-            ? 'Changing…'
-            : plan.data?.changing && current
-              ? `Change ${plan.data.changing.toLocaleString()}`
-              : 'Change'}
+          {plan.data?.changing && current
+            ? `Change ${plan.data.changing.toLocaleString()}`
+            : 'Change'}
         </Button>
       </ModalFooter>
     </Modal>
   )
-}
-
-/** How far a running edit has got, asked of the server every half second. */
-function useEditProgress(id: string | null) {
-  const [p, setP] = useState<{ done: number; total: number } | null>(null)
-  useEffect(() => {
-    if (!id) return
-    let stopped = false
-    const timer = setInterval(async () => {
-      try {
-        const got = await fileAccessApi.progress(id)
-        if (!stopped) setP({ done: got.done, total: got.total })
-      } catch {
-        /* not begun yet, or already forgotten */
-      }
-    }, 500)
-    return () => {
-      stopped = true
-      clearInterval(timer)
-    }
-  }, [id])
-  return id ? p : null
 }
 
 function PlanText({

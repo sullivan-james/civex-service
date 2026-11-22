@@ -14,12 +14,16 @@ export interface FileJob {
   /** Only waiting on work that shows itself (a move has its own row in the
    * status bar): not shown twice. */
   waiting?: boolean
+  /** Ask it to stop, when it can be (a bulk edit, between two chunks). */
+  stop?: () => void
 }
 
 /** What the work being done can tell the bar as it goes. */
 export interface JobHandle {
   update: (
-    patch: Partial<Pick<FileJob, 'title' | 'detail' | 'progress' | 'waiting'>>,
+    patch: Partial<
+      Pick<FileJob, 'title' | 'detail' | 'progress' | 'waiting' | 'stop'>
+    >,
   ) => void
 }
 

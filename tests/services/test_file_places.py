@@ -169,8 +169,8 @@ def test_a_move_says_what_it_is_doing_while_it_works_it_out(ctx, study, archive)
     items = svc.chosen(_within(study.rec_a), progress=Seen())
     svc.to_move(items, "default", Seen())
 
-    assert stages[0] != "Working out what moves"  # finding the files came first
-    assert "Working out what moves" in stages
+    # Finding the files, then working out which of them move: one stage's name.
+    assert stages and set(stages) == {"Finding files"}
 
 
 def test_a_file_several_records_use_is_one_row_and_one_file(ctx, study, archive):  # noqa: F811
