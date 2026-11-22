@@ -63,6 +63,14 @@ No database migrations.
   answer's new `plugins_dropped` and `workflows_dropped` say how many were left
   out. `GET /bundle` and the other downloads already stream to the client with no
   server path, and stay available everywhere.
+- A service hosting many projects can give a `Project` a `read_engine` (a read
+  replica's engine). Routes that only read and tolerate a replica's lag (listing
+  and getting records and collections, searching, counts, record summaries and
+  points, the CSV export of a collection, a view preview, record counts and
+  growth in analytics) are answered from it, in a read-only transaction.
+  Everything else uses the primary. `Project.needs_primary` (or
+  `request.state.needs_primary`) keeps one request on the primary. Unset, and
+  always on SQLite, nothing changes.
 
 ## v2.0.1 — updating right after a release, a quicker desktop app (2026-11-19)
 

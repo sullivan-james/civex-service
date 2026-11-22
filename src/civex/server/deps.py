@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Generator
+from dataclasses import replace
 
 from fastapi import Depends, Request
 from sqlalchemy.exc import OperationalError
@@ -43,7 +44,9 @@ def _recovery_failure_message(result) -> str:  # noqa: ANN001 — ContainerRecov
     )
 
 
-def _build_context_with_recovery(project: Project) -> AppContext:
+def _build_context_with_recovery(
+    project: Project, read_only: bool = False
+) -> AppContext:
     """
     build_context(), but for docker-managed projects: on a connection
     failure, try to auto-start a stopped container and retry once before
@@ -53,13 +56,13 @@ def _build_context_with_recovery(project: Project) -> AppContext:
 
     config = project.config
     try:
-        return build_context(project)
+        return build_context(project, read_only=read_only)
     except OperationalError:
         if not config.db.docker_managed:
             raise
         result = ensure_container_running(config.project_root.name)
         if result.outcome == ContainerRecoveryOutcome.READY:
-            return build_context(project)
+            return build_context(project, read_only=read_only)
         raise DatabaseUnavailableError(_recovery_failure_message(result)) from None
 
 
@@ -152,6 +155,51 @@ def get_ctx(request: Request) -> Generator[AppContext, None, None]:
     try:
         yield ctx
         ctx.commit()
+    except OperationalError:
+        ctx._session.rollback()
+        _recover_after_query_failure(project)
+        raise
+    except Exception:
+        ctx._session.rollback()
+        raise
+    finally:
+        ctx.close()
+
+
+NEEDS_PRIMARY_STATE = "needs_primary"
+
+
+def get_read_ctx(request: Request) -> Generator[AppContext, None, None]:
+    """`get_ctx` for a route that only reads and may be answered from a replica.
+
+    A route opts in by naming this dependency: nothing is inferred, so a route
+    that writes (or reads what it just wrote, or must see the very latest
+    numbers) keeps `get_ctx` and the primary. When the project has a
+    `read_engine` the context reads from it, in a read-only transaction; a host
+    keeps one request on the primary by setting `request.state.needs_primary`
+    to True (or the project's `needs_primary`) before the context is built.
+    Without a replica it behaves exactly like `get_ctx`; on one, nothing is
+    committed: a read has nothing to keep."""
+    project = current_project(request)
+    if getattr(request.state, NEEDS_PRIMARY_STATE, False) and not project.needs_primary:
+        project = replace(project, needs_primary=True)
+    try:
+        ctx = _build_context_with_recovery(project, read_only=True)
+    except OperationalError:
+        if project.read_engine is None or project.needs_primary:
+            raise
+        # The replica is unreachable: the primary can answer.
+        project = replace(project, needs_primary=True)
+        ctx = _build_context_with_recovery(project, read_only=True)
+    if not ctx.on_read_engine:
+        # Not served by a replica: exactly what `get_ctx` does.
+        _join_request_batch(ctx, request)
+    try:
+        yield ctx
+        if ctx.on_read_engine:
+            ctx._session.rollback()  # a read has nothing to keep
+        else:
+            ctx.commit()
     except OperationalError:
         ctx._session.rollback()
         _recover_after_query_failure(project)
