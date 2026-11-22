@@ -21,6 +21,38 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
+## Unreleased
+
+### Fixed
+
+- **A busy database is no longer reported as a broken one.** A SQLite
+  "database is locked" during sync was shown as "this computer's database isn't
+  in the shape civex expects ... failed (will not retry until fixed)". It is now
+  a transient "another civex process is using this project" failure: the sync
+  waits up to 10 s for another sync on the project (`civex sync` says so and
+  skips when it is still running), and retries a lock error a few times (1, 3 and
+  6 s) before giving up, to be tried again by the background worker. A truly bad
+  schema is reported as before.
+- **Files that can't be sent no longer log one INFO line each, every sync.** One
+  summary line per pass (count, a few ids); each file is at DEBUG. Files this
+  project never stored (records cite them, no drive ever held them) are named in
+  the summary with the collections whose records cite them, and listed in
+  `civex sync status` and after `civex sync`.
+- **Changes the authority refused for permission are sent again by themselves.**
+  The refusal now carries `code: "permission"` (in the `conflicts` item of the
+  push result; older devices ignore it, and an older authority sends none, so
+  nothing is sent again by itself from it). A permission refusal is sent again 15
+  minutes after it, then after 1 h, 4 h, 16 h, then daily, so a change that is
+  still forbidden is not asked every sync. Other refusals (a value that breaks a
+  rule) are left for a person. The sync report and `civex sync` say how many
+  refused changes wait and print `civex sync resolve --all --take retry --kind
+  rejected`.
+
+### Breaking
+
+- Migration `a3c7e1d9f5b4` adds `code`, `retries` and `retried_at` to
+  `sync_conflicts` (nullable / defaulted; applied automatically).
+
 ## v2.1.0 — big collections stay fast, hosting hooks, partitioned PostgreSQL (2026-11-22)
 
 ### Breaking

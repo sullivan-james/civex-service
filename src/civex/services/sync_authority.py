@@ -41,6 +41,8 @@ from civex.domain.sync import (
     PROTOCOL_MAX,
     PROTOCOL_RETIRING,
     PROTOCOL_MIN,
+    REFUSAL_INVALID,
+    REFUSAL_PERMISSION,
     REJECTED,
     FeedPage,
     Hello,
@@ -240,7 +242,7 @@ class SyncAuthorityService:
             return prior  # sent before: the same answer, nothing done again
         self._covered = {(entry.entity_type, entry.entity_id)}
         if problem := self._problem(who, entry):
-            return self._refuse(who, entry, problem)
+            return self._refuse(who, entry, problem[0], code=problem[1])
         try:
             with self._repo.savepoint():
                 result = self._take(who, entry)
@@ -263,12 +265,15 @@ class SyncAuthorityService:
         self._repo.save_op(entry, result, who.device_id, who.name)
         return result
 
-    def _problem(self, who: Principal, entry: SyncEntry) -> str | None:
-        """Why a change can't be taken whatever is held: its shape, or what
-        the caller may change."""
-        return problem_with(entry) or (
-            self._policy.refuses(who, entry) if self._policy else None
-        )
+    def _problem(self, who: Principal, entry: SyncEntry) -> tuple[str, str] | None:
+        """Why a change can't be taken whatever is held, with the code of the
+        refusal (`REFUSAL_INVALID` for its shape, `REFUSAL_PERMISSION` for what
+        the caller may change: a person may be given that later)."""
+        if shape := problem_with(entry):
+            return shape, REFUSAL_INVALID
+        if self._policy and (denied := self._policy.refuses(who, entry)):
+            return denied, REFUSAL_PERMISSION
+        return None
 
     def _settle_action(self, who: Principal, action: list[SyncEntry]) -> list[OpResult]:
         """Settle the entries one action wrote (a field renamed with the
@@ -293,7 +298,7 @@ class SyncAuthorityService:
         self._covered = {(e.entity_type, e.entity_id) for e in action}
         for entry in action:
             if problem := self._problem(who, entry):
-                return self._refuse_action(who, action, problem)
+                return self._refuse_action(who, action, problem[0], code=problem[1])
         try:
             with self._repo.savepoint():
                 results = [self._take(who, e) for e in action]
@@ -323,12 +328,13 @@ class SyncAuthorityService:
         who: Principal,
         action: list[SyncEntry],
         why: str,
+        code: str | None = None,
     ) -> list[OpResult]:
         message = f"Part of one change that could not go in whole: {why}"
         return [
             self._put_back(who, entry, message)
             if self._applier.head(entry.entity_type, entry.entity_id) is not None
-            else self._refuse(who, entry, message)
+            else self._refuse(who, entry, message, code=code)
             for entry in action
         ]
 
@@ -406,17 +412,25 @@ class SyncAuthorityService:
         entry: SyncEntry,
         why: str,
         field: str | None = None,
+        code: str | None = None,
     ) -> OpResult:
         """Answer that a change can never be taken. The answer is remembered, so
         a repeat gets it again; the device that sent it keeps what it made and
         shows it for review (conflicts are held by the device whose change did
         not go in, not here). `field` is the value it was refused for, when it
-        was one (`data.<field id>`), so the device can show that field to fix."""
+        was one (`data.<field id>`), so the device can show that field to fix.
+        `code` says what kind of refusal it is (`REFUSAL_PERMISSION` can be
+        sent again once the device may; anything else would only fail again). It
+        travels inside the refusal's `conflicts` item, which older devices
+        ignore, so no protocol version changes."""
+        item: dict[str, Any] = {"kind": "rejected", "field": field}
+        if code:
+            item["code"] = code
         result = OpResult(
             entry.id,
             REJECTED,
             why,
-            [{"kind": "rejected", "field": field}] if field else [],
+            [item] if (field or code) else [],
         )
         self._repo.save_op(entry, result, who.device_id, who.name)
         return result

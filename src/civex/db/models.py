@@ -1300,3 +1300,10 @@ class SyncConflict(Base):
     created_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
     resolved_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
     resolution: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # A refusal's reason code from the authority (`REFUSAL_*`), how often the
+    # device has sent it again by itself, and when last.
+    code: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    retries: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    retried_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)

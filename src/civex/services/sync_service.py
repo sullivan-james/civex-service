@@ -20,8 +20,8 @@ import urllib.parse
 import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
-from typing import Any, BinaryIO
+from datetime import datetime, timedelta, timezone
+from typing import Any, BinaryIO, TypeVar
 
 from civex import user_state
 from civex.config import (
@@ -50,6 +50,8 @@ from civex.domain.exceptions import (
 from civex.domain.file_refs import without_file_locations
 from civex.domain.hosts import is_loopback
 from civex.domain.sync import (
+    REFUSAL_PERMISSION,
+    is_lock_contention,
     Joined,
     LoginStarted,
     DEFERRED,
@@ -98,6 +100,15 @@ _NOW: Any = object()
 TransportFactory = Callable[[str, DeviceCredentials], SyncTransport]
 # The cursor while a copy from the authority is being made (`_join`).
 JOINING = -1
+# How long a sync waits for another one on this project to finish before it
+# gives up with `SyncBusy`; and the pauses before it runs again after the
+# database turned out to be busy (see `_with_lock_retries`).
+_T = TypeVar("_T")
+# A refusal for permission is sent again by itself this many times at most
+# (each time is an entry in the history); after that a person decides.
+MAX_AUTO_RETRIES = 6
+LOCK_WAIT_SECONDS = 10.0
+LOCK_RETRY_DELAYS: tuple[float, ...] = (1.0, 3.0, 6.0)
 # Told how far a long step (copying, filling, fetching history) has got.
 ProgressFn = Callable[[SyncProgress], None]
 
@@ -112,6 +123,12 @@ class SyncReport:
     conflicts: int = 0  # values that did not go in as made
     rejected: int = 0  # changes the authority refused
     waiting: int = 0  # changes held back (a refusal waiting for review)
+    # Refused changes sent again by themselves this time (they were refused for
+    # permission, and the pause since has passed), and how many refused changes
+    # still wait for a person at the end (`civex sync resolve --all --take retry
+    # --kind rejected` sends them again).
+    retried: int = 0
+    open_rejected: int = 0
     # The civex the server runs, and what to tell a person when it will stop
     # accepting this one at its next update (`retiring_notice`), as it said.
     server_version: str | None = None
@@ -131,6 +148,11 @@ class FileSendReport:
     # (a drive that is unplugged, bytes not recovered yet). The changes citing
     # them went long ago; the files follow when they can be read.
     owed: list[str] = field(default_factory=list)
+    # Of `owed`, the files this project has never stored on any drive (records
+    # came in citing them without their contents), and the collections of the
+    # records citing them, as (name, records).
+    never_stored: list[str] = field(default_factory=list)
+    never_stored_in: list[tuple[str, int]] = field(default_factory=list)
     stopped: bool = False  # ran out of `seconds` with more to send
 
 
@@ -206,6 +228,10 @@ class FilesWaiting:
     ready: int = 0
     offline: list[tuple[str, int, str]] = field(default_factory=list)
     missing: int = 0
+    # Of `missing`, those this project never stored (no drive has ever held
+    # them), and the collections whose records cite them, as (name, records).
+    never_stored: int = 0
+    never_stored_in: list[tuple[str, int]] = field(default_factory=list)
 
 
 class SyncService:
@@ -307,7 +333,24 @@ class SyncService:
             else:
                 offline[volumes[0]] = offline.get(volumes[0], 0) + 1
         waiting.offline = [(v, n, status[v].reason) for v, n in sorted(offline.items())]
+        if waiting.missing:
+            absent = {s for s, v in copies.items() if not v and s in lacking}
+            never = self._repo.never_stored(absent)
+            waiting.never_stored = len(never)
+            waiting.never_stored_in = self._citing_collections(never)
         return waiting
+
+    def _citing_collections(self, shas: set[str]) -> list[tuple[str, int]]:
+        """The collections whose live records cite these files, as (name,
+        records), the most affected first."""
+        if not shas:
+            return []
+        names = self._repo.live_collections()
+        counts = self._repo.collections_citing(shas)
+        return sorted(
+            ((names.get(d, "a removed collection"), n) for d, n in counts.items()),
+            key=lambda x: (-x[1], x[0]),
+        )
 
     def conflicts(
         self, status: str | None = "open", entity_id: uuid.UUID | None = None
@@ -759,10 +802,10 @@ class SyncService:
         up a change. Raises `SyncBusy` when another sync is running and
         `SyncError` when the authority can't be reached or refuses this device
         (`retryable` says whether trying later can help)."""
-        with sync_lock(self._config.civex_dir):
+        with sync_lock(self._config.civex_dir, wait=LOCK_WAIT_SECONDS):
             log.info("sync with %s: starting", self._config.sync.remote)
             try:
-                report = self._sync()
+                report = self._with_lock_retries(self._sync)
             except Exception as raw:
                 e = plain_failure(raw)
                 log.warning(
@@ -773,9 +816,19 @@ class SyncService:
                     f" [{e.detail}]" if e.detail else "",
                     exc_info=e is not raw,
                 )
-                self._commit_quietly()
-                self._repo.record_outcome(str(e))
-                self._commit()
+                if is_lock_contention(raw):
+                    self._repo.rollback()
+                else:
+                    self._commit_quietly()
+                try:
+                    self._repo.record_outcome(str(e))
+                    self._commit()
+                except Exception as again:  # noqa: BLE001
+                    if not is_lock_contention(again):
+                        raise
+                    # The database is busy even for saying so: the message is
+                    # already in the log and in what is raised.
+                    self._repo.rollback()
                 if e is raw:
                     raise
                 raise e from raw
@@ -792,6 +845,28 @@ class SyncService:
             self._repo.record_outcome(None)
             self._commit()
             return report
+
+    def _with_lock_retries(self, work: Callable[[], _T]) -> _T:
+        """Run `work`; when the database is only busy (another process holds
+        its write lock past the busy timeout, or a read that turned into a
+        write lost a race and SQLite refuses at once) drop what the failed
+        attempt had not committed and run it again a few times. Every step of a
+        sync resumes from what was committed, so running it again is safe."""
+        for delay in (*LOCK_RETRY_DELAYS, None):
+            try:
+                return work()
+            except Exception as e:
+                if delay is None or not is_lock_contention(e):
+                    raise
+                log.info(
+                    "sync with %s: the database is busy (another civex process is "
+                    "using this project); trying again in %.1fs",
+                    self._config.sync.remote,
+                    delay,
+                )
+                self._repo.rollback()
+                time.sleep(delay)
+        raise AssertionError("unreachable")  # pragma: no cover
 
     def _commit_quietly(self) -> None:
         try:
@@ -824,9 +899,50 @@ class SyncService:
             self._copy_again(transport, hello, report)
         report.pulled += self._pull(transport)
         report.pushed += self._push(transport, report)
+        report.retried = self._resend_permission_refusals()
+        if report.retried:
+            report.pushed += self._push(transport, report)
         if report.pushed or report.conflicts:
             report.pulled += self._pull(transport)
+        report.open_rejected = len(self._repo.find_open_conflicts(kind="rejected"))
         return report
+
+    def _resend_permission_refusals(self) -> int:
+        """Send again the open refusals the authority made for permission, once
+        their pause has passed (`_retry_pause`): the device may have been given
+        the permission since, and a change that is still forbidden is only asked
+        again with growing gaps, up to once a day. A refusal for anything else
+        (a value that breaks a rule) would only fail again, so a person decides.
+        Returns how many were sent."""
+        now = datetime.now(timezone.utc)
+        sent = 0
+        for listed in self._repo.find_open_conflicts(kind="rejected"):
+            # Read again: sending one part of an action again settled the others'
+            # items as "retrying" since the list was made, and sending the action
+            # a second time would duplicate it.
+            c = self._repo.get_conflict(listed.id)
+            if (
+                c is None
+                or c.status != "open"
+                or c.code != REFUSAL_PERMISSION
+                or c.resolution == "retrying"
+            ):
+                continue
+            # The later of the last automatic try and the latest refusal (a
+            # refusal renewed after a person's own retry starts its pause again).
+            since = max(
+                datetime.fromisoformat(t) for t in (c.retried_at, c.created_at) if t
+            )
+            if c.retries >= MAX_AUTO_RETRIES or now - since < _retry_pause(c.retries):
+                continue
+            self._repo.note_auto_retry(c.id)
+            try:
+                self.resolve_conflict(c.id, "retry")
+                sent += 1
+            except CivexError as e:  # noqa: BLE001 - left for a person
+                log.info("refused change %s not sent again: %s", c.id, e)
+            self._commit()
+        return sent
 
     def pull(self) -> int:
         with sync_lock(self._config.civex_dir):
@@ -1168,14 +1284,28 @@ class SyncService:
         self._send_files(self._transport(), shas, report, progress, seconds)
         self._commit()
         if report.owed:
-            log.info(
-                "sync with %s: %d file(s) the authority lacks cannot be read here "
-                "yet; they go when they can: %s",
-                self._config.sync.remote,
-                len(report.owed),
-                ", ".join(x[:10] for x in report.owed[:5]),
-            )
+            self._log_owed(report)
         return report
+
+    def _log_owed(self, report: FileSendReport) -> None:
+        """One line for the files the authority lacks that can't be read here:
+        how many, a few ids, and (for those this project never stored) which
+        collections cite them. Each file is at DEBUG."""
+        report.never_stored = sorted(self._repo.never_stored(report.owed))
+        report.never_stored_in = self._citing_collections(set(report.never_stored))
+        where = ", ".join(f"{n} in {name}" for name, n in report.never_stored_in[:5])
+        log.info(
+            "sync with %s: %d file(s) the authority lacks cannot be read here; "
+            "they go when they can: %s%s",
+            self._config.sync.remote,
+            len(report.owed),
+            ", ".join(x[:10] for x in report.owed[:5]),
+            f". {len(report.never_stored)} of them were never stored in this "
+            f"project (records cite them without their contents)"
+            + (f": records {where}" if where else "")
+            if report.never_stored
+            else "",
+        )
 
     def _send_files(
         self,
@@ -1245,7 +1375,7 @@ class SyncService:
             else:
                 if sha not in report.owed:
                     report.owed.append(sha)
-                log.info("file %s not sent: %s", sha[:12], why)
+                log.debug("file %s not sent: %s", sha[:12], why)
             done += 1
             say(force=True)
 
@@ -1312,6 +1442,7 @@ class SyncService:
                         result.message,
                         entry.new_data,
                         _refused_field(result),
+                        _refused_code(result),
                     )
                     self._repo.resolve_conflicts([c.id for c in older], "replaced")
                     continue
@@ -1333,6 +1464,7 @@ class SyncService:
                     {
                         "kind": "rejected",
                         "field": _refused_field(result),
+                        "code": _refused_code(result),
                         "yours": entry.new_data,
                         "message": result.message,
                     }
@@ -1357,6 +1489,7 @@ class SyncService:
                     op_id=result.op_id,
                     device_name=None,
                     message=problem.get("message"),
+                    code=problem.get("code") if kind == "rejected" else None,
                 )
         return held
 
@@ -2115,6 +2248,21 @@ def _takes_for(conflict: SyncConflictDTO) -> tuple[str, ...]:
     if conflict.entity_type == "record":
         return takes
     return tuple(t for t in takes if t not in _RECORD_ONLY)
+
+
+def _retry_pause(retries: int) -> timedelta:
+    """How long a refused change waits before it is sent again by itself: 15
+    minutes, then four times as long each time, up to a day."""
+    return min(timedelta(days=1), timedelta(minutes=15) * 4 ** min(retries, 6))
+
+
+def _refused_code(result: Any) -> str | None:
+    """Why the authority refused (`REFUSAL_*`), when it said: absent from an
+    older one, whose refusals are then never sent again by themselves."""
+    for problem in result.conflicts or []:
+        if problem.get("code"):
+            return str(problem["code"])
+    return None
 
 
 def _refused_field(result: Any) -> str | None:
