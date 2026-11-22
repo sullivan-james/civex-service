@@ -66,7 +66,7 @@ export const bundleApi = {
   /** Writes it straight onto a drive of this computer (none: the project
    * folder), with nothing passing through the browser. */
   save: (
-    options: BundleOptions & { volume: string | null },
+    options: BundleOptions & { folder: string | null },
     progressId?: string,
   ) =>
     api.post<{ path: string; opened: boolean }>(

@@ -110,7 +110,7 @@ describe('RecordStorageSummary', () => {
     show()
 
     await userEvent.click(
-      await screen.findByRole('button', { name: 'Move to drive…' }),
+      await screen.findByRole('button', { name: 'Change storage drive…' }),
     )
     // One sentence about where they end up, not how (copies kept for others).
     expect(

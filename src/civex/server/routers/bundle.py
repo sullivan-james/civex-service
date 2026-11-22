@@ -14,9 +14,8 @@ from pydantic import BaseModel, Field
 from civex import fs_open
 from civex.context import AppContext
 from civex.domain.bundle import EXTENSION, BundleError, ExportOptions
-from civex.domain.exceptions import NotFoundError
+from civex.domain.exceptions import CivexError, NotFoundError
 from civex.domain.features import OPEN_FOLDER
-from civex.domain.file_access import LinksNotPossibleError
 from civex.server.deps import get_ctx
 from civex.server.downloads import new_temp_path, serve, temp_paths
 from civex.server.routers.file_access import _from_this_machine, report_progress
@@ -156,10 +155,11 @@ class BundleSaveRequest(BaseModel):
     workflows: bool = Field(
         default=True, description="Carry the project's workflows and plugins."
     )
-    volume: str | None = Field(
+    folder: str | None = Field(
         default=None,
-        description="The drive to put it on (its exports folder); none: the "
-        "project's own exports folder.",
+        description="The folder on this computer to put it in (any folder: an "
+        "external drive, a shared folder); none: the project's own exports "
+        "folder.",
     )
     open: bool = Field(
         default=True, description="Open the folder it is in when done (this machine)."
@@ -178,17 +178,17 @@ def save_bundle(
     progress: Progress | None = Depends(report_progress),
     ctx: AppContext = Depends(get_ctx),
 ):
-    """Write the project (or the chosen collections) as a bundle straight onto
-    a drive of this computer, instead of downloading it through the browser:
-    into the drive's exports folder, as a folder export is. The same file as
-    `GET /bundle`. 409 when the drive can't be written to now."""
+    """Write the project (or the chosen collections) as a bundle straight into
+    a folder of this computer, instead of downloading it through the browser.
+    The same file as `GET /bundle`. 404 when there is no such folder, 422 when
+    it can't be written to."""
     name = (
         f"{ctx.project.config.civex_dir.parent.name}-"
         f"{datetime.now(timezone.utc):%Y-%m-%d}{EXTENSION}"
     )
     try:
         dest = ctx.file_access_svc.save_to(
-            body.volume,
+            body.folder,
             name,
             lambda path: ctx.bundle_svc.export(
                 path,
@@ -196,10 +196,10 @@ def save_bundle(
                 progress,
             ),
         )
-    except LinksNotPossibleError as e:
-        raise HTTPException(status_code=409, detail=str(e))
     except NotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except CivexError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     opened = (
         body.open
         and OPEN_FOLDER in ctx.features

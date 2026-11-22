@@ -7,7 +7,7 @@ import { HardDrive } from '../ui/icons'
 /** Where a record's files are, with everything beneath it, shown only when
  * some can't be reached or are missing: how many are in
  * each place (the same places the record's **Their files** shows, said as a
- * sentence: "10 on archive · 2 not on this computer"), and **Move to drive…**
+ * sentence: "10 on archive · 2 not on this computer"), and **Change storage drive…**
  * for all of them. `filesHref` opens them listed one by one (the Contains
  * tab's files), when the record contains anything. */
 export function RecordStorageSummary({

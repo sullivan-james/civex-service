@@ -25,7 +25,7 @@ used, and a way to get that data back later.
     the data they have is the data you used.
 
 4. If you deposit the data (Zenodo, a university repository), make a folder
-   of it (**Open as a folder**, or `civex release export v1`): the files laid
+   of it (**View as a folder**, or `civex release export v1`): the files laid
    out by record, with `manifest-sha256.txt`, `release.json` and
    `CITATION.cff`. Upload that and the release's bundle (**Download**) and,
    once you have a DOI, add it:

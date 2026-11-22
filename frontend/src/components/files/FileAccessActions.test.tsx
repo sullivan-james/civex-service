@@ -90,9 +90,9 @@ async function exportVia(method: 'folder' | 'copy' | 'zip') {
   await choose(/^export…/i)
   await next()
   const names = {
-    folder: [/open as a folder/i, /^open folder$/i],
-    copy: [/put on a drive/i, /^put on drive$/i],
-    zip: [/download as a zip/i, /^download$/i],
+    folder: [/view as a folder/i, /^open folder$/i],
+    copy: [/copy out/i, /^put on drive$/i],
+    zip: [/download a zip/i, /^download$/i],
   }[method]
   await userEvent.click(screen.getByRole('radio', { name: names[0] }))
   await userEvent.click(screen.getByRole('button', { name: names[1] }))
@@ -189,7 +189,7 @@ describe('exports saved for the schema', () => {
 
     await choose(/contour files/i)
     await userEvent.click(
-      screen.getByRole('radio', { name: /open as a folder/i }),
+      screen.getByRole('radio', { name: /view as a folder/i }),
     )
     await userEvent.click(
       screen.getByRole('button', { name: /^open folder$/i }),
@@ -558,16 +558,14 @@ describe('when the folder cannot be made on its drive', () => {
   })
 })
 
-describe('Put on a drive', () => {
+describe('Copy out', () => {
   it('is a method of the export, with the drive chosen beside it', async () => {
     const calls = serve()
     renderIt()
 
     await choose(/^export…/i)
     await next()
-    await userEvent.click(
-      screen.getByRole('radio', { name: /put on a drive/i }),
-    )
+    await userEvent.click(screen.getByRole('radio', { name: /copy out/i }))
     await userEvent.selectOptions(
       await screen.findByRole('combobox', { name: /which drive/i }),
       'archive',
@@ -609,9 +607,9 @@ describe('one dialog for every way of getting the files', () => {
 
     expect(
       screen
-        .getAllByRole('radio', { name: /folder|drive|zip/i })
+        .getAllByRole('radio', { name: /folder|copy out|zip/i })
         .map((r) => r.getAttribute('aria-label')),
-    ).toEqual(['Open as a folder', 'Put on a drive', 'Download as a zip'])
+    ).toEqual(['View as a folder', 'Copy out', 'Download a zip'])
   })
 
   it('walks through what, then how, with the one layout choice beside the preview', async () => {

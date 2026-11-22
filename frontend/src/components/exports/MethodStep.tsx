@@ -16,20 +16,20 @@ const METHODS: {
 }[] = [
   {
     id: 'link',
-    title: 'Open as a folder',
-    hint: 'Ready at once, taking almost no space. To change the files, edit them in civex or put them on a drive.',
+    title: 'View as a folder',
+    hint: 'Opens now; takes no space',
     icon: FolderOpen,
   },
   {
     id: 'copy',
-    title: 'Put on a drive',
-    hint: 'Files of your own to change or take away, such as on a USB stick.',
+    title: 'Copy out',
+    hint: 'Your own copies, to take away',
     icon: HardDrive,
   },
   {
     id: 'zip',
-    title: 'Download as a zip',
-    hint: 'One file, to send or keep somewhere else.',
+    title: 'Download a zip',
+    hint: 'One file, to send',
     icon: Archive,
   },
 ]

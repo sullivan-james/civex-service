@@ -11,19 +11,20 @@ const json = (body: unknown) =>
   })
 
 beforeEach(() => {
+  localStorage.clear()
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input), 'http://x')
-      if (url.pathname === '/api/store/volumes')
-        return json([
-          {
-            name: 'archive',
-            available: true,
-            state: 'online',
-            disk_free_bytes: 5_000_000,
-          },
-        ])
+      // The app's own folder browser: any folder of this computer.
+      if (url.pathname === '/api/store/browse')
+        return json({
+          path: '/media/usb',
+          parent: '/media',
+          entries: [],
+          places: [],
+          truncated: false,
+        })
       return json({})
     }),
   )
@@ -31,7 +32,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 function show(
-  onSave = vi.fn(async () => ({ path: '/mnt/archive/_exports/v1.zip' })),
+  onSave = vi.fn(async () => ({ path: '/media/usb/v1.civex.zip' })),
 ) {
   const onDownload = vi.fn()
   const onClose = vi.fn()
@@ -43,8 +44,7 @@ function show(
     >
       <ToastProvider>
         <SaveToDriveDialog
-          title="Save a copy"
-          need={1000}
+          title="Copy to another project"
           onSave={onSave}
           onDownload={onDownload}
           onClose={onClose}
@@ -56,21 +56,31 @@ function show(
 }
 
 describe('saving a copy', () => {
-  it('goes onto a drive of this computer by default, and says where', async () => {
+  it('needs a folder first, chosen with the folder browser, and remembers it', async () => {
+    const user = userEvent.setup()
+    show()
+    expect(screen.getByText('No folder chosen')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Choose…' }))
+    expect(
+      await screen.findByRole('heading', { name: 'Choose a folder' }),
+    ).toBeInTheDocument()
+  })
+
+  it('saves into the folder in the background, and says where', async () => {
+    // A folder used before is offered again.
+    localStorage.setItem('save.folder', JSON.stringify('/media/usb'))
     const user = userEvent.setup()
     const { onSave, onDownload, onClose } = show()
-    await user.selectOptions(
-      await screen.findByLabelText('Drive'),
-      await screen.findByRole('option', { name: /archive/ }),
-    )
+    expect(screen.getByText('/media/usb')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() =>
-      expect(onSave).toHaveBeenCalledWith('archive', expect.any(String)),
+      expect(onSave).toHaveBeenCalledWith('/media/usb', expect.any(String)),
     )
     expect(onDownload).not.toHaveBeenCalled()
-    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(onClose).toHaveBeenCalled()
     expect(
-      await screen.findByText('Saved: /mnt/archive/_exports/v1.zip'),
+      await screen.findByText('Saved: /media/usb/v1.civex.zip'),
     ).toBeInTheDocument()
   })
 
@@ -78,23 +88,9 @@ describe('saving a copy', () => {
     const user = userEvent.setup()
     const { onSave, onDownload } = show()
     await user.click(screen.getByRole('radio', { name: 'Download' }))
-    expect(screen.queryByLabelText('Drive')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Choose…' })).toBeNull()
     await user.click(screen.getByRole('button', { name: 'Download' }))
     expect(onDownload).toHaveBeenCalled()
     expect(onSave).not.toHaveBeenCalled()
-  })
-
-  it('runs in the background: the dialog closes at once, and a refusal is said', async () => {
-    const user = userEvent.setup()
-    const { onClose } = show(
-      vi.fn(async () => {
-        throw new Error("'archive' can't be written to now")
-      }),
-    )
-    await user.click(await screen.findByRole('button', { name: 'Save' }))
-    expect(onClose).toHaveBeenCalled()
-    expect(
-      await screen.findByText(/can't be written to now/),
-    ).toBeInTheDocument()
   })
 })

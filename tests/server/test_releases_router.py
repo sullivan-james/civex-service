@@ -142,20 +142,24 @@ def test_a_purge_plan_names_the_releases_keeping_files(client: TestClient):
     assert plan == {"records": 1, "kept_by_releases": {"v1": 1}}
 
 
-def test_a_release_is_written_straight_onto_this_computer(client: TestClient):
+def test_a_release_is_written_straight_into_a_folder(client: TestClient, tmp_path):
     import zipfile
 
     _study(client)
     client.post("/api/releases", json={"name": "v1", "title": "Survey"})
-    saved = client.post("/api/releases/v1/save", json={"open": False})
+    saved = client.post(
+        "/api/releases/v1/save", json={"open": False, "folder": str(tmp_path)}
+    )
     assert saved.status_code == 200, saved.text
     path = saved.json()["path"]
+    assert path.startswith(str(tmp_path))
     with zipfile.ZipFile(path) as zf:
         assert "release.json" in zf.namelist()
     assert client.post("/api/releases/v9/save", json={"open": False}).status_code == 404
     assert (
         client.post(
-            "/api/releases/v1/save", json={"volume": "nowhere", "open": False}
+            "/api/releases/v1/save",
+            json={"folder": str(tmp_path / "nowhere"), "open": False},
         ).status_code
         == 404
     )

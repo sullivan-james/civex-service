@@ -93,7 +93,11 @@ export default function ReleasePage() {
       error={error ? <ErrorState message={errorMessage(error)} /> : undefined}
       action={
         release &&
-        !yanked && <Button onClick={() => setSaving(true)}>Save a copy…</Button>
+        !yanked && (
+          <Button onClick={() => setSaving(true)}>
+            Copy to another project…
+          </Button>
+        )
       }
       secondaryActions={
         release
@@ -177,11 +181,10 @@ export default function ReleasePage() {
         </>
       )}
       {saving && release && (
-        // Onto a drive of this computer, where civex runs, or as a download.
+        // Into a folder of this computer, where civex runs, or as a download.
         <SaveToDriveDialog
-          title="Save a copy"
-          need={release.bundle_size}
-          onSave={(volume) => releasesApi.save(release.name, volume)}
+          title="Copy to another project"
+          onSave={(folder) => releasesApi.save(release.name, folder)}
           onDownload={() => {
             const a = document.createElement('a')
             a.href = releasesApi.bundleUrl(release.name)
@@ -458,15 +461,15 @@ function Files({ release }: { release: Release }) {
                 size="sm"
                 onClick={() => void exportRelease(flow, release.name, 'link')}
               >
-                Open as a folder
+                View as a folder
               </Button>
             )}
             <Button size="sm" onClick={() => setPicking('copy')}>
-              Put on a drive…
+              Copy out…
             </Button>
             {features.has('volumes') && (
               <Button size="sm" onClick={() => setPicking('move')}>
-                Move to drive…
+                Change storage drive…
               </Button>
             )}
             {p?.zip_allowed && (
@@ -474,7 +477,7 @@ function Files({ release }: { release: Release }) {
                 size="sm"
                 onClick={() => void zipRelease(flow, release.name)}
               >
-                Download as a zip
+                Download a zip
               </Button>
             )}
           </div>

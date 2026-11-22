@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-from civex import __version__, file_modes
+from civex import __version__, file_modes, fs_locations
 from civex.domain.dtos import FileRef, RecordDTO
 from civex.domain import features
 from civex.domain.field_descriptors import COMPUTED_DTYPES
@@ -1238,24 +1238,29 @@ class FileAccessService:
 
     def save_to(
         self,
-        location: str | None,
+        folder: str | None,
         filename: str,
         write: Callable[[Path], Any],
     ) -> Path:
-        """Put one file civex makes (a copy of the project, a release's) in
-        the exports folder of a drive, or of the project when none is named:
-        the same place a folder export goes, so it is found beside them.
-        `write(path)` makes it; it appears under its name only once whole.
-        Answers where it is."""
-        place = PROJECT if location in (None, "", PROJECT) else location
-        root = self.exports_root(place)
-        self._check_writable(place)
-        root.mkdir(parents=True, exist_ok=True)
+        """Put one file civex makes (a copy of the project, a release's) in a
+        folder of this computer: any folder a person chose (an external drive,
+        a shared folder; it need not be one of the project's drives), or the
+        project's own exports folder when none is named. `write(path)` makes
+        it; it appears under its name only once whole. Answers where it is."""
+        if folder:
+            root = Path(fs_locations.normalise(folder))
+            if not root.is_dir():
+                raise NotFoundError(f"There is no folder '{folder}'.")
+        else:
+            root = self.exports_root(PROJECT)
+            root.mkdir(parents=True, exist_ok=True)
         dest = root / safe_segment(filename, "file")
         part = dest.with_name(dest.name + ".part")
         try:
             write(part)
             file_modes.replace(part, dest)
+        except PermissionError:
+            raise ValidationError(f"'{root}' can't be written to.") from None
         finally:
             part.unlink(missing_ok=True)
         return dest

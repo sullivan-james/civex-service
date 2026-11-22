@@ -1045,7 +1045,7 @@ export function RecordsExplorer({
                                 // The files of the records ticked and of everything in
                                 // them: the one move dialog.
                                 <MoveToDriveButton
-                                  label="Move files to drive…"
+                                  label="Change storage drive…"
                                   what={`the files of ${bulkCount.toLocaleString()} record${bulkCount === 1 ? '' : 's'}`}
                                   pick={selectionFor(
                                     x.query,

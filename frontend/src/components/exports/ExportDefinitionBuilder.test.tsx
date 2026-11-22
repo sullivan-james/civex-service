@@ -316,17 +316,17 @@ describe('reviewing', () => {
     expect(
       (
         within(radios).getByRole('radio', {
-          name: /open as a folder/i,
+          name: /view as a folder/i,
         }) as HTMLInputElement
       ).checked,
     ).toBe(true)
     await userEvent.click(
-      within(radios).getByRole('radio', { name: /download as a zip/i }),
+      within(radios).getByRole('radio', { name: /download a zip/i }),
     )
     expect(
       (
         within(radios).getByRole('radio', {
-          name: /download as a zip/i,
+          name: /download a zip/i,
         }) as HTMLInputElement
       ).checked,
     ).toBe(true)

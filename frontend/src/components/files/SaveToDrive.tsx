@@ -9,24 +9,29 @@ import {
   SegmentedControl,
   useToast,
 } from '../ui'
-import { PROJECT, useDriveChoice } from '../../hooks/useDriveChoice'
+import { FolderOpen } from '../ui/icons'
+import { useStored } from '../../hooks/useStored'
+import { FolderPickerModal } from '../settings/FolderPickerModal'
 import { saveCopy } from './fileFlows'
-import { DrivePicker } from './DrivePicker'
 
-export type SaveHow = 'drive' | 'download'
+export type SaveHow = 'folder' | 'download'
 
 /** Where one file civex makes goes (a copy of the project, a release's):
- * onto a drive of this computer, which is where civex runs, or through the
- * browser as a download. The one choice both dialogs offer. */
-export function useSaveChoice(need: number) {
-  const [how, setHow] = useState<SaveHow>('drive')
-  const [chosen, setChosen] = useState<string | null>(null)
-  const drive = useDriveChoice({ need, allowProject: true, chosen })
+ * into a folder of this computer, which is where civex runs, or through the
+ * browser as a download. The folder is any folder, chosen with the app's own
+ * folder browser (an external drive, a shared folder: it need not be one of
+ * the project's drives), and the last one used is remembered. The one choice
+ * both dialogs offer. */
+export function useSaveChoice() {
+  const [how, setHow] = useState<SaveHow>('folder')
+  const [folder, setFolder] = useStored<string | null>('save.folder', null)
+  const [browsing, setBrowsing] = useState(false)
   return {
     how,
-    /** The drive to send to the server (none: the project folder). */
-    volume: drive.target === PROJECT ? null : drive.target,
-    blocked: how === 'drive' && drive.tooBig,
+    /** The folder to send to the server. */
+    folder,
+    /** Nothing to save into yet. */
+    blocked: how === 'folder' && !folder,
     picker: (
       <div className="space-y-3">
         <SegmentedControl
@@ -35,20 +40,33 @@ export function useSaveChoice(need: number) {
           value={how}
           onChange={setHow}
           options={[
-            { value: 'drive', label: 'Put on a drive' },
+            { value: 'folder', label: 'Save to a folder' },
             { value: 'download', label: 'Download' },
           ]}
         />
-        {how === 'drive' && (
-          <DrivePicker
-            label="Drive"
-            value={drive.target}
-            targets={drive.targets}
-            allowProject
-            need={need}
-            free={drive.free}
-            tooBig={drive.tooBig}
-            onChange={setChosen}
+        {how === 'folder' && (
+          <div className="flex items-center gap-2">
+            <FolderOpen
+              size={14}
+              className="shrink-0 text-fg-muted"
+              aria-hidden="true"
+            />
+            <span
+              className="min-w-0 flex-1 truncate font-mono text-xs"
+              title={folder ?? undefined}
+            >
+              {folder ?? 'No folder chosen'}
+            </span>
+            <Button size="sm" onClick={() => setBrowsing(true)}>
+              Choose…
+            </Button>
+          </div>
+        )}
+        {browsing && (
+          <FolderPickerModal
+            initialPath={folder ?? undefined}
+            onSelect={setFolder}
+            onClose={() => setBrowsing(false)}
           />
         )}
       </div>
@@ -56,39 +74,33 @@ export function useSaveChoice(need: number) {
   }
 }
 
-/** A small dialog for that choice alone: put it on a drive, or download it.
- * Putting it on a drive runs in the background (`fileFlows.saveCopy`): the
- * dialog closes at once and the status bar shows it. */
+/** A small dialog for that choice alone: save it to a folder, or download
+ * it. Saving runs in the background (`fileFlows.saveCopy`): the dialog closes
+ * at once and the status bar shows it. */
 export function SaveToDriveDialog({
   title,
-  need,
   onSave,
   onDownload,
   onClose,
 }: {
   title: string
-  /** Its size in bytes, to check the drive has room. */
-  need: number
-  /** Write it onto the drive (none: the project folder); answers the path. */
-  onSave: (
-    volume: string | null,
-    progressId: string,
-  ) => Promise<{ path: string }>
+  /** Write it into the folder; answers the path. */
+  onSave: (folder: string, progressId: string) => Promise<{ path: string }>
   onDownload: () => void
   onClose: () => void
 }) {
   const toast = useToast()
   const qc = useQueryClient()
-  const choice = useSaveChoice(need)
+  const choice = useSaveChoice()
 
   function go() {
     if (choice.how === 'download') onDownload()
-    else {
-      const volume = choice.volume
+    else if (choice.folder) {
+      const folder = choice.folder
       void saveCopy(
         { toast, qc, problem: () => undefined },
         'Saving a copy…',
-        (progressId) => onSave(volume, progressId),
+        (progressId) => onSave(folder, progressId),
       )
     }
     onClose()
@@ -101,7 +113,7 @@ export function SaveToDriveDialog({
       <ModalFooter>
         <Button onClick={onClose}>Cancel</Button>
         <Button variant="primary" disabled={choice.blocked} onClick={go}>
-          {choice.how === 'drive' ? 'Save' : 'Download'}
+          {choice.how === 'folder' ? 'Save' : 'Download'}
         </Button>
       </ModalFooter>
     </Modal>

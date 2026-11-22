@@ -97,12 +97,12 @@ copy where it was, the release stays with that one.
 
 To get the files out, the release's page has the same ways as any export:
 
-- **Open as a folder**: a folder on the drive holding most of the files,
+- **View as a folder**: a folder on the drive holding most of the files,
   laid out as the records were (a folder per record);
-- **Put on a drive…**: a folder of copies on the drive you choose;
-- **Move to drive…**: put all the release's files on one drive (only the
+- **Copy out…**: a folder of copies on the drive you choose;
+- **Change storage drive…**: put all the release's files on one drive (only the
   release's own copies move; records that use a file elsewhere keep theirs);
-- **Download as a zip**: offered only while the release is small enough
+- **Download a zip**: offered only while the release is small enough
   (2000 files, 500 MB); a larger one is made into a folder instead.
 
 Each folder and zip also holds `manifest-sha256.txt` (BagIt: each file's
@@ -190,7 +190,7 @@ that syncs they reach every copy.
 
 ## Getting the records back
 
-Save the bundle (**Save a copy…**, onto a drive of this computer or as a download; or `civex release download v1`) and read
+Save the bundle (**Copy to another project…**, onto a drive of this computer or as a download; or `civex release download v1`) and read
 it into a **new** project with `civex bundle import` (or **Collections →
 Bring in from another project…**). Records keep their ids and still name their files; put the
 files beside them with the release's folder export.

@@ -98,7 +98,7 @@ Tick files, then:
 
 | Action | Does |
 |---|---|
-| **Move to drive…** | Moves them onto one drive. Only the listed records' references move: a copy other records point at stays where it is |
+| **Change storage drive…** | Moves them onto one drive. Only the listed records' references move: a copy other records point at stays where it is |
 | **Download to this computer** | Fetches files only on the sync server |
 | **Free up space…** | Removes this computer's copies of files the server holds |
 

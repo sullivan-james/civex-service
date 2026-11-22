@@ -609,10 +609,11 @@ def record_differences(name: str, record_id: str, ctx: AppContext = Depends(get_
 
 
 class ReleaseSaveRequest(BaseModel):
-    volume: str | None = Field(
+    folder: str | None = Field(
         default=None,
-        description="The drive to put it on (its exports folder); none: the "
-        "project's own exports folder.",
+        description="The folder on this computer to put it in (any folder: an "
+        "external drive, a shared folder); none: the project's own exports "
+        "folder.",
     )
     open: bool = Field(
         default=True, description="Open the folder it is in when done (this machine)."
@@ -631,18 +632,16 @@ def save_release(
     request: Request,
     ctx: AppContext = Depends(get_ctx),
 ):
-    """Write a release's bundle of records straight onto a drive of this
-    computer (its exports folder), instead of downloading it through the
-    browser. 404 when it can't be had (or it was yanked); 409 when the drive
-    can't be written to now."""
+    """Write a release's bundle of records straight into a folder of this
+    computer, instead of downloading it through the browser. 404 when it
+    can't be had (or it was yanked) or there is no such folder; 422 when the
+    folder can't be written to."""
     try:
         dest = ctx.file_access_svc.save_to(
-            body.volume,
+            body.folder,
             ctx.release_svc.file_name_for(name),
             lambda path: ctx.release_svc.write_copy(name, path),
         )
-    except LinksNotPossibleError as e:
-        raise HTTPException(409, detail=str(e))
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except CivexError as e:

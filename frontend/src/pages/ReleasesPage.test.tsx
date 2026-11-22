@@ -172,7 +172,7 @@ describe('a release page', () => {
       await screen.findByText('All 3 files can be reached.'),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole('button', { name: 'Download as a zip' }),
+      screen.getByRole('button', { name: 'Download a zip' }),
     ).toBeInTheDocument()
     fireEvent.click(screen.getByRole('radio', { name: 'BibTeX' }))
     expect(await screen.findByText('@misc{Lovelace2026v1}')).toBeInTheDocument()

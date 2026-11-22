@@ -20,8 +20,8 @@ import { saveCopy } from '../files/fileFlows'
 
 /** Copy the project for another one: one file another civex can read. Shows
  * what would go in (the server's plan, asked again as the choice changes),
- * whether to carry the stored files, and where it goes: onto a drive of this
- * computer (the default: civex runs here) or through the browser. */
+ * whether to carry the stored files, and where it goes: into a folder of
+ * this computer (the default: civex runs here) or through the browser. */
 export function ExportBundleDialog({ onClose }: { onClose: () => void }) {
   const [files, setFiles] = useState(true)
   const plan = useQuery({
@@ -30,14 +30,14 @@ export function ExportBundleDialog({ onClose }: { onClose: () => void }) {
   })
   const p = plan.data
   const toast = useToast()
-  const save = useSaveChoice(files ? (p?.file_bytes ?? 0) : 0)
+  const save = useSaveChoice()
   const qc = useQueryClient()
 
   function go() {
     if (save.how === 'download') bundleApi.download({ files })
     else {
       // In the background: the status bar shows it, with its progress.
-      const options = { files, volume: save.volume }
+      const options = { files, folder: save.folder }
       void saveCopy(
         { toast, qc, problem: () => undefined },
         'Copying the project…',
@@ -89,7 +89,7 @@ export function ExportBundleDialog({ onClose }: { onClose: () => void }) {
       <ModalFooter>
         <Button onClick={onClose}>Cancel</Button>
         <Button variant="primary" disabled={!p || save.blocked} onClick={go}>
-          {save.how === 'drive' ? 'Save' : 'Download'}
+          {save.how === 'folder' ? 'Save' : 'Download'}
         </Button>
       </ModalFooter>
     </Modal>

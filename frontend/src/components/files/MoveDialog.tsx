@@ -22,14 +22,14 @@ import { DrivePicker } from './DrivePicker'
 import { moveFiles } from './fileFlows'
 import { ToDownloadNotice } from './ToDownloadNotice'
 
-/** **Move to drive…**: a button opening the move dialog for some files (the
+/** **Change storage drive…**: a button opening the move dialog for some files (the
  * ticked files of a list, a record and what is beneath it, ticked records).
  * The one way files are moved onto a drive from a page. */
 export function MoveToDriveButton({
   what,
   pick,
   onStarted,
-  label = 'Move to drive…',
+  label = 'Change storage drive…',
 }: {
   what: string
   pick: FilePick
