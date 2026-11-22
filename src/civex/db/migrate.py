@@ -274,10 +274,19 @@ def convert_records_partitions(
     `partitions` < 2, the table is already partitioned (at any count), or the
     database is not PostgreSQL. A populated table is copied once: writers wait
     (about 50 s per million records; `docs/contributing/records-partitioning.md`).
-    One process at a time per schema (the migration's advisory lock), and the
-    schema should be current (`ensure_schema_current`) first.
+    One process at a time per schema (the migration's advisory lock). Raises
+    `ValueError` when there is no `records` table yet: migrate
+    (`ensure_schema_current`) first.
     """
     with engine.connect() as connection:
+        if connection.dialect.name == "postgresql" and not inspect(
+            connection
+        ).has_table("records"):
+            connection.rollback()
+            raise ValueError(
+                "`records` does not exist: run ensure_schema_current first"
+            )
+        connection.rollback()
         with _cross_process_lock(connection):
             try:
                 if partitioning.partition_records(connection, partitions):
