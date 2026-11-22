@@ -16,7 +16,8 @@ from civex.context import AppContext
 from civex.domain.exceptions import NotAllowedError, NotFoundError, ValidationError
 from civex.domain.library import InstallPlan, LibraryItemDTO
 from civex.domain.sync import INVITE_HOURS, SyncError
-from civex.server.deps import get_ctx
+from civex.domain.features import PLUGIN_INSTALL, REMOTE_DIAL
+from civex.server.deps import get_ctx, requires
 from civex.services.sync_jobs import sync_jobs
 
 router = APIRouter(prefix="/remote", tags=["sync"])
@@ -410,7 +411,12 @@ def status(ctx: AppContext = Depends(get_ctx)):
     return _status(ctx)
 
 
-@router.post("/connect", response_model=RemoteConnectResponse, status_code=202)
+@router.post(
+    "/connect",
+    response_model=RemoteConnectResponse,
+    status_code=202,
+    dependencies=[requires(REMOTE_DIAL)],
+)
 def connect(body: RemoteConnectRequest, ctx: AppContext = Depends(get_ctx)):
     """Point this project at an authority. An empty project becomes a copy of
     it; a project with data fills an empty authority; two with data are refused.
@@ -436,7 +442,11 @@ def connect(body: RemoteConnectRequest, ctx: AppContext = Depends(get_ctx)):
     return RemoteConnectResponse(mode=mode)
 
 
-@router.post("/disconnect", response_model=RemoteStatusResponse)
+@router.post(
+    "/disconnect",
+    response_model=RemoteStatusResponse,
+    dependencies=[requires(REMOTE_DIAL)],
+)
 def disconnect(ctx: AppContext = Depends(get_ctx)):
     """Stop following the authority. The data here stays."""
     ctx.sync_svc.disconnect()
@@ -444,7 +454,7 @@ def disconnect(ctx: AppContext = Depends(get_ctx)):
     return _status(ctx)
 
 
-@router.post("/sync", status_code=202)
+@router.post("/sync", status_code=202, dependencies=[requires(REMOTE_DIAL)])
 def sync_now(ctx: AppContext = Depends(get_ctx)):
     """Ask for a sync now. It runs in the background; `GET /remote` shows how it went."""
     if not ctx.sync_svc.configured:
@@ -453,7 +463,7 @@ def sync_now(ctx: AppContext = Depends(get_ctx)):
     return {"requested": True}
 
 
-@router.post("/files/send", status_code=202)
+@router.post("/files/send", status_code=202, dependencies=[requires(REMOTE_DIAL)])
 def send_files_now(ctx: AppContext = Depends(get_ctx)):
     """Send the files the authority lacks now. Files go on their own, beside
     syncing (a sync moves records only); `GET /remote` shows how far it has got."""
@@ -909,7 +919,11 @@ def _library(call):
         raise _refuse(e)
 
 
-@router.get("/library", response_model=list[LibraryItemResponse])
+@router.get(
+    "/library",
+    response_model=list[LibraryItemResponse],
+    dependencies=[requires(REMOTE_DIAL)],
+)
 def library(ctx: AppContext = Depends(get_ctx)):
     """The workflows and plugins shared through the authority (the newest
     version of each, with its history), and where each stands here. Empty when
@@ -919,7 +933,11 @@ def library(ctx: AppContext = Depends(get_ctx)):
     return [_item(i) for i in _library(ctx.library_svc.browse)]
 
 
-@router.get("/library/{kind}/{name}", response_model=LibraryItemResponse)
+@router.get(
+    "/library/{kind}/{name}",
+    response_model=LibraryItemResponse,
+    dependencies=[requires(REMOTE_DIAL)],
+)
 def library_item(
     kind: str,
     name: str,
@@ -930,7 +948,11 @@ def library_item(
     return _item(_library(lambda: ctx.library_svc.show(kind, name, version)))
 
 
-@router.post("/library/publish", response_model=LibraryPublishResponse)
+@router.post(
+    "/library/publish",
+    response_model=LibraryPublishResponse,
+    dependencies=[requires(REMOTE_DIAL)],
+)
 def publish_to_library(body: LibraryPublishRequest, ctx: AppContext = Depends(get_ctx)):
     """Publish a workflow (with the plugins it uses, which it is pinned to) or
     a plugin from this project to the library. New text is the next version."""
@@ -943,7 +965,11 @@ def publish_to_library(body: LibraryPublishRequest, ctx: AppContext = Depends(ge
     )
 
 
-@router.get("/library/{kind}/{name}/install", response_model=InstallPlanResponse)
+@router.get(
+    "/library/{kind}/{name}/install",
+    response_model=InstallPlanResponse,
+    dependencies=[requires(REMOTE_DIAL)],
+)
 def install_plan(
     kind: str,
     name: str,
@@ -964,7 +990,11 @@ def install_plan(
     )
 
 
-@router.post("/library/{kind}/{name}/install", response_model=InstallPlanResponse)
+@router.post(
+    "/library/{kind}/{name}/install",
+    response_model=InstallPlanResponse,
+    dependencies=[requires(REMOTE_DIAL), requires(PLUGIN_INSTALL)],
+)
 def install(
     kind: str,
     name: str,
@@ -983,7 +1013,9 @@ def install(
     )
 
 
-@router.delete("/library/{kind}/{name}", status_code=204)
+@router.delete(
+    "/library/{kind}/{name}", status_code=204, dependencies=[requires(REMOTE_DIAL)]
+)
 def unpublish(
     kind: str,
     name: str,

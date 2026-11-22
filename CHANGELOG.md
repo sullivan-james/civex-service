@@ -48,6 +48,21 @@ No database migrations.
   `/collections/{name}/records/count` endpoints answers totals from the
   PostgreSQL planner (no scan), reporting whether the figure is estimated;
   exact elsewhere.
+- Three features name what touches the server's own machine, so a host serving
+  many projects can leave them out instead of blocking routes by hand:
+  `server_path_export` (exports written to a folder on the server: `POST
+  /bundle/save`, `/file-access/export`, `/file-access/exports`,
+  `/file-access/exports/remove`, `/releases/{name}/files/export`, `/releases/{name}/save`),
+  `plugin_install` (installing plugins and workflow definitions from an imported
+  bundle) and `remote_dial` (the `/remote` routes that connect out to another
+  civex: connect, sync, the library; the authority routes for devices that
+  connect in stay). All three are in `LOCAL_FEATURES`: `civex serve` and the CLI behave as
+  before.
+- Without `plugin_install`, `POST /bundle/import` still reads in schemas,
+  collections, records and files, but writes no plugin and no workflow; the
+  answer's new `plugins_dropped` and `workflows_dropped` say how many were left
+  out. `GET /bundle` and the other downloads already stream to the client with no
+  server path, and stay available everywhere.
 
 ## v2.0.1 — updating right after a release, a quicker desktop app (2026-11-19)
 

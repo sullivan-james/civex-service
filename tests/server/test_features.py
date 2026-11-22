@@ -4,6 +4,8 @@ answer from `GET /api/status/features`."""
 
 from __future__ import annotations
 
+import io
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -14,7 +16,12 @@ from civex.domain import features as f
 from civex.project import Project, scaffold_project
 from civex.server.app import api_routers, create_app
 
-HOSTED = f.LOCAL_FEATURES - {f.VOLUMES, f.TERMINAL, f.DESKTOP, f.LOCAL_WORKFLOWS}
+MACHINE_TOUCHING = {f.SERVER_PATH_EXPORT, f.PLUGIN_INSTALL, f.REMOTE_DIAL}
+HOSTED = (
+    f.LOCAL_FEATURES
+    - {f.VOLUMES, f.TERMINAL, f.DESKTOP, f.LOCAL_WORKFLOWS}
+    - MACHINE_TOUCHING
+)
 
 
 @pytest.fixture()
@@ -162,3 +169,105 @@ def test_me_says_who_and_what_they_may_do(client: TestClient, tmp_path: Path):
     assert hosted.post("/api/schemas", json={"name": "other"}).status_code == 403
     assert hosted.delete(f"/api/collections/{theirs['name']}").status_code == 403
     assert hosted.get("/api/collections").status_code == 200
+
+
+# -- the surfaces that touch the server's own machine -----------------------
+
+
+def _bundle_with_code(raw: bytes) -> bytes:
+    """`raw` (a bundle) with a plugin and a workflow definition added."""
+    out = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(raw)) as src, zipfile.ZipFile(out, "w") as dst:
+        for item in src.infolist():
+            dst.writestr(item, src.read(item))
+        dst.writestr("plugins/evil.py", "print('hi')\n")
+        dst.writestr("workflows/flow.yaml", "name: flow\n")
+    return out.getvalue()
+
+
+def _post_bundle(c: TestClient, raw: bytes):
+    return c.post("/api/bundle/import", files={"file": ("b.civex.zip", raw)})
+
+
+def test_the_machine_touching_features_are_named_and_local(hosted: TestClient):
+    assert MACHINE_TOUCHING <= f.LOCAL_FEATURES
+    assert all(f.FEATURES[x] for x in MACHINE_TOUCHING)
+    assert MACHINE_TOUCHING.isdisjoint(
+        set(hosted.get("/api/status/features").json()["features"])
+    )
+
+
+def test_a_host_without_remote_dial_cannot_connect_out_but_can_administer(
+    hosted: TestClient,
+):
+    answer = hosted.post(
+        "/api/remote/connect",
+        json={"url": "http://127.0.0.1:9", "invite": "civex_inv_x"},
+    )
+    assert answer.status_code == 501
+    assert answer.json()["detail"] == f.unavailable_message(f.REMOTE_DIAL)
+    assert hosted.post("/api/remote/sync").status_code == 501
+    assert hosted.get("/api/remote/library").status_code == 501
+    # The authority side (devices that connect to this server) is untouched.
+    assert hosted.get("/api/remote/authority").status_code == 200
+
+
+@pytest.mark.parametrize(
+    "method, path, body",
+    [
+        ("post", "/api/bundle/save", {}),
+        ("post", "/api/file-access/export", {"dest": "/tmp/x"}),
+        ("get", "/api/file-access/exports", None),
+        ("post", "/api/file-access/exports/remove", {"paths": []}),
+        ("post", "/api/releases/r/files/export", {"folder": "/tmp/x"}),
+        ("post", "/api/releases/r/save", {"folder": "/tmp/x"}),
+    ],
+)
+def test_path_named_exports_answer_501_on_a_host_without_them(
+    hosted: TestClient, method: str, path: str, body: dict | None
+):
+    answer = hosted.get(path) if method == "get" else hosted.post(path, json=body or {})
+    assert answer.status_code == 501, answer.text
+    assert answer.json()["detail"] == f.unavailable_message(f.SERVER_PATH_EXPORT)
+
+
+def test_a_bundle_streams_to_the_client_without_a_server_path(hosted: TestClient):
+    hosted.post(
+        "/api/schemas",
+        json={"name": "s", "fields": [{"name": "n", "type": "string"}]},
+    )
+    answer = hosted.get("/api/bundle")
+    assert answer.status_code == 200
+    assert answer.headers["content-type"] == "application/zip"
+    assert "bundle.json" in zipfile.ZipFile(io.BytesIO(answer.content)).namelist()
+
+
+def test_a_hosted_import_drops_plugins_and_workflows_and_says_so(
+    hosted: TestClient, tmp_path: Path
+):
+    hosted.post(
+        "/api/schemas",
+        json={"name": "s", "fields": [{"name": "n", "type": "string"}]},
+    )
+    raw = _bundle_with_code(hosted.get("/api/bundle").content)
+    answer = _post_bundle(hosted, raw)
+    assert answer.status_code == 200, answer.text
+    body = answer.json()
+    assert body["plugins"] == 0 and body["workflows"] == 0
+    assert body["plugins_dropped"] == 1 and body["workflows_dropped"] == 1
+    assert "s" in body["schemas_existing"]
+    civex_dir = tmp_path / "hosted" / "_civex"
+    assert not (civex_dir / "plugins" / "evil.py").exists()
+    assert not (civex_dir / "workflows" / "flow.yaml").exists()
+
+
+def test_a_local_import_installs_code_as_before(client: TestClient):
+    client.post(
+        "/api/schemas",
+        json={"name": "s", "fields": [{"name": "n", "type": "string"}]},
+    )
+    raw = _bundle_with_code(client.get("/api/bundle").content)
+    body = _post_bundle(client, raw).json()
+    assert body["plugins"] == 1 and body["workflows"] == 1
+    assert body["plugins_dropped"] == 0 and body["workflows_dropped"] == 0
+    assert client.get("/api/remote").status_code == 200

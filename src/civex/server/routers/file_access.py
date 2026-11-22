@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from civex import fs_open
-from civex.domain.features import OPEN_FOLDER
+from civex.domain.features import OPEN_FOLDER, SERVER_PATH_EXPORT
 from civex.context import AppContext
 from civex.domain.exceptions import CivexError, NotFoundError, ValidationError
 from civex.domain.hosts import is_loopback
@@ -21,7 +21,7 @@ from civex.domain.naming import safe_filename
 from civex.domain.query import RecordQuery
 from civex.domain.sync import SyncError
 from civex.domain.tables import TableSpec
-from civex.server.deps import get_ctx
+from civex.server.deps import get_ctx, requires
 from civex.server.downloads import new_temp_dir, serve, temp_paths
 from civex.server.models import (
     FileExportRequest,
@@ -198,7 +198,7 @@ def plan_files(
     return plan.to_dict(body.include_items, body.offset, body.limit)
 
 
-@router.post("/export")
+@router.post("/export", dependencies=[requires(SERVER_PATH_EXPORT)])
 def export_files(
     body: FileExportRequest,
     request: Request,
@@ -472,7 +472,7 @@ def available_definitions(
     return [ExportDefinitionResponse.from_dto(d) for d in found]
 
 
-@router.get("/exports")
+@router.get("/exports", dependencies=[requires(SERVER_PATH_EXPORT)])
 def list_exports(ctx: AppContext = Depends(get_ctx)):
     """The export folders civex made, newest first, in the project and on each
     connected drive: where they are, how many files, and how much space they
@@ -481,7 +481,7 @@ def list_exports(ctx: AppContext = Depends(get_ctx)):
     return [e.to_dict() for e in ctx.file_access_svc.list_exports()]
 
 
-@router.post("/exports/remove")
+@router.post("/exports/remove", dependencies=[requires(SERVER_PATH_EXPORT)])
 def remove_exports(body: RemoveExportsRequest, ctx: AppContext = Depends(get_ctx)):
     """Delete export folders: the links or copies the export made, then the
     folder. A link is removed without touching the stored file it points at.

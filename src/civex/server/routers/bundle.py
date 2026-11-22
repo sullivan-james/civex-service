@@ -15,8 +15,8 @@ from civex import fs_open
 from civex.context import AppContext
 from civex.domain.bundle import EXTENSION, BundleError, ExportOptions
 from civex.domain.exceptions import CivexError, NotFoundError
-from civex.domain.features import OPEN_FOLDER
-from civex.server.deps import get_ctx
+from civex.domain.features import OPEN_FOLDER, PLUGIN_INSTALL, SERVER_PATH_EXPORT
+from civex.server.deps import get_ctx, requires
 from civex.server.downloads import new_temp_path, serve, temp_paths
 from civex.server.routers.file_access import _from_this_machine, report_progress
 from civex.services.progress import Progress
@@ -83,6 +83,16 @@ class BundleImportResponse(BaseModel):
     workflows: int
     plugins: int = Field(
         description="Plugins written to _civex/plugins/. Plugins are code: review them."
+    )
+    workflows_dropped: int = Field(
+        default=0,
+        description="Workflow definitions in the bundle that were not installed "
+        "because this server does not offer plugin_install.",
+    )
+    plugins_dropped: int = Field(
+        default=0,
+        description="Plugins in the bundle that were not installed because this "
+        "server does not offer plugin_install.",
     )
     members_skipped: list[SkippedResponse]
 
@@ -171,7 +181,11 @@ class SavedResponse(BaseModel):
     opened: bool = Field(description="Whether its folder was opened.")
 
 
-@router.post("/bundle/save", response_model=SavedResponse)
+@router.post(
+    "/bundle/save",
+    response_model=SavedResponse,
+    dependencies=[requires(SERVER_PATH_EXPORT)],
+)
 def save_bundle(
     body: BundleSaveRequest,
     request: Request,
@@ -219,7 +233,11 @@ async def import_bundle(
     matched by name, records by id (one already here is left as it is); each
     record is checked and recorded in history like any other, and the whole
     import is one event in Activity. Plugins in the bundle are written to
-    `_civex/plugins/`: they are code, so the answer counts them."""
+    `_civex/plugins/`: they are code, so the answer counts them. A server
+    without the `plugin_install` feature installs neither plugins nor workflow
+    definitions: everything else is read in, and `plugins_dropped` /
+    `workflows_dropped` count what was left out."""
+    install = PLUGIN_INSTALL in ctx.features
     with temp_paths() as tmp:
         path = new_temp_path(".zip")
         tmp.append(path)
@@ -228,12 +246,15 @@ async def import_bundle(
                 out.write(chunk)
         try:
             result = ctx.bundle_svc.import_bundle(
-                path, progress, label=_label(file.filename)
+                path,
+                progress,
+                label=_label(file.filename),
+                install_code=install,
             )
         except BundleError as e:
             raise HTTPException(status_code=400, detail=str(e))
         ctx.commit()
-    if result.plugins:
+    if install and result.plugins:
         from civex.plugins.registry import discover_user_plugins
 
         discover_user_plugins(ctx.config.civex_dir / "plugins")
