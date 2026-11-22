@@ -483,7 +483,7 @@ def test_a_tagged_request_can_be_followed_while_and_after_it_runs(
     assert made.status_code == 200, made.text
     assert state.status_code == 200
     assert state.json() == {
-        "phase": "Copying the files",
+        "phase": "Copying files",
         "done": 2,
         "total": 2,
         "finished": True,
@@ -506,7 +506,7 @@ def test_a_plan_can_be_followed_too(client, study) -> None:
     state = client.get(f"/api/file-access/progress/{PROGRESS_ID}").json()
 
     assert state["finished"] is True and state["error"] is None
-    assert state["phase"] == "Working out the folders"
+    assert state["phase"] == "Finding files"
 
 
 def test_an_unknown_id_says_nothing_is_reporting(client) -> None:

@@ -37,6 +37,9 @@ class _State:
     bytes_total: int = 0
     rate: float = 0.0
     eta: float | None = None
+    # The person asked for the work to stop (work done in chunks looks
+    # between two; what it has done stays).
+    cancelled: bool = False
 
 
 class Progress:
@@ -81,6 +84,12 @@ class Progress:
                 self._state.total = max(total, 0)
             self._state.touched = time.monotonic()
 
+    @property
+    def cancelled(self) -> bool:
+        """Whether the person watching asked for the work to stop."""
+        with self._lock:
+            return self._state.cancelled
+
     def finish(self, error: str | None = None) -> None:
         with self._lock:
             self._state.finished = True
@@ -120,6 +129,16 @@ class ProgressRegistry:
                 "rate": state.rate,
                 "eta": state.eta,
             }
+
+    def cancel(self, progress_id: str) -> bool:
+        """Ask the work reporting under this id to stop. False when nothing
+        is (it hasn't begun, or ended a while ago)."""
+        with self._lock:
+            state = self._states.get(progress_id)
+            if state is None or state.finished:
+                return False
+            state.cancelled = True
+            return True
 
     def _forget_old(self) -> None:
         now = time.monotonic()

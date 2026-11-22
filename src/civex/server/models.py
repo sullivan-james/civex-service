@@ -1305,10 +1305,18 @@ class BulkEditResponse(BaseModel):
         description="The first of the skipped records, each with why."
     )
     runs: int = Field(description="Workflow runs queued.")
+    stopped: bool = Field(
+        default=False,
+        description="It was asked to stop before it had gone through every "
+        "record. What it changed stays; sending the same request again "
+        "finishes it (records that already hold the values are passed over).",
+    )
 
     @classmethod
-    def from_dto(cls, dto: RecordBulkEditResultDTO) -> BulkEditResponse:
-        return cls(**dto.to_dict())
+    def from_dto(
+        cls, dto: RecordBulkEditResultDTO, stopped: bool = False
+    ) -> BulkEditResponse:
+        return cls(**dto.to_dict(), stopped=stopped)
 
 
 class RecordLabelsRequest(BaseModel):
@@ -3498,7 +3506,9 @@ class FilePickRequest(FileSelectionRequest):
 class FileListRequest(FilePickRequest):
     order: str = Field(
         default="path",
-        description="path, name, size, record or place; a leading '-' reverses it.",
+        description="path or record (the order the records were added, as "
+        "the records list has them), name (the name a file was added under), "
+        "size or place; a leading '-' reverses it.",
     )
     offset: int = Field(default=0, ge=0)
     limit: int = Field(default=100, ge=1, le=1000)

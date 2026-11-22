@@ -302,6 +302,12 @@ are added one record at a time. Each record's history shows the change, and
 the whole edit is one event in Activity, where **Undo** puts it all back
 (see [Undo a mistake](../how-to/undo-mistakes.md#undo-a-bulk-edit)).
 
+A big edit runs in the background: the bar at the bottom of the page shows
+how many records it has changed of how many, and you can go on working (other
+saves are let in while it runs). **Stop** ends it where it is: the records
+changed so far stay changed, and making the same edit again finishes it (or
+**Undo** in Activity puts back what was changed).
+
 ### Moving records to another collection
 
 A record can be moved to another collection, or inside another record there.

@@ -232,9 +232,10 @@ export function FilesView({
           }}
           columns={[
             {
+              // Not sortable: a file is shown by the name its template gives
+              // it, and the list can only be put in order by what is stored.
               key: 'name',
               header: 'File',
-              sortable: true,
               render: (f: ListedFile) => (
                 <FileCell file={f} kind={kindLabel(f.field)} />
               ),
@@ -242,7 +243,6 @@ export function FilesView({
             {
               key: 'record',
               header: 'Record',
-              sortable: true,
               render: (f) => <UsedBy file={f} />,
             },
             {

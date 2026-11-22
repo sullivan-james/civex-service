@@ -74,8 +74,8 @@ export const newProgressId = () =>
     : `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
 
 /** Ask the server, every so often, how far a tagged request has got, and show it
- * on the job: the stage in words, and a bar once it knows how many steps there
- * are. Returns how to stop. The request may not have begun yet, or be forgotten,
+ * on the job: the stage as its title, and a bar once it knows how many steps
+ * there are. Returns how to stop. The request may not have begun yet, or be forgotten,
  * so a failed ask is just ignored. */
 function watchProgress(j: JobHandle, id: string, every: number): () => void {
   let stopped = false
@@ -84,7 +84,8 @@ function watchProgress(j: JobHandle, id: string, every: number): () => void {
       const p = await fileAccessApi.progress(id)
       if (stopped) return
       j.update({
-        detail: p.phase || undefined,
+        // The stage is what the job is called while it lasts.
+        ...(p.phase ? { title: `${p.phase}…` } : {}),
         progress:
           p.total > 0
             ? {
@@ -113,13 +114,20 @@ function watchProgress(j: JobHandle, id: string, every: number): () => void {
   }
 }
 
-/** Run one request with its progress shown on the job while it works. */
+/** Run one request with its progress shown on the job while it works.
+ * `stoppable`: the job can be asked to stop (the server stops it between two
+ * chunks of its work). */
 export async function tracked<T>(
-  ctx: FlowContext,
+  ctx: Pick<FlowContext, 'progressMs'>,
   j: JobHandle,
   run: (progressId: string) => Promise<T>,
+  stoppable = false,
 ): Promise<T> {
   const id = newProgressId()
+  if (stoppable)
+    j.update({
+      stop: () => void fileAccessApi.stopProgress(id).catch(() => {}),
+    })
   const stop = watchProgress(j, id, ctx.progressMs ?? 500)
   try {
     return await run(id)
@@ -159,7 +167,7 @@ export function openAsFolder(
   selection: FileSelection,
   name: string,
 ) {
-  return job(ctx, 'Preparing files…', async (j) => {
+  return job(ctx, 'Finding files…', async (j) => {
     const out = await tracked(ctx, j, (progressId) =>
       fileAccessApi.tryExport(selection, {
         name,

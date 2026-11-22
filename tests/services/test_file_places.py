@@ -54,11 +54,11 @@ def test_a_drive_that_cant_be_read_is_its_own_place(ctx, study, spread, archive)
 
 def test_moving_names_only_what_is_elsewhere_and_reachable(ctx, study, spread, archive):  # noqa: F811
     svc = ctx.file_access_svc
-    _, items = svc.chosen(_within(study.e7))
+    items = svc.chosen(_within(study.e7))
     s1 = next(i for i in items if i.filename == "s1.txt")
     assert svc.to_move(items, "archive")[:2] == ([s1.sha256], 0)  # s2 is there
     _unplug(archive)
-    _, items = svc.chosen(_within(study.e7))
+    items = svc.chosen(_within(study.e7))
     assert svc.to_move(items, "default")[:2] == ([], 0)  # s2 can't be read
 
 
@@ -76,7 +76,7 @@ def test_files_are_picked_by_kind_and_every_kind_is_still_counted(ctx, study, sp
     assert sorted(i.filename for i in listing.items) == ["s1.txt", "s2.txt"]
     assert sum(p.files for p in listing.summary) == 2  # where the tables are
     assert len(listing.kinds) == 2  # the other kind can still be picked
-    _, picked = svc.chosen(tables)
+    picked = svc.chosen(tables)
     assert {i.field for i in picked} == {"table"}  # and actions take the same
 
 
@@ -101,13 +101,13 @@ def test_records_beneath_count_only_if_they_match_the_filter_at_their_level(
         ),
         below=True,
     )
-    _, items = svc.chosen(selection)
+    items = svc.chosen(selection)
     assert [i.filename for i in items] == ["s1.txt"]
 
     no_filter = FileSelection(
         query=RecordQuery(dataset="hb", schema="encounter"), below=True
     )
-    _, items = svc.chosen(no_filter)
+    items = svc.chosen(no_filter)
     assert sorted(i.filename for i in items) == ["s1.txt", "s2.txt"]
 
 
@@ -121,7 +121,7 @@ def test_a_file_other_records_use_is_copied_for_the_picked_ones(ctx, study, arch
     study.selection(study.rec_a, "s3", b"only s3's")
     ctx.commit()
     only_a = _within(study.rec_a)
-    _, items = svc.chosen(only_a)
+    items = svc.chosen(only_a)
     listing = svc.listing(only_a)
     assert {i.filename: listing.others[copy_key(i)] for i in listing.items} == {
         "s1.txt": 1,
@@ -142,7 +142,7 @@ def test_a_shared_file_its_home_keeps_is_copied(ctx, study, archive):  # noqa: F
     study.selection(study.rec_a, "s1", b"the same table", on=home)
     study.selection(study.rec_b, "s2", b"the same table", on=home)
     ctx.commit()
-    _, items = svc.chosen(_within(study.rec_a))
+    items = svc.chosen(_within(study.rec_a))
 
     plan = svc.plan_move(items, "default")
 
@@ -166,11 +166,11 @@ def test_a_move_says_what_it_is_doing_while_it_works_it_out(ctx, study, archive)
     study.selection(study.rec_a, "s1", b"one", on=str(study.collection.id))
     ctx.commit()
     svc = ctx.file_access_svc
-    _, items = svc.chosen(_within(study.rec_a), progress=Seen())
+    items = svc.chosen(_within(study.rec_a), progress=Seen())
     svc.to_move(items, "default", Seen())
 
-    assert stages[0] != "Working out what moves"  # finding the files came first
-    assert "Working out what moves" in stages
+    # Finding the files, then working out which of them move: one stage's name.
+    assert stages and set(stages) == {"Finding files"}
 
 
 def test_a_file_several_records_use_is_one_row_and_one_file(ctx, study, archive):  # noqa: F811
@@ -191,7 +191,7 @@ def test_a_file_several_records_use_is_one_row_and_one_file(ctx, study, archive)
     ]
     assert listing.others[copy_key(row)] == 0
 
-    _, picked = svc.chosen(everything, shas=[row.sha256])
+    picked = svc.chosen(everything, shas=[row.sha256])
     assert len(picked) == 2
     assert svc.plan_move(picked, "archive").files == 1  # one stored file
 
@@ -208,7 +208,7 @@ def test_files_are_picked_by_how_many_records_use_them(ctx, study, archive):  # 
     listing = svc.listing(everything, used_by=[2])
     assert [len(listing.uses[copy_key(i)]) for i in listing.items] == [2]
     assert listing.sharing == [{"records": 1, "files": 1}, {"records": 2, "files": 1}]
-    _, picked = svc.chosen(everything, used_by=[1])  # actions follow the list
+    picked = svc.chosen(everything, used_by=[1])  # actions follow the list
     assert [i.filename for i in picked] == ["s3.txt"]
 
 
@@ -271,7 +271,7 @@ def test_moving_onto_a_drive_that_has_the_content_copies_nothing(
     store = ctx.file_svc._store
     sha = next(iter(store.copies_used([s2.id]).keys()))[1]
     assert store.copies_used([s2.id]) == {(s2.id, sha): "archive"}
-    _, items = svc.chosen(_within(study.rec_b))
+    items = svc.chosen(_within(study.rec_b))
 
     plan = svc.plan_move(items, "default")
 

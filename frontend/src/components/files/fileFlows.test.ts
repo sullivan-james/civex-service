@@ -175,7 +175,7 @@ describe('following a request while it runs', () => {
 
     const running = openAsFolder(ctx, SELECTION, 'hb')
     await vi.waitFor(() =>
-      expect(jobs.result.current[0]?.detail).toBe('Finding files'),
+      expect(jobs.result.current[0]?.title).toBe('Finding files…'),
     )
 
     expect(jobs.result.current[0].progress).toEqual({
@@ -196,7 +196,7 @@ describe('following a request while it runs', () => {
         return json(exported())
       },
       '/api/file-access/progress': () =>
-        json({ phase: 'Working out the folders', done: 0, total: 0 }),
+        json({ phase: 'Copying files', done: 0, total: 0 }),
     })
     const { ctx } = context()
     ctx.progressMs = 5
@@ -204,7 +204,7 @@ describe('following a request while it runs', () => {
 
     const running = openAsFolder(ctx, SELECTION, 'hb')
     await vi.waitFor(() =>
-      expect(jobs.result.current[0]?.detail).toBe('Working out the folders'),
+      expect(jobs.result.current[0]?.title).toBe('Copying files…'),
     )
 
     expect(jobs.result.current[0].progress).toBeUndefined()

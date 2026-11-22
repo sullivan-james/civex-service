@@ -251,7 +251,7 @@ def files_list(
     try:
         plan = ctx.file_access_svc.plan(selection, with_sources=paths)
         if on or name:
-            _, picked = ctx.file_access_svc.chosen(selection, on, name)
+            picked = ctx.file_access_svc.chosen(selection, on, name)
             keep = {(i.record_id, i.field, i.sha256) for i in picked}
             plan.items = [
                 i for i in plan.items if (i.record_id, i.field, i.sha256) in keep
@@ -533,7 +533,7 @@ def files_gather(
     ctx = get_ctx()
     try:
         svc = ctx.file_access_svc
-        _, items = svc.chosen(selection, on, name)
+        items = svc.chosen(selection, on, name)
         if dry_run:  # the move's usual preview; nothing is downloaded or moved
             p = svc.plan_move(items, to)
             shas = svc.shas_to_move(items, to)
@@ -611,7 +611,7 @@ def files_fetch(
     )
     ctx = get_ctx()
     try:
-        _, items = ctx.file_access_svc.chosen(selection, "server", name)
+        items = ctx.file_access_svc.chosen(selection, "server", name)
         if not items:
             console.print("[dim]All of them are on this computer.[/dim]")
             return
@@ -656,7 +656,7 @@ def files_free(
     ctx = get_ctx()
     try:
         svc = ctx.file_access_svc
-        _, items = svc.chosen(selection, on, name)
+        items = svc.chosen(selection, on, name)
         counted = svc.free_up(items, dry_run=True)
         kept = []
         if counted.kept_shared:
