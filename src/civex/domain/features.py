@@ -26,6 +26,9 @@ DESKTOP = "desktop"
 DIRECT_FILES = "direct_files"
 ACCOUNTS = "accounts"
 HUB_COMPUTE = "hub_compute"
+SERVER_PATH_EXPORT = "server_path_export"
+PLUGIN_INSTALL = "plugin_install"
+REMOTE_DIAL = "remote_dial"
 
 # Every feature a server may offer, with what it means in plain words (the
 # detail of the 501 a route answers when its feature is off).
@@ -44,6 +47,9 @@ FEATURES: dict[str, str] = {
     DIRECT_FILES: "uploading and downloading files straight to and from storage",
     ACCOUNTS: "signing in as a person, members and roles",
     HUB_COMPUTE: "running workflows on the server's own compute",
+    SERVER_PATH_EXPORT: "writing exports to a folder on the server's machine",
+    PLUGIN_INSTALL: "installing plugins and workflows from a bundle onto the server",
+    REMOTE_DIAL: "connecting out from the server to another civex",
 }
 
 # What `civex serve` and the CLI offer: a project in a folder on this machine.
@@ -60,6 +66,9 @@ LOCAL_FEATURES: frozenset[str] = frozenset(
         AI,
         OPEN_FOLDER,
         DESKTOP,
+        SERVER_PATH_EXPORT,
+        PLUGIN_INSTALL,
+        REMOTE_DIAL,
     }
 )
 

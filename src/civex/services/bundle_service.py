@@ -116,6 +116,11 @@ class ImportResult:
     files_refused: int = 0
     workflows: int = 0
     plugins: int = 0
+    # Workflow definitions and plugins the bundle carried that were not
+    # installed because the host doesn't allow installing code (`install_code`
+    # false): counted, never written.
+    workflows_dropped: int = 0
+    plugins_dropped: int = 0
     members_skipped: list[Skipped] = field(default_factory=list)
 
     def note(self, record_id: str, reason: str) -> None:
@@ -138,6 +143,8 @@ class ImportResult:
             "files_refused": self.files_refused,
             "workflows": self.workflows,
             "plugins": self.plugins,
+            "workflows_dropped": self.workflows_dropped,
+            "plugins_dropped": self.plugins_dropped,
             "members_skipped": [s.to_dict() for s in self.members_skipped],
         }
 
@@ -464,17 +471,22 @@ class BundleService:
         path: Path,
         progress: Progress | None = None,
         label: str | None = None,
+        *,
+        install_code: bool = True,
     ) -> ImportResult:
         """Read a bundle into this project. See the module docstring for what
-        is new, what is reused and what is left out."""
+        is new, what is reused and what is left out. With `install_code`
+        false (a host that doesn't offer `features.PLUGIN_INSTALL`) the
+        bundle's workflow definitions and plugins are counted in the result
+        but never written."""
         result = ImportResult()
         with self._open(path) as zf:
             manifest = self._manifest(zf)
             if self._batch is not None:
                 with self._batch("import", label or path.name):
-                    self._import(zf, manifest, result, progress)
+                    self._import(zf, manifest, result, progress, install_code)
             else:
-                self._import(zf, manifest, result, progress)
+                self._import(zf, manifest, result, progress, install_code)
         return result
 
     def _import(
@@ -483,12 +495,13 @@ class BundleService:
         manifest: Manifest,
         result: ImportResult,
         progress: Progress | None,
+        install_code: bool,
     ) -> None:
         self._import_schemas(manifest.schemas, result)
         self._import_collections(manifest.collections, result)
         if spec.RECORDS in zf.namelist():
             self._import_records(zf, manifest, result, progress)
-        self._import_members(zf, result)
+        self._import_members(zf, result, install_code)
 
     def _import_formulas(self, fields: list[tuple[str, dict[str, Any]]]) -> None:
         """Add formula fields once every other field exists: a round adds each
@@ -762,10 +775,14 @@ class BundleService:
             tmp_path.unlink(missing_ok=True)
         stored.add(sha)
 
-    def _import_members(self, zf: zipfile.ZipFile, result: ImportResult) -> None:
+    def _import_members(
+        self, zf: zipfile.ZipFile, result: ImportResult, install_code: bool = True
+    ) -> None:
         """Workflows and plugins, written into the project as the files they
-        are. A plugin is code: the caller says so to the person."""
-        if self._civex_dir is None:
+        are. A plugin is code: the caller says so to the person. Without
+        `install_code` nothing is written: the ones that would have been are
+        counted as dropped."""
+        if install_code and self._civex_dir is None:
             return
         for prefix, suffixes, folder, counter in (
             (spec.WORKFLOWS_DIR, spec.WORKFLOW_SUFFIXES, "workflows", "workflows"),
@@ -778,6 +795,11 @@ class BundleService:
             ]
             if not names:
                 continue
+            if not install_code:
+                key = counter + "_dropped"
+                setattr(result, key, getattr(result, key) + len(names))
+                continue
+            assert self._civex_dir is not None
             target = self._civex_dir / folder
             target.mkdir(parents=True, exist_ok=True)
             for name in names:
