@@ -11,7 +11,6 @@ no drive is asked anything.
 from __future__ import annotations
 
 import json
-import uuid
 from typing import Any
 
 from sqlalchemy import String, and_, case, false, func, literal, or_, select
@@ -294,6 +293,20 @@ def shared_copies(session: Session) -> dict[tuple[str, str | None], int]:
     return {(digest, volume): int(n) for digest, volume, n in rows}
 
 
-def record_ids(session: Session, picked: ResolvedSet, pg: bool) -> list[uuid.UUID]:
-    """The ids of the set's records."""
-    return [rid for (rid,) in records_of(session, picked, pg).with_entities(Record.id)]
+def holders(session: Session, picked: ResolvedSet, pg: bool) -> list[Any]:
+    """The ids (as the database keeps them) of the set's records that the
+    catalog says hold a file, in the order records are listed. One
+    statement."""
+    return [
+        rid
+        for (rid,) in records_of(session, picked, pg)
+        .filter(
+            Record.id.in_(
+                select(FileReference.record_id).where(
+                    FileReference.record_id.is_not(None)
+                )
+            )
+        )
+        .order_by(Record.created_at, Record.id)
+        .with_entities(type_coerce(Record.id, String))
+    ]

@@ -99,6 +99,8 @@ MISSING_NOTE = "MISSING.txt"
 GENERATED = "generated"
 # Records per page when a table works out derived columns.
 TABLE_PAGE = 500
+# Records read at a time when a plan reads the ones that hold files.
+HOLDERS_PAGE = 500
 # How a file reaches a typed table: where it is on this computer, or its name.
 FILES_PATH = "path"
 FILES_NAME = "name"
@@ -199,6 +201,86 @@ class FileAccessService:
         self._fetch(remote, progress, sizes=_sizes(found.to_fetch))
         return self._absent_now(self._plan(selection, with_sources, progress))
 
+    def preview(self, selection: FileSelection, limit: int = 0) -> FilePlan:
+        """A plan to show before anything is made: the totals of every file
+        (how many, how big, on which drives, what can't be reached) with only
+        the first `limit` files named and given their paths. The totals come
+        from the database alone (`_held`, as the files list does), so a
+        preview takes the same short while whatever the selection's size; a
+        full `plan` names every file, which costs by the file. `FilePlan.named`
+        says how many of its items carry a path (they come first).
+
+        A selection that makes tables is planned in full: a table lists
+        records, and the plan says how many rows each has."""
+        if not self._lean(selection):
+            return self.plan(selection)
+        known = self._all_file_fields()
+        held = self._held(selection)
+        if held and selection.fields and not (known & set(selection.fields)):
+            raise ValidationError(
+                "None of the selected records has a file field named "
+                + ", ".join(f"'{f}'" for f in selection.fields)
+            )
+        kinds = set(selection.fields) if selection.fields else None
+        flat = selection.layout == LAYOUT_FLAT
+        # In record order, each file once where a plan lists it once: the
+        # same file under the same name in one record (anywhere, for one
+        # folder of everything).
+        seen: set[tuple[Any, ...]] = set()
+        items: list[FileItem] = []
+        dropped = 0
+        for item, _, _ in sorted(held, key=lambda h: h[2][:2]):
+            if kinds is not None and item.field not in kinds:
+                continue
+            spot = (
+                None if flat else item.record_id,
+                item.sha256,
+                item.filename.casefold(),
+            )
+            if spot in seen:
+                dropped += 1
+                continue
+            seen.add(spot)
+            items.append(item)
+        # Named: the first files, and a few records of each group that can't
+        # be reached (they are named to the person).
+        wanted = list(dict.fromkeys(i.record_id for i in items[:limit]))
+        shown: dict[tuple[Any, ...], int] = {}
+        for item in items:
+            if item.available or item.state == "remote":
+                continue
+            group = (item.volume, item.state)
+            if shown.get(group, 0) < _SHOWN_RECORDS and item.record_id not in wanted:
+                shown[group] = shown.get(group, 0) + 1
+                wanted.append(item.record_id)
+        named: list[FileItem] = []
+        if wanted:
+            named = self._plan(
+                FileSelection(
+                    record_ids=wanted,
+                    fields=selection.fields,
+                    base=selection.base or selection.query.within,
+                    layout=selection.layout,
+                ),
+                False,
+                None,
+                lead_with_collection=len({at[2] for _, _, at in held}) > 1,
+            ).items
+        records = set(wanted)
+        first = set(dict.fromkeys(i.record_id for i in items[:limit]))
+        # The first files (in path order), then the others that were named.
+        front = sorted(
+            named, key=lambda i: (i.record_id not in first, i.path.casefold())
+        )
+        rest = [i for i in items if i.record_id not in records]
+        every = [*front, *rest]
+        return FilePlan(
+            items=every,
+            unavailable=_unavailable_groups(every),
+            duplicates_dropped=dropped,
+            named=sum(1 for i in front if i.record_id in first),
+        )
+
     def _absent_now(self, plan: FilePlan) -> FilePlan:
         """A plan made after downloading what was only on the server: a file
         still not here is one the server hasn't got either, so it can't be
@@ -265,12 +347,21 @@ class FileAccessService:
                 "A table written in each folder needs the layout with a folder per "
                 "record (tree)."
             )
-        records = self._select_records(selection, progress)
+        # Files alone: only the records that hold one are read (the catalog
+        # says which), not every record of the selection.
+        lean = self._lean(selection)
+        records = (
+            self._file_holders(selection, progress)
+            if lean
+            else self._select_records(selection, progress)
+        )
         values: list[tuple[RecordDTO, str, dict[str, Any]]] = []
         if selection.files:
-            if progress:
-                progress.phase("Working out the folders")
             values, known = self._records.file_values(records, selection.fields)
+            if lean:
+                # The kinds of record chosen aren't read, so the fields are
+                # checked against every kind's.
+                known = self._all_file_fields()
             # With no records yet there is nothing to check the fields against:
             # the export is empty for now, not wrong.
             if records and selection.fields and not (known & set(selection.fields)):
@@ -1106,6 +1197,42 @@ class FileAccessService:
             return _gone(item)
         return dataclasses.replace(item, source=str(path))
 
+    def _lean(self, selection: FileSelection) -> bool:
+        """Whether a plan of this selection needs only the records that hold
+        files: it takes files and makes no table (a table lists records with
+        none). Not for records read from elsewhere (`with_records`: a
+        release's are in memory already)."""
+        return (
+            selection.files
+            and not selection.tables
+            and hasattr(self._records, "holding_files")
+        )
+
+    def _all_file_fields(self) -> set[str]:
+        return {
+            f.name
+            for s in self._schemas.list_all()
+            for f in s.fields
+            if f.dtype in ("file", "file_list")
+        }
+
+    def _file_holders(
+        self, selection: FileSelection, progress: Progress | None
+    ) -> list[RecordDTO]:
+        """The selection's records that hold a file, in full: which they are
+        comes from the catalog (one statement, `holding_files`), and only
+        they are read, a page at a time. So a plan costs by its files, not by
+        the records they are among."""
+        ids = self._records.holding_files(self._record_set(selection))
+        if progress:
+            progress.phase("Finding files", len(ids))
+        found: list[RecordDTO] = []
+        for start in range(0, len(ids), HOLDERS_PAGE):
+            found.extend(self._records.get_many(ids[start : start + HOLDERS_PAGE]))
+            if progress:
+                progress.advance(len(found))
+        return found
+
     def _select_records(
         self, selection: FileSelection, progress: Progress | None = None
     ) -> list[RecordDTO]:
@@ -1165,8 +1292,6 @@ class FileAccessService:
         chosen as well as the ones found beneath them."""
         everything = found
         if selection.below and found:
-            if progress:
-                progress.phase("Finding what is inside")
             # Without tables, only the records holding files are used (folder
             # names come from their ancestors, looked up apart): the rest are
             # walked through, not put in full form.
@@ -1401,10 +1526,7 @@ class FileAccessService:
         kept: dict[str, dict[str, Any]] = {}
         handled = 0
         if progress:
-            progress.phase(
-                "Making the folder" if mode == "link" else "Copying the files",
-                len(plan.items),
-            )
+            progress.phase("Copying files", len(plan.items))
         # Work a folder at a time: one listing of what an earlier export left
         # there (none for a fresh folder) and one mkdir, not a stat and a mkdir
         # per file.
@@ -2268,7 +2390,8 @@ def _unavailable_groups(items: list[FileItem]) -> list[UnavailableGroup]:
         group.files += 1
         group.bytes += item.size
         if (
-            item.record_name not in group.records
+            item.record_name
+            and item.record_name not in group.records
             and len(group.records) < _SHOWN_RECORDS
         ):
             group.records.append(item.record_name)

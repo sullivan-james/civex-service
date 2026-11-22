@@ -372,6 +372,10 @@ class FilePlan:
     records: list[Any] = field(default_factory=list, repr=False)
     # The tables the selection asks for, beside the files.
     tables: list[PlannedTable] = field(default_factory=list)
+    # How many of `items` carry a path and their record's name (they come
+    # first): None = all of them. A preview names only the first few; its
+    # totals are still of every file.
+    named: int | None = None
 
     def paths_for(self, record_id: str, field_name: str) -> list[str]:
         return self.paths.get((record_id, field_name), [])
@@ -438,7 +442,8 @@ class FilePlan:
         """The plan as the API sends it. A big selection's items go in pages
         (`offset`/`limit`) or not at all; the totals and the unreachable groups
         always cover the whole selection."""
-        shown = self.items[offset : None if limit is None else offset + limit]
+        named = self.items if self.named is None else self.items[: self.named]
+        shown = named[offset : None if limit is None else offset + limit]
         return {
             "total": self.total,
             "available": self.available,

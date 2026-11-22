@@ -373,6 +373,12 @@ class LocalRecordRepository:
             self._s, picked, file_fields, search, depth, self._pg, following
         )
 
+    def holders(self, picked: ResolvedSet) -> list[Any]:
+        """The set's records that hold a file (see `held_files.holders`)."""
+        from civex.repositories.local import held_files
+
+        return held_files.holders(self._s, picked, self._pg)
+
     def shared_copies(self) -> dict[tuple[str, str | None], int]:
         """The copies several live records point at, with how many (see
         `held_files.shared_copies`)."""

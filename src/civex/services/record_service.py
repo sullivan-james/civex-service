@@ -75,7 +75,7 @@ from civex.domain.query import (
     ResolvedSet,
     TextSearch,
 )
-from civex.domain.file_access import HeldFile
+from civex.domain.file_access import HeldFile, record_key
 from civex.domain.scopes import GLOBAL, can_reference
 from civex.domain import summary
 from civex.domain.timezones import offset_changes, parse_datetime
@@ -3625,6 +3625,12 @@ class RecordService:
             depth,
             following=self.files_from_server(),
         )
+
+    def holding_files(self, picked: RecordSet) -> list[str]:
+        """The ids of the set's records that hold a file, in the order records
+        are listed: from the catalog, one statement. What a plan of files has
+        to read, instead of every record of the set."""
+        return [record_key(r) for r in self._records.holders(self._resolve_set(picked))]
 
     def shared_copies(self) -> dict[tuple[str, str | None], int]:
         """The copies of files, (sha256, volume), that more than one live

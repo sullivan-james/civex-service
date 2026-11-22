@@ -155,8 +155,8 @@ def seeded(ctx: AppContext, study: Study, archive, make_collection, make_record)
     return study
 
 
-def _selections(study: Study) -> dict[str, FileSelection]:
-    within = str(study.e7.id)
+def _selections(made: Study) -> dict[str, FileSelection]:
+    within = str(made.e7.id)
     return {
         "a record and all inside it": FileSelection(query=RecordQuery(within=within)),
         "a collection": FileSelection(query=RecordQuery(dataset="hb"), below=True),
@@ -171,11 +171,11 @@ def _selections(study: Study) -> dict[str, FileSelection]:
             with_within=True,
         ),
         "ticked rows and what is inside": FileSelection(
-            record_ids=[str(study.rec_b.id), str(study.e8.id), "not-an-id"],
+            record_ids=[str(made.rec_b.id), str(made.e8.id), "not-an-id"],
             below=True,
         ),
         "ticked rows alone": FileSelection(
-            record_ids=[str(study.s4.id), str(study.e7.id)]
+            record_ids=[str(made.s4.id), str(made.e7.id)]
         ),
         "a filter on a kind beneath": FileSelection(
             query=RecordQuery(
@@ -228,9 +228,7 @@ def test_a_drive_that_is_unplugged_reads_the_same(
     _unplug(archive)
     everything = FileSelection(query=RecordQuery(), below=True)
     for narrow in ({}, {"place": "unreachable"}, {"place": "here"}):
-        assert _listed(ctx, everything, **narrow) == _planned(
-            ctx, everything, **narrow
-        )
+        assert _listed(ctx, everything, **narrow) == _planned(ctx, everything, **narrow)
 
 
 def test_a_deleted_fields_files_are_not_listed(ctx: AppContext, seeded: Study):
@@ -272,7 +270,9 @@ def test_sorting_orders_the_whole_list_not_the_page(ctx: AppContext, seeded: Stu
         for offset in (0, 3, 6, 9):
             out += [
                 read(i)
-                for i in svc.listing(everything, sort=sort, offset=offset, limit=3).items
+                for i in svc.listing(
+                    everything, sort=sort, offset=offset, limit=3
+                ).items
             ]
         return out
 
@@ -304,6 +304,62 @@ def test_a_search_finds_a_file_by_its_name_or_its_records(
     assert sum(k["files"] for k in svc.listing(everything, name="a.csv").kinds) > 1
 
 
+def test_a_preview_has_the_plans_totals_and_names_only_the_first_files(
+    ctx: AppContext,
+    seeded: Study,
+    archive,  # noqa: F811
+):
+    svc = ctx.file_access_svc
+    _unplug(archive)  # so some of it can't be reached, and is said so
+    for name, selection in _selections(seeded).items():
+        plan = svc.plan(selection)
+        preview = svc.preview(selection, limit=2)
+        whole, shown = plan.to_dict(False), preview.to_dict(False)
+        for said in (whole, shown):
+            for group in said["unavailable"]:
+                group["records"] = sorted(group["records"])
+        assert shown == whole, name
+        # The files it names are the plan's own, path and all; the rest are
+        # counted, not named.
+        paths = {(i.record_id, i.field, i.sha256, i.path) for i in plan.items}
+        named = preview.items[: preview.named]
+        assert named and len(named) <= 6, name
+        assert {(i.record_id, i.field, i.sha256, i.path) for i in named} <= paths
+        assert len(preview.to_dict(True, 0, 50)["items"]) == preview.named
+
+
+def test_a_preview_costs_the_same_however_many_records(ctx: AppContext, study: Study):  # noqa: F811
+    svc = ctx.file_access_svc
+    made: list = []
+    everything = FileSelection(query=RecordQuery(dataset="hb"), below=True)
+    seen = []
+    for size in (5, 60):
+        _grow(study, size, made)
+        seen.append(_statements(ctx, lambda: svc.preview(everything, limit=3)))
+        assert svc.preview(everything, limit=3).total == size
+    assert seen[0] == seen[1], seen
+
+
+def test_planning_reads_only_the_records_that_hold_files(
+    ctx: AppContext,
+    study: Study,  # noqa: F811
+):
+    """A plan of files costs by the files (a page of the records holding
+    them at a time), never by the records they are among: more records with
+    no file add nothing."""
+    svc = ctx.file_access_svc
+    made: list = []
+    _grow(study, 12, made)
+    everything = FileSelection(query=RecordQuery(dataset="hb"), below=True)
+    before = _statements(ctx, lambda: svc.plan(everything))
+    for n in range(150):  # recordings with nothing in them
+        study._child("recording", {"rname": f"empty {n}"}, study.e8)
+    ctx.commit()
+
+    assert _statements(ctx, lambda: svc.plan(everything)) == before
+    assert svc.plan(everything).total == 12
+
+
 # -- cost -----------------------------------------------------------------------
 
 
@@ -322,15 +378,15 @@ def _statements(ctx: AppContext, work) -> int:
     return len(seen)
 
 
-def _grow(study: Study, upto: int, made: list) -> None:
+def _grow(project: Study, upto: int, made: list) -> None:
     """Encounters, each with a recording holding selections with files: three
     levels, files at the bottom and on the way down."""
     while len(made) < upto:
         n = len(made)
-        encounter = study._make("hb", "encounter", {"name": f"E{n}"})
-        recording = study._child("recording", {"rname": f"R{n}"}, encounter)
-        made.append(study.selection(recording, f"sel{n}", f"content {n}".encode()))
-    study.ctx.commit()
+        encounter = project._make("hb", "encounter", {"name": f"E{n}"})
+        recording = project._child("recording", {"rname": f"R{n}"}, encounter)
+        made.append(project.selection(recording, f"sel{n}", f"content {n}".encode()))
+    project.ctx.commit()
 
 
 def test_listing_costs_the_same_however_many_records(ctx: AppContext, study: Study):  # noqa: F811

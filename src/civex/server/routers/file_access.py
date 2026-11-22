@@ -168,9 +168,20 @@ def plan_files(
 ):
     """What a selection holds, each file named by its place in the record
     hierarchy, and what can be reached right now. Makes nothing: this is what to
-    show a person before they are pointed at a folder."""
+    show a person before they are pointed at a folder. Asked for the totals
+    alone (`include_items` false) or for the first files (`limit`), it is a
+    preview: the totals are of every file, read from the database without
+    naming them, and only the files sent are named, so it answers in the same
+    short while whatever the selection's size. Without a `limit`, every file
+    is named."""
+    svc = ctx.file_access_svc
+    selection = _selection(body, ctx)
     try:
-        plan = ctx.file_access_svc.plan(_selection(body, ctx), progress=progress)
+        if not body.include_items or body.limit is not None:
+            shown = body.offset + (body.limit or 0) if body.include_items else 0
+            plan = svc.preview(selection, shown)
+            return plan.to_dict(body.include_items, body.offset, body.limit)
+        plan = svc.plan(selection, progress=progress)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except CivexError as e:
