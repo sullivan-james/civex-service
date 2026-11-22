@@ -55,6 +55,21 @@ class Permissions:
     action absent may be done nowhere."""
 
     allowed: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    # `denied[action]` are collections (`collection_scope`) where it may NOT be
+    # done even though `allowed` would cover it (`PROJECT` included): a host
+    # carving "everything except these" out of a role, so a collection made
+    # later is not silently shut out the way listing every allowed one would.
+    denied: Mapping[str, frozenset[str]] = field(default_factory=dict)
+
+    def without(
+        self, actions: Iterable[str], collections: Iterable[Any]
+    ) -> Permissions:
+        """These permissions, but `actions` may not be done in `collections`."""
+        scopes = frozenset(collection_scope(c) for c in collections)
+        denied = {a: frozenset(s) for a, s in self.denied.items()}
+        for action in actions:
+            denied[action] = denied.get(action, frozenset()) | scopes
+        return Permissions(self.allowed, denied)
 
     @classmethod
     def everything(cls) -> Permissions:
@@ -84,6 +99,10 @@ class Permissions:
         """Whether `action` may be done: anywhere when `collection_id` is None
         (so an action limited to some collections answers False), else in
         that collection."""
+        if collection_id is not None and collection_scope(
+            collection_id
+        ) in self.denied.get(action, ()):
+            return False
         scopes = self.allowed.get(action, frozenset())
         if PROJECT in scopes:
             return True
@@ -124,11 +143,16 @@ class Permissions:
     # -- as data ---------------------------------------------------------------
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data: dict[str, Any] = {
             "actions": {
                 action: sorted(scopes) for action, scopes in self.allowed.items()
             }
         }
+        if self.denied:  # absent when empty, so the common shape is unchanged
+            data["denied"] = {
+                action: sorted(scopes) for action, scopes in self.denied.items()
+            }
+        return data
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> Permissions:
@@ -136,7 +160,11 @@ class Permissions:
             {
                 str(action): frozenset(str(s) for s in scopes)
                 for action, scopes in (d.get("actions") or {}).items()
-            }
+            },
+            {
+                str(action): frozenset(str(s) for s in scopes)
+                for action, scopes in (d.get("denied") or {}).items()
+            },
         )
 
 
