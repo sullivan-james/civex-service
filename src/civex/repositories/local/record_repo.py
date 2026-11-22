@@ -456,13 +456,19 @@ class LocalRecordRepository:
         if not self._pg:
             return self.count(query), False
         if _is_unfiltered(query):
+            # Summed over the leaf partitions: autovacuum never analyzes the
+            # parent of a partitioned table, so its own reltuples is stale or
+            # -1. A plain table is its own only leaf. Any never-analyzed leaf
+            # (-1) sends this to the planner's estimate below.
             tuples = self._s.execute(
                 text(
-                    "SELECT reltuples::bigint FROM pg_class "
-                    "WHERE oid = to_regclass('records')"
+                    "SELECT CASE WHEN bool_or(c.reltuples < 0) THEN NULL "
+                    "ELSE sum(c.reltuples)::bigint END "
+                    "FROM pg_partition_tree(to_regclass('records')) t "
+                    "JOIN pg_class c ON c.oid = t.relid WHERE t.isleaf"
                 )
             ).scalar()
-            if tuples is not None and tuples >= 0:
+            if tuples is not None:
                 return int(tuples), True
         listed = _base_query(self._s, query, self._pg).with_entities(Record.id)
         plan = self._s.execute(_Explain(listed.order_by(None).statement)).scalar()

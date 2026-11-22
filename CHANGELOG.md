@@ -23,9 +23,29 @@ from the next tag forward.
 
 ## Unreleased
 
-No database migrations.
+### Breaking
+
+- **PostgreSQL: `records` and `audit_log` are partitioned** (migration
+  `b5d8f1a3c6e2`). `records` becomes `PARTITION BY HASH (id)` with 8 partitions
+  (all indexes and foreign keys kept) and `audit_log` becomes one partition per
+  month plus a default one. A database that already has data is copied into the
+  new layout inside the migration: writers wait for the copy and index build
+  (about 50 seconds per million records, see
+  `docs/contributing/records-partitioning.md`), readers only for the final swap.
+  A new database converts in milliseconds. Opt out with
+  `CIVEX_RECORDS_PARTITIONS=off` / `CIVEX_AUDIT_PARTITIONS=off` (or `[db]
+  records_partitions = 1`) before the migration runs; SQLite is unchanged.
+  Hosts should call `civex.db.migrate.ensure_audit_partitions(engine)` daily
+  to create upcoming months (civex also does when a database is migrated).
 
 ### Changes
+- New records, history entries and file references get time-ordered ids
+  instead of random ones, which keeps inserts fast once the id indexes outgrow
+  memory (3-4x the insert rate and 3x less WAL at 5M rows, more at larger
+  sizes). Existing ids are unchanged, and the first 8 characters of an id
+  (the short id civex prints and accepts) stay as distinct as before: the ids
+  are a UUIDv8 with a wrapping microsecond clock first, not UUIDv7, whose first
+  8 characters would be the same for every row made in a minute.
 
 - `civex.db.migrate.schema_status(engine)` reports whether a database is at
   this civex's head, behind it, or from a newer civex, without migrating,

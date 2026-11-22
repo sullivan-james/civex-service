@@ -45,6 +45,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from civex.domain.ids import row_id
+
 # Transparently uses JSONB on PostgreSQL, JSON text on SQLite.
 _JSON = JSON().with_variant(JSONB(), "postgresql")
 # Transparently uses TSVECTOR on PostgreSQL, plain text (unused) on SQLite.
@@ -404,7 +406,9 @@ class Record(Base):
         ),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    # Time-ordered (civex.domain.ids): random ids scatter every insert across
+    # every index holding the id. Same for AuditLog and FileReference.
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=row_id)
     dataset_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("datasets.id"), nullable=False
     )
@@ -563,7 +567,7 @@ class AuditLog(Base):
         ),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=row_id)
     action: Mapped[str] = mapped_column(
         String(20), nullable=False
     )  # create | update | delete
@@ -897,7 +901,7 @@ class FileReference(Base):
         Index("ix_file_references_sha_volume", "sha256", "volume"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=row_id)
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     record_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("records.id", ondelete="CASCADE"), nullable=True
@@ -987,7 +991,7 @@ def _sync_file_refs(
             insert(table),
             [
                 {
-                    "id": _uuid(),
+                    "id": row_id(),
                     "sha256": sha,
                     owner: owner_id,
                     other: None,

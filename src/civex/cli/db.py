@@ -425,7 +425,11 @@ def migrate() -> None:
     config = load_config()
     console.print("Applying migrations...", end="    ")
     try:
-        db_service.apply_migrations(config.db.url)
+        from civex.config import PartitionLayout
+
+        db_service.apply_migrations(
+            config.db.url, PartitionLayout.for_config(config.db)
+        )
     except DatabaseTooNewError as exc:
         console.print("[error]FAILED[/error]")
         print_database_too_new(exc)

@@ -177,7 +177,9 @@ def test_an_equality_filter_uses_the_gin_index(pg):
         filter_tree={"field": "code", "op": "eq", "value": "S007"},
     )
     plan = _plan(pg, lambda: pg.record_svc.count_records(q))
-    assert "ix_records_data_gin" in plan, plan
+    # On a partitioned `records` the GIN is one index per partition, named by
+    # PostgreSQL (`records_p0_data_idx`), not the parent's `ix_records_data_gin`.
+    assert "ix_records_data_gin" in plan or "_data_idx" in plan, plan
 
 
 def test_a_field_index_is_built_and_serves_a_sort_and_a_range(pg):

@@ -332,11 +332,12 @@ def _migrate_on_startup() -> None:
     import structlog
 
     try:
-        from civex.config import load_config
+        from civex.config import PartitionLayout, load_config
         from civex.context import _get_engine
         from civex.db.migrate import ensure_schema_current
 
-        ensure_schema_current(_get_engine(load_config().db.url))
+        db = load_config().db
+        ensure_schema_current(_get_engine(db.url), PartitionLayout.for_config(db))
     except Exception as exc:
         from civex.domain.exceptions import DatabaseTooNewError
 

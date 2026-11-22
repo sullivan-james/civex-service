@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from civex.db.models import FileReference, Record, Release, WorkflowJob
 from civex.domain.file_refs import collect_sha256_refs
+from civex.domain.ids import row_id
 from civex.domain.placement import Pointer
 
 _BATCH = 1000
@@ -474,7 +475,7 @@ class LocalFileReferenceRepository:
                     for sha in collect_sha256_refs(payload):
                         out.append(
                             {
-                                "id": uuid.uuid4(),
+                                "id": row_id(),
                                 "sha256": sha,
                                 "record_id": rid,
                                 "job_id": jid,

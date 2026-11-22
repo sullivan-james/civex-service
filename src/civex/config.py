@@ -16,9 +16,9 @@ import os
 import threading
 import time
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Protocol
+from typing import Mapping, Protocol
 
 from civex.domain.exceptions import ConfigError
 
@@ -164,10 +164,94 @@ class MapConfig:
 class DBConfig:
     url: str
     docker_managed: bool = False
+    # PostgreSQL only; used when a database is first migrated to the
+    # partitioned layout (civex.db.partitioning). None: the environment
+    # (CIVEX_RECORDS_PARTITIONS), else 8. 0 or 1: keep `records` a plain table.
+    records_partitions: int | None = None
+
     # Field ids a person chose to index in this computer's database
     # (`IndexService`, `domain/field_index.py`). About this database only: a
     # setting, never synced or in history, and kept when the database moves.
     indexed_fields: list[str] = field(default_factory=list)
+
+
+DEFAULT_RECORDS_PARTITIONS = 8
+DEFAULT_AUDIT_MONTHS_AHEAD = 2
+
+ENV_RECORDS = "CIVEX_RECORDS_PARTITIONS"
+ENV_AUDIT = "CIVEX_AUDIT_PARTITIONS"
+ENV_AUDIT_AHEAD = "CIVEX_AUDIT_MONTHS_AHEAD"
+
+_OFF_WORDS = {"off", "none", "false", "no"}
+
+
+def _partition_count(value: object, source: str) -> int:
+    """A partition count from a config value or environment string: a whole
+    number, or one of the words that mean "none" (a count below 2 keeps a
+    plain table)."""
+    if isinstance(value, bool):
+        raise ConfigError(f"{source}: expected a number or 'off', got {value!r}")
+    if isinstance(value, int):
+        number = value
+    else:
+        word = str(value).strip().lower()
+        if word in _OFF_WORDS:
+            return 0
+        try:
+            number = int(word)
+        except ValueError:
+            raise ConfigError(
+                f"{source}: expected a number or 'off', got {value!r}"
+            ) from None
+    if number < 0:
+        raise ConfigError(f"{source}: must not be negative, got {number}")
+    return number
+
+
+@dataclass(frozen=True)
+class PartitionLayout:
+    """Which partitioned layout a PostgreSQL database gets when it is migrated
+    (civex.db.partitioning; docs/contributing/records-partitioning.md).
+
+    Only read when the migration runs (once per database): changing it later
+    does not re-layout an existing database. SQLite ignores it.
+    """
+
+    records_partitions: int = DEFAULT_RECORDS_PARTITIONS  # < 2: plain table
+    audit_monthly: bool = True
+    audit_months_ahead: int = DEFAULT_AUDIT_MONTHS_AHEAD
+
+    @classmethod
+    def from_env(cls, environ: Mapping[str, str] | None = None) -> PartitionLayout:
+        env = os.environ if environ is None else environ
+        records = env.get(ENV_RECORDS, "").strip()
+        audit = env.get(ENV_AUDIT, "").strip().lower()
+        ahead = env.get(ENV_AUDIT_AHEAD, "").strip()
+        return cls(
+            records_partitions=(
+                _partition_count(records, ENV_RECORDS)
+                if records
+                else DEFAULT_RECORDS_PARTITIONS
+            ),
+            audit_monthly=audit not in _OFF_WORDS | {"0"},
+            audit_months_ahead=(
+                _partition_count(ahead, ENV_AUDIT_AHEAD)
+                if ahead
+                else DEFAULT_AUDIT_MONTHS_AHEAD
+            ),
+        )
+
+    @classmethod
+    def for_config(
+        cls, db: "DBConfig", environ: Mapping[str, str] | None = None
+    ) -> PartitionLayout:
+        """The layout a project's `[db]` section asks for, else the
+        environment's. Every place that migrates a project's database takes
+        its layout from here."""
+        layout = cls.from_env(environ)
+        if db.records_partitions is not None:
+            layout = replace(layout, records_partitions=db.records_partitions)
+        return layout
 
 
 @dataclass
@@ -478,6 +562,13 @@ def parse_config(data: dict, root: Path) -> Config:
             url=data["db"]["url"],
             docker_managed=bool(data["db"].get("docker_managed", False)),
             indexed_fields=[str(f) for f in data["db"].get("indexed_fields", [])],
+            records_partitions=(
+                _partition_count(
+                    data["db"]["records_partitions"], "[db] records_partitions"
+                )
+                if "records_partitions" in data["db"]
+                else None
+            ),
         ),
         store=store,
         ai=ai,
@@ -536,6 +627,8 @@ def render_config(config: Config) -> str:
     ]
     if config.db.docker_managed:
         lines.append("docker_managed = true\n")
+    if config.db.records_partitions is not None:
+        lines.append(f"records_partitions = {int(config.db.records_partitions)}\n")
     if config.db.indexed_fields:
         listed = ", ".join(_tv(f) for f in config.db.indexed_fields)
         lines.append(f"indexed_fields = [{listed}]\n")

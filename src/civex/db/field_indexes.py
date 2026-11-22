@@ -31,6 +31,7 @@ from sqlalchemy.engine import Connection
 
 from civex.db.field_values import FieldValue
 from civex.db.models import Record
+from civex.db.partitioning import is_partitioned, partitions_of
 from civex.domain.field_index import PREFIX, FieldIndexSpec, field_of
 
 _LIKE = PREFIX.replace("_", "\\_") + "%"
@@ -97,19 +98,53 @@ def create_sql(spec: FieldIndexSpec, dialect: Any) -> str:
 def create(conn: Connection, spec: FieldIndexSpec) -> None:
     """Build one index. On PostgreSQL `conn` must be in autocommit (it is built
     CONCURRENTLY, so saving records goes on meanwhile); on SQLite it holds the
-    database for as long as it takes, like any write."""
+    database for as long as it takes, like any write.
+
+    On a hash-partitioned `records` (civex.db.partitioning) PostgreSQL cannot
+    build a partitioned index CONCURRENTLY, so it is made in the documented
+    way: an index on the parent alone (`ON ONLY`, which is invalid and instant),
+    one CONCURRENTLY per partition, each attached to the parent, which turns
+    valid when the last is. The result is an ordinary partitioned index on
+    the parent, as the migration's conversion also makes it."""
     if conn.dialect.name == "postgresql":
+        partitioned = is_partitioned(conn, "records")
         # Not listed by `existing` but maybe there, invalid: start again.
-        conn.exec_driver_sql(f"DROP INDEX CONCURRENTLY IF EXISTS {spec.name}")
-    conn.exec_driver_sql(create_sql(spec, conn.dialect))
-    if conn.dialect.name == "postgresql":
+        if partitioned:
+            conn.exec_driver_sql(f"DROP INDEX IF EXISTS {spec.name}")
+        else:
+            conn.exec_driver_sql(f"DROP INDEX CONCURRENTLY IF EXISTS {spec.name}")
+        if partitioned:
+            _create_partitioned(conn, spec)
+        else:
+            conn.exec_driver_sql(create_sql(spec, conn.dialect))
         conn.exec_driver_sql(stats_sql(spec, conn.dialect))
+        return
+    conn.exec_driver_sql(create_sql(spec, conn.dialect))
+
+
+def _create_partitioned(conn: Connection, spec: FieldIndexSpec) -> None:
+    sql = create_sql(spec, conn.dialect).replace(" CONCURRENTLY", "")
+    conn.exec_driver_sql(sql.replace(" ON records ", " ON ONLY records ", 1))
+    for n, part in enumerate(partitions_of(conn, "records")):
+        child = f"{spec.name}_{n}"
+        conn.exec_driver_sql(f"DROP INDEX CONCURRENTLY IF EXISTS {child}")
+        child_sql = create_sql(spec, conn.dialect).replace(
+            f"INDEX CONCURRENTLY IF NOT EXISTS {spec.name} ON records ",
+            f"INDEX CONCURRENTLY IF NOT EXISTS {child} ON {part} ",
+            1,
+        )
+        conn.exec_driver_sql(child_sql)
+        conn.exec_driver_sql(f"ALTER INDEX {spec.name} ATTACH PARTITION {child}")
 
 
 def drop(conn: Connection, name: str) -> None:
     if field_of(name) is None:  # never anything but ours
         raise ValueError(f"'{name}' is not a managed field index")
-    concurrently = " CONCURRENTLY" if conn.dialect.name == "postgresql" else ""
-    conn.exec_driver_sql(f"DROP INDEX{concurrently} IF EXISTS {name}")
     if conn.dialect.name == "postgresql":
+        # A partitioned index cannot be dropped CONCURRENTLY (it holds the
+        # table for an instant); a plain one can.
+        concurrently = "" if is_partitioned(conn, "records") else " CONCURRENTLY"
+        conn.exec_driver_sql(f"DROP INDEX{concurrently} IF EXISTS {name}")
         conn.exec_driver_sql(f"DROP STATISTICS IF EXISTS {stats_name(name)}")
+        return
+    conn.exec_driver_sql(f"DROP INDEX IF EXISTS {name}")

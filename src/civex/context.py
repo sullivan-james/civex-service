@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from civex.domain.dtos import RecordUse
 from civex.domain import release as release_rules
-from civex.config import Config, ConfigStore
+from civex.config import Config, ConfigStore, PartitionLayout
 from civex.domain import features
 from civex.domain.exceptions import FeatureUnavailableError
 from civex.domain.permissions import Permissions
@@ -495,7 +495,7 @@ def build_context(
     write transaction, gets the primary."""
     from sqlalchemy.orm import Session
 
-    from civex.db.migrate import ensure_schema_current
+    from civex.db.migrate import ensure_audit_partitions_daily, ensure_schema_current
     from civex.repositories.local.audit_repo import LocalAuditRepository
     from civex.repositories.local.dataset_repo import LocalDatasetRepository
     from civex.repositories.local.file_ref_repo import LocalFileReferenceRepository
@@ -543,7 +543,12 @@ def build_context(
     config = project.config
     engine = project.engine or _get_engine(config.db.url)
     if not project.migrated:
-        ensure_schema_current(engine)
+        ensure_schema_current(engine, PartitionLayout.for_config(config.db))
+    # A server that stays up for months needs next month's audit partition:
+    # at most one cheap check a day per engine.
+    ensure_audit_partitions_daily(
+        engine, PartitionLayout.for_config(config.db).audit_months_ahead
+    )
     on_read_engine = uses_read_engine(project, read_only)
     session_engine: Engine
     if on_read_engine:
