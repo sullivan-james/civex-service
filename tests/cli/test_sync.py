@@ -253,3 +253,19 @@ def test_clone_stops_cleanly_when_sign_in_is_denied_and_can_be_run_again(
     again = runner.invoke(app, ["clone", "https://hub.example/birds", "copy"])
     assert again.exit_code == 0, again.output
     assert "Cloned into" in again.output
+
+
+def test_clone_will_not_connect_a_project_that_already_holds_data(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from civex.services.sync_service import SyncService
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(SyncService, "connect", _fake_connect(None, {}))
+    assert runner.invoke(app, ["clone", "https://hub.example/birds", "copy"]).exit_code == 0
+    monkeypatch.chdir(tmp_path / "copy")
+    assert runner.invoke(app, ["schema", "create", "thing"]).exit_code == 0
+    monkeypatch.chdir(tmp_path)
+    again = runner.invoke(app, ["clone", "https://hub.example/birds", "copy"])
+    assert again.exit_code == 1
+    assert "already a civex project" in " ".join(again.output.split())
