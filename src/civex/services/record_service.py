@@ -7,7 +7,7 @@ import re
 import uuid
 from datetime import date as _date, datetime as _dt, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterable, Iterator
+from typing import Any, Callable, Generator, Iterable, Iterator
 from zoneinfo import ZoneInfo
 
 from civex.domain.charts import Chart
@@ -4266,7 +4266,7 @@ class RecordService:
         ids: list[str] | None = None,
         query: RecordQuery | None = None,
         progress: Progress | None = None,
-    ) -> Iterator[RecordBulkEditResultDTO]:
+    ) -> Generator[RecordBulkEditResultDTO, None, None]:
         """`bulk_edit` a chunk of `BULK_EDIT_PAGE` records at a time: after
         each chunk it yields what has been done so far, and the caller
         commits (`AppContext.chunked_writes`), so the database's write lock
@@ -4407,11 +4407,15 @@ class RecordService:
         if not checked:
             return 0
         stamp = _dt.now(timezone.utc)
-        self._records.update_many([(raw.id, data) for raw, data, _ in checked], stamp)
-        runs = 0
-        for raw, id_data, before in checked:
-            saved = dataclasses.replace(raw, data=id_data, updated_at=stamp)
-            if self._audit:
+        # The entries are made ready first (nothing is sent until the records
+        # are saved), so the database is written to, and so locked, only for
+        # the two statements and the commit that follows.
+        every = [
+            (raw, dataclasses.replace(raw, data=data, updated_at=stamp), before)
+            for raw, data, before in checked
+        ]
+        if self._audit:
+            for raw, saved, _ in every:
                 self._audit.log_change(
                     "update",
                     "record",
@@ -4419,6 +4423,10 @@ class RecordService:
                     self._snapshot(raw),
                     self._snapshot(saved),
                 )
+        self._records.update_many([(raw.id, data) for raw, data, _ in checked], stamp)
+        runs = 0
+        for raw, saved, before in every:
+            id_data = saved.data
             if paused or self._job_svc is None:
                 continue
             shape = shapes(raw.schema_id)

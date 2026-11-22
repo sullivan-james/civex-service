@@ -73,6 +73,15 @@ def get_progress(progress_id: str):
     return state
 
 
+@router.post("/progress/{progress_id}/cancel", status_code=204)
+def cancel_progress(progress_id: str):
+    """Ask the request tagged with this id to stop. Work done a chunk at a time
+    (a bulk edit) stops before its next chunk and keeps what it has done; other
+    work carries on to its end. 404 when nothing is reporting under the id."""
+    if not progress_registry.cancel(progress_id):
+        raise HTTPException(404, detail="Nothing is reporting under that id.")
+
+
 def _selection(body: FileSelectionRequest, ctx: AppContext) -> FileSelection:
     """The selection a request describes, with its table and order applied."""
     selection = _base_selection(body, ctx)

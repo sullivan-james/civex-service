@@ -285,8 +285,12 @@ class AppContext:
         began = [time.time()]
 
         def turn() -> None:
-            self.commit()
+            # Everything still to be written goes while the connection is
+            # marked as this work's own; then the mark comes off (while the
+            # connection is still this transaction's) and it commits.
+            self._session.flush()
             unmark()
+            self.commit()
             if index_gate.quiet_for(db) <= time.time() - began[0]:
                 time.sleep(GIVE_WAY_SECONDS)
             began[0] = time.time()
