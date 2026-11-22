@@ -183,6 +183,18 @@ rule). Nothing references `audit_log.id`, so the primary key change is
 contained; uniqueness of `hub_seq` would have to rest on the authority that
 assigns it, with a plain index for the feed.
 
+**Replays and the `audit_log` key.** With the key `(id, timestamp)` the
+database no longer rejects a second row with the same `id` unless the time is
+identical too, and nothing may use `ON CONFLICT (id)` on this table. No path
+does: an entry made elsewhere is kept only after an existence check by id
+(`SyncRepository.has_entry`, in the feed pull and history backfill) or after
+the authority's per-event record (`sync_ops`, primary key `op_id`, an
+unpartitioned table) says the event is new (push). The push check and its row
+are in one transaction, so of two concurrent replays of one event the second
+waits on the first's `sync_ops` key and rolls back whole; the pull and backfill
+run under the project's sync lock. `tests/sync/test_postgres_audit_replay.py`
+replays each path, with the time re-spelled, and expects one row per id.
+
 ### Effect on the existing indexes
 
 Both partitioned layouts create the same indexes *per partition*, including the
