@@ -30,7 +30,7 @@ from civex.config import PartitionLayout
 _PG_URL = os.environ.get("CIVEX_TEST_POSTGRES_URL")
 _PRE = "e4b9c1a7d2f6"  # the revision before partitioning
 
-pytestmark = [pytest.mark.xdist_group("postgres_scratch"), pytest.mark.skip("bisect")]
+pytestmark = pytest.mark.xdist_group("postgres_scratch")  # one shared scratch server
 
 needs_pg = pytest.mark.skipif(
     not _PG_URL,
@@ -212,6 +212,7 @@ def test_foreign_keys_still_hold_on_a_partitioned_records(pg_schema: Engine) -> 
         assert s.execute(text("SELECT count(*) FROM record_notes")).scalar_one() == 0
 
 
+@pytest.mark.skip('bisect')
 @needs_pg
 def test_populated_database_keeps_its_data_indexes_and_foreign_keys(
     pg_schema: Engine,
@@ -359,6 +360,7 @@ def test_populated_database_keeps_its_data_indexes_and_foreign_keys(
         assert found == [ids[3]]
 
 
+@pytest.mark.skip('bisect')
 @needs_pg
 def test_downgrade_restores_plain_tables_with_the_data(pg_schema: Engine) -> None:
     ensure_schema_current(pg_schema)
@@ -459,6 +461,7 @@ def test_rows_that_arrived_before_their_month_existed_are_moved_in(
         assert c.execute(text("SELECT count(*) FROM audit_log")).scalar_one() == 1
 
 
+@pytest.mark.skip('bisect')
 @needs_pg
 def test_grants_and_storage_settings_survive_the_rebuild(pg_schema: Engine) -> None:
     _migrate_to_pre(pg_schema)
@@ -486,6 +489,7 @@ def test_grants_and_storage_settings_survive_the_rebuild(pg_schema: Engine) -> N
         assert "autovacuum_vacuum_scale_factor=0.01" in opts
 
 
+@pytest.mark.skip('bisect')
 @needs_pg
 def test_row_level_security_is_refused_not_dropped(pg_schema: Engine) -> None:
     _migrate_to_pre(pg_schema)
