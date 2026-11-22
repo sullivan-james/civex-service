@@ -190,7 +190,7 @@ that syncs they reach every copy.
 
 ## Getting the records back
 
-Download the bundle (**Download**, or `civex release download v1`) and read
+Save the bundle (**Save a copy…**, onto a drive of this computer or as a download; or `civex release download v1`) and read
 it into a **new** project with `civex bundle import` (or **Collections →
 Bring in from another project…**). Records keep their ids and still name their files; put the
 files beside them with the release's folder export.

@@ -1,4 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
+import { SaveToDriveDialog } from '../components/files/SaveToDrive'
 import { useState, type ReactNode } from 'react'
 import { useParams } from 'react-router'
 import type {
@@ -79,6 +80,7 @@ export default function ReleasePage() {
   const [editing, setEditing] = useState(false)
   const [withdrawing, setWithdrawing] = useState(false)
   const [yanking, setYanking] = useState(false)
+  const [saving, setSaving] = useState(false)
   const allowed = can('change_structure')
   const yanked = !!release?.yanked_at
 
@@ -91,14 +93,7 @@ export default function ReleasePage() {
       error={error ? <ErrorState message={errorMessage(error)} /> : undefined}
       action={
         release &&
-        !yanked && (
-          <Button
-            href={releasesApi.bundleUrl(release.name)}
-            download={release.file_name}
-          >
-            Download
-          </Button>
-        )
+        !yanked && <Button onClick={() => setSaving(true)}>Save a copy…</Button>
       }
       secondaryActions={
         release
@@ -180,6 +175,21 @@ export default function ReleasePage() {
             />
           )}
         </>
+      )}
+      {saving && release && (
+        // Onto a drive of this computer, where civex runs, or as a download.
+        <SaveToDriveDialog
+          title="Save a copy"
+          need={release.bundle_size}
+          onSave={(volume) => releasesApi.save(release.name, volume)}
+          onDownload={() => {
+            const a = document.createElement('a')
+            a.href = releasesApi.bundleUrl(release.name)
+            a.download = release.file_name
+            a.click()
+          }}
+          onClose={() => setSaving(false)}
+        />
       )}
     </Page>
   )

@@ -1236,6 +1236,30 @@ class FileAccessService:
         piling up copies."""
         return self.exports_root(location) / safe_segment(name, "files")
 
+    def save_to(
+        self,
+        location: str | None,
+        filename: str,
+        write: Callable[[Path], Any],
+    ) -> Path:
+        """Put one file civex makes (a copy of the project, a release's) in
+        the exports folder of a drive, or of the project when none is named:
+        the same place a folder export goes, so it is found beside them.
+        `write(path)` makes it; it appears under its name only once whole.
+        Answers where it is."""
+        place = PROJECT if location in (None, "", PROJECT) else location
+        root = self.exports_root(place)
+        self._check_writable(place)
+        root.mkdir(parents=True, exist_ok=True)
+        dest = root / safe_segment(filename, "file")
+        part = dest.with_name(dest.name + ".part")
+        try:
+            write(part)
+            file_modes.replace(part, dest)
+        finally:
+            part.unlink(missing_ok=True)
+        return dest
+
     def _check_writable(self, location: str) -> None:
         if location == PROJECT:
             return

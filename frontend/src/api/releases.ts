@@ -263,4 +263,8 @@ export const releasesApi = {
   /** Where the bundle downloads from (fetched from the server first on a
    * copy that hasn't got it). */
   bundleUrl: (name: string) => apiUrl(`${at(name)}/bundle`),
+  /** Writes its copy straight onto a drive of this computer (none: the
+   * project folder). */
+  save: (name: string, volume: string | null) =>
+    api.post<{ path: string; opened: boolean }>(`${at(name)}/save`, { volume }),
 }

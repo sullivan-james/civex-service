@@ -608,6 +608,54 @@ def record_differences(name: str, record_id: str, ctx: AppContext = Depends(get_
     ]
 
 
+class ReleaseSaveRequest(BaseModel):
+    volume: str | None = Field(
+        default=None,
+        description="The drive to put it on (its exports folder); none: the "
+        "project's own exports folder.",
+    )
+    open: bool = Field(
+        default=True, description="Open the folder it is in when done (this machine)."
+    )
+
+
+class ReleaseSavedResponse(BaseModel):
+    path: str = Field(description="Where the file was written.")
+    opened: bool = Field(description="Whether its folder was opened.")
+
+
+@router.post("/releases/{name}/save", response_model=ReleaseSavedResponse)
+def save_release(
+    name: str,
+    body: ReleaseSaveRequest,
+    request: Request,
+    ctx: AppContext = Depends(get_ctx),
+):
+    """Write a release's bundle of records straight onto a drive of this
+    computer (its exports folder), instead of downloading it through the
+    browser. 404 when it can't be had (or it was yanked); 409 when the drive
+    can't be written to now."""
+    try:
+        dest = ctx.file_access_svc.save_to(
+            body.volume,
+            ctx.release_svc.file_name_for(name),
+            lambda path: ctx.release_svc.write_copy(name, path),
+        )
+    except LinksNotPossibleError as e:
+        raise HTTPException(409, detail=str(e))
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except CivexError as e:
+        raise HTTPException(422, detail=str(e))
+    opened = (
+        body.open
+        and OPEN_FOLDER in ctx.features
+        and _from_this_machine(request)
+        and fs_open.open_folder(dest.parent)
+    )
+    return ReleaseSavedResponse(path=str(dest), opened=bool(opened))
+
+
 @router.get(
     "/releases/{name}/bundle",
     status_code=307,

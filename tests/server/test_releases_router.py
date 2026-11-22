@@ -140,3 +140,22 @@ def test_a_purge_plan_names_the_releases_keeping_files(client: TestClient):
     assert client.delete(f"/api/records/{rec['id']}").status_code in (200, 204)
     plan = client.get(f"/api/records/{rec['id']}/purge-plan").json()
     assert plan == {"records": 1, "kept_by_releases": {"v1": 1}}
+
+
+def test_a_release_is_written_straight_onto_this_computer(client: TestClient):
+    import zipfile
+
+    _study(client)
+    client.post("/api/releases", json={"name": "v1", "title": "Survey"})
+    saved = client.post("/api/releases/v1/save", json={"open": False})
+    assert saved.status_code == 200, saved.text
+    path = saved.json()["path"]
+    with zipfile.ZipFile(path) as zf:
+        assert "release.json" in zf.namelist()
+    assert client.post("/api/releases/v9/save", json={"open": False}).status_code == 404
+    assert (
+        client.post(
+            "/api/releases/v1/save", json={"volume": "nowhere", "open": False}
+        ).status_code
+        == 404
+    )

@@ -13,11 +13,14 @@ import {
   ModalFooter,
   ModalHeader,
   Spinner,
+  useToast,
 } from '../ui'
+import { useSaveChoice } from '../files/SaveToDrive'
 
-/** Export the project as a bundle: one file another civex can read. Shows
- * what would go in (the server's plan, asked again as the choice changes) and
- * whether to carry the stored files, then starts the download. */
+/** Copy the project for another one: one file another civex can read. Shows
+ * what would go in (the server's plan, asked again as the choice changes),
+ * whether to carry the stored files, and where it goes: onto a drive of this
+ * computer (the default: civex runs here) or through the browser. */
 export function ExportBundleDialog({ onClose }: { onClose: () => void }) {
   const [files, setFiles] = useState(true)
   const plan = useQuery({
@@ -25,6 +28,28 @@ export function ExportBundleDialog({ onClose }: { onClose: () => void }) {
     queryFn: () => bundleApi.plan({ files }),
   })
   const p = plan.data
+  const toast = useToast()
+  const save = useSaveChoice(files ? (p?.file_bytes ?? 0) : 0)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<unknown>(null)
+
+  async function go() {
+    if (save.how === 'download') {
+      bundleApi.download({ files })
+      return onClose()
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      const saved = await bundleApi.save({ files, volume: save.volume })
+      toast.success(`Saved: ${saved.path}`)
+      onClose()
+    } catch (e) {
+      setError(e)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <Modal onClose={onClose} size="sm">
@@ -62,19 +87,20 @@ export function ExportBundleDialog({ onClose }: { onClose: () => void }) {
               can&apos;t be reached now will be left out.
             </p>
           )}
+          {save.picker}
+          {error != null && <FormError message={errorMessage(error)} />}
         </div>
       </ModalBody>
       <ModalFooter>
-        <Button onClick={onClose}>Cancel</Button>
+        <Button onClick={onClose} disabled={busy}>
+          Cancel
+        </Button>
         <Button
           variant="primary"
-          disabled={!p}
-          onClick={() => {
-            bundleApi.download({ files })
-            onClose()
-          }}
+          disabled={!p || busy || save.blocked}
+          onClick={go}
         >
-          Download
+          {busy ? 'Saving…' : save.how === 'drive' ? 'Save' : 'Download'}
         </Button>
       </ModalFooter>
     </Modal>

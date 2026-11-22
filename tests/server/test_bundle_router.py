@@ -134,3 +134,23 @@ def test_something_that_is_not_a_bundle_is_a_400(client: TestClient) -> None:
     )
     assert response.status_code == 400
     assert "not a civex bundle" in response.json()["detail"]
+
+
+def test_a_copy_is_written_straight_onto_this_computer(client: TestClient):
+    """`POST /bundle/save` writes the same file as the download, into the
+    exports folder, with nothing passing through the browser."""
+    _setup(client)
+    saved = client.post("/api/bundle/save", json={"files": False, "open": False})
+    assert saved.status_code == 200, saved.text
+    path = saved.json()["path"]
+    assert path.endswith(spec.EXTENSION) and "exports" in path
+    assert saved.json()["opened"] is False
+    with zipfile.ZipFile(path) as zf:
+        manifest = json.loads(zf.read(spec.MANIFEST))
+    assert {s["name"] for s in manifest["schemas"]} >= {"species", "encounter"}
+    # No half-written file is left beside it.
+    import pathlib
+
+    assert not list(pathlib.Path(path).parent.glob("*.part"))
+    gone = client.post("/api/bundle/save", json={"volume": "nowhere", "open": False})
+    assert gone.status_code == 404

@@ -62,6 +62,11 @@ export const bundleApi = {
     a.click()
   },
 
+  /** Writes it straight onto a drive of this computer (none: the project
+   * folder), with nothing passing through the browser. */
+  save: (options: BundleOptions & { volume: string | null }) =>
+    api.post<{ path: string; opened: boolean }>('/bundle/save', options),
+
   async import(file: File): Promise<BundleImportResult> {
     const form = new FormData()
     form.append('file', file)
