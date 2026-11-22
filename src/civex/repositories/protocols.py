@@ -60,7 +60,8 @@ from civex.domain.dtos import (
 from civex.domain.filters import FilterNode
 from civex.domain.library import LibraryItemDTO
 from civex.domain.placement import Pointer
-from civex.domain.query import ResolvedQuery, TextSearch
+from civex.domain.file_access import HeldFile
+from civex.domain.query import ResolvedQuery, ResolvedSet, TextSearch
 from civex.domain.summary import RawSummary, SummaryPlan
 from civex.domain.transfers import CopyResult, TransferRecord
 
@@ -357,6 +358,25 @@ class RecordRepository(Protocol):
     def list_by_dataset(self, dataset_id: uuid.UUID) -> list[RecordDTO]: ...
     def list_by_ids(self, ids: list[uuid.UUID]) -> list[RecordDTO]: ...
     def collections_of(self, ids: list[uuid.UUID]) -> set[uuid.UUID]: ...
+    def held_files(
+        self,
+        picked: ResolvedSet,
+        file_fields: dict[str, str],
+        search: TextSearch | None = None,
+        depth: int = 0,
+        following: bool = True,
+    ) -> list[HeldFile]: ...
+    def holders(self, picked: ResolvedSet) -> list[Any]: ...
+    def update_many(
+        self, rows: list[tuple[uuid.UUID, dict[str, Any]]], stamp: datetime
+    ) -> None: ...
+    def field_rows(
+        self,
+        field_ids: list[str],
+        query: ResolvedQuery | None = None,
+        ids: list[uuid.UUID] | None = None,
+    ) -> list[tuple[Any, Any, Any, dict[str, Any]]]: ...
+    def shared_copies(self) -> dict[tuple[str, str | None], int]: ...
     def list_filtered(
         self,
         query: ResolvedQuery,
@@ -364,7 +384,14 @@ class RecordRepository(Protocol):
         limit: int,
         after: tuple[datetime, uuid.UUID] | None = None,
     ) -> list[RecordDTO]: ...
+    def list_keyset(
+        self,
+        query: ResolvedQuery,
+        limit: int,
+        after_key: list[Any] | None = None,
+    ) -> tuple[list[RecordDTO], list[Any] | None, str]: ...
     def count(self, query: ResolvedQuery) -> int: ...
+    def estimate_count(self, query: ResolvedQuery) -> tuple[int, bool]: ...
     def list_ids(self, query: ResolvedQuery) -> list[uuid.UUID]: ...
     def count_by_schema(self, query: ResolvedQuery) -> dict[str, int]: ...
     def summarise(self, query: ResolvedQuery, plan: SummaryPlan) -> RawSummary: ...

@@ -28,8 +28,8 @@ from civex.domain.file_access import (
     LinksNotPossibleError,
     safe_segment,
 )
-from civex.domain.features import OPEN_FOLDER
-from civex.server.deps import get_ctx
+from civex.domain.features import OPEN_FOLDER, SERVER_PATH_EXPORT
+from civex.server.deps import get_ctx, requires
 from civex.server.downloads import new_temp_dir, serve, temp_paths
 from civex.server.models import RecordQueryRequest
 from civex.server.routers.file_access import (
@@ -467,7 +467,9 @@ def plan_release_files(
     return out
 
 
-@router.post("/releases/{name}/files/export")
+@router.post(
+    "/releases/{name}/files/export", dependencies=[requires(SERVER_PATH_EXPORT)]
+)
 def export_release_files(
     name: str,
     body: ReleaseExportRequest,
@@ -563,6 +565,7 @@ def zip_release_files(
                     scratch,
                     name=f"release-{name}",
                     beside=beside,
+                    progress=progress,
                 )
             except FileNotFoundError as e:
                 raise HTTPException(404, detail=f"A file is no longer stored: {e}")
@@ -658,7 +661,11 @@ class ReleaseSavedResponse(BaseModel):
     opened: bool = Field(description="Whether its folder was opened.")
 
 
-@router.post("/releases/{name}/save", response_model=ReleaseSavedResponse)
+@router.post(
+    "/releases/{name}/save",
+    response_model=ReleaseSavedResponse,
+    dependencies=[requires(SERVER_PATH_EXPORT)],
+)
 def save_release(
     name: str,
     body: ReleaseSaveRequest,

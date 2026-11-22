@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from civex.context import AppContext
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
 from civex.domain.query import RecordQuery
-from civex.server.deps import get_ctx
+from civex.server.deps import get_ctx, get_read_ctx
 from civex.server.query_params import record_query
 from civex.server.routers.audit import AuditView, audit_page
 from civex.server.models import (
@@ -21,7 +21,7 @@ router = APIRouter(prefix="/collections", tags=["collections"])
 
 
 @router.get("", response_model=list[DatasetResponse])
-def list_datasets(ctx: AppContext = Depends(get_ctx)):
+def list_datasets(ctx: AppContext = Depends(get_read_ctx)):
     return [DatasetResponse.from_dto(d) for d in ctx.dataset_svc.list_all()]
 
 
@@ -50,7 +50,7 @@ def create_dataset(body: CreateDatasetRequest, ctx: AppContext = Depends(get_ctx
 
 
 @router.get("/{name_or_id}", response_model=DatasetResponse)
-def get_dataset(name_or_id: str, ctx: AppContext = Depends(get_ctx)):
+def get_dataset(name_or_id: str, ctx: AppContext = Depends(get_read_ctx)):
     try:
         return DatasetResponse.from_dto(ctx.dataset_svc.lookup(name_or_id))
     except NotFoundError as e:
@@ -61,7 +61,7 @@ def get_dataset(name_or_id: str, ctx: AppContext = Depends(get_ctx)):
 def record_counts(
     name_or_id: str,
     query: RecordQuery = Depends(record_query),
-    ctx: AppContext = Depends(get_ctx),
+    ctx: AppContext = Depends(get_read_ctx),
 ):
     """Record counts grouped by schema name — single SQL GROUP BY, no record
     loading. Takes the list endpoint's filters (except 'schema', which is the

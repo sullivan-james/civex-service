@@ -7,10 +7,11 @@ import re
 import uuid
 from datetime import date as _date, datetime as _dt, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterable, Iterator
+from typing import Any, Callable, Generator, Iterable, Iterator
 from zoneinfo import ZoneInfo
 
 from civex.domain.charts import Chart
+from civex.domain.cursor import decode_cursor, encode_cursor
 from civex.domain import permissions
 from civex.domain import notes as note_rules
 from civex.domain.permissions import EVERYTHING, Permissions
@@ -70,9 +71,12 @@ from civex.domain.query import (
     META_SORTS,
     UNSEARCHED_DTYPES,
     RecordQuery,
+    RecordSet,
     ResolvedQuery,
+    ResolvedSet,
     TextSearch,
 )
+from civex.domain.file_access import HeldFile, record_key
 from civex.domain.scopes import GLOBAL, can_reference
 from civex.domain import summary
 from civex.domain.timezones import offset_changes, parse_datetime
@@ -408,6 +412,17 @@ BULK_EDIT_PAGE = 500
 MAX_REPORTED = 200
 
 
+# Field types a save keeps a catalog for (which record holds which file, which
+# record links to which): a change to one is saved by itself, so the catalogs
+# are kept as any save keeps them.
+_CATALOGUED_DTYPES = frozenset({"file", "file_list", "reference", "reference_list"})
+
+
+def _as_uuid(raw: Any) -> uuid.UUID:
+    """An id as the database gave it (text on SQLite), as an id."""
+    return raw if isinstance(raw, uuid.UUID) else uuid.UUID(str(raw))
+
+
 def _bulk_edit_problem(shape: ResolvedSchema | None, fields: list[str]) -> str | None:
     """Why a record of `shape` can't take a bulk edit of `fields`, or None. A
     record holds values only for its schema's *own* fields: an inherited one's
@@ -662,6 +677,15 @@ def _referrers_message(referrers: list[tuple[RecordDTO, dict[str, str]]]) -> str
     if len(referrers) > len(shown):
         msg += f" and {len(referrers) - len(shown)} more"
     return msg
+
+
+@dataclasses.dataclass(frozen=True)
+class RecordPage:
+    """One keyset page of records and the cursor for the next (None when
+    this is the last)."""
+
+    items: list[RecordDTO]
+    next_cursor: str | None
 
 
 class RecordService:
@@ -2968,6 +2992,43 @@ class RecordService:
         records = self._records.list_filtered(
             self.resolve(query), offset, limit, after=after
         )
+        return self._decorate(records, query, columns, child_counts, as_stored)
+
+    def query_records_page(
+        self,
+        query: RecordQuery,
+        limit: int = 50,
+        cursor: str | None = None,
+        columns: list[str] | None = None,
+        child_counts: bool = False,
+        as_stored: bool = False,
+    ) -> RecordPage:
+        """One page of `query` by keyset, sorted or not: `cursor` (the
+        previous page's `next_cursor`, opaque) continues strictly after its
+        last record, so a deep page costs what the first does and records
+        added or removed between requests neither repeat nor skip. The page's
+        `next_cursor` is None on the last page."""
+        after_key: list[Any] | None = None
+        if cursor:
+            after_key, directions = decode_cursor(cursor)
+        records, key, directions_now = self._records.list_keyset(
+            self.resolve(query), limit, after_key
+        )
+        if cursor and directions != directions_now:
+            raise ValidationError("The cursor does not belong to this query's sort")
+        return RecordPage(
+            self._decorate(records, query, columns, child_counts, as_stored),
+            encode_cursor(key, directions_now) if key is not None else None,
+        )
+
+    def _decorate(
+        self,
+        records: list[RecordDTO],
+        query: RecordQuery,
+        columns: list[str] | None,
+        child_counts: bool,
+        as_stored: bool,
+    ) -> list[RecordDTO]:
         if as_stored:
             return self._with_names_many(records)
         named = self._attach_open_notes(
@@ -2985,6 +3046,11 @@ class RecordService:
     def count_records(self, query: RecordQuery) -> int:
         return self._records.count(self.resolve(query))
 
+    def estimate_records(self, query: RecordQuery) -> tuple[int, bool]:
+        """(matching records, whether that is an estimate): the planner's on
+        PostgreSQL, at no cost per record, exact elsewhere."""
+        return self._records.estimate_count(self.resolve(query))
+
     def stream_records(
         self,
         query: RecordQuery,
@@ -2996,30 +3062,23 @@ class RecordService:
         must not hold the whole result set in memory (`as_stored`: see
         `query_records`).
 
-        An unsorted walk continues from the last record's (created_at, id)
-        rather than an ever-growing OFFSET, which would re-read every row it
-        skips and make a large export quadratic. A custom sort has no such
-        cursor, so it still pages by offset."""
-        offset = 0
-        after: tuple[_dt, uuid.UUID] | None = None
+        Each page continues from the last record's sort key (a cursor, see
+        `query_records_page`) rather than an ever-growing OFFSET, which would
+        re-read every row it skips and make a large export quadratic."""
+        cursor: str | None = None
         while True:
-            page = self.query_records(
+            page = self.query_records_page(
                 query,
                 limit=page_size,
-                offset=0 if after else offset,
+                cursor=cursor,
                 columns=columns,
-                after=after,
                 as_stored=as_stored,
             )
-            if not page:
+            if page.items:
+                yield page.items
+            if page.next_cursor is None:
                 return
-            yield page
-            if len(page) < page_size:
-                return
-            if query.sort:
-                offset += page_size
-            else:
-                after = (page[-1].created_at, page[-1].id)
+            cursor = page.next_cursor
 
     def schema_counts(self, query: RecordQuery) -> dict[str, int]:
         """Matching records per schema name -- one GROUP BY, no rows loaded.
@@ -3553,6 +3612,87 @@ class RecordService:
             return named
         return self._attach_reference_labels(named, shapes)
 
+    def _resolve_set(self, picked: RecordSet) -> ResolvedSet:
+        """Names -> ids for a set of records. A query that asks `listed` what
+        a kind it can't be asked of lists (the filter means nothing there)
+        lists nothing; ids that name no record are left out."""
+        listed: list[ResolvedQuery] | None = None
+        if picked.listed is not None:
+            listed = []
+            for query in picked.listed:
+                try:
+                    listed.append(self.resolve(query))
+                except ValidationError:
+                    continue
+        ids: list[uuid.UUID] = []
+        for raw in dict.fromkeys(picked.ids):
+            try:
+                ids.append(uuid.UUID(str(raw)))
+            except (ValueError, AttributeError, TypeError):
+                continue
+        return ResolvedSet(
+            queries=[self.resolve(q) for q in picked.queries],
+            ids=ids,
+            below=picked.below,
+            listed=listed,
+            schema_ids=(
+                [s.id for s in self._schema_svc.list_all() if s.name in picked.kinds]
+                if picked.kinds is not None
+                else None
+            ),
+        )
+
+    def held_files(
+        self, picked: RecordSet, search: str | None = None
+    ) -> list[HeldFile]:
+        """Every file the set's records hold, as each is written in its record
+        and with the copy that record points at: read by the database alone,
+        in one statement however many records there are. Nothing is named and
+        no drive is asked (a caller names the few it shows). `search` marks
+        the files it finds (`HeldFile.found`): by the name a file was added
+        under, or by its record, or one above it, as a search of records
+        would find it."""
+        schemas = self._schema_svc.list_all()
+        file_fields = {
+            str(f.id): f.name
+            for s in schemas
+            for f in s.fields
+            if f.dtype in ("file", "file_list")
+        }
+        parent = {s.id: s.parent_id for s in schemas}
+        depth = 0
+        for start in parent:
+            hops, at = 0, parent.get(start)
+            while at is not None and hops < _MAX_TRAIL_DEPTH:
+                hops, at = hops + 1, parent.get(at)
+            depth = max(depth, hops)
+        looked_for = self.text_search(search) if search else None
+        if looked_for is not None:
+            # A file is found by its own name, not by the name of another
+            # file its record (or a record above) holds.
+            looked_for = TextSearch(
+                looked_for.term,
+                tuple(i for i in looked_for.field_ids if i not in file_fields),
+            )
+        return self._records.held_files(
+            self._resolve_set(picked),
+            file_fields,
+            looked_for,
+            depth,
+            following=self.files_from_server(),
+        )
+
+    def holding_files(self, picked: RecordSet) -> list[str]:
+        """The ids of the set's records that hold a file, in the order records
+        are listed: from the catalog, one statement. What a plan of files has
+        to read, instead of every record of the set."""
+        return [record_key(r) for r in self._records.holders(self._resolve_set(picked))]
+
+    def shared_copies(self) -> dict[tuple[str, str | None], int]:
+        """The copies of files, (sha256, volume), that more than one live
+        record points at, and how many do. From the catalog, one statement."""
+        return self._records.shared_copies()
+
     def file_values(
         self, records: list[RecordDTO], field_names: list[str] | None = None
     ) -> tuple[list[tuple[RecordDTO, str, dict[str, Any]]], set[str]]:
@@ -3859,8 +3999,283 @@ class RecordService:
         chosen records (`ids`, or every record `query` lists) would do,
         without doing it: how many would change, how many already hold the
         values, which can't take them and why, and how many workflow runs it
-        would start. The same walk as `bulk_edit`, so they can't disagree."""
-        return self._bulk_edit(changes, ids, query, write=False, progress=progress)[0]
+        would start.
+
+        Worked out over the set, not record by record: one statement reads,
+        of every chosen record, only the values of the fields being changed
+        (`RecordRepository.field_rows`), which says who already holds them;
+        the checks a save runs are then run once for each different case (a
+        kind of record, in a collection, changing these of the fields:
+        `_checked_update` on one such record), since a value a field won't
+        take is refused for every record of that kind alike. Only a change
+        the database must be asked about per record (a link to another
+        record, a field in a uniqueness key, a file) reads those records, as
+        the edit does. `tests/services/test_record_bulk_edit.py` holds the
+        plan to what the edit then does."""
+        fields = list(changes)
+        if not fields:
+            raise ValidationError("Choose a field to set or clear")
+        shapes = self._schema_svc.resolver()
+        schemas = self._schema_svc.list_all()
+        named = {
+            str(f.id): f.name for s in schemas for f in s.fields if f.name in changes
+        }
+        if ids is not None:
+            rows = self._records.field_rows(
+                list(named), ids=self._chosen_ids(ids, None, "edit")
+            )
+        elif query is not None:
+            rows = self._records.field_rows(list(named), query=self.resolve(query))
+        else:
+            raise ValidationError("Choose the records to edit: ids, or a query")
+        if progress:
+            progress.phase("Checking", len(rows))
+        for dataset_id in {r[2] for r in rows if r[2] is not None}:
+            self._permissions.require(permissions.WRITE_RECORDS, _as_uuid(dataset_id))
+        paused = self._job_svc.is_paused() if self._job_svc else True
+        counts = {"changing": 0, "unchanged": 0, "skipped": 0}
+        skipped: list[tuple[Any, str]] = []
+        runs = 0
+        workflows: dict[str, int] = {}
+        # What is the same for every record of a kind: whether it can take
+        # these fields at all, the changes as it takes them, and whether its
+        # checks need the database for each record.
+        kinds: dict[
+            Any, tuple[ResolvedSchema | None, str | None, dict[str, Any], bool]
+        ] = {}
+        # (kind, collection, the fields that change) -> why it is refused (or
+        # None) and the workflows it starts, from one record checked in full.
+        cases: dict[tuple[Any, ...], tuple[str | None, list[str]]] = {}
+        slow: list[Any] = []
+
+        def skip(record_id: Any, reason: str) -> None:
+            counts["skipped"] += 1
+            if len(skipped) < MAX_REPORTED:
+                skipped.append((record_id, reason))
+
+        for done, (record_id, schema_id, dataset_id, held) in enumerate(rows, 1):
+            if schema_id not in kinds:
+                shape = shapes(_as_uuid(schema_id))
+                problem = _bulk_edit_problem(shape, fields)
+                wanted = (
+                    _strip_derived_file_keys(changes, shape.fields)
+                    if shape is not None and problem is None
+                    else {}
+                )
+                kinds[schema_id] = (
+                    shape,
+                    problem
+                    or (None if shape is not None else "Its schema no longer exists"),
+                    wanted,
+                    shape is not None and self._edit_is_plain(shape, set(wanted)),
+                )
+            shape, problem, wanted, plain = kinds[schema_id]
+            if problem or shape is None:
+                skip(record_id, problem or "Its schema no longer exists")
+                continue
+            differing = frozenset(
+                name
+                for name, value in wanted.items()
+                if held.get(str(shape.by_name[name].id)) != value
+            )
+            if not differing:
+                counts["unchanged"] += 1
+                continue
+            if not plain:
+                slow.append(record_id)
+                continue
+            case = (schema_id, dataset_id, differing)
+            if case not in cases:
+                cases[case] = self._edit_case(
+                    _as_uuid(record_id), shape, wanted, shapes, paused
+                )
+            refused, starts = cases[case]
+            if refused is not None:
+                skip(record_id, refused)
+                continue
+            counts["changing"] += 1
+            for name in starts:
+                runs += 1
+                workflows[name] = workflows.get(name, 0) + 1
+            if progress and done % 5000 == 0:
+                progress.advance(done)
+        skips = self._named_skips(skipped, shapes)
+        if slow:
+            # These need the database for each record: read them, as the edit
+            # does, remembering the keys the ones before would take.
+            part = self._plan_one_by_one(
+                changes, [_as_uuid(r) for r in slow], shapes, paused
+            )
+            counts["changing"] += part.changing
+            counts["unchanged"] += part.unchanged
+            counts["skipped"] += part.skipped
+            skips = [*skips, *part.skipped_records][:MAX_REPORTED]
+            runs += part.runs
+            for name in part.workflows:
+                workflows.setdefault(name, 0)
+        if progress:
+            progress.advance(len(rows))
+        return RecordBulkEditPlanDTO(
+            fields=fields,
+            records=len(rows),
+            changing=counts["changing"],
+            unchanged=counts["unchanged"],
+            skipped=counts["skipped"],
+            skipped_records=skips,
+            runs=runs,
+            workflows=sorted(workflows),
+            automation_paused=paused and self._job_svc is not None,
+        )
+
+    @staticmethod
+    def _edit_is_plain(shape: ResolvedSchema, names: set[str]) -> bool:
+        """Whether changing these fields of a record of this kind asks the
+        database nothing about that record in particular: none is a file or a
+        link to another record (catalogs and reachability), and none is part
+        of a uniqueness key (which other record holds the value)."""
+        ids = set()
+        for name in names:
+            found = shape.by_name.get(name)
+            if found is None or found.dtype in _CATALOGUED_DTYPES:
+                return False
+            ids.add(str(found.id))
+        return not any(ids & {str(i) for i in key} for key in shape.schema.unique_keys)
+
+    def _edit_case(
+        self,
+        record_id: uuid.UUID,
+        shape: ResolvedSchema,
+        wanted: dict[str, Any],
+        shapes: SchemaResolver,
+        paused: bool,
+    ) -> tuple[str | None, list[str]]:
+        """One record of a case checked in full, as its save would be: why it
+        is refused (None when it isn't) and the workflows it would start."""
+        raw = self._records.get_by_id(record_id)
+        if raw is None:
+            return "It no longer exists", []
+        merged = _patched(self._ids_to_names(raw.data, shape), wanted)
+        if merged is None:
+            return None, []
+        dataset = (
+            self._datasets.get_by_id(
+                raw.dataset_id, include_deleted=True, with_count=False
+            )
+            if raw.dataset_id
+            else None
+        )
+        try:
+            before, id_data = self._checked_update(raw, merged, shape, dataset)
+        except ValidationError as e:
+            return str(e), []
+        if paused or self._job_svc is None:
+            return None, []
+        after = self._ids_to_names(id_data, shape)
+        changed = {k for k in set(before) | set(after) if before.get(k) != after.get(k)}
+        return None, [
+            wf.name
+            for wf in self._job_svc.triggered_by(
+                shape.schema.name, "record_updated", changed
+            )
+        ]
+
+    def _named_skips(
+        self, skipped: list[tuple[Any, str]], shapes: SchemaResolver
+    ) -> list[BulkEditSkipDTO]:
+        """The records a plan names as left alone, with their names: only
+        these few are read."""
+        if not skipped:
+            return []
+        ids = [_as_uuid(record_id) for record_id, _ in skipped]
+        found = {r.id: r for r in self._records.list_by_ids(ids)}
+        return [
+            BulkEditSkipDTO(
+                record_id=rid,
+                name=self._with_names(found[rid], shapes).natural_name
+                if rid in found
+                else None,
+                reason=reason,
+            )
+            for rid, (_, reason) in zip(ids, skipped)
+        ]
+
+    def _plan_one_by_one(
+        self,
+        changes: dict[str, Any],
+        chosen: list[uuid.UUID],
+        shapes: SchemaResolver,
+        paused: bool,
+    ) -> RecordBulkEditPlanDTO:
+        """The plan for records whose checks ask the database about each (a
+        link, a uniqueness key, a file): read a page at a time and checked as
+        the edit checks them, standing in for its earlier writes with the
+        keys the records before would take (`_claim_keys`)."""
+        fields = list(changes)
+        datasets: dict[uuid.UUID, DatasetDTO | None] = {}
+        claimed: dict[tuple[Any, ...], uuid.UUID] = {}
+        workflows: dict[str, int] = {}
+        skips: list[BulkEditSkipDTO] = []
+        counts = {"records": 0, "changing": 0, "unchanged": 0, "skipped": 0}
+        runs = 0
+        for start in range(0, len(chosen), BULK_EDIT_PAGE):
+            page = chosen[start : start + BULK_EDIT_PAGE]
+            by_id = {r.id: r for r in self._records.list_by_ids(page)}
+            for rid in page:
+                raw = by_id.get(rid)
+                if raw is None or raw.deleted_at is not None:
+                    continue
+                counts["records"] += 1
+                shape = shapes(raw.schema_id)
+                if shape is None:
+                    continue
+                wanted = _strip_derived_file_keys(changes, shape.fields)
+                merged = _patched(self._ids_to_names(raw.data, shape), wanted)
+                if merged is None:
+                    counts["unchanged"] += 1
+                    continue
+                if raw.dataset_id not in datasets:
+                    datasets[raw.dataset_id] = self._datasets.get_by_id(
+                        raw.dataset_id, include_deleted=True, with_count=False
+                    )
+                dataset = datasets[raw.dataset_id]
+                try:
+                    before, id_data = self._checked_update(raw, merged, shape, dataset)
+                    self._claim_keys(claimed, shape, raw, id_data)
+                except ValidationError as e:
+                    counts["skipped"] += 1
+                    if len(skips) < MAX_REPORTED:
+                        skips.append(
+                            BulkEditSkipDTO(
+                                record_id=raw.id,
+                                name=self._with_names(raw, shapes).natural_name,
+                                reason=str(e),
+                            )
+                        )
+                    continue
+                counts["changing"] += 1
+                if not paused and self._job_svc is not None:
+                    after = self._ids_to_names(id_data, shape)
+                    changed = {
+                        k
+                        for k in set(before) | set(after)
+                        if before.get(k) != after.get(k)
+                    }
+                    for wf in self._job_svc.triggered_by(
+                        shape.schema.name, "record_updated", changed
+                    ):
+                        runs += 1
+                        workflows[wf.name] = workflows.get(wf.name, 0) + 1
+        return RecordBulkEditPlanDTO(
+            fields=fields,
+            records=counts["records"],
+            changing=counts["changing"],
+            unchanged=counts["unchanged"],
+            skipped=counts["skipped"],
+            skipped_records=skips,
+            runs=runs,
+            workflows=sorted(workflows),
+            automation_paused=False,
+        )
 
     def bulk_edit(
         self,
@@ -3870,30 +4285,53 @@ class RecordService:
         query: RecordQuery | None = None,
         progress: Progress | None = None,
     ) -> RecordBulkEditResultDTO:
-        """Set (or, with None, clear) `changes` on every chosen record. Each
-        record is saved as an edit of only those fields (`_patched`, the rule
-        behind `patch`), through the checks, history and triggers of any save;
-        one that already holds the values is not written. A record that can't
-        take the change is left as it is and reported, the others go ahead:
-        `plan_bulk_edit` says which beforehand. The lot is one event in
-        Activity. `write_records` is asked for every collection involved
-        before anything is written."""
-        return self._bulk_edit(changes, ids, query, write=True, progress=progress)[1]
+        """Set (or, with None, clear) `changes` on every chosen record, in the
+        caller's one transaction. Each record is saved as an edit of only
+        those fields (`_patched`, the rule behind `patch`), through the
+        checks, history and triggers of any save; one that already holds the
+        values is not written. A record that can't take the change is left as
+        it is and reported, the others go ahead: `plan_bulk_edit` says which
+        beforehand. The lot is one event in Activity. `write_records` is
+        asked for every collection involved before anything is written.
 
-    def _bulk_edit(
+        A host that must not hold the database for the whole edit (the
+        server, the CLI) runs `bulk_edit_chunks` instead and commits after
+        each chunk."""
+        result = RecordBulkEditResultDTO(0, 0, 0, [], 0)
+        for result in self.bulk_edit_chunks(
+            changes, ids=ids, query=query, progress=progress
+        ):
+            pass
+        return result
+
+    def bulk_edit_chunks(
         self,
         changes: dict[str, Any],
-        ids: list[str] | None,
-        query: RecordQuery | None,
         *,
-        write: bool,
+        ids: list[str] | None = None,
+        query: RecordQuery | None = None,
         progress: Progress | None = None,
-    ) -> tuple[RecordBulkEditPlanDTO, RecordBulkEditResultDTO]:
-        """The one walk behind the plan and the edit. Records are read a page
-        at a time and each schema resolved once; when `write`, each record
-        that can change is saved as it is reached, so a key one record takes
-        is taken for the next. Planning stands in for that by remembering the
-        keys the records before it would take."""
+    ) -> Generator[RecordBulkEditResultDTO, None, None]:
+        """`bulk_edit` a chunk of `BULK_EDIT_PAGE` records at a time: after
+        each chunk it yields what has been done so far, and the caller
+        commits (`AppContext.chunked_writes`), so the database's write lock
+        is held for one chunk and other saves go in between two.
+
+        A chunk is whole records only: each record's checks are done before
+        anything of the chunk is written, then the chunk's records are saved
+        in one statement (`update_many`) and its history entries in another,
+        instead of a read, a write, two catalogs and an entry per record. A
+        record whose change touches a file, a link to another record or a
+        uniqueness key is saved by itself (`_write_update`), since those ask
+        the database about that record.
+
+        Every chunk's entries are in one batch (one event in Activity, undone
+        whole by `revert_batch`, however many chunks went in); each record's
+        entry is an action of its own, so one sent to a server between two
+        chunks splits nothing. Nothing says where it got to: records that
+        already hold the values are passed over, so an edit stopped half way
+        (cancelled, a crash) is finished by running it again. Stop by closing
+        the generator; what was committed stays."""
         fields = list(changes)
         if not fields:
             raise ValidationError("Choose a field to set or clear")
@@ -3902,11 +4340,10 @@ class RecordService:
             self._permissions.require(permissions.WRITE_RECORDS, dataset_id)
         shapes = self._schema_svc.resolver()
         datasets: dict[uuid.UUID, DatasetDTO | None] = {}
-        claimed: dict[tuple[Any, ...], uuid.UUID] = {}
         paused = self._job_svc.is_paused() if self._job_svc else True
-        workflows: dict[str, int] = {}
+        starts: dict[tuple[str, frozenset[str]], bool] = {}
         skips: list[BulkEditSkipDTO] = []
-        counts = {"records": 0, "changing": 0, "unchanged": 0, "skipped": 0}
+        counts = {"changing": 0, "unchanged": 0, "skipped": 0}
         runs = 0
 
         def skip(raw: RecordDTO, reason: str) -> None:
@@ -3920,23 +4357,33 @@ class RecordService:
                     )
                 )
 
+        def so_far() -> RecordBulkEditResultDTO:
+            return RecordBulkEditResultDTO(
+                changed=counts["changing"],
+                unchanged=counts["unchanged"],
+                skipped=counts["skipped"],
+                skipped_records=list(skips),
+                runs=runs,
+            )
+
         batch = (
             self._audit.batch("edit", ", ".join(fields))
-            if write and self._audit is not None and len(chosen) > 1
+            if self._audit is not None and len(chosen) > 1
             else nullcontext()
         )
         if progress:
-            progress.phase("Changing records" if write else "Checking", len(chosen))
-        done = 0
+            progress.phase("Changing records", len(chosen))
         with batch:
             for start in range(0, len(chosen), BULK_EDIT_PAGE):
                 page = chosen[start : start + BULK_EDIT_PAGE]
                 by_id = {r.id: r for r in self._records.list_by_ids(page)}
+                # Checked, and to be written together at the end of the chunk:
+                # the record, its data to store, and its data before by name.
+                together: list[tuple[RecordDTO, dict[str, Any], dict[str, Any]]] = []
                 for rid in page:
                     raw = by_id.get(rid)
                     if raw is None or raw.deleted_at is not None:
                         continue
-                    counts["records"] += 1
                     shape = shapes(raw.schema_id)
                     problem = _bulk_edit_problem(shape, fields)
                     if problem or shape is None:
@@ -3953,51 +4400,106 @@ class RecordService:
                         )
                     dataset = datasets[raw.dataset_id]
                     try:
-                        if write:
-                            runs += self._write_update(raw, merged, shapes, dataset)[1]
-                        else:
+                        if self._edit_is_plain(shape, set(wanted)):
                             before, id_data = self._checked_update(
                                 raw, merged, shape, dataset
                             )
-                            self._claim_keys(claimed, shape, raw, id_data)
-                            if not paused and self._job_svc is not None:
-                                after = self._ids_to_names(id_data, shape)
-                                changed = {
-                                    k
-                                    for k in set(before) | set(after)
-                                    if before.get(k) != after.get(k)
-                                }
-                                for wf in self._job_svc.triggered_by(
-                                    shape.schema.name, "record_updated", changed
-                                ):
-                                    runs += 1
-                                    workflows[wf.name] = workflows.get(wf.name, 0) + 1
+                            if self._stays_plain(shape, raw.data, id_data):
+                                together.append((raw, id_data, before))
+                                counts["changing"] += 1
+                                continue
+                        runs += self._write_update(raw, merged, shapes, dataset)[1]
                     except ValidationError as e:
                         skip(raw, str(e))
                         continue
                     counts["changing"] += 1
-                done += len(page)
+                runs += self._write_together(together, shapes, paused, starts)
                 if progress:
-                    progress.advance(done)
-        plan = RecordBulkEditPlanDTO(
-            fields=fields,
-            records=counts["records"],
-            changing=counts["changing"],
-            unchanged=counts["unchanged"],
-            skipped=counts["skipped"],
-            skipped_records=skips,
-            runs=runs,
-            workflows=sorted(workflows),
-            automation_paused=paused and self._job_svc is not None,
-        )
-        result = RecordBulkEditResultDTO(
-            changed=counts["changing"],
-            unchanged=counts["unchanged"],
-            skipped=counts["skipped"],
-            skipped_records=skips,
-            runs=runs,
-        )
-        return plan, result
+                    progress.advance(min(start + BULK_EDIT_PAGE, len(chosen)))
+                yield so_far()
+        if not chosen:
+            yield so_far()
+
+    @staticmethod
+    def _stays_plain(
+        shape: ResolvedSchema, stored: dict[str, Any], to_store: dict[str, Any]
+    ) -> bool:
+        """Whether everything that differs between a record's data and what a
+        checked save would store is a plain value (a default the save filled
+        in could be a link or part of a key)."""
+        keyed = {str(i) for key in shape.schema.unique_keys for i in key}
+        for field_id in set(stored) | set(to_store):
+            if stored.get(field_id) == to_store.get(field_id):
+                continue
+            name = shape.id_to_name.get(field_id)
+            found = shape.by_name.get(name) if name else None
+            if found is None or found.dtype in _CATALOGUED_DTYPES or field_id in keyed:
+                return False
+        return True
+
+    def _write_together(
+        self,
+        checked: list[tuple[RecordDTO, dict[str, Any], dict[str, Any]]],
+        shapes: SchemaResolver,
+        paused: bool,
+        starts: dict[tuple[str, frozenset[str]], bool],
+    ) -> int:
+        """Save a chunk's checked records at once: one statement for the
+        records, one for their history entries (an entry each, as a save
+        writes), and a workflow run only for a record whose change starts
+        one. How many runs were queued. `starts` remembers, for a kind and
+        the fields that changed, whether any workflow watches them."""
+        if not checked:
+            return 0
+        stamp = _dt.now(timezone.utc)
+        # The entries are made ready first (nothing is sent until the records
+        # are saved), so the database is written to, and so locked, only for
+        # the two statements and the commit that follows.
+        every = [
+            (raw, dataclasses.replace(raw, data=data, updated_at=stamp), before)
+            for raw, data, before in checked
+        ]
+        if self._audit:
+            for raw, saved, _ in every:
+                self._audit.log_change(
+                    "update",
+                    "record",
+                    raw.id,
+                    self._snapshot(raw),
+                    self._snapshot(saved),
+                )
+        self._records.update_many([(raw.id, data) for raw, data, _ in checked], stamp)
+        runs = 0
+        for raw, saved, before in every:
+            id_data = saved.data
+            if paused or self._job_svc is None:
+                continue
+            shape = shapes(raw.schema_id)
+            if shape is None:
+                continue
+            after = self._ids_to_names(id_data, shape)
+            changed = frozenset(
+                k for k in set(before) | set(after) if before.get(k) != after.get(k)
+            )
+            watched = (shape.schema.name, changed)
+            if watched not in starts:
+                starts[watched] = bool(
+                    self._job_svc.triggered_by(
+                        shape.schema.name, "record_updated", set(changed)
+                    )
+                )
+            if starts[watched]:
+                runs += len(
+                    self._job_svc.trigger_for_record(
+                        self._with_names(saved, shapes),
+                        "record_updated",
+                        changed_fields=set(changed),
+                        depth=0,
+                        changes={k: (before.get(k), after.get(k)) for k in changed},
+                        cause=None,
+                    )
+                )
+        return runs
 
     def _claim_keys(
         self,

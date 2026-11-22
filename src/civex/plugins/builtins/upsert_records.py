@@ -1,25 +1,25 @@
 from __future__ import annotations
 
-import logging
 from typing import Any
 
+from civex_plugin_sdk import Ctx
+from civex_plugin_sdk import Plugin as PluginBase
 from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel, ConfigDict, Field
 
-from civex_plugin_sdk import RpcError
-
-from civex.plugins.builtins._refusals import GONE, refused
-from civex_plugin_sdk import Ctx
-from civex_plugin_sdk import Plugin as PluginBase
+from civex.plugins.builtins._table_rows import save_rows
+from civex.plugins.builtins.rows_to_records import OUTPUTS
 from civex.plugins.hints import advanced, hint, says
-
-log = logging.getLogger(__name__)
 
 
 class Plugin(PluginBase):
+    """The older name of `civex.rows_to_records` with one key field: kept so
+    workflows saved with it run as they did; the work is the same code."""
+
     id = "civex.upsert_records"
     name = "Add or update records from a table"
     description = (
+        "The older name of Make a record for each row, matching on one field. "
         "Create or update one record per table row, matching existing records "
         "on a key column. An update changes only the columns in the table; the "
         "record's other fields are kept, and an empty cell never clears a value."
@@ -33,21 +33,7 @@ class Plugin(PluginBase):
             description="The table to save. Its columns go into the fields of the same name.",
         )
     ]
-    outputs = [
-        IOSpec(
-            name="created",
-            type="number",
-            description="How many rows it added as new records.",
-        ),
-        IOSpec(
-            name="updated", type="number", description="How many rows matched a record."
-        ),
-        IOSpec(
-            name="skipped",
-            type="number",
-            description="The rows whose record could not be saved.",
-        ),
-    ]
+    outputs = OUTPUTS
 
     class Config(BaseModel):
         model_config = ConfigDict(
@@ -87,73 +73,12 @@ class Plugin(PluginBase):
     def invoke(
         self, inputs: dict[str, Any], config: Config, ctx: Ctx
     ) -> dict[str, Any]:
-        try:
-            import pandas as pd
-        except ImportError:
-            raise ImportError(
-                "civex.upsert_records requires pandas: pip install 'civex[workflows]'"
-            )
-
-        df: pd.DataFrame = inputs["table"]
-        dataset_name = config.dataset or ctx.get_context_dataset()["name"]
-        parent_id = config.parent_record_id or ctx.get_context_record()["id"]
-
-        log.info(
-            "Upserting %d rows → dataset '%s', schema '%s', key '%s'",
-            len(df),
-            dataset_name,
-            config.schema_name,
-            config.key_field,
+        return save_rows(
+            ctx,
+            inputs["table"],
+            schema_name=config.schema_name,
+            dataset=config.dataset,
+            match_on=[config.key_field],
+            mapping={},
+            parent_record_id=config.parent_record_id,
         )
-        created = updated = skipped = 0
-
-        for _, row in df.iterrows():
-            data: dict[str, Any] = {}
-            for col in df.columns:
-                val = row[col]
-                if pd.isna(val):
-                    continue
-                data[col] = val.item() if hasattr(val, "item") else val
-
-            key_value = data.get(config.key_field)
-            if key_value is None:
-                continue
-
-            existing = ctx.find_records(
-                dataset_name,
-                schema_name=config.schema_name,
-                parent_record_id=parent_id,
-                filters=[f"{config.key_field}={key_value}"],
-                limit=1,
-            )
-
-            try:
-                if existing:
-                    # Only the fields the row has: the record's other fields (a
-                    # file, computed values) stay, and an empty cell leaves its
-                    # field alone rather than clearing it.
-                    ctx.patch_record(existing[0]["id"], data)
-                    updated += 1
-                else:
-                    ctx.create_record(
-                        dataset_name,
-                        config.schema_name,
-                        data,
-                        context_record_id=parent_id,
-                    )
-                    created += 1
-            except RpcError as e:
-                if not refused(e, GONE):
-                    raise
-                # NotFoundError alongside ValidationError: the matched record
-                # can be deleted between find_records() above and this
-                # update() (e.g. another workflow step, or a concurrent
-                # delete) -- that race should skip the row like any other
-                # per-row failure, not abort the whole upsert.
-                log.warning("  ✗ skipped row %s: %s", data, e)
-                skipped += 1
-
-        log.info(
-            "Upsert done: %d created, %d updated, %d skipped", created, updated, skipped
-        )
-        return {"created": created, "updated": updated, "skipped": skipped}

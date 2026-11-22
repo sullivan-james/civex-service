@@ -423,40 +423,6 @@ export function useBulkEditPlan(body: BulkEditRequest | null) {
   })
 }
 
-/** Sets fields on many records. Every list and record page may show them,
- * and runs may have been started. */
-export function useBulkEdit() {
-  const qc = useQueryClient()
-  const toast = useToast()
-  return useMutation({
-    mutationFn: ({
-      body,
-      progressId,
-    }: {
-      body: BulkEditRequest
-      progressId?: string
-    }) => recordsApi.bulkEdit(body, progressId),
-    onSuccess: (result) => {
-      qc.invalidateQueries({ queryKey: ['records'] })
-      qc.invalidateQueries({ queryKey: ['record'] })
-      qc.invalidateQueries({ queryKey: ['record-bulk-edit-plan'] })
-      qc.invalidateQueries({ queryKey: ['audit'] })
-      invalidateRecordNames(qc)
-      if (result.runs) {
-        qc.invalidateQueries({ queryKey: ['jobs'] })
-        qc.invalidateQueries({ queryKey: ['automation'] })
-      }
-      toast.success(
-        `${result.changed.toLocaleString()} record${result.changed === 1 ? '' : 's'} changed` +
-          (result.skipped
-            ? `, ${result.skipped.toLocaleString()} left as ${result.skipped === 1 ? 'it was' : 'they were'}`
-            : ''),
-      )
-    },
-    onError: (err) => toast.error(errorMessage(err)),
-  })
-}
-
 /** Moves records to another collection (or inside another record). Every
  * list of records may have changed: the ones they left, the ones they
  * joined, and the counts of both. */

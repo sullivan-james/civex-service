@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from civex import fs_open
-from civex.domain.features import OPEN_FOLDER
+from civex.domain.features import OPEN_FOLDER, SERVER_PATH_EXPORT
 from civex.context import AppContext
 from civex.domain.exceptions import CivexError, NotFoundError, ValidationError
 from civex.domain.hosts import is_loopback
@@ -21,7 +21,7 @@ from civex.domain.naming import safe_filename
 from civex.domain.query import RecordQuery
 from civex.domain.sync import SyncError
 from civex.domain.tables import TableSpec
-from civex.server.deps import get_ctx
+from civex.server.deps import get_ctx, requires
 from civex.server.downloads import new_temp_dir, serve, temp_paths
 from civex.server.models import (
     FileExportRequest,
@@ -71,6 +71,15 @@ def get_progress(progress_id: str):
     if state is None:
         raise HTTPException(404, detail="Nothing is reporting under that id.")
     return state
+
+
+@router.post("/progress/{progress_id}/cancel", status_code=204)
+def cancel_progress(progress_id: str):
+    """Ask the request tagged with this id to stop. Work done a chunk at a time
+    (a bulk edit) stops before its next chunk and keeps what it has done; other
+    work carries on to its end. 404 when nothing is reporting under the id."""
+    if not progress_registry.cancel(progress_id):
+        raise HTTPException(404, detail="Nothing is reporting under that id.")
 
 
 def _selection(body: FileSelectionRequest, ctx: AppContext) -> FileSelection:
@@ -168,9 +177,20 @@ def plan_files(
 ):
     """What a selection holds, each file named by its place in the record
     hierarchy, and what can be reached right now. Makes nothing: this is what to
-    show a person before they are pointed at a folder."""
+    show a person before they are pointed at a folder. Asked for the totals
+    alone (`include_items` false) or for the first files (`limit`), it is a
+    preview: the totals are of every file, read from the database without
+    naming them, and only the files sent are named, so it answers in the same
+    short while whatever the selection's size. Without a `limit`, every file
+    is named."""
+    svc = ctx.file_access_svc
+    selection = _selection(body, ctx)
     try:
-        plan = ctx.file_access_svc.plan(_selection(body, ctx), progress=progress)
+        if not body.include_items or body.limit is not None:
+            shown = body.offset + (body.limit or 0) if body.include_items else 0
+            plan = svc.preview(selection, shown)
+            return plan.to_dict(body.include_items, body.offset, body.limit)
+        plan = svc.plan(selection, progress=progress)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except CivexError as e:
@@ -178,7 +198,7 @@ def plan_files(
     return plan.to_dict(body.include_items, body.offset, body.limit)
 
 
-@router.post("/export")
+@router.post("/export", dependencies=[requires(SERVER_PATH_EXPORT)])
 def export_files(
     body: FileExportRequest,
     request: Request,
@@ -308,7 +328,7 @@ def _picked(body: FilePickRequest, ctx: AppContext, progress: Progress | None = 
             body.used_by,
             progress,
             server=body.server,
-        )[1]
+        )
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except ValidationError as e:
@@ -322,9 +342,12 @@ def list_files(body: FileListRequest, ctx: AppContext = Depends(get_ctx)):
     names of the records above it, `trail`; `others` counts the records
     outside the selection that use it too), each with where it is (`place`: a
     drive's name, `server` or `missing`; `place_kind`: drive, unreachable,
-    server or missing), narrowed by place, name (the file's, or any record's
-    it sits under) and the selection's own filter; and `summary`, where all
-    of the selection's files are, by place. While this project follows a
+    server or missing), narrowed by place, name (the name a file was added
+    under, or its record or one above it, found as a search of records finds
+    them) and the selection's own filter; and `summary`, where all of the
+    selection's files are, by place. The counts and the order come from the
+    database alone, so a page costs the same whatever it is a page of; only
+    its rows are named. While this project follows a
     server, each file says whether the server has it (`sent`), `server`
     counts them (`sent`, and `unsent`: on a drive here, not sent yet), and
     `server` in the request narrows to either. Counts are of files."""
@@ -449,7 +472,7 @@ def available_definitions(
     return [ExportDefinitionResponse.from_dto(d) for d in found]
 
 
-@router.get("/exports")
+@router.get("/exports", dependencies=[requires(SERVER_PATH_EXPORT)])
 def list_exports(ctx: AppContext = Depends(get_ctx)):
     """The export folders civex made, newest first, in the project and on each
     connected drive: where they are, how many files, and how much space they
@@ -458,7 +481,7 @@ def list_exports(ctx: AppContext = Depends(get_ctx)):
     return [e.to_dict() for e in ctx.file_access_svc.list_exports()]
 
 
-@router.post("/exports/remove")
+@router.post("/exports/remove", dependencies=[requires(SERVER_PATH_EXPORT)])
 def remove_exports(body: RemoveExportsRequest, ctx: AppContext = Depends(get_ctx)):
     """Delete export folders: the links or copies the export made, then the
     folder. A link is removed without touching the stored file it points at.
@@ -507,6 +530,7 @@ def zip_files(
                 plan,
                 scratch,
                 name=safe_filename(body.name) if body.name else None,
+                progress=progress,
             )
         except FileNotFoundError as e:
             raise HTTPException(404, detail=f"A file is no longer stored: {e}")

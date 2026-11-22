@@ -5,6 +5,8 @@
 | `generate.py` | Fill a project with a large, realistic dataset (records, and with `--files` stored files on several volumes) through civex's own services |
 | `stress.py` | Time, load, break and check a project made by `generate.py`: metadata and files |
 | `bench_indexes.py` | PostgreSQL index comparison on its own throwaway tables |
+| `bench_scale.py` | `records` / `audit_log` at tens of millions of rows on PostgreSQL, plus a partitioning / BRIN / JSONB side-table spike; numbers in [the design note](../docs/contributing/billion-row-collections.md) |
+| `bench_paging.py` | PostgreSQL: OFFSET vs keyset paging and exact vs estimated counts, seeded with N records (`PG_URL`, `--records`) |
 
 They import civex, so run them with this checkout's virtualenv, from inside the
 project they work on. Make a project for them; never point them at real data
@@ -68,3 +70,21 @@ Without `--preset`: `--collections --encounters --recordings --selections
 A report is printed and saved as `stress-<time>.json` in the project; the
 server's output goes to `stress-server.log`. The exit status is 1 when a check
 fails, so `stress.py check --hash` can gate a run.
+
+## bench_scale.py
+
+Needs an empty scratch PostgreSQL database with a lot of disk (about 1.8 KB
+of table and index per record at 20M rows, ~36 GB plus WAL, so allow 70 GB;
+RAM can be small). It builds its own `bm_*`/`sp_*` tables and never touches
+civex data. One command, from a clean database:
+
+```bash
+createdb civex_scale
+PG_URL=postgresql://user@localhost:5432/civex_scale \
+  .venv/bin/python benchmarks/bench_scale.py --rows 20000000 --spike-rows 3000000 --out scale.json
+```
+
+The default run takes about an hour at 20M rows (seeding runs at ~17k rows/s,
+so 100M rows is ~2 h of seeding alone, plus index builds). Use `--rows 1000000
+--spike-rows 100000` for a ten-minute smoke test. `--phase` reruns one phase
+(`seed`, `measure`, `ids`, `spike`, `catalog`); the JSON accumulates in `--out`.

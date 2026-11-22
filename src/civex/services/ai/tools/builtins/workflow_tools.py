@@ -266,7 +266,7 @@ project data through the declared `ctx.*` capability calls, nothing else.
 3. record_updated fires on record creation too, but only for fields explicitly set to a non-null value.
    A trigger with fields: [my_field] will NOT fire on create if my_field was left null.
 4. date_format in extract_from_filename uses YYYY MM DD tokens — NOT strftime (%Y %m %d).
-5. Typical table pipeline (CSV, TSV, ...): load_file → parse_table → (optional transform) → upsert_records or rows_to_records.
+5. Typical table pipeline (CSV, TSV, ...): load_file → parse_table → (optional transform) → rows_to_records (set `match_on` to the key fields, or leave it empty to use the schema's unique key, so a re-run updates instead of duplicating; upsert_records is its older one-key name).
 6. match_files_to_records config.pattern is a Python regex applied to the filename to extract the key.
 7. dataset="" in plugin config means "use the trigger record's collection" — leave empty unless targeting a different one.
 8. Custom plugins are auto-discovered on workflow run — no registration needed after saving.

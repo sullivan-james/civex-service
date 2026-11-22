@@ -96,3 +96,52 @@ def test_a_bulk_edit_is_undone_from_its_line_in_history(client: TestClient):
     for record_id in ids:
         data = client.get(f"/api/records/{record_id}").json()["data"]
         assert data.get("dose") is None
+
+
+def test_a_stopped_edit_keeps_what_it_changed_and_the_same_request_finishes_it(
+    client: TestClient, monkeypatch
+):
+    """Asked to stop (`POST /file-access/progress/{id}/cancel`), it stops
+    before its next chunk, says so, and leaves whole records; sending the
+    same edit again changes the rest."""
+    from civex.services import progress as progress_module
+    from civex.services import record_service
+
+    trials = _setup(client)
+    ids = [t["id"] for t in trials]
+    progress_id = "stop-this-edit-1"
+    monkeypatch.setattr(record_service, "BULK_EDIT_PAGE", 1)
+    advance = progress_module.Progress.advance
+    asked: list[int] = []
+
+    def advance_then_stop(self, done, total=None):
+        advance(self, done, total)
+        if not asked:  # after its first chunk, someone presses Stop
+            asked.append(
+                client.post(
+                    f"/api/file-access/progress/{progress_id}/cancel"
+                ).status_code
+            )
+
+    monkeypatch.setattr(progress_module.Progress, "advance", advance_then_stop)
+    body = {"ids": ids, "changes": {"dose": 5}}
+
+    resp = client.post(
+        "/api/records/bulk-edit", json=body, headers={"X-Civex-Progress": progress_id}
+    )
+
+    assert resp.status_code == 200, resp.text
+    stopped = resp.json()
+    assert asked == [204]
+    assert (stopped["stopped"], stopped["changed"]) == (True, 1)
+    doses = [client.get(f"/api/records/{i}").json()["data"].get("dose") for i in ids]
+    assert sorted(doses, key=str) == [5, None, None]
+
+    monkeypatch.setattr(progress_module.Progress, "advance", advance)
+    again = _post(client, "/api/records/bulk-edit", body)
+    assert (again["stopped"], again["changed"], again["unchanged"]) == (False, 2, 1)
+    # Nothing is reporting under an id that isn't in use.
+    assert (
+        client.post("/api/file-access/progress/nothing-here-0/cancel").status_code
+        == 404
+    )

@@ -13,7 +13,9 @@ machine, or a bucket with `[store.s3]`).
 from __future__ import annotations
 
 import os
+import time
 import uuid
+import weakref
 
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -139,6 +141,10 @@ class AppContext:
     # when they are in a bucket (`store_svc`/`transfer_svc` then say so).
     _store_svc: StoreService | None = None
     _transfer_svc: TransferService | None = None
+    # True when this context reads from the project's `read_engine` (a replica):
+    # it was built `read_only=True` and the project offers one and doesn't
+    # need the primary for this request. Such a context refuses writes.
+    on_read_engine: bool = False
 
     @property
     def store_svc(self) -> StoreService:
@@ -244,6 +250,68 @@ class AppContext:
         return [row for page in pages for row in page]
 
     @contextmanager
+    def chunked_writes(self) -> Iterator[Callable[[], None]]:
+        """For work that changes a great many rows (a bulk edit): it writes a
+        chunk, calls the `turn` this yields, writes the next. `turn` commits
+        (so SQLite's one write lock is held for a chunk, never for the whole
+        job) and, when another writer asked for the lock meanwhile, waits
+        `GIVE_WAY_SECONDS` before going on, so a person's save goes in between
+        two chunks instead of waiting for the job, or failing after
+        `busy_timeout`.
+
+        It is the gate index builds give way through (`db/index_gate`), not a
+        second one: while the work runs, every other connection's write
+        touches the wait file (`upkeep`), and `quiet_for` says whether one
+        has since the last turn. The work's own connection is marked as the
+        builder's is, so its own writes ask nothing. PostgreSQL locks rows,
+        not the database: there `turn` only commits."""
+        from civex.db import index_gate
+
+        bind = self._session.get_bind()
+        db = (
+            index_gate.sqlite_file(bind.url.database)  # type: ignore[union-attr]
+            if bind.dialect.name == "sqlite"
+            else None
+        )
+        if db is None:
+            yield self.commit
+            return
+        # The marks are kept by the dict they are in (a connection's own,
+        # which outlives the transaction), so one can come off after its
+        # transaction has ended (whatever committed it).
+        marked: list[dict[Any, Any]] = []
+
+        def mark() -> None:
+            info = self._session.connection().info
+            info[index_gate.BUILDER] = True
+            marked.append(info)
+
+        def unmark() -> None:
+            while marked:
+                marked.pop().pop(index_gate.BUILDER, None)
+
+        began = [time.time()]
+
+        def turn() -> None:
+            # Everything still to be written goes while the connection is
+            # marked as this work's own; then the mark comes off (while the
+            # connection is still this transaction's) and it commits.
+            self._session.flush()
+            unmark()
+            self.commit()
+            if index_gate.quiet_for(db) <= time.time() - began[0]:
+                time.sleep(GIVE_WAY_SECONDS)
+            began[0] = time.time()
+            mark()
+
+        with index_gate.upkeep(db):
+            mark()
+            try:
+                yield turn
+            finally:
+                unmark()
+
+    @contextmanager
     def all_or_nothing(self) -> Iterator[None]:
         """Keep everything done inside it, or, when it raises, nothing: a SQL
         SAVEPOINT, rolled back on an exception and released otherwise.
@@ -309,6 +377,11 @@ def _frame_query(
 # each time, on whichever project the host serves.
 ContextFactory = Callable[[], "AppContext"]
 
+# How long chunked work waits, after a chunk, when another writer asked for
+# the database meanwhile: longer than SQLite's longest pause between a waiting
+# writer's tries (100 ms), so the writer gets the lock.
+GIVE_WAY_SECONDS = 0.15
+
 
 def local_context() -> AppContext:
     """A context on the project in the current directory: what `civex serve`
@@ -371,10 +444,52 @@ def build_local_context(
     return build_context(Project.local(config), file_store)
 
 
+_READ_ONLY_ENGINES: weakref.WeakKeyDictionary[Engine, Engine] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _read_only_engine(engine: Engine) -> Engine:
+    """`engine`, sharing its pool, with every transaction read-only and on one
+    snapshot (REPEATABLE READ, so a streamed export reading twice sees the same
+    rows). Made once per engine."""
+    ro = _READ_ONLY_ENGINES.get(engine)
+    if ro is None:
+        ro = engine.execution_options(
+            postgresql_readonly=True, isolation_level="REPEATABLE READ"
+        )
+        _READ_ONLY_ENGINES[engine] = ro
+    return ro
+
+
+def uses_read_engine(project: Project, read_only: bool) -> bool:
+    """Whether a context built `read_only` for `project` is served by its read
+    engine: only when the project has one, the request doesn't need the
+    primary, and the database is PostgreSQL (SQLite has no replicas)."""
+    replica = project.read_engine
+    return (
+        read_only
+        and replica is not None
+        and not project.needs_primary
+        and replica.dialect.name == "postgresql"
+        # A project following an authority keeps its sync position in the
+        # database, in a row a read may have to create: primary only.
+        and project.config.sync.remote is None
+    )
+
+
 def build_context(
     project: Project,
     file_store: ObjectStore | None = None,
+    *,
+    read_only: bool = False,
 ) -> AppContext:
+    """The services for `project`. `read_only=True` is the caller promising to
+    only read: the context is then served by `project.read_engine` when there
+    is one (see `uses_read_engine`), in a read-only transaction that refuses
+    any write. Only the routes and methods that are replica-safe by design ask
+    for it (`server.deps.get_read_ctx`); everything else, and anything inside a
+    write transaction, gets the primary."""
     from sqlalchemy.orm import Session
 
     from civex.db.migrate import ensure_audit_partitions_daily, ensure_schema_current
@@ -431,11 +546,28 @@ def build_context(
     ensure_audit_partitions_daily(
         engine, PartitionLayout.for_config(config.db).audit_months_ahead
     )
-    session = Session(engine)
+    on_read_engine = uses_read_engine(project, read_only)
+    session_engine: Engine
+    if on_read_engine:
+        assert project.read_engine is not None
+        # Never migrated from here (a replica can't be); the read-only
+        # transaction makes a stray write an error rather than a lost update.
+        session_engine = _read_only_engine(project.read_engine)
+    else:
+        session_engine = engine
+    session = Session(session_engine)
+    if on_read_engine:
+        # Connect now, so an unreachable replica fails here, where the host
+        # can fall back to the primary, not at some later query.
+        try:
+            session.connection()
+        except BaseException:
+            session.close()
+            raise
     schema_repo = LocalSchemaRepository(session)
     dataset_repo = LocalDatasetRepository(session)
     record_repo = LocalRecordRepository(
-        session, is_postgres=engine.dialect.name == "postgresql"
+        session, is_postgres=session_engine.dialect.name == "postgresql"
     )
     job_repo = LocalWorkflowJobRepository(session)
     device_id = project.device_id
@@ -734,6 +866,7 @@ def build_context(
         _session=session,
         _store_svc=store_svc,
         _transfer_svc=transfer_svc,
+        on_read_engine=on_read_engine,
     )
     ai_svc._app_ctx = ctx
     return ctx

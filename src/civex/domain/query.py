@@ -93,3 +93,30 @@ class ResolvedQuery:
     search: TextSearch | None = None
     filter_tree: FilterNode | None = None
     sort: list[SortKey] | None = None
+
+
+@dataclass
+class RecordSet:
+    """Records as a set the database works out by itself, for work that must
+    not load them to find them (the files of a collection): the records
+    `queries` list between them and the live ones among `ids`; with `below`,
+    every live record beneath those too, of which `listed` (when not None)
+    keeps only the ones one of its queries lists; then only those of `kinds`
+    (schema names) when given."""
+
+    queries: list[RecordQuery] = _field(default_factory=list)
+    ids: list[str] = _field(default_factory=list)
+    below: bool = False
+    listed: list[RecordQuery] | None = None
+    kinds: list[str] | None = None
+
+
+@dataclass
+class ResolvedSet:
+    """A `RecordSet` with its names resolved, for the repository."""
+
+    queries: list[ResolvedQuery] = _field(default_factory=list)
+    ids: list[uuid.UUID] = _field(default_factory=list)
+    below: bool = False
+    listed: list[ResolvedQuery] | None = None
+    schema_ids: list[uuid.UUID] | None = None

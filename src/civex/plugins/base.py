@@ -243,12 +243,14 @@ class WorkflowContext:
         search: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        filter_tree: dict[str, Any] | None = None,
     ) -> list[RecordDTO]:
         return self._app_ctx.record_svc.find(
             dataset_name,
             schema_name=schema_name,
             parent_record_id=parent_record_id,
             filters=filters,
+            filter_tree=filter_tree,
             search=search,
             limit=limit,
             offset=offset,

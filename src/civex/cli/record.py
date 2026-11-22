@@ -843,8 +843,15 @@ def record_set(
             raise typer.Exit(1 if plan.skipped and not plan.changing else 0)
         if not yes:
             typer.confirm(f"Change {plan.changing} record(s)?", abort=True)
-        result = ctx.record_svc.bulk_edit(changes, **selection)
+        # Saved a chunk at a time, so the database is never held for the whole
+        # edit; stopped half way (Ctrl+C), the same command finishes it.
+        result = None
+        with ctx.chunked_writes() as turn:
+            for result in ctx.record_svc.bulk_edit_chunks(changes, **selection):
+                turn()
         ctx.commit()
+        if result is None:
+            return
         console.print(
             f"[success]Changed {result.changed} record(s)."
             + (f" {result.skipped} left as they were." if result.skipped else "")

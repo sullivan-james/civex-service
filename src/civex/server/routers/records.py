@@ -5,6 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
 
 from civex.context import AppContext, context_factory
+from civex.domain.dtos import RecordBulkEditResultDTO
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.query import RecordQuery
 from civex.domain.summary import (
@@ -15,7 +16,7 @@ from civex.domain.summary import (
 )
 from civex.domain.tables import check_format, extension, media_type
 from civex.server.background import run_pending_jobs
-from civex.server.deps import get_ctx
+from civex.server.deps import get_ctx, get_read_ctx
 from civex.server.downloads import new_temp_path, serve, temp_paths
 from civex.server.models import (
     BulkEditPlanResponse,
@@ -26,6 +27,7 @@ from civex.server.models import (
     MoveRecordsResponse,
     PaginatedRecordResponse,
     QualityFindingResponse,
+    RecordsCountResponse,
     QualityRecordsRequest,
     QualityRecordsResponse,
     QualityReportResponse,
@@ -77,7 +79,7 @@ def search_records_global(
         "collection may reference -- its own collection's and those of "
         "global collections. What a reference picker should pass.",
     ),
-    ctx: AppContext = Depends(get_ctx),
+    ctx: AppContext = Depends(get_read_ctx),
 ):
     try:
         items = ctx.record_svc.find_by_schema(
@@ -105,7 +107,7 @@ def search_records(
         description="Collection name: only search records in it. Omitted, "
         "every collection is searched.",
     ),
-    ctx: AppContext = Depends(get_ctx),
+    ctx: AppContext = Depends(get_read_ctx),
 ):
     """Search records of every schema in one query, best match first -- what
     the web UI's jump-to box uses. Each result's `collection` says where it
@@ -125,16 +127,35 @@ def _page(
     child_counts: bool,
     limit: int,
     offset: int,
+    cursor: str | None = None,
+    estimate: bool = False,
 ) -> PaginatedRecordResponse:
+    if cursor and offset:
+        raise HTTPException(422, detail="Give 'cursor' or 'offset', not both")
     try:
-        items = ctx.record_svc.query_records(
-            query,
-            limit=limit,
-            offset=offset,
-            columns=columns or None,
-            child_counts=child_counts,
-        )
-        total = ctx.record_svc.count_records(query)
+        next_cursor: str | None = None
+        if cursor or not offset:
+            # Keyset: the first page too, so it can hand out the cursor.
+            page = ctx.record_svc.query_records_page(
+                query,
+                limit=limit,
+                cursor=cursor,
+                columns=columns or None,
+                child_counts=child_counts,
+            )
+            items, next_cursor = page.items, page.next_cursor
+        else:
+            items = ctx.record_svc.query_records(
+                query,
+                limit=limit,
+                offset=offset,
+                columns=columns or None,
+                child_counts=child_counts,
+            )
+        if estimate:
+            total, estimated = ctx.record_svc.estimate_records(query)
+        else:
+            total, estimated = ctx.record_svc.count_records(query), False
     except (NotFoundError, ValueError, ValidationError) as e:
         raise HTTPException(404 if isinstance(e, NotFoundError) else 422, detail=str(e))
     return PaginatedRecordResponse(
@@ -142,6 +163,8 @@ def _page(
         total=total,
         offset=offset,
         limit=limit,
+        total_estimated=estimated,
+        next_cursor=next_cursor,
     )
 
 
@@ -150,6 +173,19 @@ _COLUMNS = Query(
     description="Repeatable column names whose values aren't in a record's "
     "own 'data' -- inherited fields and 'ref_field.target_field' joins -- "
     "returned under each record's 'derived'.",
+)
+_CURSOR = Query(
+    default=None,
+    description="Opaque 'next_cursor' of the previous page: continue strictly "
+    "after its last record. Costs the same at any depth and is stable while "
+    "records are added or removed, unlike 'offset' (which it replaces; give "
+    "one or the other). Sorted and searched lists page by it too.",
+)
+_ESTIMATE = Query(
+    default=False,
+    description="Take 'total' from the query planner's estimate instead of "
+    "counting (PostgreSQL; elsewhere the count is exact). 'total_estimated' "
+    "says which it is.",
 )
 _CHILD_COUNTS = Query(
     default=False,
@@ -167,7 +203,9 @@ def list_records(
     child_counts: bool = _CHILD_COUNTS,
     limit: int = Query(default=50, le=1000),
     offset: int = Query(default=0, ge=0),
-    ctx: AppContext = Depends(get_ctx),
+    cursor: Optional[str] = _CURSOR,
+    estimate: bool = _ESTIMATE,
+    ctx: AppContext = Depends(get_read_ctx),
 ):
     """List records in a collection, paginated, filtered and sorted.
 
@@ -175,7 +213,7 @@ def list_records(
     are AND-combined with the 'filter' tree, if both are given.
     """
     query.dataset = dataset_name
-    return _page(ctx, query, columns, child_counts, limit, offset)
+    return _page(ctx, query, columns, child_counts, limit, offset, cursor, estimate)
 
 
 @router.get("/records/all", response_model=PaginatedRecordResponse)
@@ -185,7 +223,9 @@ def list_all_records(
     child_counts: bool = _CHILD_COUNTS,
     limit: int = Query(default=50, le=1000),
     offset: int = Query(default=0, ge=0),
-    ctx: AppContext = Depends(get_ctx),
+    cursor: Optional[str] = _CURSOR,
+    estimate: bool = _ESTIMATE,
+    ctx: AppContext = Depends(get_read_ctx),
 ):
     """List records in every collection, paginated: of one schema, or with
     no 'schema' of every kind at once (with 'within', everything beneath that
@@ -193,13 +233,55 @@ def list_all_records(
     and sorted by '@kind', '@collection', '@updated_at' or '@created_at'; a
     filter or sort on a field needs a 'schema' and is refused without one."""
     query.dataset = None
-    return _page(ctx, query, columns, child_counts, limit, offset)
+    return _page(ctx, query, columns, child_counts, limit, offset, cursor, estimate)
+
+
+def _count(ctx: AppContext, query: RecordQuery, estimate: bool) -> RecordsCountResponse:
+    try:
+        if estimate:
+            count, estimated = ctx.record_svc.estimate_records(query)
+        else:
+            count, estimated = ctx.record_svc.count_records(query), False
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except (ValueError, ValidationError) as e:
+        raise HTTPException(422, detail=str(e))
+    return RecordsCountResponse(count=count, estimated=estimated)
+
+
+@router.get("/records/count", response_model=RecordsCountResponse)
+def count_all_records(
+    query: RecordQuery = Depends(record_query),
+    estimate: bool = _ESTIMATE,
+    ctx: AppContext = Depends(get_read_ctx),
+):
+    """How many records match, in every collection. `estimate=true` answers
+    from the planner on PostgreSQL (no scan: the same at a billion records as
+    at a thousand); `estimated` says whether the count is exact."""
+    query.dataset = None
+    query.sort = None
+    return _count(ctx, query, estimate)
+
+
+@router.get(
+    "/collections/{dataset_name}/records/count", response_model=RecordsCountResponse
+)
+def count_collection_records(
+    dataset_name: str,
+    query: RecordQuery = Depends(record_query),
+    estimate: bool = _ESTIMATE,
+    ctx: AppContext = Depends(get_read_ctx),
+):
+    """How many records of a collection match (see `/records/count`)."""
+    query.dataset = dataset_name
+    query.sort = None
+    return _count(ctx, query, estimate)
 
 
 @router.get("/records/counts")
 def record_counts_everywhere(
     query: RecordQuery = Depends(record_query),
-    ctx: AppContext = Depends(get_ctx),
+    ctx: AppContext = Depends(get_read_ctx),
 ):
     """Record counts grouped by schema name across every collection: a
     collection's `record-counts`, for the explorer browsing all of them."""
@@ -222,13 +304,15 @@ def list_schema_records(
     child_counts: bool = _CHILD_COUNTS,
     limit: int = Query(default=50, le=1000),
     offset: int = Query(default=0, ge=0),
-    ctx: AppContext = Depends(get_ctx),
+    cursor: Optional[str] = _CURSOR,
+    estimate: bool = _ESTIMATE,
+    ctx: AppContext = Depends(get_read_ctx),
 ):
     """List a schema's records across every collection -- the same query as
     a collection's list, just not scoped to one collection (what a saved view
     browses)."""
     query.schema = schema_name
-    return _page(ctx, query, columns, child_counts, limit, offset)
+    return _page(ctx, query, columns, child_counts, limit, offset, cursor, estimate)
 
 
 @router.post(
@@ -330,7 +414,7 @@ def list_orphans(
 
 
 @router.get("/records/{record_id}", response_model=RecordResponse)
-def get_record(record_id: str, ctx: AppContext = Depends(get_ctx)):
+def get_record(record_id: str, ctx: AppContext = Depends(get_read_ctx)):
     try:
         record = ctx.record_svc.get(record_id)
         ancestors = ctx.record_svc.ancestors(record)
@@ -554,7 +638,7 @@ def summarise_records(
         description="Answer with the summary as a table file instead: csv, tsv, "
         "xlsx, json or jsonl. A last row holds the totals.",
     ),
-    ctx: AppContext = Depends(get_ctx),
+    ctx: AppContext = Depends(get_read_ctx),
 ):
     """Summarise the records a query lists (the same selectors as listing
     them): group them by field values, of their own kind or of a kind above
@@ -644,7 +728,7 @@ def records_with_issue(body: QualityRecordsRequest, ctx: AppContext = Depends(ge
 
 
 @router.post("/records/points", response_model=RecordPointsResponse)
-def record_points(body: RecordPointsRequest, ctx: AppContext = Depends(get_ctx)):
+def record_points(body: RecordPointsRequest, ctx: AppContext = Depends(get_read_ctx)):
     """Where the records a query lists are, for a map (the same selectors as
     listing them): each record with a value in the location field `field`,
     with its id, its name and the geometry. The field may be of a kind above
@@ -733,11 +817,28 @@ def bulk_edit_records(
     as any edit and logged in its history; the lot is one event in Activity.
     A record that can't take the change is left as it is and named in the
     answer, and the others go ahead (`POST /records/bulk-edit/plan` says so
-    beforehand). Tag the request with `X-Civex-Progress` to follow it."""
+    beforehand).
+
+    It is saved a chunk of records at a time, each chunk whole and on its own,
+    so other saves go in between two and a long edit never holds the database.
+    Tag the request with `X-Civex-Progress` to follow it (how many records of
+    how many, after each chunk) and to stop it
+    (`POST /file-access/progress/{id}/cancel`): a stopped edit keeps the
+    records it changed (`stopped` in the answer) and is finished by sending it
+    again."""
+    result = RecordBulkEditResultDTO(0, 0, 0, [], 0)
+    stopped = False
     try:
-        result = ctx.record_svc.bulk_edit(
-            body.changes, progress=progress, **_selection(body, "edit")
-        )
+        with ctx.chunked_writes() as turn:
+            chunks = ctx.record_svc.bulk_edit_chunks(
+                body.changes, progress=progress, **_selection(body, "edit")
+            )
+            for result in chunks:
+                turn()
+                if progress is not None and progress.cancelled:
+                    stopped = True
+                    chunks.close()
+                    break
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except (ValueError, ValidationError) as e:
@@ -745,7 +846,7 @@ def bulk_edit_records(
     ctx.commit()
     if result.runs:
         background_tasks.add_task(run_pending_jobs, context_factory(ctx.project))
-    return BulkEditResponse.from_dto(result)
+    return BulkEditResponse.from_dto(result, stopped)
 
 
 @router.delete("/collections/{dataset_name}/records")
@@ -774,7 +875,7 @@ def delete_all_records(
 def export_records_csv(
     collection_name: str,
     query: RecordQuery = Depends(record_query),
-    ctx: AppContext = Depends(get_ctx),
+    ctx: AppContext = Depends(get_read_ctx),
 ):
     """Export records in a collection as a CSV file, honoring the same
     filters as the record list endpoint. One table for everything listed; to

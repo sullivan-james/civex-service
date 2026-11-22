@@ -1,3 +1,5 @@
+import { runFileJob } from './fileJobs'
+import { tracked } from '../components/files/fileFlows'
 import {
   keepPreviousData,
   useMutation,
@@ -123,10 +125,16 @@ export function useRecordDifferences(name: string, id: string | null) {
   })
 }
 
+/** Makes a release, as a job: the status bar shows how far it has got (a
+ * big one reads every record it holds), and it carries on if the person
+ * leaves the page. */
 export function useCreateRelease() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (body: ReleaseCreateBody) => releasesApi.create(body),
+    mutationFn: (body: ReleaseCreateBody) =>
+      runFileJob({ title: 'Making release…' }, (j) =>
+        tracked({}, j, (progressId) => releasesApi.create(body, progressId)),
+      ),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['releases'] }),
   })
 }

@@ -481,6 +481,32 @@ def test_rows_that_arrived_before_their_month_existed_are_moved_in(
 
 
 @needs_pg
+def test_estimated_count_sums_the_partitions(pg_schema: Engine) -> None:
+    from civex.domain.query import ResolvedQuery
+    from civex.repositories.local.record_repo import LocalRecordRepository
+
+    ensure_schema_current(pg_schema)
+    with Session(pg_schema) as s:
+        ds, sc = Dataset(name="d"), Schema(name="s")
+        s.add_all([ds, sc])
+        s.flush()
+        s.execute(
+            text(
+                "INSERT INTO records (id, dataset_id, schema_id, data, created_at, updated_at) "
+                "SELECT gen_random_uuid(), :d, :s, '{}', now(), now() FROM generate_series(1, 2000)"
+            ),
+            {"d": ds.id, "s": sc.id},
+        )
+        s.commit()
+    with pg_schema.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
+        c.execute(text("ANALYZE records"))
+    with Session(pg_schema) as s:
+        repo = LocalRecordRepository(s, is_postgres=True)
+        count, estimated = repo.estimate_count(ResolvedQuery())
+        assert estimated and 1900 <= count <= 2100
+
+
+@needs_pg
 def test_grants_and_storage_settings_survive_the_rebuild(pg_schema: Engine) -> None:
     _migrate_to_pre(pg_schema)
     with pg_schema.begin() as c:
