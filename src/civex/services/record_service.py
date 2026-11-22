@@ -14,6 +14,7 @@ from civex.domain.bundle import plain_data
 from civex.domain.charts import Chart
 from civex.domain.cursor import decode_cursor, encode_cursor
 from civex.domain import permissions
+from civex.domain.file_refs import collect_sha256_refs
 from civex.domain import notes as note_rules
 from civex.domain.permissions import EVERYTHING, Permissions
 from civex.domain.file_refs import without_file_locations
@@ -736,6 +737,20 @@ class RecordService:
         )
         self._job_svc = job_svc
         self._audit = audit_repo
+
+    def _check_file_rights(
+        self, dataset_id: uuid.UUID, before: dict[str, Any], after: dict[str, Any]
+    ) -> None:
+        """A save that cites a file the record did not hold takes `ADD_FILES`
+        in its collection, and one that lets go of a file it held takes
+        `DELETE_FILES` (`domain.permissions`): the same two rights whoever
+        saves, a person or a device."""
+        held = collect_sha256_refs(before)
+        wanted = collect_sha256_refs(after)
+        if wanted - held:
+            self._permissions.require(permissions.ADD_FILES, dataset_id)
+        if held - wanted:
+            self._permissions.require(permissions.DELETE_FILES, dataset_id)
 
     def _require_each(self, action: str, records: Iterable[Any]) -> None:
         """`action` in every collection these records are in, before any of
@@ -2093,6 +2108,7 @@ class RecordService:
             self.validate(data, shape.fields)
 
         self._validate_data(data, shape)
+        self._check_file_rights(dataset.id, {}, data)
         self._check_references(data, shape, dataset)
         id_data = self._names_to_ids(data, shape)
         self._check_unique(shape, dataset.id, resolved_parent_id, id_data)
@@ -2288,6 +2304,7 @@ class RecordService:
         # the record already holds may break a rule tightened since, and must
         # not stop an edit to another field (the data check finds it).
         self._validate_data(_changed_values(data, old_data), shape)
+        self._check_file_rights(raw.dataset_id, old_data, data)
         if dataset:
             self._check_references(data, shape, dataset, unchanged=old_data)
         id_data = self._names_to_ids(data, shape)
@@ -2647,7 +2664,7 @@ class RecordService:
         neither, the kind's most recently changed record. A formula that can't
         be saved comes back as `problem`, one that can't be worked out for that
         record as `error`: neither raises."""
-        self._permissions.require(permissions.READ)
+        self._permissions.require_somewhere(permissions.READ)
         schema = self._schema_svc.get(schema_name)
         rules: dict[str, Any] = {"expression": expression}
         if result:
@@ -2706,7 +2723,7 @@ class RecordService:
         above holds it then). Records with no value are left out; at most
         `limit`, oldest first, and `total` says how many have one. A fixed
         number of statements however many records."""
-        self._permissions.require(permissions.READ)
+        self._permissions.require_somewhere(permissions.READ)
         if not 1 <= limit <= POINTS_MAX_LIMIT:
             raise ValidationError(f"The limit must be between 1 and {POINTS_MAX_LIMIT}")
         if not query.schema:
@@ -2896,7 +2913,7 @@ class RecordService:
         measure names one of its fields, or (`schema`) a field of a kind above
         it, like a filter condition. In SQL, one statement however many
         records; a link field's groups are named in one more lookup."""
-        self._permissions.require(permissions.READ)
+        self._permissions.require_somewhere(permissions.READ)
         request.check()
         if not query.schema:
             raise ValidationError(
@@ -4459,7 +4476,9 @@ class RecordService:
         with batch:
             for start in range(0, len(chosen), BULK_EDIT_PAGE):
                 page = chosen[start : start + BULK_EDIT_PAGE]
-                for raw in self._records.list_by_ids(page):
+                records_on_page = self._records.list_by_ids(page)
+                self._require_each(permissions.DELETE_FILES, records_on_page)
+                for raw in records_on_page:
                     if raw.deleted_at is not None:
                         continue
                     shape = shapes(raw.schema_id)
@@ -5540,6 +5559,16 @@ class RecordService:
         """Block a delete of target_ids if anything outside the batch still
         references it, unless force=True -- in which case the referencing
         fields are cleared (ON DELETE SET NULL) and audit-logged instead."""
+        field_map = self._reference_field_map()
+        if field_map and self._records.hidden_referrers(
+            list(target_ids), [uuid.UUID(f) for f in field_map]
+        ):
+            # Something the caller cannot see still points at it, and a
+            # delete (forced or not) must neither leave that dangling nor
+            # reach into what is hidden: refused, without saying what.
+            raise ValidationError(
+                "Cannot delete: still referenced by records you cannot see."
+            )
         referrers = self._find_referrers(target_ids, exclude_ids=target_ids)
         if not referrers:
             return

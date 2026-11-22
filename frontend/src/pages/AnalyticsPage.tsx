@@ -121,7 +121,7 @@ export default function AnalyticsPage() {
   const page = useDashboard()
   const save = useSaveDashboard()
   const { canSomewhere, why } = usePermissions()
-  const mayEdit = canSomewhere('write_records')
+  const mayEdit = canSomewhere('views')
   const [sp, setSp] = useSearchParams()
   const editing = sp.get('edit') === '1' && mayEdit
   const [draft, setDraft] = useState<DashboardCardShown[] | null>(null)
@@ -235,7 +235,7 @@ export default function AnalyticsPage() {
               size="sm"
               onClick={() => setEditing(true)}
               disabled={!mayEdit || !page.data}
-              title={mayEdit ? undefined : why('write_records')}
+              title={mayEdit ? undefined : why('views')}
             >
               Edit page
             </Button>

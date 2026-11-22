@@ -31,6 +31,7 @@ from sqlalchemy.sql.expression import ClauseElement
 from sqlalchemy.orm import Session, aliased
 
 from civex.db.field_values import field_value
+from civex.db import read_scope
 from civex.db.models import (
     Dataset,
     Record,
@@ -372,6 +373,24 @@ class LocalRecordRepository:
             for r in self._s.query(Record).filter(Record.id.in_(chunk)).all()
         ]
 
+    def hidden_referrers(
+        self, target_ids: list[uuid.UUID], field_ids: list[uuid.UUID]
+    ) -> int:
+        """How many records the caller cannot see hold a reference to these
+        targets (0 for one who sees everything): what a delete must still
+        respect, though it may not say what they are."""
+        if not read_scope.restricted(self._s):
+            return 0
+        seen = {r for r, _, _ in self.referrers_of(target_ids, field_ids)}
+        with read_scope.unscoped(self._s):
+            every = {r for r, _, _ in self.referrers_of(target_ids, field_ids)}
+        return len(every - seen)
+
+    def dataset_of(self, id: uuid.UUID) -> uuid.UUID | None:
+        """The collection a record is in (deleted ones too), without loading it
+        into the session; None when there is no such record."""
+        return self._s.query(Record.dataset_id).filter(Record.id == id).scalar()
+
     def collections_of(self, ids: list[uuid.UUID]) -> set[uuid.UUID]:
         """The collections these records are in: one query per chunk of ids,
         no rows hydrated (what a bulk change asks permission for up front)."""
@@ -453,7 +472,9 @@ class LocalRecordRepository:
         neither scans a row, so they cost the same at 10 billion records as
         at 10. Deleted rows are counted by `reltuples`, and both are only as
         fresh as the last ANALYZE. Elsewhere the count is exact."""
-        if not self._pg:
+        if not self._pg or read_scope.restricted(self._s):
+            # (A restricted session counts exactly: the planner's figures are
+            # of the whole table, hidden collections included.)
             return self.count(query), False
         if _is_unfiltered(query):
             # Summed over the leaf partitions: autovacuum never analyzes the

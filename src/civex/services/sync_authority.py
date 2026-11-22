@@ -13,7 +13,11 @@ not arrived) is neither recorded nor refused, and is sent again later.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
+from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
+from functools import wraps
 
 import uuid
 from types import SimpleNamespace
@@ -70,6 +74,15 @@ PUSH_MAX = 500
 log = logging.getLogger(__name__)
 
 
+def _whole_project(method: Callable[..., Any]) -> Callable[..., Any]:
+    @wraps(method)
+    def run(self: SyncAuthorityService, *args: Any, **kwargs: Any) -> Any:
+        with self._unscoped():
+            return method(self, *args, **kwargs)
+
+    return run
+
+
 class SyncAuthorityService:
     def __init__(
         self,
@@ -83,8 +96,13 @@ class SyncAuthorityService:
         capabilities: tuple[str, ...] = CAPABILITIES,
         notes: Any = None,
         releases: Any = None,
+        unscoped: Callable[[], AbstractContextManager[None]] | None = None,
     ) -> None:
         self._repo = repo
+        # Lifts the host's limit on which collections a query can see, for the
+        # work that settles a push or serves a device: those see the whole
+        # project and ask `policy` about each thing, never the query layer.
+        self._unscoped = unscoped or nullcontext
         # () -> ReleaseService: whether a pushed release is one a person could
         # have made, and that a made one's content stays as it is.
         self._releases = releases
@@ -120,6 +138,7 @@ class SyncAuthorityService:
     # Joining
     # ------------------------------------------------------------------
 
+    @_whole_project
     def hello(self, who: Principal, protocol: int) -> Hello:
         meta = self._repo.meta()
         counts = self._repo.entity_counts()
@@ -139,6 +158,7 @@ class SyncAuthorityService:
             protocol_retiring=PROTOCOL_RETIRING,
         )
 
+    @_whole_project
     def snapshot(self, kind: str, after: str | None, limit: int) -> SnapshotPage:
         """A page of one kind as it is now, for a device joining, continuing
         after the cursor `after` (None: the first page). `head_seq` is read
@@ -167,6 +187,7 @@ class SyncAuthorityService:
     # The feed
     # ------------------------------------------------------------------
 
+    @_whole_project
     def feed(self, after: int, limit: int = 200) -> FeedPage:
         head = self._head()
         entries, more = self._repo.entries_after(after, max(1, min(limit, FEED_MAX)))
@@ -189,6 +210,7 @@ class SyncAuthorityService:
         if self._releases is not None:
             self._releases().index_waiting(sha256)
 
+    @_whole_project
     def push(self, who: Principal, entries: list[SyncEntry]) -> PushResult:
         """Settle each change, in the order sent. Stops at the first that has
         to wait (later ones may depend on it); those are simply not answered.
@@ -273,6 +295,57 @@ class SyncAuthorityService:
             return shape, REFUSAL_INVALID
         if self._policy and (denied := self._policy.refuses(who, entry)):
             return denied, REFUSAL_PERMISSION
+        if (
+            self._policy
+            and entry.entity_type == "dataset"
+            and entry.action == "create"
+            and self._repo.existing_ids("dataset", {str(entry.entity_id)})
+        ):
+            # A "create" of a collection that is already here is a change to
+            # it: judged as one, so it cannot be used to reach one hidden from
+            # the device.
+            as_change = dataclasses.replace(entry, action="update")
+            if denied := self._policy.refuses(who, as_change):
+                return denied, REFUSAL_PERMISSION
+        if self._policy and entry.entity_type == "note":
+            # A note already held here is judged where it is, not where the
+            # device says its record is (or it could move a hidden note onto a
+            # record it may read).
+            on = self._repo.note_record_id(entry.entity_id)
+            where = self._records.records_repo.dataset_of(on) if on else None
+            if where is not None:
+                held_note = cast(Any, SimpleNamespace)(
+                    entity_type="note",
+                    action=entry.action,
+                    new_data={"dataset_id": str(where)},
+                    old_data=None,
+                )
+                if denied := self._policy.refuses(who, held_note):
+                    return denied, REFUSAL_PERMISSION
+        if self._policy and entry.entity_type == "record":
+            # Where the record is *here* counts as much as where the device
+            # says it is: it may not take over or overwrite a record of a
+            # collection it is not allowed into by naming another.
+            held = self._records.records_repo.dataset_of(entry.entity_id)
+            if held is not None:
+                # The same change judged where the record is held: its files
+                # and its removal count there, and where the delta says it
+                # goes is asked about separately (`refuses` above).
+                delta = {
+                    k: v for k, v in (entry.delta or {}).items() if k != "dataset_id"
+                }
+                held_entry = cast(Any, SimpleNamespace)(
+                    entity_type="record",
+                    action=entry.action,
+                    new_data={
+                        "dataset_id": str(held),
+                        "data": (entry.new_data or {}).get("data"),
+                    },
+                    old_data=entry.old_data and {"data": entry.old_data.get("data")},
+                    delta=delta or None,
+                )
+                if denied := self._policy.refuses(who, held_entry):
+                    return denied, REFUSAL_PERMISSION
         return None
 
     def _settle_action(self, who: Principal, action: list[SyncEntry]) -> list[OpResult]:
@@ -575,7 +648,7 @@ class SyncAuthorityService:
             refusal = self._policy.refuses(
                 who,
                 cast(Any, SimpleNamespace)(
-                    entity_type="record",
+                    entity_type="note",
                     action="update",
                     new_data={"dataset_id": str(collection)},
                     old_data=None,

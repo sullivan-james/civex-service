@@ -43,7 +43,7 @@ export function KindCharts({
   )
   const charts = schema.charts ?? []
   const kind = displayLabel(schema.name, schema.label)
-  const mayChange = canSomewhere('write_records')
+  const mayChange = canSomewhere('views')
   const setOpen = (id: string | null) =>
     setSp((prev) => {
       const out = new URLSearchParams(prev)

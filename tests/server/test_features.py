@@ -160,6 +160,9 @@ def test_me_says_who_and_what_they_may_do(client: TestClient, tmp_path: Path):
     assert me["permissions"]["actions"] == {
         "read": ["project"],
         "write_records": [f"collection:{mine['id']}"],
+        # notes and shared views follow writing for a host that is silent on them
+        "notes": [f"collection:{mine['id']}"],
+        "views": [f"collection:{mine['id']}"],
     }
     body = {"schema_name": "sample", "data": {}}
     assert hosted.post("/api/collections/mine/records", json=body).status_code == 201

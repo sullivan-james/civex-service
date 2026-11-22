@@ -1082,6 +1082,15 @@ class LocalSyncRepository:
         deleted ones included: zero is an empty project."""
         return sum(self.entity_counts().values())
 
+    def note_record_id(self, note_id: uuid.UUID) -> uuid.UUID | None:
+        """The record a note is on, whatever the session may see; None when
+        there is no such note."""
+        return (
+            self._s.query(RecordNote.record_id)
+            .filter(RecordNote.id == note_id)
+            .scalar()
+        )
+
     def entity_counts(self) -> dict[str, int]:
         """How many of each kind there are, deleted ones included."""
         return {

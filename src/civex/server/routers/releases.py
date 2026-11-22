@@ -29,7 +29,7 @@ from civex.domain.file_access import (
     safe_segment,
 )
 from civex.domain.features import OPEN_FOLDER, SERVER_PATH_EXPORT
-from civex.server.deps import get_ctx, requires
+from civex.server.deps import get_ctx, reads_whole_project, requires
 from civex.server.downloads import new_temp_dir, serve, temp_paths
 from civex.server.models import RecordQueryRequest
 from civex.server.routers.file_access import (
@@ -43,7 +43,7 @@ from civex.services.record_service import MAX_ZIP_FILE_COUNT, MAX_ZIP_TOTAL_SIZE
 from civex.services.release_service import COMPARE_INLINE_MAX, ReleaseScope
 from civex.services.transfer_jobs import jobs
 
-router = APIRouter(tags=["releases"])
+router = APIRouter(tags=["releases"], dependencies=[reads_whole_project()])
 
 
 class ReleaseScopeRequest(BaseModel):

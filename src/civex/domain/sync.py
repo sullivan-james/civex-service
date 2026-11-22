@@ -13,7 +13,7 @@ import dataclasses
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Any, Protocol
 
 from civex.domain import features
@@ -545,6 +545,61 @@ class PushResult:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> PushResult:
         return cls([OpResult.from_dict(r) for r in d["results"]], int(d["head_seq"]))
+
+
+@dataclass(frozen=True)
+class PushAccepted:
+    """What a host is told after a device's push has been committed
+    (`Project.push_accepted`): who sent it and what the authority took, so a
+    host can attribute and count pushes without reading its responses. `taken`
+    are the ids of the changes taken into the project (`APPLIED` or `MERGED`),
+    and `counts` how many changes ended in each status, refused ones included.
+    There is no commit as such: a change is numbered (`first_seq`..`last_seq`,
+    the positions in the feed)."""
+
+    device_id: str | None
+    device: str
+    actor: str | None
+    taken: tuple[uuid.UUID, ...]
+    counts: Mapping[str, int]
+    changed: Mapping[str, int]  # taken changes by kind of thing (record, note, ...)
+    first_seq: int | None
+    last_seq: int | None
+    head_seq: int
+
+    @classmethod
+    def of(
+        cls,
+        who: Principal,
+        actor: str | None,
+        entries: Sequence[SyncEntry],
+        result: PushResult,
+    ) -> PushAccepted | None:
+        """The report of a push, or None when it took nothing (all refused,
+        repeated or held back): nothing happened that a host would count."""
+        kinds = {e.id: e.entity_type for e in entries}
+        taken = [r for r in result.results if r.status in (APPLIED, MERGED)]
+        if not taken:
+            return None
+        counts: dict[str, int] = {}
+        for r in result.results:
+            counts[r.status] = counts.get(r.status, 0) + 1
+        changed: dict[str, int] = {}
+        for r in taken:
+            kind = kinds.get(r.op_id, "unknown")
+            changed[kind] = changed.get(kind, 0) + 1
+        seqs = [r.hub_seq for r in taken if r.hub_seq is not None]
+        return cls(
+            device_id=who.device_id,
+            device=who.name,
+            actor=actor,
+            taken=tuple(r.op_id for r in taken),
+            counts=counts,
+            changed=changed,
+            first_seq=min(seqs) if seqs else None,
+            last_seq=max(seqs) if seqs else None,
+            head_seq=result.head_seq,
+        )
 
 
 @dataclass

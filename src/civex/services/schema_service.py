@@ -607,7 +607,7 @@ class SchemaService:
         filter, so it takes the right to write records somewhere, not to
         change the structure. Each is checked as it would
         be drawn: its fields are the kind's own or those of a kind above."""
-        self._permissions.require_somewhere(permissions.WRITE_RECORDS)
+        self._permissions.require_somewhere(permissions.VIEWS)
         schema = self.get(name)
         parsed = parse_charts(charts)
         for chart in parsed:

@@ -14,6 +14,7 @@ documented in `docs/guides/sync.md`.
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections import deque
@@ -46,6 +47,8 @@ from civex.domain.sync import (
     PROTOCOL_MAX,
     PROTOCOL_MIN,
     FeedPage,
+    PushAccepted,
+    PushResult,
     Principal,
     SyncEntry,
     SyncError,
@@ -57,6 +60,8 @@ from civex.domain.sync import (
     snapshot_for,
 )
 from civex.server.deps import current_project, get_ctx
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sync/v1", tags=["sync"])
 
@@ -455,7 +460,25 @@ def push(body: SyncPushRequest, call: Peer = Depends(peer)):
         result = call.ctx.authority_svc.push(call.who, entries)
     except ValidationError as e:
         raise HTTPException(422, detail=str(e))
+    _tell_the_host(call, entries, result)
     return SyncPushResponse(**result.to_dict())
+
+
+def _tell_the_host(call: Peer, entries: list[SyncEntry], result: PushResult) -> None:
+    """`Project.push_accepted`, once the push is committed (the commit is
+    forced here, ahead of the response, so the host is never told of a push
+    that then fails to commit), and only when the push took something."""
+    tell = call.ctx.project.push_accepted
+    if tell is None:
+        return
+    report = PushAccepted.of(call.who, call.ctx.project.actor, entries, result)
+    if report is None:
+        return
+    call.ctx.commit()
+    try:
+        tell(report)
+    except Exception:  # a host's bookkeeping never fails a push that went in
+        log.exception("push_accepted callback failed")
 
 
 @router.get("/feed", response_model=SyncFeedResponse)
@@ -593,6 +616,9 @@ def download_file(sha256: str, call: Peer = Depends(peer)):
     the record that cites it: a 307 to storage when the authority offers
     `direct_files`, else the bytes."""
     svc = call.ctx.file_svc
+    # Content only a collection this device may not read uses is not its to
+    # have, however it learned the hash.
+    svc.check_readable(sha256)
     if DIRECT_FILES in call.ctx.features:
         url = svc.download_url(sha256)
         if url:

@@ -17,7 +17,8 @@ from civex.domain.exceptions import NotAllowedError, NotFoundError, ValidationEr
 from civex.domain.library import InstallPlan, LibraryItemDTO
 from civex.domain.sync import INVITE_HOURS, SyncError
 from civex.domain.features import PLUGIN_INSTALL, REMOTE_DIAL
-from civex.server.deps import get_ctx, requires
+from civex.domain.permissions import MANAGE_DEVICES
+from civex.server.deps import allows, get_ctx, requires
 from civex.services.sync_jobs import sync_jobs
 
 router = APIRouter(prefix="/remote", tags=["sync"])
@@ -853,14 +854,22 @@ def _authority(ctx: AppContext) -> AuthorityResponse:
     )
 
 
-@router.get("/authority", response_model=AuthorityResponse)
+@router.get(
+    "/authority",
+    response_model=AuthorityResponse,
+    dependencies=[allows(MANAGE_DEVICES)],
+)
 def authority(ctx: AppContext = Depends(get_ctx)):
     """Whether this project accepts devices, the devices that joined, and the
     invites waiting."""
     return _authority(ctx)
 
 
-@router.patch("/authority", response_model=AuthorityResponse)
+@router.patch(
+    "/authority",
+    response_model=AuthorityResponse,
+    dependencies=[allows(MANAGE_DEVICES)],
+)
 def update_authority(body: AuthorityUpdateRequest, ctx: AppContext = Depends(get_ctx)):
     """Start or stop accepting devices (the devices stay on record), and say
     what the library takes from them."""
@@ -874,7 +883,11 @@ def update_authority(body: AuthorityUpdateRequest, ctx: AppContext = Depends(get
     return _authority(ctx)
 
 
-@router.post("/authority/invites", response_model=InvitedResponse)
+@router.post(
+    "/authority/invites",
+    response_model=InvitedResponse,
+    dependencies=[allows(MANAGE_DEVICES)],
+)
 def invite_device(body: InviteRequest, ctx: AppContext = Depends(get_ctx)):
     """Invite a device. The answer is the only time the invite is shown."""
     try:
@@ -885,7 +898,11 @@ def invite_device(body: InviteRequest, ctx: AppContext = Depends(get_ctx)):
     return InvitedResponse(**_authority(ctx).model_dump(), invite=code)
 
 
-@router.post("/authority/invites/{name}/cancel", response_model=AuthorityResponse)
+@router.post(
+    "/authority/invites/{name}/cancel",
+    response_model=AuthorityResponse,
+    dependencies=[allows(MANAGE_DEVICES)],
+)
 def cancel_invite(name: str, ctx: AppContext = Depends(get_ctx)):
     """Cancel a device's invite before it is used."""
     if not ctx.device_keys.cancel_invite(name):
@@ -894,7 +911,11 @@ def cancel_invite(name: str, ctx: AppContext = Depends(get_ctx)):
     return _authority(ctx)
 
 
-@router.post("/authority/logins/{code}/approve", response_model=AuthorityResponse)
+@router.post(
+    "/authority/logins/{code}/approve",
+    response_model=AuthorityResponse,
+    dependencies=[allows(MANAGE_DEVICES)],
+)
 def approve_login(
     code: str, body: ApproveLoginRequest, ctx: AppContext = Depends(get_ctx)
 ):
@@ -908,7 +929,11 @@ def approve_login(
     return _authority(ctx)
 
 
-@router.post("/authority/logins/{code}/deny", response_model=AuthorityResponse)
+@router.post(
+    "/authority/logins/{code}/deny",
+    response_model=AuthorityResponse,
+    dependencies=[allows(MANAGE_DEVICES)],
+)
 def deny_login(code: str, ctx: AppContext = Depends(get_ctx)):
     """Turn away the device showing this code."""
     if not ctx.device_keys.deny_login(code):
@@ -917,7 +942,11 @@ def deny_login(code: str, ctx: AppContext = Depends(get_ctx)):
     return _authority(ctx)
 
 
-@router.post("/authority/devices/{name}/revoke", response_model=AuthorityResponse)
+@router.post(
+    "/authority/devices/{name}/revoke",
+    response_model=AuthorityResponse,
+    dependencies=[allows(MANAGE_DEVICES)],
+)
 def revoke_device(name: str, ctx: AppContext = Depends(get_ctx)):
     """Stop a device syncing, at once: its session is refused from now on."""
     if not ctx.device_keys.revoke_device(name):
@@ -926,7 +955,11 @@ def revoke_device(name: str, ctx: AppContext = Depends(get_ctx)):
     return _authority(ctx)
 
 
-@router.post("/authority/devices/{name}/publish", response_model=AuthorityResponse)
+@router.post(
+    "/authority/devices/{name}/publish",
+    response_model=AuthorityResponse,
+    dependencies=[allows(MANAGE_DEVICES)],
+)
 def allow_publish(
     name: str, body: DevicePublishRequest, ctx: AppContext = Depends(get_ctx)
 ):

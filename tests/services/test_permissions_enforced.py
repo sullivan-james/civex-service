@@ -137,3 +137,88 @@ def test_deleting_and_restoring_are_checked_before_anything_moves(study):
             writer.record_svc.restore_records([str(kept.id)])
     finally:
         writer.close()
+
+
+def test_notes_and_shared_views_are_rights_of_their_own(study):
+    owner, as_, mine, theirs, kept = study
+    # stated: may write records but not leave notes or save filters
+    writer = as_(Permissions.of(p.READ, p.WRITE_RECORDS).lacking(p.NOTES, p.VIEWS))
+    try:
+        with pytest.raises(NotAllowedError, match="notes"):
+            writer.note_svc.add(str(kept.id), "hello")
+        with pytest.raises(NotAllowedError, match="filters"):
+            writer.view_svc.create("sample", "labelled", columns=["label"])
+    finally:
+        writer.close()
+    noter = as_(Permissions.of(p.READ, p.NOTES, collections=[theirs.id]))
+    try:
+        assert noter.note_svc.add(str(kept.id), "seen").body == "seen"
+        with pytest.raises(NotAllowedError):
+            noter.record_svc.update(str(kept.id), {"label": "no"})
+        with pytest.raises(NotAllowedError):
+            noter.view_svc.create("sample", "labelled", columns=["label"])
+    finally:
+        noter.close()
+    # not in `mine`
+    elsewhere = as_(Permissions.of(p.READ, p.NOTES, collections=[mine.id]))
+    try:
+        with pytest.raises(NotAllowedError):
+            elsewhere.note_svc.add(str(kept.id), "no")
+    finally:
+        elsewhere.close()
+
+
+def test_files_are_added_and_let_go_by_separate_rights(study):
+    owner, as_, mine, theirs, kept = study
+    blob = owner.file_svc.store_bytes(b"scan", "scan.bin")
+    owner.commit()
+    adder = as_(Permissions.of(p.READ, p.WRITE_RECORDS, p.ADD_FILES))
+    try:
+        made = adder.record_svc.add(
+            "mine", "sample", {"label": "with", "scan": blob.to_dict()}
+        )
+        with pytest.raises(NotAllowedError, match="delete files"):
+            adder.record_svc.update(str(made.id), {"label": "with", "scan": None})
+        adder.commit()
+    finally:
+        adder.close()
+    writer = as_(Permissions.of(p.READ, p.WRITE_RECORDS))
+    try:
+        with pytest.raises(NotAllowedError, match="add files"):
+            writer.record_svc.add(
+                "mine", "sample", {"label": "no", "scan": blob.to_dict()}
+            )
+        with pytest.raises(NotAllowedError, match="add files"):
+            writer.file_svc.store_bytes(b"x", "x.bin")
+    finally:
+        writer.close()
+    full = as_(Permissions.of(p.READ, p.WRITE_RECORDS, p.MANAGE_FILES))
+    try:
+        full.record_svc.add("mine", "sample", {"label": "ok", "scan": blob.to_dict()})
+        full.file_svc.store_bytes(b"y", "y.bin")
+    finally:
+        full.close()
+
+
+def test_a_hidden_collection_is_not_there_for_the_services(study):
+    owner, as_, mine, theirs, kept = study
+    seeing = as_(Permissions.of(p.READ, p.WRITE_RECORDS, read_collections=[mine.id]))
+    try:
+        from civex.domain.exceptions import NotFoundError
+
+        assert [d.name for d in seeing.dataset_svc.list_all()] == ["mine"]
+        with pytest.raises(NotFoundError):
+            seeing.record_svc.get(str(kept.id))
+        with pytest.raises(NotFoundError):
+            seeing.record_svc.add("theirs", "sample", {"label": "x"})
+        with pytest.raises(NotFoundError):
+            seeing.record_svc.find("theirs", "sample")
+    finally:
+        seeing.close()
+
+
+def test_the_local_user_is_held_to_nothing_new(study):
+    owner, *_ = study
+    assert owner.permissions.read_scope().unrestricted
+    assert owner.permissions.can("notes") and owner.permissions.can("manage_devices")
+    assert owner.permissions.can("manage_files")

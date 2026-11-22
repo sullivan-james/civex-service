@@ -242,6 +242,7 @@ def download_file(
     (`direct_files`), the answer is a 307 to one, and the bytes never pass
     through civex.
     """
+    ctx.file_svc.check_readable(sha256)
     try:
         return _serve(ctx, sha256, filename, request)
     except FileNotFoundError:
@@ -301,4 +302,5 @@ def file_info(sha256: str, ctx: AppContext = Depends(get_ctx)):
     use it. A file used by several records is stored once, so this is how to
     see everything that shares it.
     """
+    ctx.file_svc.check_readable(sha256)
     return asdict(ctx.file_info_svc.info(sha256))

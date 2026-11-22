@@ -13,6 +13,7 @@ from civex.domain import features as features_
 from civex.domain.exceptions import (
     ConfigError,
     DatabaseUnavailableError,
+    NotAllowedError,
     FeatureUnavailableError,
 )
 from civex.project import Project
@@ -211,3 +212,27 @@ def get_read_ctx(request: Request) -> Generator[AppContext, None, None]:
         raise
     finally:
         ctx.close()
+
+
+def allows(action: str):  # noqa: ANN201 - a FastAPI dependency marker
+    """`dependencies=[allows(MANAGE_DEVICES)]` on a route or router: 403 unless
+    whoever is calling may do `action` in the project (`domain.permissions`), as
+    the host worked it out for this request. Ahead of the route, so nothing it
+    does runs for a caller who may not."""
+
+    def check(request: Request) -> None:
+        current_project(request).permissions.require(action)
+
+    return Depends(check)
+
+
+def reads_whole_project():  # noqa: ANN201 - a FastAPI dependency marker
+    """On a router about the project as a whole (its storage, its history
+    clean-up, its database): 403 unless the caller may read every collection,
+    since what it counts, moves or removes does not stop at the ones they see."""
+
+    def check(request: Request) -> None:
+        if not current_project(request).permissions.read_scope().unrestricted:
+            raise NotAllowedError("This is only for someone who can see everything.")
+
+    return Depends(check)

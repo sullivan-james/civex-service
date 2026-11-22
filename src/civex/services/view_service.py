@@ -68,7 +68,7 @@ class ViewService:
     ) -> ViewDTO:
         """Save a filter: which records (filter, sort), and the columns and
         files layout a list of them opens with."""
-        self._permissions.require_somewhere(permissions.WRITE_RECORDS)
+        self._permissions.require_somewhere(permissions.VIEWS)
         schema = self._schemas.get(schema_name)
         name = validate_free_name(name, "view name")
         _check_layout(files_layout)
@@ -115,7 +115,7 @@ class ViewService:
         files_layout=...,
     ) -> ViewDTO:
         """Change what is given (`...` leaves a part as it is)."""
-        self._permissions.require_somewhere(permissions.WRITE_RECORDS)
+        self._permissions.require_somewhere(permissions.VIEWS)
         schema = self._schemas.get(schema_name)
         view = self._views.get_by_name(schema.id, view_name)
         if view is None:
@@ -148,7 +148,7 @@ class ViewService:
         return updated
 
     def delete(self, schema_name: str, view_name: str) -> None:
-        self._permissions.require_somewhere(permissions.WRITE_RECORDS)
+        self._permissions.require_somewhere(permissions.VIEWS)
         view = self.get(schema_name, view_name)
         if self._audit:
             self._audit.log_change("delete", "view", view.id, view.to_dict(), None)

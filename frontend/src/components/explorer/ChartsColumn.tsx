@@ -46,7 +46,7 @@ export function ChartsColumn({
 }) {
   const { canSomewhere } = usePermissions()
   const addToAnalytics = useAddToAnalytics()
-  const mayAdd = canSomewhere('write_records')
+  const mayAdd = canSomewhere('views')
   return (
     <section aria-label="Charts" className="space-y-3">
       {/* Level with the records' heading beside it. */}

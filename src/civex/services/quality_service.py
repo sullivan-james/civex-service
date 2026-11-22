@@ -80,7 +80,7 @@ class QualityService:
         """What needs a look in the records `query` lists, per kind and field:
         each issue counted, with a few records named (`MAX_EXAMPLES`), and how
         many records leave each field empty."""
-        self._permissions.require(permissions.READ)
+        self._permissions.require_somewhere(permissions.READ)
         tally = quality.Tally()
         declared: set[str] = set()
         for record, shape, findings in self._walk(query):
@@ -115,7 +115,7 @@ class QualityService:
         field's name or a key's, and of kind `schema`, when given): one finding
         per record, a page of them, and how many there are. What the report's
         lines open, for a person to look at or tick and edit."""
-        self._permissions.require(permissions.READ)
+        self._permissions.require_somewhere(permissions.READ)
         quality.check_issue(issue)
         found: list[quality.Finding] = []
         total = 0
@@ -144,7 +144,7 @@ class QualityService:
         records' values they refuse, how many leave a required field empty,
         and a few of them named. Every collection; nothing is changed. What
         the field editor warns with before a rule is tightened."""
-        self._permissions.require(permissions.READ)
+        self._permissions.require_somewhere(permissions.READ)
         schema = self._schemas.get(schema_name)
         field = next((f for f in schema.fields if f.name == field_name), None)
         if field is None:

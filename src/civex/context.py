@@ -567,6 +567,10 @@ def build_context(
         except BaseException:
             session.close()
             raise
+    from civex.db import read_scope
+
+    # A collection this caller may not read is not there for any query below.
+    read_scope.install(session, project.permissions.read_scope)
     schema_repo = LocalSchemaRepository(session)
     dataset_repo = LocalDatasetRepository(session)
     record_repo = LocalRecordRepository(
@@ -621,6 +625,8 @@ def build_context(
         permissions=may,
     )
     file_svc = FileService(file_store, volumes, permissions=may)
+    if not may.read_scope().unrestricted:
+        file_svc.readable = LocalFileReferenceRepository(session).is_readable
     store_svc: StoreService | None = None
     if isinstance(file_store, VolumeAwareFileObjectStore):
         store_svc = StoreService(config, file_store, project.config_store)
@@ -730,6 +736,9 @@ def build_context(
         record_svc,
         ProjectRules(schema_svc, record_repo),
         authenticator=device_keys,
+        # The authority settles a push against the whole project, then asks the
+        # policy about each thing: a hidden collection must not look empty to it.
+        unscoped=lambda: read_scope.unscoped(session),
         # The same answer a person at a browser gets, asked of each change a
         # device pushes (the local user's refuses nothing).
         policy=may,

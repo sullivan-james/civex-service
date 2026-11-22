@@ -75,9 +75,9 @@ beforeEach(() => {
           account: { name: 'ana', kind: 'local', manage_url: null },
           permissions: {
             actions: writer
-              ? { read: ['project'], write_records: ['project'] }
+              ? { read: ['project'], notes: ['project'] }
               : { read: ['project'] },
-            all: { write_records: 'add and change records' },
+            all: { notes: 'add and change notes' },
           },
         })
       if (url.pathname === '/api/records/r1/notes' && method === 'GET')

@@ -50,6 +50,19 @@ from the next tag forward.
 
 ### Added
 
+- **Finer permissions for hosts (C3a).** `civex.domain.permissions` gains
+  `ADD_FILES`/`DELETE_FILES` (`MANAGE_FILES` stays as an alias for both), `NOTES`,
+  `VIEWS` and `MANAGE_DEVICES`; every action, `READ` included, can be limited to
+  collections (`Permissions.of(..., read_collections=...)`, `read_scope()`). A
+  collection the caller cannot read is absent everywhere (lists, counts, search,
+  summaries, dashboards, exports, history, notes, files) and a direct request for
+  it is a 404, enforced once at the session (`civex.db.read_scope`). Saving a
+  record that cites or lets go of a file takes `add_files`/`delete_files`;
+  `/remote/authority*` takes `manage_devices`. Hosts that say nothing about
+  `notes`/`views` keep them following `write_records`. New
+  `Project.push_accepted` host callback, called once after a device's push is
+  committed. See `docs/guides/hosting.md`.
+
 - **`civex files missing`** lists files records cite that this project never
   stored and nothing can supply (no copy here, none on the server), by
   collection and field. `--ignore <hash|all>` stops the warnings (the records keep
