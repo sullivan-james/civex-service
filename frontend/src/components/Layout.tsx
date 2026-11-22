@@ -9,7 +9,6 @@ import {
   useState,
 } from 'react'
 import { NavLink, useLocation } from 'react-router'
-import { openNotesHref } from '../utils/notes'
 import { useFeatures } from '../hooks/useFeatures'
 import { offered } from '../utils/features'
 import {
@@ -48,7 +47,6 @@ import {
   BookMarked,
   ChevronDown,
   LayoutGrid,
-  MessageSquare,
   House,
   Database,
   Workflow,
@@ -130,7 +128,6 @@ const navGroups: NavGroupDef[] = [
     items: [
       { to: '/collections', label: 'Collections', icon: LayoutGrid },
       // Every record with a thread not yet resolved: All records, filtered.
-      { to: openNotesHref(), label: 'Open notes', icon: MessageSquare },
       { to: '/exports', label: 'Exports', icon: FolderTree },
       { to: '/releases', label: 'Releases', icon: BookMarked },
       { to: '/activity', label: 'Activity', icon: History },
@@ -204,8 +201,8 @@ function NavItem({
   onNavigate?: () => void
 }) {
   const location = useLocation()
-  // An item that is a filtered address (Open notes) is where you are only
-  // when the address asks the same; others go by the page.
+  // An item that is a filtered address is where you are only when the
+  // address asks the same; others go by the page.
   const query = to.includes('?') ? to.slice(to.indexOf('?')) : null
   const here = (isActive: boolean) =>
     isActive && (query === null || location.search === query)

@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router'
 import {
   useDeleteManyRecords,
   useDeleteMatchingRecords,
+  useRecordPage,
   useRecordQuality,
   useRecordSummary,
 } from '../../hooks/useRecords'
@@ -35,6 +36,7 @@ import {
   AlertTriangle,
   BarChart3,
   ListFilter,
+  MessageSquare,
   PanelRightOpen,
   ChevronDown,
   Columns3,
@@ -47,7 +49,11 @@ import {
   type RecordsTableSort,
 } from '../records/RecordsTable'
 import { ColumnPicker, columnLabel } from '../views/ColumnPicker'
-import { OPEN_NOTES_FILTER, asksForOpenNotes } from '../../utils/notes'
+import {
+  OPEN_NOTES,
+  OPEN_NOTES_FILTER,
+  asksForOpenNotes,
+} from '../../utils/notes'
 import { FilterControls } from './FilterControls'
 import { DrillLinks } from './DrillLinks'
 import { SavedViewBar } from './SavedViewBar'
@@ -216,6 +222,27 @@ export function RecordsExplorer({
       : null,
   )
   const issuesFound = checkCount.data?.records_with_issues
+  // How many of the listed records have an open note: a fact beside the
+  // count, like problems, shown only when there are any (one count, asked
+  // once the rows are in; not while the list is already narrowed to them).
+  const openNotesListed = asksForOpenNotes(x.filter)
+  const withOpenNotes = useRecordPage(
+    {
+      datasetName: dataset,
+      schemaName: listedName ?? undefined,
+      allKinds,
+    },
+    {
+      ...x.query,
+      sort: undefined,
+      filter: withCondition(x.filter, OPEN_NOTES),
+      limit: 1,
+    },
+    {
+      enabled: x.page.data !== undefined && !x.page.error && !openNotesListed,
+    },
+  )
+  const openNotes = openNotesListed ? 0 : (withOpenNotes.data?.total ?? 0)
   // --- charts: beside the records, counting exactly what is listed. They
   // are asked for once the rows are in, and a very big list waits for a click.
   const records = queryBody({ ...x.query, sort: undefined }, dataset)
@@ -948,6 +975,22 @@ export function RecordsExplorer({
                         )}
                       {/* Beside the count of the records whose columns they are. */}
                       {!quiet && !aside && !chartsOnly && columnsButton}
+                      {openNotes > 0 && !aside && (
+                        // Clicking it lists them: the filter gains "has open notes".
+                        <Button
+                          size="sm"
+                          variant="link"
+                          onClick={() =>
+                            patch({
+                              filter: withCondition(x.filter, OPEN_NOTES),
+                            })
+                          }
+                        >
+                          <MessageSquare size={14} />
+                          {openNotes.toLocaleString()}{' '}
+                          {openNotes === 1 ? 'open note' : 'open notes'}
+                        </Button>
+                      )}
                       {(showChecks || showFiles) && (
                         <Button
                           size="sm"

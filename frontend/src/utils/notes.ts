@@ -29,7 +29,13 @@ export function noteFilterFields(): FilterableField[] {
   ] as FilterableField[]
 }
 
-const OPEN: FilterTreeWire = { field: OPEN_NOTES_FILTER, op: 'eq', value: true }
+/** The condition that lists records with an open thread. */
+export const OPEN_NOTES: FilterTreeWire = {
+  field: OPEN_NOTES_FILTER,
+  op: 'eq',
+  value: true,
+}
+const OPEN = OPEN_NOTES
 
 /** Every record with an open thread, of every kind, across every
  * collection: the Collections page's All records, filtered, listing all

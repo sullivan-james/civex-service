@@ -337,7 +337,9 @@ resolved thread opens it again. Deleting the note that starts a thread hides
 its replies too, and restoring it brings them back.
 
 The record's header says how many threads are still open, and links to its
-Notes tab. **Open notes** in the sidebar lists every record with an open
+Notes tab. Beside the number of records, any list says **N open notes** when some of
+the records listed have one; click it to list them. **All open notes** on a
+record's Notes tab lists every record with an open
 thread, of every kind, in every collection: it is the **All records** tab of
 Collections with **All kinds** picked, filtered with **Has open notes**, so
 search and the Open notes filter work on it, and a record opens on its Notes

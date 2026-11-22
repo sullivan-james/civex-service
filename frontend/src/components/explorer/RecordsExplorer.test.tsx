@@ -234,8 +234,14 @@ function renderExplorer(
 
 const search = () =>
   new URLSearchParams(screen.getByTestId('search').textContent ?? '')
+// The list's own requests (not the one-row count of open notes beside it).
 const recordCalls = () =>
-  calls.filter((c) => c.method === 'GET' && c.path.endsWith('/records'))
+  calls.filter(
+    (c) =>
+      c.method === 'GET' &&
+      c.path.endsWith('/records') &&
+      c.params.get('limit') !== '1',
+  )
 const lastRecordCall = () => {
   const all = recordCalls()
   return all[all.length - 1]
@@ -583,6 +589,26 @@ describe('RecordsExplorer', () => {
       expect(calls.some((c) => c.method === 'DELETE')).toBe(true),
     )
     await waitFor(() => expect(search().get('view')).toBeNull())
+  })
+
+  it('says how many listed records have open notes, and lists them on a click', async () => {
+    const user = userEvent.setup()
+    renderExplorer({}, '/collections/hb?schema=recording')
+    // A fact beside the count, like problems: the fake server finds one.
+    await user.click(await screen.findByRole('button', { name: '1 open note' }))
+    await waitFor(() =>
+      expect(JSON.parse(search().get('filter')!)).toEqual({
+        field: '@open_notes',
+        op: 'eq',
+        value: true,
+      }),
+    )
+    // Listing them, it is not said again.
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: /^\d+ open notes?$/ }),
+      ).toBeNull(),
+    )
   })
 
   it('lists records with open notes with what is open, each opening on its notes', async () => {
