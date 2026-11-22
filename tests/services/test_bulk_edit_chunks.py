@@ -13,6 +13,7 @@ from sqlalchemy import event, text
 
 from civex.config import load_config
 from civex.context import AppContext, build_local_context
+from civex.domain.audit_diff import entry_snapshots
 from civex.domain.query import RecordQuery
 from civex.services import record_service
 
@@ -200,6 +201,17 @@ def test_every_chunk_is_in_one_event_and_is_undone_as_one(
     ).scalar()
     assert shared == 0  # no action spans two records, let alone two chunks
 
+    # Each entry is the record as it was saved, the time of the save included:
+    # these entries are what a sync sends.
+    stored = {str(r.id): r for r in ctx.record_svc.get_many(ids, as_stored=True)}
+    for entry in entries:
+        record = stored[str(entry.entity_id)]
+        before, after = entry_snapshots(entry.old_data, entry.new_data, entry.delta)
+        assert after["updated_at"] == record.to_dict()["updated_at"]
+        assert before["updated_at"] != after["updated_at"]
+        held = ctx.record_svc._records.get_by_id(record.id).data
+        assert after["data"] and all(held[k] == v for k, v in after["data"].items())
+
     undone = ctx.history_svc.revert_batch(batch, dry_run=False)
     ctx.commit()
     assert undone.applied == 8 and set(_status(ctx, ids)) == {"new"}
@@ -262,12 +274,15 @@ def test_an_edit_stopped_half_way_leaves_whole_records_and_is_finished_by_runnin
 # -- other saves go in meanwhile ---------------------------------------------------
 
 
-def test_another_save_goes_in_while_a_big_edit_runs(ctx: AppContext, trials):
+def test_another_save_goes_in_while_a_big_edit_runs(
+    ctx: AppContext, trials, monkeypatch: pytest.MonkeyPatch
+):
     """The edit never holds the database for longer than a chunk, and gives
     way when another writer asks: a save from another session, made while a
     few thousand records are being changed, is in within about a chunk."""
     _, more = trials
-    ids = more(3000)
+    monkeypatch.setattr(record_service, "BULK_EDIT_PAGE", 100)
+    ids = more(3000)  # thirty chunks
     (other,) = more(1)
     running = threading.Event()
     finished = threading.Event()
@@ -288,13 +303,15 @@ def test_another_save_goes_in_while_a_big_edit_runs(ctx: AppContext, trials):
             running.set()
             finished.set()
 
-    worker = threading.Thread(target=edit)
-    worker.start()
-    assert running.wait(30)  # its first chunk is in
     waits: list[float] = []
     during = 0
+    # The saving session is ready before the edit starts, so its first save
+    # is asked for while the edit still has most of its chunks to go.
     with build_local_context(load_config()) as saving:
-        for n in range(200):
+        worker = threading.Thread(target=edit)
+        worker.start()
+        assert running.wait(30)  # its first chunk is in
+        for n in range(500):
             if finished.is_set():
                 break
             began = time.monotonic()
@@ -302,7 +319,7 @@ def test_another_save_goes_in_while_a_big_edit_runs(ctx: AppContext, trials):
             saving.commit()
             waits.append(time.monotonic() - began)
             during += not finished.is_set()
-    worker.join(60)
+        worker.join(60)
 
     assert not failed, failed
     assert during >= 1, "no save was made while the edit ran"

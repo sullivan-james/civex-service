@@ -271,16 +271,19 @@ class AppContext:
         if db is None:
             yield self.commit
             return
-        marked: list[Any] = []
+        # The marks are kept by the dict they are in (a connection's own,
+        # which outlives the transaction), so one can come off after its
+        # transaction has ended (whatever committed it).
+        marked: list[dict[Any, Any]] = []
 
         def mark() -> None:
-            conn = self._session.connection()
-            conn.info[index_gate.BUILDER] = True
-            marked.append(conn)
+            info = self._session.connection().info
+            info[index_gate.BUILDER] = True
+            marked.append(info)
 
         def unmark() -> None:
             while marked:
-                marked.pop().info.pop(index_gate.BUILDER, None)
+                marked.pop().pop(index_gate.BUILDER, None)
 
         began = [time.time()]
 
