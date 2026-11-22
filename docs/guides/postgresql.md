@@ -72,3 +72,23 @@ civex db migrate    # update the database structure now
 New civex versions update the database structure the next time a project opens.
 **Settings → Database** shows the connection and offers **Update it** when an
 update is waiting.
+
+## Measuring a project from a host
+
+A host that runs many projects against one PostgreSQL server (one schema each,
+chosen by the engine's `search_path`) can meter them with
+`civex.usage.project_usage(engine)` instead of reading civex's tables:
+
+```python
+from civex.usage import project_usage
+
+u = project_usage(engine)
+u.stored_bytes, u.stored_objects      # distinct files in the object store
+u.records_estimate, u.records_exact   # planner estimate on PostgreSQL
+```
+
+It reads only, so a read replica's engine works. Records come from
+`pg_class.reltuples` (no scan; as fresh as the last `ANALYZE`); a table never
+analysed is counted up to 100,000 and then reported as "at least that many".
+Each statement has a 5 second timeout, and a figure that could not be had in
+time is `None`.
