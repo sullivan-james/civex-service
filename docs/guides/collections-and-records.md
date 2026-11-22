@@ -132,7 +132,8 @@ record. **Filters** say which rows you see. **Charts** count the rows you see.
   [Saved filters](views.md). **Save this filter** saves yours, and everyone
   sees it.
 - **Columns**, beside the count of records, include parents' fields and
-  fields through a reference. Click a header to sort.
+  fields through a reference. Your choice for a kind is remembered in this
+  browser. Click a header to sort.
 - **Export** takes exactly the rows listed or ticked. See
   [Get files out](../how-to/export-files.md). It also offers the charts on
   screen, one or all of them, as tables of their numbers.

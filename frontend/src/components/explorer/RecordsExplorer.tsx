@@ -591,18 +591,26 @@ export function RecordsExplorer({
     >
       <ColumnPicker
         columns={x.columnNames}
-        onChange={(cols) => patch({ cols })}
+        // Remembered for this kind; the address stays as it was unless a
+        // saved filter or a link named its own columns.
+        onChange={(cols) => {
+          x.rememberColumns(cols)
+          if (x.cols) patch({ cols: null })
+        }}
         baseFields={x.baseFields}
         joinable={x.joinable}
         extra={[{ name: OPEN_NOTES_FILTER, label: 'Open notes' }]}
         allowHideAll={false}
       />
-      {x.cols && (
+      {(x.cols || x.columnsRemembered) && (
         <Button
           size="sm"
           variant="ghost"
           className="mt-2"
-          onClick={() => patch({ cols: null })}
+          onClick={() => {
+            x.rememberColumns(null)
+            if (x.cols) patch({ cols: null })
+          }}
         >
           Reset to default columns
         </Button>

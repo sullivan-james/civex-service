@@ -1054,7 +1054,13 @@ describe('RecordsExplorer', () => {
 
     const name = (label: string) =>
       within(screen.getByRole('dialog')).getByText(label, { selector: 'label' })
-    const cols = () => search().get('cols')
+    // The columns on screen, by their headers.
+    const cols = () =>
+      screen
+        .getAllByRole('columnheader')
+        .map((h) => (h.textContent ?? '').trim().toLowerCase())
+        .filter((h) => ['site', 'area', 'depth', 'vessel'].includes(h))
+        .join(',')
 
     it('unticks one column with a plain click', async () => {
       const { user } = await openColumns()
@@ -1078,11 +1084,33 @@ describe('RecordsExplorer', () => {
       await user.keyboard('{/Shift}')
 
       await waitFor(() => {
-        const chosen = (cols() ?? '').split(',')
+        const chosen = cols().split(',')
         expect(chosen).toEqual(
           expect.arrayContaining(['site', 'area', 'depth', 'vessel']),
         )
       })
+    })
+
+    it('remembers the columns chosen for a kind, without putting them in the address', async () => {
+      const user = userEvent.setup()
+      const first = renderExplorer()
+      await screen.findByText('Stellwagen')
+      await user.click(screen.getByRole('button', { name: /Columns/ }))
+      await screen.findByRole('dialog')
+      await user.click(name('Vessel'))
+      await waitFor(() => expect(cols()).toBe('site,area,depth'))
+      expect(search().get('cols')).toBeNull()
+      first.unmount()
+      // Coming back to a list of the kind, they are as they were left.
+      renderExplorer()
+      await screen.findByText('Stellwagen')
+      expect(cols()).toBe('site,area,depth')
+      // And the default is one click away.
+      await user.click(screen.getByRole('button', { name: /Columns/ }))
+      await user.click(
+        await screen.findByRole('button', { name: 'Reset to default columns' }),
+      )
+      await waitFor(() => expect(cols()).toBe('site,area,depth,vessel'))
     })
   })
 

@@ -10,6 +10,7 @@ import {
   useRecordPage,
 } from '../../hooks/useRecords'
 import { useFieldTypes } from '../../hooks/useFieldTypes'
+import { useStored } from '../../hooks/useStored'
 import { useSchemas } from '../../hooks/useSchemas'
 import { useViews } from '../../hooks/useViews'
 import {
@@ -201,9 +202,34 @@ export function useExplorer(scope: ExplorerScope) {
     () => (listed ? joinableColumns(listed, byId, byName) : []),
     [listed, byId, byName],
   )
-  const defaultColumns = useMemo(
-    () => (listed ? defaultColumnNames(listed) : []),
-    [listed],
+  // The columns a person last chose for a kind are remembered in this
+  // browser for this project, and are what its lists open with from then on
+  // (a saved filter, or `cols` in a link, still says its own).
+  const [remembered, setRemembered] = useStored<Record<string, string[]>>(
+    'explorer.columns',
+    {},
+  )
+  const chosenColumns = listed ? remembered[listed.name] : undefined
+  const defaultColumns = useMemo(() => {
+    if (!listed) return []
+    const ok = new Set([
+      ...baseFields.map((f) => f.name),
+      ...joinable.map((j) => j.value),
+    ])
+    const kept = (chosenColumns ?? []).filter(
+      (c) => ok.has(c) || c.startsWith('@'),
+    )
+    return kept.length > 0 ? kept : defaultColumnNames(listed)
+  }, [listed, chosenColumns, baseFields, joinable])
+  const rememberColumns = useCallback(
+    (cols: string[] | null) => {
+      if (!listed) return
+      const next = { ...remembered }
+      if (cols) next[listed.name] = cols
+      else delete next[listed.name]
+      setRemembered(next)
+    },
+    [listed, remembered, setRemembered],
   )
 
   // Sort and columns picked on one level mean nothing on another (a
@@ -320,6 +346,9 @@ export function useExplorer(scope: ExplorerScope) {
     searchIn,
     joinable,
     defaultColumns,
+    /** Whether this kind's columns are a person's own choice, remembered. */
+    columnsRemembered: !!chosenColumns,
+    rememberColumns,
     columnNames,
     query,
     page,
