@@ -231,7 +231,7 @@ export default function App() {
             <Route
               path="/settings/storage/volumes/:name"
               element={
-                <Gated feature="volumes">
+                <Gated feature={['settings', 'volumes']}>
                   <VolumePage />
                 </Gated>
               }

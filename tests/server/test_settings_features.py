@@ -19,18 +19,17 @@ from civex.server.app import create_app
 # OPERATIONS below.
 GATED: dict[str, list[tuple[str, str, dict | None]]] = {
     f.SETTINGS_APPEARANCE: [
-        ("GET", "/api/settings/ui", None),
         ("PATCH", "/api/settings/ui", {"show_advanced": True}),
     ],
     f.SETTINGS_MAP: [
-        ("GET", "/api/settings/map", None),
+        ("PATCH", "/api/settings/map", {"tile_url": None}),
     ],
     f.SETTINGS_RETENTION: [
-        ("GET", "/api/settings/retention", None),
         ("PATCH", "/api/settings/retention", {"audit_days": 30}),
     ],
     f.SETTINGS_ADVANCED: [
-        ("GET", "/api/settings/command-line", None),
+        ("POST", "/api/settings/command-line", {}),
+        ("DELETE", "/api/settings/command-line", None),
     ],
 }
 
@@ -71,6 +70,15 @@ def _send(c: TestClient, method: str, path: str, body):
 
 
 CASES = [(feat, *req) for feat, reqs in GATED.items() for req in reqs]
+# Not run where the feature is on: the command-line routes change the real PATH.
+ON_CASES = [c for c in CASES if "command-line" not in c[2]]
+READS = [
+    "/api/settings/ui",
+    "/api/settings/map",
+    "/api/settings/retention",
+    "/api/settings/command-line",
+    "/api/settings/identity",
+]
 
 
 @pytest.mark.parametrize(("feature", "method", "path", "body"), CASES)
@@ -83,7 +91,7 @@ def test_a_settings_route_refuses_when_its_feature_is_off(
     assert answer.json()["detail"] == f.unavailable_message(feature)
 
 
-@pytest.mark.parametrize(("feature", "method", "path", "body"), CASES)
+@pytest.mark.parametrize(("feature", "method", "path", "body"), ON_CASES)
 def test_a_settings_route_is_not_refused_when_its_feature_is_on(
     tmp_path: Path, monkeypatch, feature, method, path, body
 ):
@@ -99,11 +107,23 @@ def test_no_settings_feature_refuses_an_operation_a_host_drives(
     assert _send(c, method, path, body).status_code != 501
 
 
+@pytest.mark.parametrize("path", READS)
+def test_reading_a_setting_is_never_refused(tmp_path: Path, monkeypatch, path):
+    """The app reads these everywhere (the map view, the advanced display), so a
+    host turning settings off refuses only edits."""
+    c = _client(tmp_path, monkeypatch, f.LOCAL_FEATURES - f.SETTINGS_FEATURES)
+    assert c.get(path).status_code != 501
+
+
 def test_turning_one_section_off_leaves_the_others(tmp_path: Path, monkeypatch):
     c = _client(tmp_path, monkeypatch, f.LOCAL_FEATURES - {f.SETTINGS_MAP})
-    assert c.get("/api/settings/map").status_code == 501
-    assert c.get("/api/settings/ui").status_code == 200
-    assert c.get("/api/settings/retention").status_code == 200
+    off = c.patch("/api/settings/map", json={"tile_url": None})
+    assert off.status_code == 501
+    on = c.patch("/api/settings/ui", json={"show_advanced": True})
+    assert on.status_code == 200
+    assert (
+        c.patch("/api/settings/retention", json={"audit_days": 30}).status_code == 200
+    )
 
 
 @pytest.mark.parametrize(("feature", "method", "path", "body"), CASES)

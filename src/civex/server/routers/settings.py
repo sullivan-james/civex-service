@@ -77,7 +77,6 @@ def update_identity(
 @router.get(
     "/ui",
     response_model=UISettingsResponse,
-    dependencies=[requires(SETTINGS_APPEARANCE)],
 )
 def get_ui_settings(project: Project = Depends(current_project)):
     """Return this project's UI preferences."""
@@ -135,7 +134,6 @@ def create_shortcut(project: Project = Depends(current_project)):
 @router.get(
     "/map",
     response_model=MapSettingsResponse,
-    dependencies=[requires(SETTINGS_MAP)],
 )
 def get_map_settings(project: Project = Depends(current_project)):
     """Where the location editor gets street-level map tiles, if anywhere."""
@@ -187,7 +185,6 @@ def _retention_response(config) -> RetentionSettingsResponse:
 @router.get(
     "/retention",
     response_model=RetentionSettingsResponse,
-    dependencies=[requires(SETTINGS_RETENTION)],
 )
 def get_retention_settings(project: Project = Depends(current_project)):
     """Return how long this project keeps deleted items, change history and
@@ -252,7 +249,6 @@ def _command_line(found) -> CommandLineResponse:
 @router.get(
     "/command-line",
     response_model=CommandLineResponse,
-    dependencies=[requires(SETTINGS_ADVANCED)],
 )
 def get_command_line():
     """Whether the desktop app's `civex` can be typed in a terminal."""

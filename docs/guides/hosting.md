@@ -59,7 +59,8 @@ civex's app and refuses only the routes that *edit that section's stored
 settings*. It never refuses an operational route a host's own UI drives (the
 device invites, approvals and revokes under `/remote/authority*`, the retention
 clean-up under `/retention/*`): those stay governed by the host's own gate and
-by permissions. `settings` is the umbrella: with it off, every `settings_*`
+by permissions. Reading a setting is never refused either: the app reads
+some of them everywhere. `/settings/shortcut` stays under `desktop`. `settings` is the umbrella: with it off, every `settings_*`
 section counts as off, in the server and the app (`features.enabled`), and
 `PATCH /settings/identity` is refused too.
 
@@ -68,11 +69,11 @@ For a hub that owns all settings, leave out of `features`:
 | Feature | What goes |
 |---|---|
 | `settings` | The whole Settings area and its navigation item, and every section below. Also refuses editing `/settings/identity`. |
-| `settings_appearance` | Appearance; refuses `/settings/ui`. |
-| `settings_retention` | Retention; refuses `/settings/retention` (the clean-up routes stay). |
-| `settings_map` | Map tiles; refuses `/settings/map`. |
-| `settings_advanced` | Advanced; refuses `/settings/command-line`. |
-| `settings_devices` | Devices: the app's section only (no route is refused). |
+| `settings_appearance` | Appearance; refuses edits to `/settings/ui`. |
+| `settings_retention` | Retention; refuses editing `/settings/retention` (the clean-up routes stay). |
+| `settings_map` | Map tiles; refuses editing `/settings/map`. |
+| `settings_advanced` | Advanced; refuses changing `/settings/command-line`. |
+| `settings_devices` | The Devices section of the app (what a hosted project shows in place of Sync); no route is refused. |
 | `settings_members` | Members & access, which the host manages on its own pages. App only. |
 
 Also leave out the features that need a machine: `volumes`, `store_admin`,

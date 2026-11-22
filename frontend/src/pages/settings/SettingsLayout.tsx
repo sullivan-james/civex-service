@@ -3,6 +3,7 @@ import { Navigate, Outlet, useLocation, useSearchParams } from 'react-router'
 import { InfoTip, Page, Skeleton, TabNav } from '../../components/ui'
 import { useFeatures, useFeaturesSettled } from '../../hooks/useFeatures'
 import { offered, SETTINGS_SECTION_FEATURES } from '../../utils/features'
+import { NotAvailable } from '../../components/FeatureGate'
 import { useSlot } from '../../hooks/useSlot'
 
 /** Settings is a set of pages, one per area, each with its own address
@@ -112,6 +113,7 @@ export default function SettingsLayout() {
   // `/settings` alone opens the first section a host leaves on.
   if (!area && settled && sections[0])
     return <Navigate to={sections[0].to} replace />
+  if (!area && settled) return <NotAvailable />
   const current = sections.find(
     (s) => s.to === area || s.to === `${area}/${sub}`,
   )
