@@ -88,12 +88,6 @@ from civex.services.schema_service import SchemaResolver, SchemaService
 
 from typing import TYPE_CHECKING
 
-# A stored value's key when it is a field's id (never a field's name, which
-# has no hyphens).
-_FIELD_ID = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
-)
-
 if TYPE_CHECKING:
     from civex.services.workflow_job_service import WorkflowJobService
 
@@ -725,17 +719,19 @@ class RecordService:
     ) -> dict[str, Any]:
         if shape is None:
             return data
-        # A deleted field's value stays in the stored data (so a restore brings it
-        # back) but isn't a field the record has now. Nor is a value kept under
-        # the id of a field that is gone for good (its kind was purged, or the
-        # record's kind no longer sits under the one that had it): left as it
-        # is it would read as a field named by that id, which no kind has, so
-        # a bundle or a release of the record could not be read back.
+        # A record's data is the values of the fields its kind has. A deleted
+        # field's value stays in the stored data (so a restore brings it back)
+        # but isn't one of them. Nor is a value left under a key that names no
+        # field at all: the id of a field that is gone for good (its kind was
+        # purged, or the record's kind no longer sits under the one that had
+        # it), or a name kept from before values were stored by field id whose
+        # field has since gone. Passed through, it would read as a field no
+        # kind has, and a bundle or a release of the record could not be read
+        # back ("A line of records.jsonl can't be read").
         return {
             shape.id_to_name.get(k, k): v
             for k, v in data.items()
-            if k not in shape.deleted_by_id
-            and (k in shape.id_to_name or not _FIELD_ID.match(k))
+            if k in shape.id_to_name or k in shape.name_to_id
         }
 
     def _snapshot(self, dto: RecordDTO) -> dict[str, Any]:

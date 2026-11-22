@@ -205,7 +205,13 @@ def test_a_value_left_under_a_field_that_no_longer_exists_is_not_in_the_way(ctx,
     from civex.db.models import Record
 
     row = ctx._session.get(Record, study["a"].id)
-    row.data = {**row.data, "c7a87f0d-e9e5-4d42-b298-354addb754e5": "left behind"}
+    row.data = {
+        **row.data,
+        # The id of a field that is gone for good, and a name kept from
+        # before values were stored by id, whose field has gone too.
+        "c7a87f0d-e9e5-4d42-b298-354addb754e5": "left behind",
+        "recording": "also left behind",
+    }
     flag_modified(row, "data")
     ctx.commit()
 
