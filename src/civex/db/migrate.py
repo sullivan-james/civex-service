@@ -25,8 +25,10 @@ states a given project is in.
 
 from __future__ import annotations
 
+import functools
 import threading
 import weakref
+from dataclasses import dataclass
 from pathlib import Path
 
 from alembic import command
@@ -95,6 +97,94 @@ def missing_structure(engine: Engine) -> list[str]:
     return missing
 
 
+@functools.lru_cache(maxsize=1)
+def _script_directory() -> ScriptDirectory:
+    # Parsing the migration files is the costly part of knowing head, and they
+    # don't change while the process runs, so it is done once.
+    return ScriptDirectory(str(_MIGRATIONS_DIR))
+
+
+def head_revision() -> str:
+    """The revision this civex migrates a database to."""
+    head = _script_directory().get_current_head()
+    assert head is not None
+    return head
+
+
+def _unknown_revisions(revisions: list[str]) -> list[str]:
+    """The `revisions` this civex has no migration for (a newer civex's)."""
+    from alembic.util.exc import CommandError
+
+    script = _script_directory()
+    unknown: list[str] = []
+    for revision in revisions:
+        try:
+            script.get_revision(revision)
+        except (CommandError, KeyError):
+            unknown.append(revision)
+    return unknown
+
+
+@dataclass(frozen=True)
+class SchemaStatus:
+    """Where a database stands against this civex, from `schema_status`.
+
+    `current` is the stamped revision (several joined by ", " if it is stamped
+    at more than one), None when it has none. `behind` means a migration
+    would run (not stamped, or stamped older than `head`); `too_new` means it
+    is stamped by a newer civex (`behind` is then False: nothing here can
+    migrate it). `missing_structure` is None unless asked for.
+    """
+
+    current: str | None
+    head: str
+    behind: bool
+    too_new: bool
+    missing_structure: tuple[str, ...] | None = None
+
+    @property
+    def up_to_date(self) -> bool:
+        return not self.behind and not self.too_new
+
+
+def schema_status(engine: Engine, *, check_structure: bool = False) -> SchemaStatus:
+    """Report the database at `engine` against this civex, changing nothing.
+
+    Unlike `ensure_schema_current` it never migrates, stamps, creates a table
+    or takes the migration lock, so a host can ask "is this tenant current?"
+    for a fleet (or to refuse a stale one) without paying for a migration
+    attempt. It uses one connection and, normally, one read of
+    `alembic_version`; head is computed once per process. Whatever the
+    connection's default schema is (a PostgreSQL `search_path` set in the
+    URL's `options`) is the one examined.
+
+    A database with civex's tables but no `alembic_version` (from before
+    Alembic) reports `current=None, behind=True`: `ensure_schema_current`
+    would stamp it. `check_structure=True` also reflects the tables
+    (`missing_structure`), which is much slower, for a doctor-style check.
+    """
+    head = head_revision()
+    with engine.connect() as connection:
+        revisions: list[str] = []
+        if inspect(connection).has_table("alembic_version"):
+            revisions = [
+                row[0]
+                for row in connection.exec_driver_sql(
+                    "SELECT version_num FROM alembic_version"
+                )
+            ]
+        connection.rollback()
+    missing = tuple(missing_structure(engine)) if check_structure else None
+    too_new = bool(_unknown_revisions(revisions))
+    return SchemaStatus(
+        current=", ".join(sorted(revisions)) or None,
+        head=head,
+        behind=not too_new and revisions != [head],
+        too_new=too_new,
+        missing_structure=missing,
+    )
+
+
 def too_new_error(database: str, revisions: list[str]) -> Exception:
     """The error for a database at `revisions` this civex doesn't know.
 
@@ -111,11 +201,11 @@ def too_new_error(database: str, revisions: list[str]) -> Exception:
         database=database,
         revisions=revisions,
         civex_version=__version__,
-        known_head=ScriptDirectory(str(_MIGRATIONS_DIR)).get_current_head(),
+        known_head=head_revision(),
     )
 
 
-def _refuse_newer_database(connection: Connection, cfg: Config) -> None:
+def _refuse_newer_database(connection: Connection) -> None:
     """Say so plainly when the database is from a newer civex.
 
     Alembic's own error for this ("Can't locate revision identified by ...")
@@ -124,15 +214,10 @@ def _refuse_newer_database(connection: Connection, cfg: Config) -> None:
     that was updated and this one wasn't.
     """
     from alembic.runtime.migration import MigrationContext
-    from alembic.util.exc import CommandError
 
-    script = ScriptDirectory.from_config(cfg)
-    unknown: list[str] = []
-    for revision in MigrationContext.configure(connection).get_current_heads():
-        try:
-            script.get_revision(revision)
-        except (CommandError, KeyError):
-            unknown.append(revision)
+    unknown = _unknown_revisions(
+        list(MigrationContext.configure(connection).get_current_heads())
+    )
     if not unknown:
         return
     where = connection.engine.url.render_as_string(hide_password=True)
@@ -150,7 +235,7 @@ def _migrate_connection(connection: Connection) -> None:
     if "alembic_version" not in tables and _LEGACY_MARKER_TABLE in tables:
         command.stamp(cfg, "head")
     else:
-        _refuse_newer_database(connection, cfg)
+        _refuse_newer_database(connection)
         command.upgrade(cfg, "head")
     connection.commit()
 
