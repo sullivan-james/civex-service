@@ -212,7 +212,6 @@ def test_foreign_keys_still_hold_on_a_partitioned_records(pg_schema: Engine) -> 
         assert s.execute(text("SELECT count(*) FROM record_notes")).scalar_one() == 0
 
 
-@pytest.mark.skip('bisect')
 @needs_pg
 def test_populated_database_keeps_its_data_indexes_and_foreign_keys(
     pg_schema: Engine,
@@ -360,7 +359,6 @@ def test_populated_database_keeps_its_data_indexes_and_foreign_keys(
         assert found == [ids[3]]
 
 
-@pytest.mark.skip('bisect')
 @needs_pg
 def test_downgrade_restores_plain_tables_with_the_data(pg_schema: Engine) -> None:
     ensure_schema_current(pg_schema)
