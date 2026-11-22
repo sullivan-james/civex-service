@@ -127,6 +127,21 @@ export async function tracked<T>(
   }
 }
 
+/** Write one file civex makes (a copy of the project, a release's) onto a
+ * drive: a job like any other, so it carries on in the status bar with its
+ * progress after the dialog that asked for it has closed, and says where the
+ * file is when it is done. */
+export function saveCopy(
+  ctx: FlowContext,
+  title: string,
+  save: (progressId: string) => Promise<{ path: string }>,
+) {
+  return job(ctx, title, async (j) => {
+    const saved = await tracked(ctx, j, save)
+    ctx.toast.success(`Saved: ${saved.path}`)
+  })
+}
+
 /** The plan, when the server refused without sending one. */
 async function planFor(
   selection: FileSelection,

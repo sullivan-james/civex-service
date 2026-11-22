@@ -64,7 +64,9 @@ describe('saving a copy', () => {
       await screen.findByRole('option', { name: /archive/ }),
     )
     await user.click(screen.getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(onSave).toHaveBeenCalledWith('archive'))
+    await waitFor(() =>
+      expect(onSave).toHaveBeenCalledWith('archive', expect.any(String)),
+    )
     expect(onDownload).not.toHaveBeenCalled()
     await waitFor(() => expect(onClose).toHaveBeenCalled())
     expect(
@@ -82,7 +84,7 @@ describe('saving a copy', () => {
     expect(onSave).not.toHaveBeenCalled()
   })
 
-  it('says why when the drive refuses it, and stays open', async () => {
+  it('runs in the background: the dialog closes at once, and a refusal is said', async () => {
     const user = userEvent.setup()
     const { onClose } = show(
       vi.fn(async () => {
@@ -90,9 +92,9 @@ describe('saving a copy', () => {
       }),
     )
     await user.click(await screen.findByRole('button', { name: 'Save' }))
+    expect(onClose).toHaveBeenCalled()
     expect(
       await screen.findByText(/can't be written to now/),
     ).toBeInTheDocument()
-    expect(onClose).not.toHaveBeenCalled()
   })
 })

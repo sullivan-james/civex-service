@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { bundleApi, type BundleImportResult } from '../../api/bundle'
 import { errorMessage } from '../../lib/errors'
 import { pluralise } from '../../lib/utils'
@@ -16,6 +16,7 @@ import {
   useToast,
 } from '../ui'
 import { useSaveChoice } from '../files/SaveToDrive'
+import { saveCopy } from '../files/fileFlows'
 
 /** Copy the project for another one: one file another civex can read. Shows
  * what would go in (the server's plan, asked again as the choice changes),
@@ -30,25 +31,20 @@ export function ExportBundleDialog({ onClose }: { onClose: () => void }) {
   const p = plan.data
   const toast = useToast()
   const save = useSaveChoice(files ? (p?.file_bytes ?? 0) : 0)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<unknown>(null)
+  const qc = useQueryClient()
 
-  async function go() {
-    if (save.how === 'download') {
-      bundleApi.download({ files })
-      return onClose()
+  function go() {
+    if (save.how === 'download') bundleApi.download({ files })
+    else {
+      // In the background: the status bar shows it, with its progress.
+      const options = { files, volume: save.volume }
+      void saveCopy(
+        { toast, qc, problem: () => undefined },
+        'Copying the project…',
+        (progressId) => bundleApi.save(options, progressId),
+      )
     }
-    setBusy(true)
-    setError(null)
-    try {
-      const saved = await bundleApi.save({ files, volume: save.volume })
-      toast.success(`Saved: ${saved.path}`)
-      onClose()
-    } catch (e) {
-      setError(e)
-    } finally {
-      setBusy(false)
-    }
+    onClose()
   }
 
   return (
@@ -88,19 +84,12 @@ export function ExportBundleDialog({ onClose }: { onClose: () => void }) {
             </p>
           )}
           {save.picker}
-          {error != null && <FormError message={errorMessage(error)} />}
         </div>
       </ModalBody>
       <ModalFooter>
-        <Button onClick={onClose} disabled={busy}>
-          Cancel
-        </Button>
-        <Button
-          variant="primary"
-          disabled={!p || busy || save.blocked}
-          onClick={go}
-        >
-          {busy ? 'Saving…' : save.how === 'drive' ? 'Save' : 'Download'}
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="primary" disabled={!p || save.blocked} onClick={go}>
+          {save.how === 'drive' ? 'Save' : 'Download'}
         </Button>
       </ModalFooter>
     </Modal>

@@ -1,7 +1,7 @@
 import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   Button,
-  FormError,
   Modal,
   ModalBody,
   ModalFooter,
@@ -10,7 +10,7 @@ import {
   useToast,
 } from '../ui'
 import { PROJECT, useDriveChoice } from '../../hooks/useDriveChoice'
-import { errorMessage } from '../../lib/errors'
+import { saveCopy } from './fileFlows'
 import { DrivePicker } from './DrivePicker'
 
 export type SaveHow = 'drive' | 'download'
@@ -56,7 +56,9 @@ export function useSaveChoice(need: number) {
   }
 }
 
-/** A small dialog for that choice alone: put it on a drive, or download it. */
+/** A small dialog for that choice alone: put it on a drive, or download it.
+ * Putting it on a drive runs in the background (`fileFlows.saveCopy`): the
+ * dialog closes at once and the status bar shows it. */
 export function SaveToDriveDialog({
   title,
   need,
@@ -68,50 +70,38 @@ export function SaveToDriveDialog({
   /** Its size in bytes, to check the drive has room. */
   need: number
   /** Write it onto the drive (none: the project folder); answers the path. */
-  onSave: (volume: string | null) => Promise<{ path: string }>
+  onSave: (
+    volume: string | null,
+    progressId: string,
+  ) => Promise<{ path: string }>
   onDownload: () => void
   onClose: () => void
 }) {
   const toast = useToast()
+  const qc = useQueryClient()
   const choice = useSaveChoice(need)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<unknown>(null)
 
-  async function go() {
-    if (choice.how === 'download') {
-      onDownload()
-      return onClose()
+  function go() {
+    if (choice.how === 'download') onDownload()
+    else {
+      const volume = choice.volume
+      void saveCopy(
+        { toast, qc, problem: () => undefined },
+        'Saving a copy…',
+        (progressId) => onSave(volume, progressId),
+      )
     }
-    setBusy(true)
-    setError(null)
-    try {
-      const saved = await onSave(choice.volume)
-      toast.success(`Saved: ${saved.path}`)
-      onClose()
-    } catch (e) {
-      setError(e)
-    } finally {
-      setBusy(false)
-    }
+    onClose()
   }
 
   return (
-    <Modal onClose={onClose} size="sm" dismissible={!busy}>
+    <Modal onClose={onClose} size="sm">
       <ModalHeader onClose={onClose}>{title}</ModalHeader>
-      <ModalBody className="space-y-3 text-sm">
-        {choice.picker}
-        {error != null && <FormError message={errorMessage(error)} />}
-      </ModalBody>
+      <ModalBody className="space-y-3 text-sm">{choice.picker}</ModalBody>
       <ModalFooter>
-        <Button onClick={onClose} disabled={busy}>
-          Cancel
-        </Button>
-        <Button
-          variant="primary"
-          disabled={busy || choice.blocked}
-          onClick={go}
-        >
-          {busy ? 'Saving…' : choice.how === 'drive' ? 'Save' : 'Download'}
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="primary" disabled={choice.blocked} onClick={go}>
+          {choice.how === 'drive' ? 'Save' : 'Download'}
         </Button>
       </ModalFooter>
     </Modal>

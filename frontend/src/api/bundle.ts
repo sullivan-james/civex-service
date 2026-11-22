@@ -1,5 +1,6 @@
 import { api } from './client'
 import { apiUrl } from '../utils/host'
+import { progressHeaders } from './fileAccess'
 
 /** What a bundle would hold (`GET /bundle/plan`): the counts the download
  * will have, and how big the files are. */
@@ -64,8 +65,15 @@ export const bundleApi = {
 
   /** Writes it straight onto a drive of this computer (none: the project
    * folder), with nothing passing through the browser. */
-  save: (options: BundleOptions & { volume: string | null }) =>
-    api.post<{ path: string; opened: boolean }>('/bundle/save', options),
+  save: (
+    options: BundleOptions & { volume: string | null },
+    progressId?: string,
+  ) =>
+    api.post<{ path: string; opened: boolean }>(
+      '/bundle/save',
+      options,
+      progressHeaders(progressId),
+    ),
 
   async import(file: File): Promise<BundleImportResult> {
     const form = new FormData()
