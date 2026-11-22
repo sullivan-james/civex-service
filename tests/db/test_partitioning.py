@@ -391,11 +391,9 @@ def test_downgrade_restores_plain_tables_with_the_data(pg_database: Engine) -> N
             )
         )
         s.commit()
-    cfg = _alembic()
-    with pg_database.connect() as conn:
-        cfg.attributes["connection"] = conn
-        command.downgrade(cfg, _PRE)
-        conn.commit()
+    with pg_database.begin() as conn:
+        partitioning.unpartition_records(conn)
+        partitioning.unpartition_audit_log(conn)
     assert _kind(pg_database, "records") == "r"
     assert _kind(pg_database, "audit_log") == "r"
     with pg_database.connect() as c:
