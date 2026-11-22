@@ -81,3 +81,25 @@ def test_a_pushed_change_is_judged_by_the_same_rule():
     assert p.action_for(_entry("schema", "purge")) == (p.DELETE, None)
     assert p.action_for(_entry("view", "update")) == (p.WRITE_RECORDS, p.ANYWHERE)
     assert p.action_for(_entry("record", "restore", mine)) == (p.WRITE_RECORDS, str(C1))
+
+
+def test_without_carves_collections_out_of_a_wider_grant():
+    writer = Permissions.of(p.READ, p.WRITE_RECORDS).without([p.WRITE_RECORDS], [C1])
+    assert not writer.can(p.WRITE_RECORDS, C1)
+    assert writer.can(p.WRITE_RECORDS, C2)  # and any collection made later
+    assert writer.can(p.WRITE_RECORDS)  # "somewhere" is untouched
+    assert writer.can(p.READ, C1)
+    with pytest.raises(NotAllowedError):
+        writer.require(p.WRITE_RECORDS, C1)
+
+
+def test_denied_collections_refuse_pushed_changes_and_round_trip():
+    writer = Permissions.of(p.READ, p.WRITE_RECORDS).without([p.WRITE_RECORDS], [C1])
+    mine = {"id": str(uuid.uuid4()), "dataset_id": str(C1)}
+
+    class Who:
+        name = "laptop"
+
+    assert writer.refuses(Who(), _entry("record", "create", mine)) is not None
+    assert Permissions.from_dict(writer.to_dict()) == writer
+    assert Permissions.from_dict({"actions": {"read": ["project"]}}).denied == {}

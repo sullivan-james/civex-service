@@ -7,7 +7,7 @@ import { useFileJobs } from '../fileJobs'
  * in a moment, and must not flash. */
 export const FILE_JOB_SHOW_AFTER_MS = 1000
 
-/** Things being done to files, as tasks: "Preparing files…", "Moving 120 files
+/** Things being done to files, as tasks: "Finding files…", "Moving 120 files
  * to archive…", "Building the folder…", each shown once it has been going for
  * a second. */
 export function useFileJobTasks(): BackgroundTask[] {
@@ -35,5 +35,6 @@ export function useFileJobTasks(): BackgroundTask[] {
       title: j.title,
       detail: j.detail,
       progress: j.progress,
+      actions: j.stop ? [{ label: 'Stop', onClick: j.stop }] : undefined,
     }))
 }

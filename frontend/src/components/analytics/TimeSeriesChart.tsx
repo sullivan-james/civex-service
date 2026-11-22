@@ -19,6 +19,7 @@ import {
   seriesColor,
 } from './chartTheme'
 import { ChartTooltip } from './ChartTooltip'
+import { formatBucketLabel } from './format'
 
 export interface TimeSeriesSeries {
   /** Key into each data point that holds this series' value. */
@@ -41,6 +42,8 @@ export interface TimeSeriesChartProps {
   variant?: 'line' | 'area'
   height?: number
   formatValue?: (value: number) => string
+  /** The x value as shown on the axis and in the tooltip; a date in the
+   * chosen pattern by default. */
   formatXAxis?: (value: string) => string
   /** Title of the value axis (a measure, with its unit). */
   valueLabel?: string
@@ -76,7 +79,7 @@ export function TimeSeriesChart({
   variant = 'line',
   height = 240,
   formatValue,
-  formatXAxis,
+  formatXAxis = formatBucketLabel,
   valueLabel,
   tooltipKey,
   onPointClick,
@@ -138,7 +141,11 @@ export function TimeSeriesChart({
         />
         <Tooltip
           content={
-            <ChartTooltip formatValue={formatValue} labelKey={tooltipKey} />
+            <ChartTooltip
+              formatValue={formatValue}
+              formatLabel={formatXAxis}
+              labelKey={tooltipKey}
+            />
           }
           cursor={{ stroke: 'var(--color-border)' }}
         />

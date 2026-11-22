@@ -18,6 +18,7 @@ import {
   SegmentedControl,
   type DataTableColumn,
 } from '../ui'
+import { formatTimestamp } from '../../utils/dates'
 
 const LIBRARY_MODES: { value: LibraryMode; label: string }[] = [
   { value: 'off', label: 'Nothing' },
@@ -26,7 +27,7 @@ const LIBRARY_MODES: { value: LibraryMode; label: string }[] = [
 ]
 
 function when(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleString() : 'never'
+  return iso ? formatTimestamp(iso) : 'never'
 }
 
 const DEVICES: DataTableColumn<SyncDevice>[] = [

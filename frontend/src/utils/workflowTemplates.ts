@@ -151,10 +151,10 @@ ${onChange(schema)}steps:
     inputs:
       bytes: read_file.bytes
   - id: add_or_update
-    plugin: civex.upsert_records
+    plugin: civex.rows_to_records
     config:
       schema: null
-      key_field: null
+      match_on: []
     inputs:
       table: read_table.table
 `,

@@ -38,18 +38,11 @@ export function atLeast(value: string, least: Precision): boolean {
   return !!kind && PRECISIONS.indexOf(kind) >= PRECISIONS.indexOf(least)
 }
 
+/** What a `date` field with this least precision takes, in words. */
 export function precisionHelp(least: Precision): string {
   return {
     year: 'A year, a month or a full date all work.',
     month: 'A month or a full date works; a bare year does not.',
     day: 'A full date is needed.',
-  }[least]
-}
-
-export function placeholderFor(least: Precision): string {
-  return {
-    year: '2019, 2019-06 or 2019-06-14',
-    month: '2019-06 or 2019-06-14',
-    day: '2019-06-14',
   }[least]
 }

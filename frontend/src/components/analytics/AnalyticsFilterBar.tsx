@@ -1,5 +1,16 @@
-import { Field, Select, Input, Button, FormGrid, FormFooter } from '../ui'
-import { utcToDatetimeLocal, datetimeLocalToUTC } from '../../utils/dates'
+import {
+  Field,
+  Select,
+  Button,
+  FormGrid,
+  FormFooter,
+  DateTimeInput,
+} from '../ui'
+import {
+  utcToDatetimeLocal,
+  datetimeLocalToUTC,
+  isWallTime,
+} from '../../utils/dates'
 import type {
   AnalyticsBucket,
   AnalyticsFiltersState,
@@ -85,23 +96,19 @@ export function AnalyticsFilterBar({
       className={`p-4 border border-border rounded-md bg-canvas-subtle ${className}`}
     >
       <Field label="From" span={4}>
-        <Input
-          type="datetime-local"
+        <DateTimeInput
           value={utcToDatetimeLocal(filters.start)}
-          onChange={(e) =>
-            e.target.value &&
-            onChange({ start: datetimeLocalToUTC(e.target.value) })
+          onChange={(next) =>
+            isWallTime(next) && onChange({ start: datetimeLocalToUTC(next) })
           }
         />
       </Field>
 
       <Field label="To" span={4}>
-        <Input
-          type="datetime-local"
+        <DateTimeInput
           value={utcToDatetimeLocal(filters.end)}
-          onChange={(e) =>
-            e.target.value &&
-            onChange({ end: datetimeLocalToUTC(e.target.value) })
+          onChange={(next) =>
+            isWallTime(next) && onChange({ end: datetimeLocalToUTC(next) })
           }
         />
       </Field>

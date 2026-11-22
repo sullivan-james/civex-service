@@ -18,6 +18,7 @@ from sqlalchemy import (
     or_,
     select,
     String,
+    type_coerce,
     update,
 )
 from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
@@ -35,7 +36,8 @@ from civex.domain import notes as note_rules
 from civex.domain.dtos import RecordDTO
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.filters import FilterCondition, FilterGroup, FilterNode, SortKey
-from civex.domain.query import ID_PREFIX_MIN, ResolvedQuery, TextSearch
+from civex.domain.file_access import HeldFile
+from civex.domain.query import ID_PREFIX_MIN, ResolvedQuery, ResolvedSet, TextSearch
 from civex.domain.summary import RawSummary, SummaryPlan
 from civex.repositories.local._ids import prefix_span
 from civex.repositories.local._bucketing import day_bucket
@@ -356,6 +358,34 @@ class LocalRecordRepository:
             rid
             for (rid,) in _base_query(self._s, query, self._pg).with_entities(Record.id)
         ]
+
+    def held_files(
+        self,
+        picked: ResolvedSet,
+        file_fields: dict[str, str],
+        search: TextSearch | None = None,
+        depth: int = 0,
+        following: bool = True,
+    ) -> list[HeldFile]:
+        """Every file value the set's records hold (see `held_files`)."""
+        from civex.repositories.local import held_files
+
+        return held_files.held_files(
+            self._s, picked, file_fields, search, depth, self._pg, following
+        )
+
+    def holders(self, picked: ResolvedSet) -> list[Any]:
+        """The set's records that hold a file (see `held_files.holders`)."""
+        from civex.repositories.local import held_files
+
+        return held_files.holders(self._s, picked, self._pg)
+
+    def shared_copies(self) -> dict[tuple[str, str | None], int]:
+        """The copies several live records point at, with how many (see
+        `held_files.shared_copies`)."""
+        from civex.repositories.local import held_files
+
+        return held_files.shared_copies(self._s)
 
     def count_children(
         self, parent_ids: list[uuid.UUID]
@@ -721,6 +751,66 @@ class LocalRecordRepository:
         self._s.flush()
         return _to_dto(row)
 
+    def update_many(
+        self, rows: list[tuple[uuid.UUID, dict[str, Any]]], stamp: datetime
+    ) -> None:
+        """Save many records' data at once, each changed at `stamp`: one
+        statement for the lot (the driver runs it once per row), where
+        `update` is a read and a write per record. For changes that leave
+        every file and every link to another record as it was: the catalogs
+        kept in step by a single save's events (`file_references`,
+        `record_references`) are not touched here."""
+        if not rows:
+            return
+        self._s.execute(
+            update(Record),
+            [{"id": rid, "data": data, "updated_at": stamp} for rid, data in rows],
+        )
+        # Copies of these records the session holds are out of date now.
+        changed = {rid for rid, _ in rows}
+        for held in list(self._s.identity_map.values()):
+            if isinstance(held, Record) and held.id in changed:
+                self._s.expire(held)
+
+    def field_rows(
+        self,
+        field_ids: list[str],
+        query: ResolvedQuery | None = None,
+        ids: list[uuid.UUID] | None = None,
+    ) -> list[tuple[Any, Any, Any, dict[str, Any]]]:
+        """For every live record `query` lists (or among `ids`): its id, its
+        schema and its collection (each as the database keeps it) and its
+        values for `field_ids` alone (those it has). What a plan of an edit to
+        those fields has to read of each record, in one statement however
+        many (a few, for a great many ids), instead of the records."""
+        columns = [
+            type_coerce(Record.id, String),
+            type_coerce(Record.schema_id, String),
+            type_coerce(Record.dataset_id, String),
+            *[_field_value(f, self._pg) for f in field_ids],
+        ]
+        if query is not None:
+            batches = [_base_query(self._s, query, self._pg).with_entities(*columns)]
+        else:
+            wanted = list(ids or [])
+            batches = [
+                self._s.query(*columns).filter(
+                    Record.id.in_(wanted[i : i + _MANY_IDS]),
+                    Record.deleted_at.is_(None),
+                )
+                for i in range(0, len(wanted), _MANY_IDS)
+            ]
+        out: list[tuple[Any, Any, Any, dict[str, Any]]] = []
+        for batch in batches:
+            for rid, schema_id, dataset_id, *values in batch:
+                held = {}
+                for field_id, value in zip(field_ids, values):
+                    value = _loaded(value, self._pg)
+                    if value is not None:
+                        held[field_id] = value
+                out.append((rid, schema_id, dataset_id, held))
+        return out
+
     def open_notes_of(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, tuple[int, str]]:
         """For each of these records with threads of notes not yet resolved:
         how many, and the text of the latest one's first note (records with
@@ -1023,6 +1113,29 @@ class LocalRecordRepository:
         self._s.flush()
 
 
+# Ids named in one statement (well inside SQLite's and PostgreSQL's limits
+# on bound values).
+_MANY_IDS = 20_000
+
+
+def _field_value(field_id: str, pg: bool) -> Any:
+    """A record's value for one field, read alone: parsed on PostgreSQL, and
+    as JSON text on SQLite, for `_loaded` to parse (the text `null` where the
+    record has none, which it doesn't parse)."""
+    if pg:
+        return Record.data[field_id]
+    return type_coerce(
+        func.json_quote(func.json_extract(Record.data, f'$."{field_id}"')), String
+    )
+
+
+def _loaded(value: Any, pg: bool) -> Any:
+    """A value `_field_value` read, as the value (None: the record has none)."""
+    if pg or value is None:
+        return value
+    return None if value == "null" else json.loads(value)
+
+
 def _descends(ancestor_id: uuid.UUID, hops: int):
     """The record sits `hops` levels below `ancestor_id` (1: its child)."""
     if hops == 1:
@@ -1075,7 +1188,7 @@ def _like_pattern(term: str) -> str:
     return f"%{escaped}%"
 
 
-def text_match(search: TextSearch, is_postgres: bool = False):
+def text_match(search: TextSearch, is_postgres: bool = False, entity: Any = Record):
     """The one rule for which records a text search finds (see TextSearch):
     a value of one of its fields contains the term, case-insensitively, or
     the record's id starts with it. A value is a top-level string or number,
@@ -1085,19 +1198,25 @@ def text_match(search: TextSearch, is_postgres: bool = False):
     One correlated EXISTS over the record's own JSON (`json_each` on SQLite,
     `jsonb_each`/`jsonb_array_elements` on PostgreSQL), so a search stays one
     statement. It reads every candidate row's data: no index serves a
-    substring match (a trigram index over the values would, on PostgreSQL)."""
+    substring match (a trigram index over the values would, on PostgreSQL).
+    `entity`: the records asked about, when not the statement's own (a
+    record above it)."""
     like = _like_pattern(search.term)
     matches = []
     if search.field_ids:
-        matches.append(_values_contain(list(search.field_ids), like, is_postgres))
+        matches.append(
+            _values_contain(list(search.field_ids), like, is_postgres, entity)
+        )
     digits = search.term.strip().lower().replace("-", "")
     span = prefix_span(digits) if len(digits) >= ID_PREFIX_MIN else None
     if span is not None:
-        matches.append(Record.id.between(*span))
+        matches.append(entity.id.between(*span))
     return or_(*matches) if matches else false()
 
 
-def _values_contain(field_ids: list[str], like: str, is_postgres: bool):
+def _values_contain(
+    field_ids: list[str], like: str, is_postgres: bool, entity: Any = Record
+):
     """EXISTS a top-level entry of one of `field_ids` whose value, a list
     item of it, or a file's name in either, contains `like`."""
     entry: Any
@@ -1108,7 +1227,7 @@ def _values_contain(field_ids: list[str], like: str, is_postgres: bool):
         # render_derived names the columns (`AS e(key, value)`), so they
         # don't depend on how PostgreSQL names a set-returning function's.
         entry = (
-            func.jsonb_each(Record.data).table_valued("key", "value").render_derived()
+            func.jsonb_each(entity.data).table_valued("key", "value").render_derived()
         )
         entry_type = func.jsonb_typeof(entry.c.value)
         items = case(
@@ -1125,7 +1244,7 @@ def _values_contain(field_ids: list[str], like: str, is_postgres: bool):
         def name_of(value: Any) -> Any:
             return value.op("->>")(literal_column("'filename'"))
     else:
-        entry = func.json_each(Record.data).table_valued("key", "value", "type")
+        entry = func.json_each(entity.data).table_valued("key", "value", "type")
         entry_type = entry.c.type
         items = case((entry_type == "array", entry.c.value), else_=literal("[]"))
         item = func.json_each(items).table_valued("value", "type")

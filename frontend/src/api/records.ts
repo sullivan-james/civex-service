@@ -248,6 +248,8 @@ export interface BulkEditResult {
   skipped: number
   skipped_records: BulkEditSkip[]
   runs: number
+  /** It was asked to stop before it had gone through every record. */
+  stopped?: boolean
 }
 
 export interface RecordMovePlan {

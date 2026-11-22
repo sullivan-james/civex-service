@@ -3,7 +3,7 @@ import { FileLink, FileLocationChip } from './FileLocation'
 import { Badge } from '../ui'
 import { ReferenceLink } from './ReferenceLink'
 import { useFieldTimeZone } from './timeZoneContext'
-import { formatDateTime } from '../../utils/dates'
+import { formatDate, formatDateTime } from '../../utils/dates'
 import { formatLocation, isGeometry } from '../../utils/geo'
 import { describeGeometry } from '../../utils/geoDraft'
 import type { Field } from '../../api/schemas'
@@ -42,6 +42,9 @@ export function FieldValue({
     )
   if (field?.type === 'longtext' && typeof value === 'string')
     return <span className="whitespace-pre-wrap">{value}</span>
+  if (field?.type === 'date' && typeof value === 'string' && value)
+    // In the chosen pattern, at its own precision; the stored form on hover.
+    return <span title={value}>{formatDate(value)}</span>
   if (field?.type === 'datetime' && typeof value === 'string' && value)
     // Shown as wall time in the field's zone; the stored UTC value is on hover.
     return <span title={value}>{formatDateTime(value, timeZone)}</span>

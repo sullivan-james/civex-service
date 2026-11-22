@@ -40,7 +40,7 @@ from civex.domain import geo as geo_rules
 from civex.domain import tables as table_rules
 from civex.domain import templating
 from civex.domain.naming import display_label
-from civex.domain.query import RecordQuery
+from civex.domain.query import RecordQuery, RecordSet
 from civex.domain.placement import STEP_COPY, STEP_MOVE, STEP_THERE
 from civex.domain.transfers import KIND_FILES, TransferSpec
 from civex.services.transfer_engine import Step, plan_steps
@@ -51,6 +51,7 @@ from civex.domain.file_access import (
     SERVER_STATES,
     server_state,
     copy_key,
+    record_key,
     MovePlan,
     FileListing,
     PlaceSummary,
@@ -98,6 +99,8 @@ MISSING_NOTE = "MISSING.txt"
 GENERATED = "generated"
 # Records per page when a table works out derived columns.
 TABLE_PAGE = 500
+# Records read at a time when a plan reads the ones that hold files.
+HOLDERS_PAGE = 500
 # How a file reaches a typed table: where it is on this computer, or its name.
 FILES_PATH = "path"
 FILES_NAME = "name"
@@ -198,6 +201,86 @@ class FileAccessService:
         self._fetch(remote, progress, sizes=_sizes(found.to_fetch))
         return self._absent_now(self._plan(selection, with_sources, progress))
 
+    def preview(self, selection: FileSelection, limit: int = 0) -> FilePlan:
+        """A plan to show before anything is made: the totals of every file
+        (how many, how big, on which drives, what can't be reached) with only
+        the first `limit` files named and given their paths. The totals come
+        from the database alone (`_held`, as the files list does), so a
+        preview takes the same short while whatever the selection's size; a
+        full `plan` names every file, which costs by the file. `FilePlan.named`
+        says how many of its items carry a path (they come first).
+
+        A selection that makes tables is planned in full: a table lists
+        records, and the plan says how many rows each has."""
+        if not self._lean(selection):
+            return self.plan(selection)
+        known = self._all_file_fields()
+        held = self._held(selection)
+        if held and selection.fields and not (known & set(selection.fields)):
+            raise ValidationError(
+                "None of the selected records has a file field named "
+                + ", ".join(f"'{f}'" for f in selection.fields)
+            )
+        kinds = set(selection.fields) if selection.fields else None
+        flat = selection.layout == LAYOUT_FLAT
+        # In record order, each file once where a plan lists it once: the
+        # same file under the same name in one record (anywhere, for one
+        # folder of everything).
+        seen: set[tuple[Any, ...]] = set()
+        items: list[FileItem] = []
+        dropped = 0
+        for item, _, _ in sorted(held, key=lambda h: h[2][:2]):
+            if kinds is not None and item.field not in kinds:
+                continue
+            spot = (
+                None if flat else item.record_id,
+                item.sha256,
+                item.filename.casefold(),
+            )
+            if spot in seen:
+                dropped += 1
+                continue
+            seen.add(spot)
+            items.append(item)
+        # Named: the first files, and a few records of each group that can't
+        # be reached (they are named to the person).
+        wanted = list(dict.fromkeys(i.record_id for i in items[:limit]))
+        shown: dict[tuple[Any, ...], int] = {}
+        for item in items:
+            if item.available or item.state == "remote":
+                continue
+            group = (item.volume, item.state)
+            if shown.get(group, 0) < _SHOWN_RECORDS and item.record_id not in wanted:
+                shown[group] = shown.get(group, 0) + 1
+                wanted.append(item.record_id)
+        named: list[FileItem] = []
+        if wanted:
+            named = self._plan(
+                FileSelection(
+                    record_ids=wanted,
+                    fields=selection.fields,
+                    base=selection.base or selection.query.within,
+                    layout=selection.layout,
+                ),
+                False,
+                None,
+                lead_with_collection=len({at[2] for _, _, at in held}) > 1,
+            ).items
+        records = set(wanted)
+        first = set(dict.fromkeys(i.record_id for i in items[:limit]))
+        # The first files (in path order), then the others that were named.
+        front = sorted(
+            named, key=lambda i: (i.record_id not in first, i.path.casefold())
+        )
+        rest = [i for i in items if i.record_id not in records]
+        every = [*front, *rest]
+        return FilePlan(
+            items=every,
+            unavailable=_unavailable_groups(every),
+            duplicates_dropped=dropped,
+            named=sum(1 for i in front if i.record_id in first),
+        )
+
     def _absent_now(self, plan: FilePlan) -> FilePlan:
         """A plan made after downloading what was only on the server: a file
         still not here is one the server hasn't got either, so it can't be
@@ -249,7 +332,11 @@ class FileAccessService:
         selection: FileSelection,
         with_sources: bool,
         progress: Progress | None,
+        lead_with_collection: bool | None = None,
     ) -> FilePlan:
+        """`lead_with_collection`: whether paths start with the collection's
+        name, when the caller knows (it is planning part of a selection that
+        spans several, or doesn't); None works it out from what is planned."""
         if selection.layout not in LAYOUTS:
             raise ValidationError(f"layout must be one of: {', '.join(LAYOUTS)}")
         flat = selection.layout == LAYOUT_FLAT
@@ -260,12 +347,21 @@ class FileAccessService:
                 "A table written in each folder needs the layout with a folder per "
                 "record (tree)."
             )
-        records = self._select_records(selection, progress)
+        # Files alone: only the records that hold one are read (the catalog
+        # says which), not every record of the selection.
+        lean = self._lean(selection)
+        records = (
+            self._file_holders(selection, progress)
+            if lean
+            else self._select_records(selection, progress)
+        )
         values: list[tuple[RecordDTO, str, dict[str, Any]]] = []
         if selection.files:
-            if progress:
-                progress.phase("Working out the folders")
             values, known = self._records.file_values(records, selection.fields)
+            if lean:
+                # The kinds of record chosen aren't read, so the fields are
+                # checked against every kind's.
+                known = self._all_file_fields()
             # With no records yet there is nothing to check the fields against:
             # the export is empty for now, not wrong.
             if records and selection.fields and not (known & set(selection.fields)):
@@ -314,6 +410,8 @@ class FileAccessService:
                     | {h.dataset_id for h in holders.values()}
                 )
                 > 1
+                if lead_with_collection is None
+                else lead_with_collection
             )
         )
         segments: dict[str, str] = {}
@@ -1099,6 +1197,42 @@ class FileAccessService:
             return _gone(item)
         return dataclasses.replace(item, source=str(path))
 
+    def _lean(self, selection: FileSelection) -> bool:
+        """Whether a plan of this selection needs only the records that hold
+        files: it takes files and makes no table (a table lists records with
+        none). Not for records read from elsewhere (`with_records`: a
+        release's are in memory already)."""
+        return (
+            selection.files
+            and not selection.tables
+            and hasattr(self._records, "holding_files")
+        )
+
+    def _all_file_fields(self) -> set[str]:
+        return {
+            f.name
+            for s in self._schemas.list_all()
+            for f in s.fields
+            if f.dtype in ("file", "file_list")
+        }
+
+    def _file_holders(
+        self, selection: FileSelection, progress: Progress | None
+    ) -> list[RecordDTO]:
+        """The selection's records that hold a file, in full: which they are
+        comes from the catalog (one statement, `holding_files`), and only
+        they are read, a page at a time. So a plan costs by its files, not by
+        the records they are among."""
+        ids = self._records.holding_files(self._record_set(selection))
+        if progress:
+            progress.phase("Finding files", len(ids))
+        found: list[RecordDTO] = []
+        for start in range(0, len(ids), HOLDERS_PAGE):
+            found.extend(self._records.get_many(ids[start : start + HOLDERS_PAGE]))
+            if progress:
+                progress.advance(len(found))
+        return found
+
     def _select_records(
         self, selection: FileSelection, progress: Progress | None = None
     ) -> list[RecordDTO]:
@@ -1158,8 +1292,6 @@ class FileAccessService:
         chosen as well as the ones found beneath them."""
         everything = found
         if selection.below and found:
-            if progress:
-                progress.phase("Finding what is inside")
             # Without tables, only the records holding files are used (folder
             # names come from their ancestors, looked up apart): the rest are
             # walked through, not put in full form.
@@ -1394,10 +1526,7 @@ class FileAccessService:
         kept: dict[str, dict[str, Any]] = {}
         handled = 0
         if progress:
-            progress.phase(
-                "Making the folder" if mode == "link" else "Copying the files",
-                len(plan.items),
-            )
+            progress.phase("Copying files", len(plan.items))
         # Work a folder at a time: one listing of what an earlier export left
         # there (none for a fresh folder) and one mkdir, not a stat and a mkdir
         # per file.
@@ -1578,6 +1707,171 @@ class FileAccessService:
 
     # -- the files of a selection, by place (the Files tab) -----------------
 
+    def _record_set(self, selection: FileSelection) -> RecordSet:
+        """The records a selection means, as a set the database works out
+        (the same reading as `_select_records`, which loads them)."""
+        allowed = list(selection.schemas) if selection.schemas else None
+        if selection.record_ids is not None:
+            return RecordSet(
+                ids=list(selection.record_ids), below=selection.below, kinds=allowed
+            )
+        query = selection.query
+        narrowed = bool(query.where or query.search)
+        ids: list[str] = []
+        below = selection.below
+        # The kinds a record beneath the chosen ones can be: None = any.
+        beneath: list[str] | None = None
+        if query.within and not query.schema:
+            anchor = self._records.get(query.within)
+            beneath = [
+                d.name
+                for d, _ in self._schemas.descendants(
+                    self._schemas.get(anchor.schema_name)
+                )
+            ]
+            ids = [str(anchor.id)]
+            queries = [
+                query.for_kind(n) for n in beneath if allowed is None or n in allowed
+            ]
+            # Every kind beneath the record is asked already: looking beneath
+            # what they list finds nothing more (unless a search or a term
+            # narrowed them, which their own children need not match).
+            below = below and narrowed
+        elif allowed and not query.schema:
+            queries = [query.for_kind(n) for n in allowed]
+            beneath = list(
+                dict.fromkeys(
+                    d.name
+                    for n in allowed
+                    for d, _ in self._schemas.descendants(self._schemas.get(n))
+                )
+            )
+        else:
+            queries = [query]
+            if selection.with_within and query.within and query.schema:
+                ids = [str(self._records.get(query.within).id)]
+            if query.schema:
+                beneath = [
+                    d.name
+                    for d, _ in self._schemas.descendants(
+                        self._schemas.get(query.schema)
+                    )
+                ]
+            elif not (
+                narrowed or query.filter_tree or query.parent_record_id or query.within
+            ):
+                # A whole collection (or project): everything beneath its
+                # records is among them.
+                below = False
+        listed = None
+        if below and query.filter_tree:
+            kinds = (
+                beneath
+                if beneath is not None
+                else [s.name for s in self._schemas.list_all()]
+            )
+            listed = [query.for_kind(k) for k in kinds]
+        return RecordSet(
+            queries=queries, ids=ids, below=below, listed=listed, kinds=allowed
+        )
+
+    def _held(
+        self, selection: FileSelection, name: str | None = None
+    ) -> list[tuple[FileItem, bool, tuple[Any, Any, Any]]]:
+        """Every file the selection's records hold, of every kind, from the
+        database alone (`RecordService.held_files`): one statement however
+        many records, and no drive asked where a file is (a drive is asked
+        once whether it can be used). Each is a `FileItem` not yet named (no
+        path, no record name, the file's name as it was added: `_named`
+        names the few that are shown), whether `name` found it, and where it
+        sorts ((its record's time, its record, its collection) as kept)."""
+        if selection.layout not in LAYOUTS:
+            raise ValidationError(f"layout must be one of: {', '.join(LAYOUTS)}")
+        held = self._records.held_files(
+            self._record_set(selection), (name or "").strip() or None
+        )
+        following = self._records.files_from_server()
+        order = {v: n for n, v in enumerate(self._store.volume_names())}
+        status = _memo(self._store.volume_status)
+        ids: dict[Any, str] = {}
+        waiting, waiting_fix = (
+            "Not downloaded to this computer yet.",
+            "Opening or exporting it downloads it from the server.",
+        )
+        lost, lost_fix = not_on_server_yet(None)
+        out: list[tuple[FileItem, bool, tuple[Any, Any, Any]]] = []
+        for h in held:
+            record_id = ids.get(h.record_id)
+            if record_id is None:
+                record_id = ids[h.record_id] = record_key(h.record_id)
+            volume = h.volume
+            if volume is None and h.stored_on:
+                known = sorted(
+                    (v for v in h.stored_on if v in order), key=order.__getitem__
+                )
+                volume = next(
+                    (v for v in known if status(v).reachable),
+                    known[0] if known else None,
+                )
+            if volume is not None:
+                st = status(volume)
+                item = FileItem(
+                    "",
+                    h.sha256,
+                    h.filename,
+                    h.size,
+                    record_id,
+                    "",
+                    h.field,
+                    volume,
+                    st.state,
+                    st.reachable,
+                    st.reason,
+                    st.fix,
+                    None,
+                    h.on_server if following else None,
+                )
+            elif following and h.server_lacks and not h.on_server:
+                item = FileItem(
+                    "",
+                    h.sha256,
+                    h.filename,
+                    h.size,
+                    record_id,
+                    "",
+                    h.field,
+                    None,
+                    "absent",
+                    False,
+                    lost,
+                    lost_fix,
+                    None,
+                    False,
+                )
+            elif following:
+                item = FileItem(
+                    "",
+                    h.sha256,
+                    h.filename,
+                    h.size,
+                    record_id,
+                    "",
+                    h.field,
+                    None,
+                    "remote",
+                    False,
+                    waiting,
+                    waiting_fix,
+                    None,
+                    h.on_server,
+                )
+            else:
+                item = FileItem(
+                    "", h.sha256, h.filename, h.size, record_id, "", h.field
+                )
+            out.append((item, h.found, (h.created_at, h.record_id, h.dataset_id)))
+        return out
+
     def chosen(
         self,
         selection: FileSelection,
@@ -1587,54 +1881,70 @@ class FileAccessService:
         used_by: list[int] | None = None,
         progress: Progress | None = None,
         server: str | None = None,
-    ) -> tuple[FilePlan, list[FileItem]]:
+    ) -> list[FileItem]:
         """The files a person has picked: a selection's files, narrowed to its
-        kinds of file (`selection.fields`), a place (`in_place`), a name (in
-        the file's name or the names of the records it sits under), and
-        ticked files (`shas`: a file with every use of it listed here; records
-        outside the selection that use it are not picked), and how many live
-        records use a file (`used_by`, see `use_counts`), and whether the
-        server has it (`server`: `sent` or `unsent`, see `server_state`). The one rule
-        behind the file list and every action on it, so what is listed is what
-        is acted on. The plan returned is of every kind (what the list's
-        choices are counted from)."""
+        kinds of file (`selection.fields`), a place (`in_place`), a name (the
+        name a file was added under, or its record or one above it found as a
+        search of records finds them), ticked files (`shas`: a file with
+        every use of it listed here; records outside the selection that use
+        it are not picked), how many live records use a file (`used_by`, see
+        `use_counts`), and whether the server has it (`server`: `sent` or
+        `unsent`, see `server_state`). The one rule behind the file list and
+        every action on it, so what is listed is what is acted on.
+
+        Answered from the database alone (`_held`), so it costs the same
+        short while whatever the selection's size; the files come without a
+        path or a record's name, which no action on them needs."""
+        if progress:
+            progress.phase("Finding files")
+        return self._chosen(
+            self._held(selection, name), selection, place, shas, server, used_by
+        )
+
+    def _chosen(
+        self,
+        held: list[tuple[FileItem, bool, tuple[Any, Any, Any]]],
+        selection: FileSelection,
+        place: str | None,
+        shas: list[str] | None,
+        server: str | None,
+        used_by: list[int] | None = None,
+    ) -> list[FileItem]:
         if server is not None and server not in SERVER_STATES:
             raise ValidationError(f"server must be one of: {', '.join(SERVER_STATES)}")
-        plan = self.plan(dataclasses.replace(selection, fields=None), progress=progress)
         kinds = set(selection.fields) if selection.fields else None
-        needle = (name or "").strip().casefold()
         wanted = set(shas) if shas is not None else None
         items = [
             i
-            for i in plan.items
-            if (kinds is None or i.field in kinds)
+            for i, found, _ in held
+            if found
+            and (kinds is None or i.field in kinds)
             and (place is None or in_place(i, place))
             and (server is None or server_state(i) == server)
-            and (
-                not needle
-                or needle in i.filename.casefold()
-                or needle in i.path.casefold()
-                or needle in i.record_name.casefold()
-            )
             and (wanted is None or i.sha256 in wanted)
         ]
         if used_by:
             counts = self.use_counts(items)
             items = [i for i in items if counts[copy_key(i)] in set(used_by)]
-        return plan, items
+        return items
 
     def use_counts(self, items: list[FileItem]) -> dict[str, int]:
         """How many live records use each of these files as stored (by
         `copy_key`: the copy they point at), anywhere (at least the records
-        among these that do). A duplicate on another drive is another file."""
-        users = self.refs.copy_users(i.sha256 for i in items) if self.refs else {}
-        here: dict[str, set[str]] = {}
+        among these that do). A duplicate on another drive is another file.
+        One statement, whatever the number of files."""
+        uses: dict[str, list[FileItem]] = {}
         for i in items:
-            here.setdefault(copy_key(i), set()).add(i.record_id)
-        return {
-            key: max(len(users.get(_key_parts(key), ())), len(records))
-            for key, records in here.items()
-        }
+            uses.setdefault(copy_key(i), []).append(i)
+        return self._use_counts(uses)
+
+    def _use_counts(self, uses: dict[str, list[FileItem]]) -> dict[str, int]:
+        users = self._records.shared_copies()
+        out: dict[str, int] = {}
+        for key, found in uses.items():
+            here = 1 if len(found) == 1 else len({i.record_id for i in found})
+            out[key] = max(users.get(_key_parts(key), 0), here)
+        return out
 
     def listing(
         self,
@@ -1654,48 +1964,119 @@ class FileAccessService:
         view) and how many of each kind the selection holds (`kinds`, before
         narrowing by kind); every count is of files, not of uses. `used_by`
         keeps the files used by exactly so many live records (anywhere), and
-        `sharing` counts the files by that. `sort`: path, name, size, record
-        or place; a leading "-" reverses it."""
-        plan, items = self.chosen(selection, place, name, server=server)
+        `sharing` counts the files by that.
+
+        The counts and the order come from the database alone (`_held`);
+        only the page's rows are named (`_named`: their records, the records
+        above them, the names their templates give). So `sort` orders by what
+        is stored: `path` and `record` by the order records are listed in
+        (when each was added), `name` by the name a file was added under,
+        `size`, `place`; a leading "-" reverses it."""
+        if server is not None and server not in SERVER_STATES:
+            raise ValidationError(f"server must be one of: {', '.join(SERVER_STATES)}")
+        held = self._held(selection, name)
+        chosen_kinds = set(selection.fields) if selection.fields else None
+        every = [i for i, _, _ in held]
         of_kind = (
-            [i for i in plan.items if i.field in set(selection.fields)]
-            if selection.fields
-            else plan.items
+            [i for i in every if i.field in chosen_kinds] if chosen_kinds else every
         )
+        # One pass: the files that are listed (narrowed as `_chosen` narrows
+        # them), gathered by copy, and where each copy sorts (by the first of
+        # the records that use it).
         uses: dict[str, list[FileItem]] = {}
-        for item in sorted(items, key=lambda i: i.path.casefold()):
-            uses.setdefault(copy_key(item), []).append(item)
-        rows = [found[0] for found in uses.values()]
-        used = self.use_counts(items)
-        counts = Counter(used[copy_key(i)] for i in rows)
-        if used_by:
-            rows = [i for i in rows if used[copy_key(i)] in set(used_by)]
-        key, reverse = sort.lstrip("-"), sort.startswith("-")
-        order: dict[str, Callable[[FileItem], Any]] = {
-            "path": lambda i: i.path.casefold(),
-            "name": lambda i: i.filename.casefold(),
-            "size": lambda i: i.size,
-            "record": lambda i: (i.record_name.casefold(), i.path.casefold()),
-            "place": lambda i: (place_of(i)[0].casefold(), i.path.casefold()),
+        first: dict[str, tuple[Any, ...]] = {}
+        for item, found, (made, record, _) in held:
+            if not (
+                found
+                and (chosen_kinds is None or item.field in chosen_kinds)
+                and (place is None or in_place(item, place))
+                and (server is None or server_state(item) == server)
+            ):
+                continue
+            key = copy_key(item)
+            at = (made, record, item.filename.casefold(), item.sha256)
+            if key not in uses:
+                uses[key] = [item]
+                first[key] = (*at, item)
+                continue
+            uses[key].append(item)
+            if at < first[key][:4]:
+                first[key] = (*at, item)
+        used = self._use_counts(uses)
+        counts = Counter(used.values())
+        rows = [key for key in uses if not used_by or used[key] in set(used_by)]
+        key_name, reverse = sort.lstrip("-"), sort.startswith("-")
+        order: dict[str, Callable[[str], Any]] = {
+            "path": lambda k: first[k][:4],
+            "record": lambda k: first[k][:4],
+            "name": lambda k: (first[k][2], *first[k][:2], first[k][3]),
+            "size": lambda k: (first[k][4].size, *first[k][:4]),
+            "place": lambda k: (place_of(first[k][4])[0].casefold(), *first[k][:4]),
         }
-        if key not in order:
+        if key_name not in order:
             raise ValidationError(f"sort must be one of: {', '.join(order)}")
-        rows.sort(key=order[key], reverse=reverse)
-        page = rows[offset : offset + limit]
+        rows.sort(key=order[key_name], reverse=reverse)
+        shown = rows[offset : offset + limit]
+        named = self._named(
+            selection,
+            {key: uses[key] for key in shown},
+            len({at[2] for _, _, at in held}) > 1,
+        )
         return FileListing(
             total=len(rows),
             summary=_places(_one_each(of_kind)),
             server=_by_server(of_kind),
-            items=page,
-            kinds=_kinds(plan.items),
-            uses={copy_key(i): uses[copy_key(i)] for i in page},
+            items=[named[key][0] for key in shown],
+            kinds=_kinds(every),
+            uses=named,
             others={
-                copy_key(i): used[copy_key(i)]
-                - len({u.record_id for u in uses[copy_key(i)]})
-                for i in page
+                key: used[key] - len({u.record_id for u in uses[key]}) for key in shown
             },
             sharing=[{"records": n, "files": counts[n]} for n in sorted(counts)],
         )
+
+    def _named(
+        self,
+        selection: FileSelection,
+        uses: dict[str, list[FileItem]],
+        several_collections: bool,
+    ) -> dict[str, list[FileItem]]:
+        """The same files as they are shown: each with its path (the records
+        above it), its record's name, the name its template gives it and why
+        it can't be reached when it can't. `uses` is the files to name, by
+        copy; only their records are read (a plan of just those, so the one
+        path rule names them), which is why a page costs the same whatever it
+        is a page of. Each copy's uses come back in path order."""
+        wanted = {
+            (i.record_id, i.field, i.sha256) for found in uses.values() for i in found
+        }
+        if not wanted:
+            return {}
+        plan = self._plan(
+            FileSelection(
+                record_ids=sorted({record for record, _, _ in wanted}),
+                base=selection.base or selection.query.within,
+                layout=selection.layout,
+            ),
+            False,
+            None,
+            lead_with_collection=several_collections,
+        )
+        found: dict[tuple[str, str, str], list[FileItem]] = {}
+        for item in plan.items:
+            found.setdefault((item.record_id, item.field, item.sha256), []).append(item)
+        out: dict[str, list[FileItem]] = {}
+        for key, items in uses.items():
+            named = [
+                n
+                for spot in dict.fromkeys(
+                    (i.record_id, i.field, i.sha256) for i in items
+                )
+                for n in found.get(spot, [])
+            ]
+            # A record changed since it was counted: shown as it was read.
+            out[key] = sorted(named or items, key=lambda i: i.path.casefold())
+        return out
 
     def plan_move(self, items: list[FileItem], volume: str) -> MovePlan:
         """What moving these files onto `volume` would do. The picked records
@@ -1725,7 +2106,7 @@ class FileAccessService:
         moving: list[str] = []
         records = sorted({i.record_id for i in items})
         if progress:
-            progress.phase("Working out what moves", len(on_drives))
+            progress.phase("Finding files", len(on_drives))
         for n, step in enumerate(self._steps(on_drives, volume, records), 1):
             plan.freed_bytes += len(step.drop) * size[step.sha256]
             if step.step == STEP_THERE:
@@ -2009,7 +2390,8 @@ def _unavailable_groups(items: list[FileItem]) -> list[UnavailableGroup]:
         group.files += 1
         group.bytes += item.size
         if (
-            item.record_name not in group.records
+            item.record_name
+            and item.record_name not in group.records
             and len(group.records) < _SHOWN_RECORDS
         ):
             group.records.append(item.record_name)

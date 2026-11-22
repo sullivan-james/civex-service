@@ -19,6 +19,7 @@ import { RestoreBatchDialog } from '../trash/RestoreBatchDialog'
 import { AuditEntryDialog } from './AuditEntryDialog'
 import { UndoEditDialog } from './UndoEditDialog'
 import { EntrySubject } from './EntrySubject'
+import { formatTimestamp } from '../../utils/dates'
 
 const PAGE = 25
 
@@ -61,8 +62,7 @@ export function BatchDialog({
       <ModalHeader onClose={onClose}>{title}</ModalHeader>
       <ModalBody className="space-y-3">
         <p className="text-sm text-fg-muted">
-          {new Date(event.timestamp).toLocaleString()} ·{' '}
-          {describeParts(event.parts)}
+          {formatTimestamp(event.timestamp)} · {describeParts(event.parts)}
         </p>
         {batch.kind === 'workflow' && batch.ref && (
           <Link

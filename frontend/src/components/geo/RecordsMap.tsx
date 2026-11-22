@@ -177,12 +177,13 @@ export default function RecordsMap({
     const dots: Feature[] = []
     const shapes: Feature[] = []
     for (const p of points) {
-      let geometry: Geometry
+      let geometry: Geometry | null
       try {
         geometry = format.readGeometry(p.geometry)
       } catch {
         continue // a value this reader doesn't know: leave it out
       }
+      if (!geometry) continue
       const f = new Feature({ geometry, id: p.id, name: p.name })
       ;(geometry instanceof Point ? dots : shapes).push(f)
     }

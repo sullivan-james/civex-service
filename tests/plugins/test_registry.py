@@ -34,8 +34,14 @@ _BUILTIN_CONTRACTS = {
         ("files",),
         ("created", "updated", "unmatched", "ambiguous"),
     ),
-    "civex.rows_to_records": (("table",), ("created", "skipped")),
-    "civex.upsert_records": (("table",), ("created", "updated", "skipped")),
+    "civex.rows_to_records": (
+        ("table",),
+        ("created", "updated", "unchanged", "skipped", "skipped_rows"),
+    ),
+    "civex.upsert_records": (
+        ("table",),
+        ("created", "updated", "unchanged", "skipped", "skipped_rows"),
+    ),
 }
 
 # Built-ins run through the host functions like any plugin, so what they

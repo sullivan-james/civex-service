@@ -1397,23 +1397,19 @@ def test_a_plan_reports_the_records_it_goes_through_against_how_many_there_are(
         _sel(schema="selection", within=str(study.e7.id)), progress=seen
     )
 
-    assert seen.phases() == ["Finding files", "Working out the folders"]
+    assert seen.phases() == ["Finding files"]
     assert seen.events[0] == ("phase", "Finding files", 5)
     done = [e[1] for e in seen.events if e[0] == "advance"]
     assert done == sorted(done) and done[-1] == 5
 
 
-def test_going_beneath_says_it_is_looking_inside(ctx: AppContext, study: Study) -> None:
+def test_going_beneath_is_still_finding_files(ctx: AppContext, study: Study) -> None:
     study.selection(study.rec_a, "s1", b"one")
     seen = Recorder()
 
     ctx.file_access_svc.plan(_below(dataset="hb", schema="encounter"), progress=seen)
 
-    assert seen.phases() == [
-        "Finding files",
-        "Finding what is inside",
-        "Working out the folders",
-    ]
+    assert seen.phases() == ["Finding files"]
 
 
 def test_ticked_rows_report_just_their_own_count(ctx: AppContext, study: Study) -> None:
@@ -1438,15 +1434,11 @@ def test_an_export_reports_making_the_folder_a_file_at_a_time(
         progress=seen,
     )
 
-    assert seen.phases() == [
-        "Finding files",
-        "Working out the folders",
-        "Making the folder",
-    ]
-    assert ("phase", "Making the folder", 4) in seen.events
+    assert seen.phases() == ["Finding files", "Copying files"]
+    assert ("phase", "Copying files", 4) in seen.events
     advances = [
         e[1]
-        for e in seen.events[seen.events.index(("phase", "Making the folder", 4)) :]
+        for e in seen.events[seen.events.index(("phase", "Copying files", 4)) :]
         if e[0] == "advance"
     ]
     assert advances == [1, 2, 3, 4]
@@ -1465,7 +1457,7 @@ def test_a_copy_says_it_is_copying(
         progress=seen,
     )
 
-    assert "Copying the files" in seen.phases()
+    assert "Copying files" in seen.phases()
 
 
 def test_a_managed_export_reports_too(ctx: AppContext, study: Study) -> None:
@@ -1476,7 +1468,7 @@ def test_a_managed_export_reports_too(ctx: AppContext, study: Study) -> None:
         _sel(schema="selection", within=str(study.e7.id)), "tables", progress=seen
     )
 
-    assert seen.phases()[0] == "Finding files" and "Making the folder" in seen.phases()
+    assert seen.phases()[0] == "Finding files" and "Copying files" in seen.phases()
     # The plan is made once, however many stages report it.
     assert seen.phases().count("Finding files") == 1
 

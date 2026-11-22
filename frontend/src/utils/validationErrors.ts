@@ -1,5 +1,6 @@
 import { ApiError } from '../api/client'
 import { formatBytes } from './restrictions'
+import { formatDate, formatDateTime } from './dates'
 
 export interface ParsedValidationError {
   /** Plain-language message per field name that caused it. */
@@ -20,18 +21,11 @@ export interface ParsedValidationError {
 const FIELD_PREFIX_RE = /^Field '([^']+)':\s*(.*)$/s
 const MISSING_REQUIRED_RE = /^Missing required fields:\s*(.+)$/
 
-/** "2020-01-01" -> "1 January 2020"; "2020-01-01T09:00:00+00:00" -> "1 January 2020, 09:00". */
+/** A bound in an error message, in the chosen date pattern: "2020-01" ->
+ * "01/2020"; an instant in UTC, as the server compared it,
+ * "2020-01-01T09:00:00+00:00" -> "01/01/2020 09:00 UTC". */
 function formatDateLike(raw: string): string {
-  const hasTime = raw.includes('T')
-  const d = new Date(hasTime ? raw : `${raw}T00:00:00Z`)
-  if (isNaN(d.getTime())) return raw
-  return d.toLocaleString('en-GB', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-    ...(hasTime ? { hour: '2-digit', minute: '2-digit' } : {}),
-    timeZone: 'UTC',
-  })
+  return raw.includes('T') ? formatDateTime(raw, 'UTC') : formatDate(raw)
 }
 
 /** Translate the tail of a `Field '<name>': <detail>` message into plain

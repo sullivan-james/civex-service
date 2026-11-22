@@ -144,11 +144,11 @@ def test_picked_files_are_downloaded_and_freed_by_the_same_rules(pair):
     svc = phone.file_access_svc
     everything = FileSelection(query=RecordQuery(dataset="study"))
 
-    _, on_server = svc.chosen(everything, place="server")
+    on_server = svc.chosen(everything, place="server")
     assert [i.sha256 for i in on_server] == [ref.sha256]
     assert svc.download(on_server)["fetched"] == 1
     phone.commit()
-    _, here = svc.chosen(everything, place="here")
+    here = svc.chosen(everything, place="here")
     assert [i.sha256 for i in here] == [ref.sha256]
 
     # A kept collection's files aren't freed one by one: the background
@@ -176,7 +176,7 @@ def test_moving_a_file_only_on_the_server_downloads_it_onto_that_drive(pair, tmp
     phone.store_svc.add_volume("archive", str(drive))
     phone.commit()
     svc = phone.file_access_svc
-    _, items = svc.chosen(FileSelection(query=RecordQuery(dataset="study")))
+    items = svc.chosen(FileSelection(query=RecordQuery(dataset="study")))
 
     shas, downloaded, _ = svc.to_move(items, "archive")
     phone.commit()
@@ -204,13 +204,13 @@ def test_a_download_says_how_many_listed_files_it_covers_and_where_the_rest_are(
     phone.sync_svc.sync()
     svc = phone.file_access_svc
     everything = FileSelection(query=RecordQuery(dataset="study"))
-    _, rows = svc.chosen(everything, place="server")
+    rows = svc.chosen(everything, place="server")
     assert len(rows) == 2  # two records, one file
 
     got = svc.download(rows[:1])
     phone.commit()
     assert (got["fetched"], got["listed"]) == (1, 1)
-    _, rows = svc.chosen(everything, place="here")
+    rows = svc.chosen(everything, place="here")
     assert len(rows) == 2  # the other record's row came with it
 
     lost = laptop.file_svc.store_bytes(b"never sent", "x.bin")
@@ -222,7 +222,7 @@ def test_a_download_says_how_many_listed_files_it_covers_and_where_the_rest_are(
     laptop.sync_svc.sync()
     laptop.sync_svc.send_files()
     phone.sync_svc.sync()
-    _, rows = svc.chosen(everything, place="server")
+    rows = svc.chosen(everything, place="server")
     got = svc.download(rows)
     assert got["absent_where"] == [
         {

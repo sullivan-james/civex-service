@@ -128,32 +128,26 @@ def migration_status(url: str) -> MigrationStatus:
     reported as MigrationStatus.error rather than propagated. create_engine()
     itself can raise (ModuleNotFoundError for a missing driver) in addition
     to the connection attempt, so it has to be inside the try too."""
-    from alembic.script import ScriptDirectory
-    from sqlalchemy import create_engine, inspect
+    from sqlalchemy import create_engine
 
-    from civex.db.migrate import _MIGRATIONS_DIR
+    from civex.db.migrate import head_revision, schema_status
 
-    script = ScriptDirectory(str(_MIGRATIONS_DIR))
-    head = script.get_current_head()
+    head = head_revision()
     engine = None
     try:
         engine = create_engine(url)
-        with engine.connect() as connection:
-            tables = inspect(connection).get_table_names()
-            if "alembic_version" not in tables:
-                return MigrationStatus(None, head, up_to_date=False)
-            row = connection.exec_driver_sql(
-                "SELECT version_num FROM alembic_version"
-            ).fetchone()
-            current = row[0] if row else None
+        status = schema_status(engine)
     except Exception as exc:
         return MigrationStatus(None, head, up_to_date=False, error=str(exc))
     finally:
         if engine is not None:
             engine.dispose()
-    if current is not None and not _known_revision(script, current):
-        return MigrationStatus(current, head, up_to_date=False, too_new=True)
-    return MigrationStatus(current, head, up_to_date=current == head)
+    return MigrationStatus(
+        status.current,
+        head,
+        up_to_date=status.up_to_date,
+        too_new=status.too_new,
+    )
 
 
 def newer_database_error(url: str):
@@ -169,15 +163,6 @@ def newer_database_error(url: str):
         return None
     where = make_url(url).render_as_string(hide_password=True)
     return too_new_error(where, [info.current_revision])
-
-
-def _known_revision(script, revision: str) -> bool:
-    from alembic.util.exc import CommandError
-
-    try:
-        return script.get_revision(revision) is not None
-    except (CommandError, KeyError):
-        return False
 
 
 def structure_problems(url: str) -> list[str]:

@@ -177,13 +177,12 @@ describe('EditableCell datetimes', () => {
       </CollectionTimeZone>,
     )
     // Shown as Chicago wall time, not the raw UTC string.
-    expect(screen.getByText(/3:30 PM CST/)).toBeInTheDocument()
+    expect(screen.getByText('01/03/2024 15:30 CST')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('cell'))
-    const input = document.querySelector(
-      'input[type="datetime-local"]',
-    ) as HTMLInputElement
-    expect(input).toHaveValue('2024-03-01T15:30')
-    fireEvent.change(input, { target: { value: '2024-03-01T16:45' } })
+    // Typed in the chosen date pattern (DD/MM/YYYY by default), 24-hour.
+    const input = screen.getByRole('textbox')
+    expect(input).toHaveValue('01/03/2024 15:30')
+    fireEvent.change(input, { target: { value: '01/03/2024 16:45' } })
     await userEvent.keyboard('{Enter}')
     expect(onCommit).toHaveBeenCalledWith('2024-03-01T22:45:00.000Z')
   })
@@ -206,13 +205,11 @@ describe('EditableCell datetimes', () => {
         </table>
       </CollectionTimeZone>,
     )
-    expect(screen.getByText(/3:30:45 PM CST/)).toBeInTheDocument()
+    expect(screen.getByText('01/03/2024 15:30:45 CST')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('cell'))
-    const input = document.querySelector(
-      'input[type="datetime-local"]',
-    ) as HTMLInputElement
-    expect(input.value).toMatch(/^2024-03-01T15:30:45/)
-    fireEvent.change(input, { target: { value: '2024-03-01T16:45:09' } })
+    const input = screen.getByRole('textbox')
+    expect(input).toHaveValue('01/03/2024 15:30:45')
+    fireEvent.change(input, { target: { value: '01/03/2024 16:45:09' } })
     await userEvent.keyboard('{Enter}')
     expect(onCommit).toHaveBeenCalledWith('2024-03-01T22:45:09.000Z')
   })

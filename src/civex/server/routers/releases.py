@@ -563,6 +563,7 @@ def zip_release_files(
                     scratch,
                     name=f"release-{name}",
                     beside=beside,
+                    progress=progress,
                 )
             except FileNotFoundError as e:
                 raise HTTPException(404, detail=f"A file is no longer stored: {e}")

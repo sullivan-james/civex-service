@@ -5,6 +5,7 @@ import { useRestorePlan } from '../../hooks/useRestore'
 import { recordHistoryHref } from '../../utils/auditFilter'
 import { RestoreDialog } from '../trash/RestoreDialog'
 import { Button, ErrorState } from '../ui'
+import { formatInstantDate } from '../../utils/dates'
 
 /** What a record's page says when there is no such record to show: deleted
  * (and so restorable), or gone, with where to see what happened either way. A
@@ -16,7 +17,7 @@ export function RecordMissing({ id }: { id: string }) {
   const { data: plan } = useRestorePlan({ kind: 'record', ref: id }, deleted)
   const [restoring, setRestoring] = useState(false)
   const when = data?.deleted_at
-    ? ` on ${new Date(data.deleted_at).toLocaleDateString()}`
+    ? ` on ${formatInstantDate(data.deleted_at)}`
     : ''
   const message = deleted
     ? `This record was deleted${when}. It can be restored.`

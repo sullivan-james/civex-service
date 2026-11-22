@@ -47,32 +47,28 @@ export function exportRelease(
   allowPartial = false,
 ) {
   const mode = folderMode()
-  return job(
-    ctx,
-    mode === 'link' ? 'Preparing files…' : 'Copying files…',
-    async (j) => {
-      try {
-        reportExport(
-          ctx.toast,
-          await tracked(ctx, j, (progressId) =>
-            releasesApi.exportFiles(
-              name,
-              {
-                mode,
-                folder: exportFolder() ?? undefined,
-                allow_partial: allowPartial,
-                open: true,
-              },
-              progressId,
-            ),
+  return job(ctx, 'Finding files…', async (j) => {
+    try {
+      reportExport(
+        ctx.toast,
+        await tracked(ctx, j, (progressId) =>
+          releasesApi.exportFiles(
+            name,
+            {
+              mode,
+              folder: exportFolder() ?? undefined,
+              allow_partial: allowPartial,
+              open: true,
+            },
+            progressId,
           ),
-        )
-      } catch (err) {
-        if (!offerPartial(ctx, err, () => void exportRelease(ctx, name, true)))
-          throw err
-      }
-    },
-  )
+        ),
+      )
+    } catch (err) {
+      if (!offerPartial(ctx, err, () => void exportRelease(ctx, name, true)))
+        throw err
+    }
+  })
 }
 
 /** The release's files as one zip (only offered while it is small enough). */

@@ -1,6 +1,7 @@
 import { Fragment, type ReactNode } from 'react'
 import { isBlank, isFileRef, valueText } from '../../utils/auditValues'
 import { FetchedReferenceLink } from '../records/ReferenceLink'
+import { formatFieldDate } from '../../utils/dates'
 
 const COMPACT_LIMIT = 60
 
@@ -26,6 +27,8 @@ export function AuditValue({
         <FetchedReferenceLink id={String(v)} />
       </Fragment>
     ))
+  const date = formatFieldDate(value, dtype)
+  if (date !== null) return date
   if (isFileRef(value) || typeof value !== 'object') return valueText(value)
   if (Array.isArray(value) && value.every((v) => typeof v !== 'object'))
     return valueText(value)

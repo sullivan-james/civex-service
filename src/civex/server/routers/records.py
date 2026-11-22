@@ -5,6 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
 
 from civex.context import AppContext, context_factory
+from civex.domain.dtos import RecordBulkEditResultDTO
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.query import RecordQuery
 from civex.domain.summary import (
@@ -733,11 +734,28 @@ def bulk_edit_records(
     as any edit and logged in its history; the lot is one event in Activity.
     A record that can't take the change is left as it is and named in the
     answer, and the others go ahead (`POST /records/bulk-edit/plan` says so
-    beforehand). Tag the request with `X-Civex-Progress` to follow it."""
+    beforehand).
+
+    It is saved a chunk of records at a time, each chunk whole and on its own,
+    so other saves go in between two and a long edit never holds the database.
+    Tag the request with `X-Civex-Progress` to follow it (how many records of
+    how many, after each chunk) and to stop it
+    (`POST /file-access/progress/{id}/cancel`): a stopped edit keeps the
+    records it changed (`stopped` in the answer) and is finished by sending it
+    again."""
+    result = RecordBulkEditResultDTO(0, 0, 0, [], 0)
+    stopped = False
     try:
-        result = ctx.record_svc.bulk_edit(
-            body.changes, progress=progress, **_selection(body, "edit")
-        )
+        with ctx.chunked_writes() as turn:
+            chunks = ctx.record_svc.bulk_edit_chunks(
+                body.changes, progress=progress, **_selection(body, "edit")
+            )
+            for result in chunks:
+                turn()
+                if progress is not None and progress.cancelled:
+                    stopped = True
+                    chunks.close()
+                    break
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except (ValueError, ValidationError) as e:
@@ -745,7 +763,7 @@ def bulk_edit_records(
     ctx.commit()
     if result.runs:
         background_tasks.add_task(run_pending_jobs, context_factory(ctx.project))
-    return BulkEditResponse.from_dto(result)
+    return BulkEditResponse.from_dto(result, stopped)
 
 
 @router.delete("/collections/{dataset_name}/records")

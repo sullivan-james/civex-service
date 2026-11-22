@@ -8,6 +8,7 @@ import { ApiError } from '../../api/client'
 import { fieldSaveErrors } from './saveErrors'
 import { isPendingFile, pendingFile, type PendingFile } from './pendingFiles'
 import { formatBytes, toInputProps } from '../../utils/restrictions'
+import { formatDate, formatInstantDate } from '../../utils/dates'
 import { displayLabel } from '../../utils/naming'
 import { isGeometry, parseLocation, type Geometry } from '../../utils/geo'
 import { LocatorMap } from '../ui/LocatorMap'
@@ -469,7 +470,14 @@ export function restrictionHints(field: Field): string[] {
     else if (lo !== undefined) hints.push(`${from} ${lo}`)
     else if (hi !== undefined) hints.push(`${to} ${hi}`)
   }
-  const day = (v: unknown) => String(v).slice(0, 10)
+  // A bound's day in the chosen pattern; a datetime's in the field's own zone.
+  const day = (v: unknown) =>
+    field.type === 'date'
+      ? formatDate(String(v))
+      : formatInstantDate(
+          String(v),
+          typeof r.timezone === 'string' ? r.timezone : null,
+        )
   switch (field.type) {
     case 'integer':
     case 'float':
