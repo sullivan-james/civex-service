@@ -29,6 +29,13 @@ HUB_COMPUTE = "hub_compute"
 SERVER_PATH_EXPORT = "server_path_export"
 PLUGIN_INSTALL = "plugin_install"
 REMOTE_DIAL = "remote_dial"
+SETTINGS = "settings"
+SETTINGS_APPEARANCE = "settings_appearance"
+SETTINGS_RETENTION = "settings_retention"
+SETTINGS_MAP = "settings_map"
+SETTINGS_ADVANCED = "settings_advanced"
+SETTINGS_DEVICES = "settings_devices"
+SETTINGS_MEMBERS = "settings_members"
 
 # Every feature a server may offer, with what it means in plain words (the
 # detail of the 501 a route answers when its feature is off).
@@ -50,7 +57,29 @@ FEATURES: dict[str, str] = {
     SERVER_PATH_EXPORT: "writing exports to a folder on the server's machine",
     PLUGIN_INSTALL: "installing plugins and workflows from a bundle onto the server",
     REMOTE_DIAL: "connecting out from the server to another civex",
+    SETTINGS: "the Settings area",
+    SETTINGS_APPEARANCE: "appearance settings",
+    SETTINGS_RETENTION: "retention settings and clean-ups",
+    SETTINGS_MAP: "map settings",
+    SETTINGS_ADVANCED: "advanced settings",
+    SETTINGS_DEVICES: "managing the devices that sync with this project",
+    SETTINGS_MEMBERS: "the members and access page",
 }
+
+# The settings surfaces a host that owns all settings turns off. `SETTINGS`
+# hides the whole area in the app; each of the others is one section (and, for
+# all but members, the routes behind it).
+SETTINGS_FEATURES: frozenset[str] = frozenset(
+    {
+        SETTINGS,
+        SETTINGS_APPEARANCE,
+        SETTINGS_RETENTION,
+        SETTINGS_MAP,
+        SETTINGS_ADVANCED,
+        SETTINGS_DEVICES,
+        SETTINGS_MEMBERS,
+    }
+)
 
 # What `civex serve` and the CLI offer: a project in a folder on this machine.
 LOCAL_FEATURES: frozenset[str] = frozenset(
@@ -70,6 +99,7 @@ LOCAL_FEATURES: frozenset[str] = frozenset(
         PLUGIN_INSTALL,
         REMOTE_DIAL,
     }
+    | SETTINGS_FEATURES
 )
 
 

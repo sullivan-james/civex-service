@@ -185,6 +185,7 @@ const settingsNavItem: NavItemDef = {
   to: '/settings',
   label: 'Settings',
   icon: Settings,
+  feature: 'settings',
 }
 
 function NavItem({
@@ -333,7 +334,8 @@ function NavGroups({
 function SyncButton() {
   const { data } = useRemoteStatus()
   const { request, spinning } = useManualSync()
-  if (!data?.configured) return null
+  // A hosted authority is what devices follow; it follows nothing itself.
+  if (!data?.configured || data.serving) return null
   const state = syncButtonState(data, spinning)
   const busy = state.tone === 'busy'
   return (
@@ -371,6 +373,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   const { data: uiSettings } = useUISettings()
   const showAdvanced = uiSettings?.show_advanced ?? false
   const features = useFeatures()
+  const showSettings = offered(features, settingsNavItem)
 
   const aiSplitLayout = useDefaultLayout({
     id: 'civex-ai-split',
@@ -541,10 +544,12 @@ export default function Layout({ children }: { children: ReactNode }) {
             </div>
             <NavGroups collapsed={collapsed} showAdvanced={showAdvanced} />
             <div className="flex-1" />
-            <div className="flex flex-col gap-1 pt-2 border-t border-border-muted">
-              {!collapsed && <NavGroupHeading>Settings</NavGroupHeading>}
-              <NavItem {...settingsNavItem} collapsed={collapsed} />
-            </div>
+            {showSettings && (
+              <div className="flex flex-col gap-1 pt-2 border-t border-border-muted">
+                {!collapsed && <NavGroupHeading>Settings</NavGroupHeading>}
+                <NavItem {...settingsNavItem} collapsed={collapsed} />
+              </div>
+            )}
           </nav>
         )}
 
@@ -585,14 +590,16 @@ export default function Layout({ children }: { children: ReactNode }) {
                 onNavigate={closeDrawer}
               />
               <div className="flex-1" />
-              <div className="flex flex-col gap-1 pt-2 border-t border-border-muted">
-                <NavGroupHeading>Settings</NavGroupHeading>
-                <NavItem
-                  {...settingsNavItem}
-                  collapsed={false}
-                  onNavigate={closeDrawer}
-                />
-              </div>
+              {showSettings && (
+                <div className="flex flex-col gap-1 pt-2 border-t border-border-muted">
+                  <NavGroupHeading>Settings</NavGroupHeading>
+                  <NavItem
+                    {...settingsNavItem}
+                    collapsed={false}
+                    onNavigate={closeDrawer}
+                  />
+                </div>
+              )}
             </div>
           </div>
         )}

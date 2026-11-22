@@ -44,3 +44,33 @@ reads `window.__CIVEX__.navigate.current()` first.
 Extensions can use `window.__CIVEX__.navigate.on(fn)`, which calls `fn(path)`
 now and on each change, and returns a function that stops listening;
 `navigate.current()` returns the path.
+
+## Features a host should switch off
+
+A host owns identity, access, settings and where data lives, so it narrows
+`project.features` (`civex.domain.features`) and the app hides, and the server
+refuses, what it turned off. `GET /api/status/features` returns what is on and
+every feature that exists, so a host sees the whole list. A route of a feature
+that is off answers 501; the app shows "Not available here" at its address as
+well as hiding its navigation item.
+
+For a hub that owns all settings, leave out of `features`:
+
+| Feature | What goes |
+|---|---|
+| `settings` | The whole Settings area and its navigation item. |
+| `settings_appearance` | Appearance (`/settings/ui`). |
+| `settings_retention` | Retention and its clean-ups (`/settings/retention`, `/retention/*`). |
+| `settings_map` | Map tiles (`/settings/map`). |
+| `settings_advanced` | Advanced (`/settings/command-line`). |
+| `settings_devices` | Devices: invites, login approvals, revoke, publish (`/remote/authority*`). |
+| `settings_members` | Members & access, which the host manages on its own pages. App only: there is no route behind it. |
+
+Also leave out the features that need a machine: `volumes`, `store_admin`,
+`db_admin`, `local_workflows`, `plugin_editor`, `terminal`, `updates`, `logs`,
+`ai`, `open_folder`, `desktop`, `server_path_export`, `plugin_install` and
+`remote_dial`. `settings` off hides the area in the app only; to refuse the
+routes, leave out the section features as well.
+
+The top-bar sync button and `/sync/review` need no feature: they appear only
+for a project that follows a remote, never for a hosted authority.

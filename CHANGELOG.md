@@ -60,6 +60,17 @@ from the next tag forward.
   exists here or that the server holds. Also `GET/POST /api/remote/files/missing`
   (`/ignore`, `/unignore`, `/remove`), an Ignore action on the app's missing-files
   notice, and an "Ignored" line in `civex sync status`.
+- Settings features a host can switch off, because a host owns all settings:
+  `settings` (the whole Settings area), `settings_appearance`,
+  `settings_retention`, `settings_map`, `settings_advanced`, `settings_devices`
+  and `settings_members`. A local project keeps all of them. The routes behind
+  a section answer 501 when its feature is off; `GET /api/status/features`
+  lists them all.
+- A page whose feature is off is blocked, not just hidden from the navigation:
+  the terminal, plugins, workflows, runs, AI, database, storage, updates, logs
+  and each settings section show "Not available here". The top-bar sync button
+  and `/sync/review` appear only for a project that follows a remote, which a
+  hosted authority does not.
 
 ### Fixed
 
