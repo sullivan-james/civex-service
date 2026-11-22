@@ -32,6 +32,7 @@ from pathlib import Path
 
 from civex.config import load_config
 from civex.context import build_local_context
+from civex.domain.query import RecordQuery
 
 REGIONS = ["North Sea", "Baltic", "Celtic Sea", "Moray Firth", "Hebrides", "Biscay"]
 GROUPS = ["cetacean", "pinniped", "fish", "seabird", "invertebrate"]
@@ -260,6 +261,141 @@ class Progress:
             print(f"  {self.n:>10,} records  {rate:,.0f}/s", flush=True)
 
 
+# -- one kind, many records (--flat) -------------------------------------------
+
+# Twenty fields of the scalar types a list is sorted and filtered by.
+FLAT_FIELDS = [
+    ("code", "string"),
+    ("site", "string"),
+    ("region", "string"),
+    ("observer", "string"),
+    ("quality", "string"),
+    ("label", "string"),
+    ("notes", "string"),
+    ("taken", "date"),
+    ("seen_at", "datetime"),
+    ("depth", "float"),
+    ("temperature", "float"),
+    ("salinity", "float"),
+    ("latitude", "float"),
+    ("longitude", "float"),
+    ("score", "float"),
+    ("count", "integer"),
+    ("sample_rate", "integer"),
+    ("group_size", "integer"),
+    ("reviewed", "boolean"),
+    ("flagged", "boolean"),
+]
+FLAT_SITES = [f"Site {i:03d}" for i in range(200)]
+
+
+def flat_values(i: int, rnd: random.Random) -> dict:
+    """One record of the flat kind, by field name. Some values are left out
+    (about 1 in 10 depths, 1 in 5 notes), as real data has gaps."""
+    when = datetime(2019, 1, 1, tzinfo=timezone.utc) + timedelta(
+        minutes=rnd.randint(0, 6 * 365 * 1440)
+    )
+    data = {
+        "code": f"R{i:07d}",
+        "site": rnd.choice(FLAT_SITES),
+        "region": rnd.choice(REGIONS),
+        "observer": f"{rnd.choice(FIRST)} {rnd.choice(LAST)}",
+        "quality": rnd.choice(QUALITY),
+        "label": rnd.choice(LABELS),
+        "taken": when.date().isoformat(),
+        "seen_at": when.isoformat().replace("+00:00", "Z"),
+        "temperature": round(rnd.uniform(-2, 25), 2),
+        "salinity": round(rnd.uniform(28, 38), 3),
+        "latitude": round(rnd.uniform(48, 62), 5),
+        "longitude": round(rnd.uniform(-12, 12), 5),
+        "score": round(rnd.random(), 4),
+        "count": rnd.randint(0, 500),
+        "sample_rate": rnd.choice([48000, 96000, 192000, 384000]),
+        "group_size": rnd.randint(1, 60),
+        "reviewed": rnd.random() < 0.3,
+        "flagged": rnd.random() < 0.05,
+    }
+    if rnd.random() < 0.9:
+        data["depth"] = round(rnd.uniform(0, 4000), 1)
+    if rnd.random() < 0.8:
+        data["notes"] = f"Sea state {rnd.randint(0, 6)}; {rnd.choice(LABELS)} heard"
+    return data
+
+
+def generate_flat(args) -> None:
+    """`--flat N`: one collection `flat` holding N records of one kind
+    `sample` (twenty fields), for timing lists at a million records.
+
+    Through `RecordService.add` by default (validation, history, everything:
+    ~200 records/s on SQLite, so a million takes over an hour). `--bulk`
+    instead writes the rows straight into the records table, in the stored
+    form (field-id keyed data, the timestamps `add` would give), a batch per
+    statement: tens of thousands a second. It bypasses validation, history
+    (no audit_log rows), triggers and the reference/file catalogs, none of
+    which a list reads; the records are what `add` would have stored, so
+    the queries see the same thing. Not for timing writes."""
+    rnd = random.Random(args.seed)
+    ctx = build_local_context(load_config())
+    t_start = time.monotonic()
+    if "sample" not in {s.name for s in ctx.schema_svc.list_all()}:
+        ctx.schema_svc.create("sample")
+        for name, dtype in FLAT_FIELDS:
+            ctx.schema_svc.add_field("sample", name, dtype)
+        ctx.dataset_svc.create("flat", timezone="UTC")
+        ctx.commit()
+    schema = ctx.schema_svc.get("sample")
+    collection = ctx.dataset_svc.get("flat")
+    have = ctx.record_svc.count_records(RecordQuery(dataset="flat", schema="sample"))
+    prog = Progress(args.flat)
+    if not args.bulk:
+        for i in range(have, args.flat):
+            ctx.record_svc.add("flat", "sample", flat_values(i, rnd), with_labels=False)
+            if (i + 1) % args.batch == 0:
+                ctx.commit()
+            prog.tick()
+    else:
+        import uuid
+
+        from sqlalchemy import insert
+
+        from civex.db.models import Record
+
+        ids = {f.name: str(f.id) for f in schema.fields}
+        start = datetime.now(timezone.utc) - timedelta(seconds=args.flat)
+        rows = []
+        for i in range(have, args.flat):
+            at = start + timedelta(seconds=i)
+            data = {ids[k]: v for k, v in flat_values(i, rnd).items()}
+            rows.append(
+                dict(
+                    id=uuid.uuid4(),
+                    dataset_id=collection.id,
+                    schema_id=schema.id,
+                    data=data,
+                    created_at=at,
+                    updated_at=at,
+                )
+            )
+            if len(rows) >= max(args.batch, 10_000):
+                ctx._session.execute(insert(Record), rows)
+                ctx.commit()
+                prog.n += len(rows)
+                if prog.n % 100_000 < len(rows):
+                    rate = prog.n / (time.monotonic() - prog.t0)
+                    print(f"  {prog.n:>10,} records  {rate:,.0f}/s", flush=True)
+                rows = []
+        if rows:
+            ctx._session.execute(insert(Record), rows)
+            prog.n += len(rows)
+    ctx.commit()
+    ctx.index_svc.after_bulk_write()
+    ctx.commit()
+    ctx.close()
+    dt = time.monotonic() - t_start
+    made = max(args.flat - have, 0)
+    print(f"done: {made:,} records in {dt:,.0f}s ({made / max(dt, 1e-9):,.0f}/s)")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--collections", type=int, default=6, help="survey collections")
@@ -272,6 +408,18 @@ def main() -> None:
     ap.add_argument("--first-year", type=int, default=2019)
     ap.add_argument("--batch", type=int, default=2000, help="records per commit")
     ap.add_argument("--seed", type=int, default=1)
+    flat = ap.add_argument_group("one kind, many records")
+    flat.add_argument(
+        "--flat",
+        type=int,
+        metavar="N",
+        help="instead of the study: N records of one 20-field kind in one collection",
+    )
+    flat.add_argument(
+        "--bulk",
+        action="store_true",
+        help="with --flat: write rows straight into the table (fast; no history)",
+    )
     ap.add_argument(
         "--preset",
         choices=sorted(PRESETS),
@@ -334,6 +482,9 @@ def main() -> None:
                 setattr(args, key, value)
     if args.file_budget_gb is None:
         args.file_budget_gb = 2.0
+    if args.flat:
+        generate_flat(args)
+        return
 
     rnd = random.Random(args.seed)
     ctx = build_local_context(load_config())
@@ -364,7 +515,6 @@ def main() -> None:
     ctx.dataset_svc.create(
         "reference-data",
         scope="global",
-        schemas=["site", "species", "observer"],
         description="Shared sites, species and observers",
     )
     years = [args.first_year + i for i in range(args.collections)]
@@ -372,7 +522,6 @@ def main() -> None:
         ctx.dataset_svc.create(
             f"survey-{y}",
             timezone="UTC",
-            schemas=["encounter", "recording", "selection"],
             description=f"{y} field season",
         )
     ctx.commit()

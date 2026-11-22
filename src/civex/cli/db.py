@@ -660,6 +660,7 @@ def move(
         f"[dim]The original is untouched at {record.source_location}. "
         f"Undo with `civex db revert {record.id}`.[/dim]"
     )
+    _queue_indexes_after_switch()
 
 
 @app.command("moves")
@@ -716,3 +717,126 @@ def revert(
     console.print(
         f"[success]Switched back to {record.source_label}:[/success] {record.source_location}"
     )
+    _queue_indexes_after_switch()
+
+
+@app.command("indexes")
+def indexes(
+    reconcile: bool = typer.Option(
+        False,
+        "--reconcile",
+        help="Build what is missing and drop what isn't wanted, now, showing progress",
+    ),
+    background: bool = typer.Option(
+        False, "--background", hidden=True, help="Reconcile quietly (started by civex)"
+    ),
+) -> None:
+    """List the field indexes in this computer's database.
+
+    A field is indexed when it is part of a uniqueness key or someone asked
+    for it (`civex schema index`). Indexes are built and dropped in the
+    background: by a running `civex serve`, or by a process that the command
+    which changed them started. With --reconcile it is done here and now,
+    showing progress. On SQLite a build gives way to anyone saving records, so
+    it may wait for a quiet moment.
+    """
+    from rich.table import Table
+
+    from civex.cli.utils import get_ctx
+
+    ctx = get_ctx()
+    try:
+        if reconcile or background:
+            _reconcile_indexes(ctx, quietly=background)
+        report = ctx.index_svc.status()
+    finally:
+        ctx.close()
+    if background:
+        return
+    if not report.fields and not report.stale:
+        console.print("No field indexes.")
+        return
+    table = Table("Schema", "Field", "Why", "Built")
+    for f in report.fields:
+        why = ", ".join(
+            {"unique_key": "unique key", "chosen": "chosen"}[r] for r in f.reasons
+        )
+        table.add_row(f.schema_name, f.field_name, why, "yes" if f.built else "not yet")
+    console.print(table)
+    if report.stale:
+        console.print(
+            f"{len(report.stale)} index(es) nothing needs any more "
+            "(dropped by `civex db indexes --reconcile`)."
+        )
+
+
+def _reconcile_indexes(ctx, quietly: bool) -> None:
+    """`run_upkeep` in this process: with a bar, or (the background process)
+    with a line in its log."""
+    import time
+
+    from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
+
+    from civex.domain.field_index import IndexProgress
+    from civex.services.index_jobs import run_upkeep
+
+    if quietly:
+        result = run_upkeep(ctx)
+        if result is not None:
+            print(
+                f"{time.strftime('%Y-%m-%d %H:%M:%S')} field indexes: "
+                f"{len(result.created)} built, {len(result.dropped)} dropped in "
+                f"{result.seconds:.1f}s (gave way to saves {result.yielded} times)",
+                flush=True,
+            )
+        return
+    bar = Progress(
+        TextColumn("{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        TimeElapsedColumn(),
+        console=console,
+    )
+
+    def show(p: IndexProgress) -> None:
+        if not bar.tasks:
+            bar.add_task("", total=max(p.total, 1))
+        if not p.field_label:
+            what = "Done"
+        elif p.waiting:
+            what = "Waiting for a moment when nobody is saving"
+        else:
+            what = f"Indexing {p.schema_label} › {p.field_label}"
+        bar.update(bar.tasks[0].id, description=what, completed=p.done)
+
+    with bar:
+        result = run_upkeep(ctx, show)
+    if result is None:
+        console.print(
+            "Another civex process is updating the indexes now; "
+            "`civex db indexes` shows how far it has got."
+        )
+        return
+    if result.created:
+        yielded = (
+            f" (gave way to saves {result.yielded} times)" if result.yielded else ""
+        )
+        console.print(
+            f"Built {len(result.created)} index(es) in {result.seconds:.1f}s{yielded}"
+        )
+    if result.dropped:
+        console.print(f"Dropped {len(result.dropped)} index(es) nothing needs")
+    if not result.created and not result.dropped:
+        console.print("The indexes are already in step.")
+
+
+def _queue_indexes_after_switch() -> None:
+    """The field indexes are this computer's choice, not data: a database this
+    project has just switched to gets them built in the background."""
+    from civex.cli.utils import get_ctx, queue_indexes
+
+    ctx = get_ctx()
+    try:
+        queue_indexes(ctx)
+    finally:
+        ctx.close()

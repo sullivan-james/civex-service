@@ -159,6 +159,7 @@ class BundleService:
         commit: Callable[[], None],
         civex_dir: Path | None,
         batch: Callable[..., Any] | None = None,
+        after_bulk_write: Callable[[], None] | None = None,
     ) -> None:
         self._schemas = schema_svc
         self._datasets = dataset_svc
@@ -172,6 +173,10 @@ class BundleService:
         # some), None when it took whole collections.
         self.written_ids: list[uuid.UUID] | None = None
         self._cited: dict[str, int] = {}
+
+        # `index_svc.after_bulk_write`: the planner's statistics, refreshed
+        # once the records are in.
+        self._after_bulk_write = after_bulk_write
 
     # -- export ------------------------------------------------------------
 
@@ -487,6 +492,8 @@ class BundleService:
                     self._import(zf, manifest, result, progress, install_code)
             else:
                 self._import(zf, manifest, result, progress, install_code)
+        if self._after_bulk_write is not None and result.records_added:
+            self._after_bulk_write()
         return result
 
     def _import(

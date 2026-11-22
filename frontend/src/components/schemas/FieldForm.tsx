@@ -26,6 +26,7 @@ import {
 import { nameError } from '../../utils/naming'
 import type { TemplateField } from '../templates/TemplateBuilder'
 import { CONTROLS } from './controlRegistry'
+import { FieldIndexRow } from './FieldIndexRow'
 import type { ControlContext, Rules } from './RestrictionControls'
 
 type FieldFormProps = {
@@ -256,6 +257,9 @@ export function FieldForm(props: FieldFormProps) {
             checked={required}
             onChange={setRequired}
           />
+        )}
+        {editing && (
+          <FieldIndexRow schemaName={schemaName} fieldName={editing.name} />
         )}
         {mode === 'create' && descriptor?.supports_default !== false && (
           <Field label="Default value" span={6}>

@@ -17,6 +17,7 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import Engine
 
 from civex.context import AppContext
+from civex.db import field_indexes
 from civex.db.engine import enable_sqlite_foreign_keys
 from civex.db.migrate import ensure_schema_current
 from civex.db.models import AiUsageEvent, Record
@@ -112,7 +113,17 @@ def populated(ctx: AppContext, make_schema, make_collection) -> Engine:
     # file_references).
     ctx.release_svc.create("v1", "A release", authors=[{"name": "A. Person"}])
     ctx.commit()
+    # A field index, which no migration makes: the copy leaves it out (it is
+    # this computer's choice, built in the background after a switch).
+    ctx.index_svc.set_indexed("patient", "name", True)
+    ctx.index_svc.reconcile()
+    ctx.commit()
     return ctx._session.get_bind()  # type: ignore[return-value]
+
+
+def _field_indexes(engine: Engine) -> set[str]:
+    with engine.connect() as conn:
+        return field_indexes.existing(conn)
 
 
 def _add_sync_state(ctx: AppContext) -> None:
@@ -266,6 +277,11 @@ def test_copy_carries_every_row_and_verifies(populated: Engine, tmp_path: Path):
     assert row_counts(target) == row_counts(populated)
     assert not is_empty(target)
     assert _records(target) == _records(populated)
+    # Field indexes aren't copied: building them on a big table takes minutes,
+    # and the move would wait; the switched-to database gets them built in
+    # the background (tests/services/test_db_move_service.py).
+    assert _field_indexes(populated) != set()
+    assert _field_indexes(target) == set()
     # Rows derived from data come across too, not re-derived or dropped.
     assert (
         result.counts["record_references"]
@@ -478,6 +494,7 @@ def test_round_trip_through_postgres(
     to_sqlite = copy_database(pg, back)
     assert to_sqlite.verified, to_sqlite.problems
     assert _records(back) == _records(populated)
+    assert _field_indexes(pg) == _field_indexes(back) == set()
     _assert_same_data(populated, pg)  # every table, both directions
     _assert_same_data(populated, back)
 
