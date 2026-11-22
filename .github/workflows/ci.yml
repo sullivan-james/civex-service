@@ -13,6 +13,10 @@ on:
       - "uv.lock"
       - ".github/workflows/ci.yml"
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   secrets:
     runs-on: ubuntu-latest
@@ -53,7 +57,14 @@ jobs:
         run: uv run mypy src/civex civex-plugin-sdk/src/civex_plugin_sdk
 
   test:
+    # Sharded by recorded durations (.test_durations, pytest-split); each shard
+    # also runs xdist across its runner's cores.
+    name: test (${{ matrix.group }}/6)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -67,18 +78,59 @@ jobs:
         run: uv sync --extra server --extra workflows --extra dev
 
       # Coverage nearly triples the suite's time, so a pull request runs the
-      # tests alone and coverage (with its fail_under floor) is measured on
-      # every push to main.
+      # tests alone; every push to main records coverage per shard and the
+      # `coverage` job combines it and applies the fail_under floor.
       - name: Run tests
         if: github.event_name == 'pull_request'
-        run: uv run pytest tests/ -q -n auto
+        run: uv run --with pytest-split pytest tests/ -q -n auto --splits 6 --group ${{ matrix.group }} --durations=15 --store-durations --durations-path durations-${{ matrix.group }}.json
 
       - name: Run tests with coverage
         if: github.event_name != 'pull_request'
-        run: uv run pytest tests/ -q -n auto --cov=civex --cov-report=term-missing
+        run: uv run --with pytest-split pytest tests/ -q -n auto --splits 6 --group ${{ matrix.group }} --cov=civex --durations=15 --store-durations --durations-path durations-${{ matrix.group }}.json
+        env:
+          COVERAGE_FILE: .coverage.${{ matrix.group }}
 
       - name: Run SDK tests
+        if: matrix.group == 1
         run: uv run pytest civex-plugin-sdk/tests -q
+
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: coverage-${{ matrix.group }}
+          path: .coverage.${{ matrix.group }}
+          include-hidden-files: true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: durations-${{ matrix.group }}
+          path: durations-${{ matrix.group }}.json
+
+  coverage:
+    if: github.event_name != 'pull_request'
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      # Installed (editable) so `source = ["civex"]` finds the package and
+      # counts files no shard imported, exactly as the unsharded run did.
+      - name: Install with dev extras
+        run: uv sync --extra server --extra workflows --extra dev
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+
+      - name: Combine coverage and enforce the fail_under floor
+        run: |
+          uv run coverage combine .coverage.*
+          uv run coverage report
 
   postgres:
     # An authority on PostgreSQL: the migrations' PostgreSQL parts, settling
