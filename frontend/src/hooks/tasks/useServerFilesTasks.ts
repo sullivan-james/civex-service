@@ -83,7 +83,11 @@ export function serverFilesTasks(
       detail: `${missing === 1 ? 'It isn’t' : 'They aren’t'} on this computer, and the server hasn’t got ${missing === 1 ? 'it' : 'them'}, so nothing here can send ${missing === 1 ? 'it' : 'them'}.`,
       actions: [
         { label: 'See which', to: MISSING },
-        ...(ignore ? [{ label: 'Ignore', ...ignore }] : []),
+        // Only files this project never stored can be ignored; ones stored
+        // once and since gone stay in the warning.
+        ...(ignore && (waiting?.never_stored ?? 0) > 0
+          ? [{ label: 'Ignore', ...ignore }]
+          : []),
       ],
     })
   return tasks

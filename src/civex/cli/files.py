@@ -297,6 +297,12 @@ def _missing_picked(pool: list[str], pick: str | None) -> list[str]:
     if not found:
         console.print(f"[error]No such missing file: '{escape(pick or '')}'.[/error]")
         raise typer.Exit(1)
+    if len(found) > 1:
+        console.print(
+            f"[error]'{escape(pick or '')}' starts {len(found)} missing files: "
+            "give more of the hash, or `all`.[/error]"
+        )
+        raise typer.Exit(1)
     return found
 
 
@@ -330,6 +336,12 @@ def files_missing(
     the server. A record whose required field would be left empty is left as it
     is and named.
     """
+    if sum(o is not None for o in (ignore, unignore, remove)) > 1:
+        console.print("[error]Give one of --ignore, --unignore, --remove.[/error]")
+        raise typer.Exit(1)
+    if dry_run and remove is None:
+        console.print("[error]--dry-run goes with --remove.[/error]")
+        raise typer.Exit(1)
     ctx = get_ctx()
     try:
         svc = ctx.sync_svc

@@ -567,8 +567,7 @@ def missing_files(ctx: AppContext = Depends(get_ctx)):
 def ignore_missing_files(body: MissingFilesRequest, ctx: AppContext = Depends(get_ctx)):
     """Stop warning about these missing files (the records keep citing them)."""
     try:
-        shas = body.shas if body.shas is not None else ctx.sync_svc.missing_files().shas
-        return MissingFilesDone(count=ctx.sync_svc.ignore_missing(shas))
+        return MissingFilesDone(count=ctx.sync_svc.ignore_missing(body.shas))
     except SyncError as e:
         raise _refuse(e)
 
@@ -598,9 +597,7 @@ def remove_missing_files(body: MissingFilesRequest, ctx: AppContext = Depends(ge
     (history, sync), one event in Activity. A record whose required field would
     be left empty is left as it is and named."""
     try:
-        report = ctx.sync_svc.missing_files(include_ignored=True)
-        shas = body.shas if body.shas is not None else report.shas + report.ignored
-        result = ctx.sync_svc.remove_missing(shas, dry_run=body.dry_run)
+        result = ctx.sync_svc.remove_missing(body.shas, dry_run=body.dry_run)
     except SyncError as e:
         raise _refuse(e)
     return MissingFilesRemoved(

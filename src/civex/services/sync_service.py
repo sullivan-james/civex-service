@@ -384,7 +384,9 @@ class SyncService:
             self._commit()
         return ignored - found
 
-    def missing_files(self, include_ignored: bool = False) -> MissingFilesReport:
+    def missing_files(
+        self, include_ignored: bool = False, with_groups: bool = True
+    ) -> MissingFilesReport:
         """The files live records cite that this project has never stored, that
         no drive here holds, and (with a remote set) that the authority hasn't
         got either: the ones nothing can supply, with where records cite them.
@@ -415,7 +417,7 @@ class SyncService:
         report.ignored = sorted(s for s in candidates if s in ignored)
         report.shas = sorted(s for s in candidates if s not in ignored)
         shown = set(candidates) if include_ignored else set(report.shas)
-        if shown:
+        if shown and with_groups:
             plan = self._records.remove_files(
                 shown, [str(r) for r in self._repo.citing_records(shown)], dry_run=True
             )
@@ -423,16 +425,17 @@ class SyncService:
                 report.groups = planned.groups
         return report
 
-    def ignore_missing(self, shas: list[str]) -> int:
-        """Stop warning about these missing files (the references stay). Only
-        files `missing_files` lists can be ignored."""
-        report = self.missing_files()
+    def ignore_missing(self, shas: list[str] | None = None) -> int:
+        """Stop warning about these missing files (the references stay), or
+        every one listed when `shas` is None. Only files `missing_files` lists
+        can be ignored."""
+        report = self.missing_files(with_groups=False)
         if not report.server_checked:
             raise SyncError(
                 "The server couldn't be asked whether it has these files, so none "
                 "was ignored. Try again when it can be reached."
             )
-        chosen = set(shas) & set(report.shas)
+        chosen = set(report.shas) if shas is None else set(shas) & set(report.shas)
         self._repo.ignore_missing(chosen)
         self._commit()
         return len(chosen)
@@ -446,22 +449,24 @@ class SyncService:
         return n
 
     def remove_missing(
-        self, shas: list[str], dry_run: bool = False
+        self, shas: list[str] | None = None, dry_run: bool = False
     ) -> MissingFilesRemovalDTO:
         """Take missing files out of the records citing them (the field no longer
         points at them), as one batch of ordinary edits: validated, in the
         history, synced, undone whole from Activity. Only files `missing_files`
         lists (never one that exists here or that the authority holds), and
         never when the authority couldn't be asked. A required field that would
-        be left empty leaves its record as it is, named in the result. Raises
-        `SyncError` when the authority can't be asked."""
-        report = self.missing_files(include_ignored=True)
+        be left empty leaves its record as it is, named in the result. Every
+        such file when `shas` is None. Raises `SyncError` when the authority
+        can't be asked."""
+        report = self.missing_files(include_ignored=True, with_groups=False)
         if not report.server_checked:
             raise SyncError(
                 "The server couldn't be asked whether it has these files, so none "
                 "was removed. Try again when it can be reached."
             )
-        chosen = set(shas) & (set(report.shas) | set(report.ignored))
+        every = set(report.shas) | set(report.ignored)
+        chosen = every if shas is None else set(shas) & every
         result = MissingFilesRemovalDTO()
         if not chosen:
             return result
@@ -470,7 +475,10 @@ class SyncService:
             if not dry_run:
                 self._commit()
         if not dry_run:
-            self._repo.unignore_missing(chosen)
+            # Forget the ignoring of files no record cites now; one a record
+            # was left citing (a required field) keeps it.
+            still = set().union(*self._repo.citing_records(chosen).values())
+            self._repo.unignore_missing(chosen - still)
             self._commit()
         return result
 
@@ -1426,7 +1434,8 @@ class SyncService:
         """One line for the files the authority lacks that can't be read here:
         how many, a few ids, and (for those this project never stored) which
         collections cite them. Each file is at DEBUG."""
-        report.owed = [s for s in report.owed if s not in self._repo.ignored_missing()]
+        ignored = self._repo.ignored_missing()
+        report.owed = [s for s in report.owed if s not in ignored]
         if not report.owed:
             return
         report.never_stored = sorted(self._repo.never_stored(report.owed))
