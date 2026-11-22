@@ -60,6 +60,22 @@ def pg_schema():
     admin.dispose()
 
 
+@pytest.fixture()
+def pg_database():
+    """An engine on a database of its own (for a test that runs alembic
+    downgrades, which must not share the scratch database with other tests)."""
+    name = f"civex_part_{uuid.uuid4().hex[:12]}"
+    admin = create_engine(_PG_URL, isolation_level="AUTOCOMMIT")
+    with admin.connect() as c:
+        c.execute(text(f'CREATE DATABASE "{name}"'))
+    engine = create_engine(_PG_URL.rsplit("/", 1)[0] + f"/{name}")
+    yield engine
+    engine.dispose()
+    with admin.connect() as c:
+        c.execute(text(f'DROP DATABASE "{name}" WITH (FORCE)'))
+    admin.dispose()
+
+
 def _kind(engine: Engine, table: str) -> str:
     with engine.connect() as c:
         return c.execute(
@@ -359,11 +375,10 @@ def test_populated_database_keeps_its_data_indexes_and_foreign_keys(
         assert found == [ids[3]]
 
 
-@pytest.mark.skip('bisect')
 @needs_pg
-def test_downgrade_restores_plain_tables_with_the_data(pg_schema: Engine) -> None:
-    ensure_schema_current(pg_schema)
-    with Session(pg_schema) as s:
+def test_downgrade_restores_plain_tables_with_the_data(pg_database: Engine) -> None:
+    ensure_schema_current(pg_database)
+    with Session(pg_database) as s:
         ds, sc = Dataset(name="d"), Schema(name="s")
         s.add_all([ds, sc])
         s.flush()
@@ -377,13 +392,13 @@ def test_downgrade_restores_plain_tables_with_the_data(pg_schema: Engine) -> Non
         )
         s.commit()
     cfg = _alembic()
-    with pg_schema.connect() as conn:
+    with pg_database.connect() as conn:
         cfg.attributes["connection"] = conn
         command.downgrade(cfg, _PRE)
         conn.commit()
-    assert _kind(pg_schema, "records") == "r"
-    assert _kind(pg_schema, "audit_log") == "r"
-    with pg_schema.connect() as c:
+    assert _kind(pg_database, "records") == "r"
+    assert _kind(pg_database, "audit_log") == "r"
+    with pg_database.connect() as c:
         assert c.execute(text("SELECT count(*) FROM records")).scalar_one() == 1
         assert c.execute(text("SELECT count(*) FROM audit_log")).scalar_one() == 1
         assert (
@@ -460,7 +475,6 @@ def test_rows_that_arrived_before_their_month_existed_are_moved_in(
         assert c.execute(text("SELECT count(*) FROM audit_log")).scalar_one() == 1
 
 
-@pytest.mark.skip('bisect')
 @needs_pg
 def test_grants_and_storage_settings_survive_the_rebuild(pg_schema: Engine) -> None:
     _migrate_to_pre(pg_schema)
@@ -488,7 +502,6 @@ def test_grants_and_storage_settings_survive_the_rebuild(pg_schema: Engine) -> N
         assert "autovacuum_vacuum_scale_factor=0.01" in opts
 
 
-@pytest.mark.skip('bisect')
 @needs_pg
 def test_row_level_security_is_refused_not_dropped(pg_schema: Engine) -> None:
     _migrate_to_pre(pg_schema)
