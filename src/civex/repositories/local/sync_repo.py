@@ -1063,15 +1063,16 @@ class LocalSyncRepository:
                 known[row.op_id] = self._op_result(row)
         pinned = self._meta_row()
         self._s.refresh(pinned)
-        record_ids = list(
-            dict.fromkeys(e.entity_id for e in batch if e.entity_type == "record")
-        )
+        record_ids = sorted(
+            {e.entity_id for e in batch if e.entity_type == "record"}
+        )  # in id order, so the locks are taken in one order
         held: list[Record] = []
         absent = set(record_ids)
         for at in range(0, len(record_ids), 500):
             for record in self._s.scalars(
                 select(Record)
                 .where(Record.id.in_(record_ids[at : at + 500]))
+                .order_by(Record.id)  # one lock order, whoever else locks records
                 .with_for_update(of=Record)
             ):
                 held.append(record)

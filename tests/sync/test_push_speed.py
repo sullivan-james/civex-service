@@ -80,3 +80,57 @@ def test_missing_files_is_one_lookup_and_agrees_with_asking_one_by_one(pair, aut
     assert set(lacking) == {s for s in shas if not authority.file_svc.exists(s)}
     assert refs[0].sha256 not in lacking and refs[1].sha256 in lacking
     assert authority.file_svc.exists_many(shas) == {refs[0].sha256}
+
+
+def test_a_refused_change_in_the_middle_leaves_the_push_reading_what_is_true(
+    project,
+):
+    """The records and the feed's counter a push holds are read again after a
+    savepoint is rolled back: the middle edit of three on one record is refused
+    after it took a number, and the answer must still say where the feed really
+    is, with the numbers contiguous."""
+    from civex.domain.sync import SyncEntry
+    from civex.testing.peers import join, principal, push, wire
+
+    authority = project("authority")
+    laptop, phone = project("laptop"), project("phone")
+    laptop.schema_svc.create("encounter")
+    laptop.schema_svc.add_field("encounter", "site", "string")
+    laptop.schema_svc.add_field("encounter", "depth", "float")
+    laptop.dataset_svc.create("study")
+    record = laptop.record_svc.add("study", "encounter", {"site": "x", "depth": 1.0})
+    laptop.commit()
+    push(authority, laptop, "laptop")
+    join(authority, phone)
+    for i in (1, 2, 3):
+        phone.record_svc.update(str(record.id), {"site": f"e{i}", "depth": float(i)})
+    phone.commit()
+    first, second, third = [
+        SyncEntry.from_dict(wire(e.to_dict()))
+        for e in phone.sync_repo.pending_entries(50)
+    ]
+    third.timestamp = "not a time"  # refused after it has taken a number
+
+    result = authority.authority_svc.push(
+        principal(authority, "phone"), [first, second, third]
+    )
+    authority.commit()
+
+    assert result.results[2].status == "rejected"
+    entries, _ = authority.sync_repo.entries_after(0, 500)
+    seqs = [e.hub_seq for e in entries]
+    assert seqs == list(range(1, len(seqs) + 1))  # contiguous
+    assert result.head_seq == seqs[-1] == authority.sync_repo.head_seq()
+    assert authority.record_svc.get(str(record.id)).data["site"] == "e2"
+
+
+def test_rows_held_by_a_push_are_read_again_after_a_refused_action(project):
+    """Seed 17 of the random scenarios refuses an action whose bulk deletes the
+    savepoint then undoes: a record held from the start of the push kept the
+    deleted state, and the authority and its devices ended up disagreeing about
+    deleted_at. It fails if the rows held aren't read again after a rollback
+    (forget_held in LocalSyncRepository.savepoint)."""
+    from civex.testing.invariants import scenario
+
+    problems = scenario(project, project("authority"), 17)
+    assert not problems, "\n".join(problems[:10])
