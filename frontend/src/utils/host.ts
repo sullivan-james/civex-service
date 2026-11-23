@@ -25,6 +25,10 @@ export interface Boot {
    * `--content-max` and `--content-pad` set the page content's width and
    * side padding (default `1600px`, `1.5rem`), to line it up with a host's. */
   theme?: Record<string, string>
+  /** For a mounted app (`embed.tsx`): the colour scheme the host is drawn in,
+   * so the app's own light/dark tokens (the ones `theme` does not set) match.
+   * Left out, it follows the browser's. */
+  scheme?: 'light' | 'dark'
   /** What to call the app and where its logo is, in place of "civex". */
   brand?: { name?: string; logo_url?: string }
 }
@@ -35,9 +39,75 @@ declare global {
   }
 }
 
+/** What a host that mounts the app inside its own page (`embed.tsx`) tells it,
+ * in place of `<base href>`, `window.__CIVEX__`, the global `fetch` and
+ * `document.body`. Nothing is set when the app has the page to itself. One
+ * mount at a time: the mount sets it, its unmount clears it. */
+export interface MountedHost {
+  base: string
+  boot: Boot
+  fetch?: typeof fetch
+  /** Where floating UI (menus, popovers) is drawn: inside the mounted tree, so
+   * it keeps the app's styles. */
+  portal: HTMLElement
+  /** The element holding the mounted app (its style scope). */
+  root: HTMLElement
+}
+
+let mounted: MountedHost | null = null
+
+export function setMountedHost(host: MountedHost | null): void {
+  mounted = host
+}
+
+/** Whether the app is mounted inside a host page (`embed.tsx`). */
+export function isMounted(): boolean {
+  return mounted !== null
+}
+
+/** `fetch` as the host wants the app's requests made (to add its sign-in), the
+ * browser's own otherwise. Every request the app makes goes through this. */
+export function hostFetch(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response> {
+  return (mounted?.fetch ?? fetch)(input, init)
+}
+
+/** Where a floating panel is drawn: `document.body`, or the mounted tree. */
+export function portalRoot(): HTMLElement {
+  return mounted?.portal ?? document.body
+}
+
+/** The element the app's custom properties (its tokens) are read from. */
+export function styleRoot(): HTMLElement {
+  return mounted?.root ?? document.documentElement
+}
+
+/** Adds a stylesheet a lazily loaded part of the app brings (a map's, a
+ * terminal's): to the page, or, when mounted, inside the mounted tree so it
+ * stays within it. Once per `id`. */
+export function addStyles(id: string, css: string): void {
+  const rootNode = mounted?.root.getRootNode()
+  const into: ParentNode =
+    rootNode instanceof ShadowRoot ? rootNode : document.head
+  if (into.querySelector(`style[data-civex-style="${id}"]`)) return
+  const style = document.createElement('style')
+  style.dataset.civexStyle = id
+  style.textContent = css
+  into.append(style)
+}
+
+/** The focused element, looking inside the mounted tree's shadow root. */
+export function focusedElement(): Element | null {
+  const root = mounted?.root.getRootNode()
+  return (root instanceof ShadowRoot ? root : document).activeElement
+}
+
 /** The path the app is served at, without a trailing slash: `''` at `/`,
  * `/p/acme/survey` under a host. Read from `<base href>`, which a host sets. */
 export function basePath(doc: Document = document): string {
+  if (mounted) return mounted.base.replace(/\/+$/, '')
   const href = doc.querySelector('base')?.getAttribute('href')
   if (!href) return ''
   try {
@@ -58,6 +128,7 @@ export function apiUrl(path: string): string {
 
 /** The boot object the page carried, or nothing. */
 export function boot(): Boot {
+  if (mounted) return mounted.boot
   const value = typeof window === 'undefined' ? undefined : window.__CIVEX__
   return value && typeof value === 'object' ? value : {}
 }

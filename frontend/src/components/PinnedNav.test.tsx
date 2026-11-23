@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router'
 import { PinnedNav } from './PinnedNav'
-import { PINS_KEY, readPins } from '../utils/pins'
+import { pinsKey, readPins } from '../utils/pins'
 
 const json = (body: unknown) =>
   new Response(JSON.stringify(body), {
@@ -54,7 +54,7 @@ describe('PinnedNav', () => {
 
   it('shows a pinned filter with its live count, and unpins it', async () => {
     localStorage.setItem(
-      PINS_KEY,
+      pinsKey(),
       JSON.stringify([
         {
           key: 'view:selection/Missing table',

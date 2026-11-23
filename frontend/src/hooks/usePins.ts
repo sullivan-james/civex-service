@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useSyncExternalStore } from 'react'
 import {
-  PINS_KEY,
-  RECENTS_KEY,
+  pinsKey,
+  recentsKey,
   parseTargets,
   pushRecent,
   togglePin,
@@ -54,7 +54,7 @@ export function recordRecent(target: NavTarget) {
 }
 
 export function usePins() {
-  const pins = useStoredTargets(PINS_KEY)
+  const pins = useStoredTargets(pinsKey())
   const toggle = useCallback((target: NavTarget) => {
     try {
       togglePin(localStorage, target)
@@ -71,5 +71,5 @@ export function usePins() {
 }
 
 export function useRecents(): NavTarget[] {
-  return useStoredTargets(RECENTS_KEY)
+  return useStoredTargets(recentsKey())
 }

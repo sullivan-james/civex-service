@@ -7,7 +7,7 @@
 
 import { projectKey } from './host'
 
-export const VISITS_KEY = projectKey('civex.collectionVisits')
+export const visitsKey = () => projectKey('civex.collectionVisits')
 
 export interface CollectionVisit {
   count: number
@@ -21,7 +21,7 @@ type ReadableStorage = Pick<Storage, 'getItem' | 'setItem'>
 
 export function readVisits(storage: ReadableStorage): CollectionVisits {
   try {
-    const parsed = JSON.parse(storage.getItem(VISITS_KEY) ?? '{}')
+    const parsed = JSON.parse(storage.getItem(visitsKey()) ?? '{}')
     if (!parsed || typeof parsed !== 'object') return {}
     const visits: CollectionVisits = {}
     for (const [name, v] of Object.entries(parsed)) {
@@ -45,7 +45,7 @@ export function recordVisit(
   const visits = readVisits(storage)
   visits[name] = { count: (visits[name]?.count ?? 0) + 1, last: now }
   try {
-    storage.setItem(VISITS_KEY, JSON.stringify(visits))
+    storage.setItem(visitsKey(), JSON.stringify(visits))
   } catch {
     /* not remembering is fine */
   }

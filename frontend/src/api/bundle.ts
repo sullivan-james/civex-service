@@ -1,5 +1,5 @@
 import { api } from './client'
-import { apiUrl } from '../utils/host'
+import { apiUrl, hostFetch } from '../utils/host'
 import { progressHeaders } from './fileAccess'
 
 /** What a bundle would hold (`GET /bundle/plan`): the counts the download
@@ -78,7 +78,7 @@ export const bundleApi = {
   async import(file: File): Promise<BundleImportResult> {
     const form = new FormData()
     form.append('file', file)
-    const res = await fetch(apiUrl('/bundle/import'), {
+    const res = await hostFetch(apiUrl('/bundle/import'), {
       method: 'POST',
       body: form,
     })

@@ -3,7 +3,7 @@ import {
   readVisits,
   recordVisit,
   topCollections,
-  VISITS_KEY,
+  visitsKey,
 } from './collectionVisits'
 
 function memoryStorage(initial?: string) {
@@ -36,7 +36,7 @@ describe('collection visits', () => {
         ),
       ),
     ).toEqual({ b: { count: 1, last: 2 } })
-    expect(VISITS_KEY).toBe('civex.collectionVisits')
+    expect(visitsKey()).toBe('civex.collectionVisits')
   })
 
   it('survives storage that refuses writes', () => {

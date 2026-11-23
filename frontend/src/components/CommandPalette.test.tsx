@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { CommandPalette } from './CommandPalette'
-import { PINS_KEY, readPins } from '../utils/pins'
+import { pinsKey, readPins } from '../utils/pins'
 
 const json = (body: unknown) =>
   new Response(JSON.stringify(body), {
@@ -108,7 +108,7 @@ afterEach(() => vi.unstubAllGlobals())
 describe('CommandPalette', () => {
   it('lists pinned things when nothing is typed', async () => {
     localStorage.setItem(
-      PINS_KEY,
+      pinsKey(),
       JSON.stringify([
         {
           key: 'collection:c1',
