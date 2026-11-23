@@ -19,11 +19,13 @@ import json
 from pathlib import Path
 from typing import Any
 
+from civex.domain.features import LOCAL_FEATURES, RELEASES
 from civex.server.app import create_app
 
 _OUTPUT_PATH = Path(__file__).resolve().parents[1] / "reference" / "openapi.json"
 
 
 def on_pre_build(config: Any, **kwargs: Any) -> None:
-    spec = create_app().openapi()
+    # The reference is of everything a host can offer, releases included.
+    spec = create_app(LOCAL_FEATURES | {RELEASES}).openapi()
     _OUTPUT_PATH.write_text(json.dumps(spec, indent=2, sort_keys=True))

@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 import io
+import json
 import zipfile
 
+import pytest
 from fastapi.testclient import TestClient
+
+
+@pytest.fixture()
+def client(releases_client: TestClient) -> TestClient:
+    return releases_client
 
 
 def _study(client: TestClient) -> None:
@@ -77,11 +84,17 @@ def test_plan_make_read_cite_verify_and_download(client: TestClient):
     deep = client.post("/api/releases/v1/verify?deep=true").json()
     assert deep["matches"] is True and deep["files_read"] == 1
 
-    bundle = client.get("/api/releases/v1/bundle", follow_redirects=False)
-    assert bundle.status_code == 307
-    assert bundle.headers["location"].startswith(f"../../files/{body['bundle_sha256']}")
     download = client.get("/api/releases/v1/bundle")
     assert download.status_code == 200 and download.content[:2] == b"PK"
+    assert "v1" in download.headers["content-disposition"]
+    with zipfile.ZipFile(io.BytesIO(download.content)) as zf:
+        names = zf.namelist()
+        manifest = json.loads(zf.read("bundle.json"))
+    # The records, the citation, and the files the records cite.
+    assert "records.jsonl" in names and "CITATION.cff" in names
+    assert manifest["files"]["included"] is True and manifest["files"]["count"] == 1
+    (file_member,) = [n for n in names if n.startswith("files/")]
+    assert file_member.startswith("files/")
 
 
 def test_the_files_come_out_as_a_folder_or_a_small_zip(client: TestClient):

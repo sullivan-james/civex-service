@@ -131,7 +131,12 @@ const navGroups: NavGroupDef[] = [
       { to: '/collections', label: 'Collections', icon: LayoutGrid },
       // Every record with a thread not yet resolved: All records, filtered.
       { to: '/exports', label: 'Exports', icon: FolderTree },
-      { to: '/releases', label: 'Releases', icon: BookMarked },
+      {
+        to: '/releases',
+        label: 'Releases',
+        icon: BookMarked,
+        feature: 'releases',
+      },
       { to: '/activity', label: 'Activity', icon: History },
     ],
   },

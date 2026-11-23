@@ -204,7 +204,7 @@ class BundleService:
                     progress.phase("Adding files", len(refs), plan.file_bytes)
                 written = 0
                 for sha, size in refs.items():
-                    if not self._write_file(zf, sha):
+                    if not self.write_file(zf, sha):
                         missing.append(sha)
                     written += 1
                     if progress:
@@ -420,7 +420,7 @@ class BundleService:
             ]
         )
 
-    def _write_file(self, zf: zipfile.ZipFile, sha: str) -> bool:
+    def write_file(self, zf: zipfile.ZipFile, sha: str) -> bool:
         """Copy one stored file into the bundle, uncompressed (media rarely
         compresses, and this keeps the import a plain copy). False when its
         bytes can't be read here (on no drive, or one that isn't reachable)."""

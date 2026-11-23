@@ -29,6 +29,7 @@ HUB_COMPUTE = "hub_compute"
 SERVER_PATH_EXPORT = "server_path_export"
 PLUGIN_INSTALL = "plugin_install"
 REMOTE_DIAL = "remote_dial"
+RELEASES = "releases"
 SETTINGS = "settings"
 SETTINGS_APPEARANCE = "settings_appearance"
 SETTINGS_RETENTION = "settings_retention"
@@ -57,6 +58,7 @@ FEATURES: dict[str, str] = {
     SERVER_PATH_EXPORT: "writing exports to a folder on the server's machine",
     PLUGIN_INSTALL: "installing plugins and workflows from a bundle onto the server",
     REMOTE_DIAL: "connecting out from the server to another civex",
+    RELEASES: "releases: permanent, citable versions of the data, published on a host",
     SETTINGS: "the Settings area",
     SETTINGS_APPEARANCE: "appearance settings",
     SETTINGS_RETENTION: "the retention settings",
@@ -83,6 +85,8 @@ SETTINGS_FEATURES: frozenset[str] = frozenset(
 )
 
 # What `civex serve` and the CLI offer: a project in a folder on this machine.
+# `RELEASES` is not among them, on purpose: a release is published by a host
+# (a hub), never made on a personal device, so only a host turns it on.
 LOCAL_FEATURES: frozenset[str] = frozenset(
     {
         VOLUMES,

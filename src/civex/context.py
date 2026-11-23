@@ -758,7 +758,6 @@ def build_context(
         # device pushes (the local user's refuses nothing).
         policy=may,
         notes=note_svc,
-        releases=lambda: ctx.release_svc,
         capabilities=CAPABILITIES
         + ((DIRECT_FILES,) if features.DIRECT_FILES in project.features else ()),
     )

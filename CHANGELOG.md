@@ -23,6 +23,54 @@ from the next tag forward.
 
 ## Unreleased
 
+### v2.3.0
+
+#### Breaking
+
+- **Releases are hub-only and never synced. Sync protocol 6.** A release is
+  published on a host (a civex hub), not made on a personal device, so it no
+  longer travels. A host that wants releases turns on the new `RELEASES`
+  feature (off by default; not in `LOCAL_FEATURES`). Every `/releases` route
+  (making, correcting, withdrawing, yanking, listing, reading, comparing, the
+  files, the bundle) and the app's Releases pages are gated by it: with it off
+  they answer **404** (a project on a host that mounts the router without the
+  feature answers 501), and the app hides them.
+  - **Sync:** the authority never feeds or snapshots a release, hello counts
+    leave them out, and a push of one is refused (`rejected`, code
+    `not_synced`, "Releases are published on a civex hub"); a protocol 3-5 peer
+    that sends one is refused the same way and one that asks for
+    `/snapshot/release` gets an empty page. A device no longer sends releases or
+    counts them as unsent, and release-owned `file_references` are not files it
+    sends or fetches (they stay on the host that made them, so clean-up still
+    keeps them). Update the authority first. Releases already held by an
+    authority keep working there (REST); they are just not fed.
+  - **Desktop:** `civex release create`, `correct`, `withdraw` and `yank` are
+    removed (`civex release` says "Releases are published on a civex hub"), and
+    the app's release pages and the explorer's "Release these..." are hidden.
+    A release already on the computer stays read-only: `civex release list`,
+    `show`, `verify`, `cite`, `diff`, and `civex release export NAME`, which now
+    writes **one bundle with its files** (the old folder export is `civex
+    release files NAME`). Clean-up still keeps the files such a release owns.
+  - **A new `RELEASE` permission** replaces `change_structure` for making,
+    correcting, withdrawing and yanking. A host that says nothing about it gets
+    it wherever `change_structure` goes (roles behave as before); granting it
+    alone allows releasing without editing the structure, and `lacking` it
+    takes it away alone. `GET /releases/{name}/bundle` now answers 200 with one
+    bundle that includes the release's files (it was a redirect to a bundle of
+    records only).
+- **No migration.** Nothing is converted: existing release rows, their
+  bundles and file ownership are untouched.
+
+#### Added
+
+- **`civex clone <repo-url> --release NAME`** downloads a hub's release bundle
+  (records and files, streamed to disk in chunks) and reads it into a **new**
+  project that follows nothing. It starts read-only (`[project] read_only` in
+  config.toml; `--writable` to allow changes); `--token` (or `CIVEX_TOKEN`)
+  authorises a private repository. Workflows and plugins in the bundle are not
+  installed. Over plain HTTPS it is the same as downloading the bundle and
+  running `civex bundle import`.
+
 ### v2.2.1
 
 - **Faster pushes to an authority.** A push of 100 changes ran about 17

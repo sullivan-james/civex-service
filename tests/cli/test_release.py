@@ -1,4 +1,5 @@
-"""`civex release create|list|show|verify|withdraw|yank|export|correct|cite|diff|download`."""
+"""`civex release list|show|verify|export|files|cite|diff|download`: releases are
+published on a hub, so the ones already on this computer are read-only."""
 
 from __future__ import annotations
 
@@ -20,28 +21,16 @@ def test_releases_from_the_cli(
     make_record("survey", "sample", {"site": "a", "photo": photo.to_dict()})
     ctx.commit()
 
-    dry = runner.invoke(app, ["release", "create", "v1", "-t", "Survey", "--dry-run"])
-    assert dry.exit_code == 0, dry.output
-    assert "would hold" in dry.output
-
-    made = runner.invoke(
-        app,
-        [
-            "release",
-            "create",
-            "v1",
-            "-t",
-            "Survey",
-            "-a",
-            "Ada Lovelace|0000-0002-1825-0097|Analytical Society",
-            "-k",
-            "seals",
-            "--doi",
-            "10.1234/x",
-        ],
+    # Releases are made on a hub; one already here (made by an older civex, or
+    # through the service) stays readable.
+    ctx.release_svc.create(
+        "v1",
+        "Survey",
+        authors=[{"name": "Ada Lovelace", "orcid": "0000-0002-1825-0097"}],
+        keywords=["seals"],
+        doi="10.1234/x",
     )
-    assert made.exit_code == 0, made.output
-    assert "Made release v1" in made.output
+    ctx.commit()
 
     listed = runner.invoke(app, ["release", "list"])
     assert listed.exit_code == 0 and "v1" in listed.output
@@ -54,7 +43,7 @@ def test_releases_from_the_cli(
     deep = runner.invoke(app, ["release", "verify", "v1", "--deep"])
     assert deep.exit_code == 0 and "1 read back" in deep.output, deep.output
 
-    exported = runner.invoke(app, ["release", "export", "v1", "--mode", "copy"])
+    exported = runner.invoke(app, ["release", "files", "v1", "--mode", "copy"])
     assert exported.exit_code == 0, exported.output
     (made_at,) = (project_dir / "_civex" / "exports").iterdir()
     assert (made_at / "manifest-sha256.txt").read_text().startswith(photo.sha256)
@@ -77,19 +66,37 @@ def test_releases_from_the_cli(
     shown = runner.invoke(app, ["release", "diff", "v1", "--show", "added"])
     assert str(added.id) in shown.output
 
-    fixed = runner.invoke(app, ["release", "correct", "v1", "-t", "The survey"])
-    assert fixed.exit_code == 0 and "The survey" in fixed.output
+    # The commands that made or changed a release are gone.
+    for gone in ("create", "correct", "withdraw", "yank"):
+        answer = runner.invoke(app, ["release", gone, "v1"])
+        assert answer.exit_code == 2, (gone, answer.output)
+    assert "yanked" not in runner.invoke(app, ["release", "list"]).output
 
-    refused = runner.invoke(app, ["release", "withdraw", "v1", "-r", ""])
-    assert refused.exit_code == 1
-    gone = runner.invoke(app, ["release", "withdraw", "v1", "-r", "wrong units"])
-    assert gone.exit_code == 0 and "Withdrew" in gone.output
 
-    taken = runner.invoke(app, ["release", "create", "v1", "-t", "Again"])
-    assert taken.exit_code == 1
+def test_civex_release_says_where_releases_are_published():
+    bare = runner.invoke(app, ["release"])
+    assert bare.exit_code == 0
+    assert "published on a civex hub" in bare.output.replace("\n", " ")
+    assert "release list" in bare.output
 
-    kept = runner.invoke(app, ["release", "yank", "v1", "-r", "consent"], input="n\n")
-    assert kept.exit_code == 1 and "gives up 2 files" in kept.output
-    yanked = runner.invoke(app, ["release", "yank", "v1", "-r", "consent", "--yes"])
-    assert yanked.exit_code == 0 and "Yanked" in yanked.output
-    assert "yanked" in runner.invoke(app, ["release", "list"]).output
+
+def test_a_release_here_is_exported_as_one_bundle_with_its_files(
+    project_dir: Path, ctx, make_schema, make_collection, make_record, tmp_path
+):
+    import json
+    import zipfile
+
+    make_schema("sample", fields=[("site", "string"), ("photo", "file")])
+    make_collection("survey")
+    photo = ctx.file_svc.store_bytes(b"a photo", "p.jpg")
+    make_record("survey", "sample", {"site": "a", "photo": photo.to_dict()})
+    ctx.release_svc.create("v1", "Survey")
+    ctx.commit()
+    out = tmp_path / "v1.civex.zip"
+    done = runner.invoke(app, ["release", "export", "v1", "-o", str(out)])
+    assert done.exit_code == 0, done.output
+    with zipfile.ZipFile(out) as zf:
+        manifest = json.loads(zf.read("bundle.json"))
+        assert f"files/{photo.sha256}" in zf.namelist()
+    assert manifest["files"]["included"] and manifest["files"]["count"] == 1
+    assert manifest["files"]["missing"] == []

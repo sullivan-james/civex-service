@@ -45,11 +45,14 @@ from civex.domain.sync import (
     DEFERRED,
     ENTITY_ORDER,
     MERGED,
+    NOT_SYNCED_KINDS,
+    NOT_SYNCED_MESSAGE,
     SCOPED_PROTOCOL,
     PROTOCOL_MAX,
     PROTOCOL_RETIRING,
     PROTOCOL_MIN,
     REFUSAL_INVALID,
+    REFUSAL_NOT_SYNCED,
     REFUSAL_PERMISSION,
     REJECTED,
     FeedPage,
@@ -102,7 +105,6 @@ class SyncAuthorityService:
         policy: SyncPolicy | None = None,
         capabilities: tuple[str, ...] = CAPABILITIES,
         notes: Any = None,
-        releases: Any = None,
         unscoped: Callable[[], AbstractContextManager[None]] | None = None,
         readable: Callable[[str], bool] | None = None,
         sees: Callable[[Any], bool] | None = None,
@@ -121,9 +123,6 @@ class SyncAuthorityService:
         self._unscoped = unscoped or nullcontext
         # Which collections the caller may read (everything when not given).
         self._scope = scope or (lambda: ReadScope())
-        # () -> ReleaseService: whether a pushed release is one a person could
-        # have made, and that a made one's content stays as it is.
-        self._releases = releases
         # NoteService: where a pushed note's record is, and whether its text
         # is one a person's note could have.
         self._notes = notes
@@ -170,8 +169,6 @@ class SyncAuthorityService:
         # What this caller may see of it (the session is limited to that).
         counts = self._repo.entity_counts()
         empty = (sum(counts.values()) == 0) if holds is None else not holds
-        if not scope.unrestricted:
-            counts["release"] = 0
         readable = None
         if protocol >= SCOPED_PROTOCOL:
             # Which collections this caller may read, so a device can tell when
@@ -213,10 +210,14 @@ class SyncAuthorityService:
         what they may see), whole pages of it included; `dataset` asks for one
         collection's own things (a collection newly readable), or with
         `left_after` those of its records that have since left it."""
-        if kind not in ENTITY_ORDER:
+        if kind not in ENTITY_ORDER and kind not in NOT_SYNCED_KINDS:
             raise ValidationError(f"Unknown kind '{kind}'")
         with self._unscoped():
             head = self._head()
+        if kind in NOT_SYNCED_KINDS:
+            # Asked for by a device on protocol 5 or older, which still lists
+            # releases among what it joins with: there are none to give.
+            return SnapshotPage(kind, [], False, head, None)
         limit = max(1, min(limit, SNAPSHOT_MAX))
         if left_after is not None:
             # Never before what this authority still holds history of: a request
@@ -225,9 +226,6 @@ class SyncAuthorityService:
         if dataset is not None and not self._scope().sees(dataset):
             # A collection the caller may not read is asked about like one that
             # is not there: an empty page, never what once lived in it.
-            return SnapshotPage(kind, [], False, head, None)
-        if kind == "release" and not self._scope().unrestricted:
-            # A release is a bundle of records from anywhere in the project.
             return SnapshotPage(kind, [], False, head, None)
         try:
             items = self._repo.snapshots_page(
@@ -314,12 +312,6 @@ class SyncAuthorityService:
     # ------------------------------------------------------------------
     # Accepting changes
     # ------------------------------------------------------------------
-
-    def received_file(self, sha256: str) -> None:
-        """A file a device sent has been stored here: if it is a release's
-        bundle, the release owns the files it cites from now on."""
-        if self._releases is not None:
-            self._releases().index_waiting(sha256)
 
     @_whole_project
     def push(self, who: Principal, entries: list[SyncEntry]) -> PushResult:
@@ -418,6 +410,10 @@ class SyncAuthorityService:
         """Why a change can't be taken whatever is held, with the code of the
         refusal (`REFUSAL_INVALID` for its shape, `REFUSAL_PERMISSION` for what
         the caller may change: a person may be given that later)."""
+        if entry.entity_type in NOT_SYNCED_KINDS:
+            # Whatever the protocol the device speaks: a release is published
+            # on a host, so one sent here is never taken (and never sent again).
+            return NOT_SYNCED_MESSAGE, REFUSAL_NOT_SYNCED
         if shape := problem_with(entry):
             return shape, REFUSAL_INVALID
         if self._policy and (denied := self._policy.refuses(who, entry)):
@@ -713,10 +709,6 @@ class SyncAuthorityService:
     def _take(self, who: Principal, entry: SyncEntry) -> OpResult:
         """Merge the change into what is held, write it, and record it."""
         kind, eid = entry.entity_type, entry.entity_id
-        if kind == "release" and entry.action in ("delete", "purge"):
-            raise ValidationError(
-                "A release is never deleted: it can be withdrawn, or yanked"
-            )
         head = self._applier.head(kind, eid)
         if (
             kind == "record"
@@ -790,12 +782,7 @@ class SyncAuthorityService:
                 self._records.check_incoming(final, head)
             elif kind == "note" and self._notes is not None:
                 self._check_note(who, final)
-            elif kind == "release" and self._releases is not None:
-                self._releases().check_incoming(final, head)
             self._applier.apply_state(kind, eid, final)
-            if kind == "release" and self._releases is not None:
-                # Its bundle may be here already (files go on their own).
-                self._releases().index_waiting(str(final.get("bundle_sha256")))
         elif entry.action == "delete":
             if head is not None and head.get("deleted_at"):
                 # Already deleted (another device got there first). Both are

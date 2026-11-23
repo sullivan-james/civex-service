@@ -57,6 +57,7 @@ from civex.domain.sync import (
     LoginStarted,
     DEFERRED,
     ENTITY_ORDER,
+    NOT_SYNCED_KINDS,
     PROTOCOL_MAX,
     COPYING,
     DeviceCredentials,
@@ -1311,7 +1312,12 @@ class SyncService:
                     for entry in page.entries:
                         if entry.hub_seq is None:
                             raise SyncError("The server sent a change without a number")
-                        if self._repo.has_entry(entry.id):
+                        if entry.entity_type in NOT_SYNCED_KINDS:
+                            # An authority on protocol 5 or older still feeds
+                            # releases: they are never taken (published on a
+                            # host), only read past.
+                            pass
+                        elif self._repo.has_entry(entry.id):
                             # Ours, now numbered, and stamped with the device
                             # it came through.
                             self._repo.mark_seq(entry.id, entry.hub_seq, entry.device)

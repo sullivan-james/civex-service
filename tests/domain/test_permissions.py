@@ -163,6 +163,32 @@ def test_notes_and_views_follow_writing_unless_the_host_says_otherwise():
     assert not Permissions.of(p.READ, p.WRITE_RECORDS).can_somewhere(p.MANAGE_DEVICES)
 
 
+def test_release_follows_changing_the_structure_unless_the_host_says_otherwise():
+    # A role that could change the structure could make a release: it keeps it.
+    old = Permissions.of(p.READ, p.CHANGE_STRUCTURE)
+    assert old.can(p.RELEASE) and old.can_somewhere(p.RELEASE)
+    # A host that withholds it (stated, so nothing follows) takes it away alone.
+    withheld = old.lacking(p.RELEASE)
+    assert not withheld.can(p.RELEASE) and withheld.can(p.CHANGE_STRUCTURE)
+    # Granted alone it is not changing the structure.
+    alone = Permissions.of(p.READ, p.RELEASE)
+    assert alone.can(p.RELEASE) and not alone.can(p.CHANGE_STRUCTURE)
+    # Losing the structure (not the other way) takes the implied release too.
+    assert not old.lacking(p.CHANGE_STRUCTURE).can(p.RELEASE)
+    # Writing records is not releasing, and neither is a reader.
+    assert not Permissions.of(p.READ, p.WRITE_RECORDS).can(p.RELEASE)
+    assert not Permissions.of(p.READ).can(p.RELEASE)
+    # A carve-out of the structure carries over; an everyone-role has it.
+    carved = Permissions.of(p.READ, p.CHANGE_STRUCTURE).without(
+        [p.CHANGE_STRUCTURE], [C1]
+    )
+    assert not carved.can(p.RELEASE, C1) and carved.can(p.RELEASE, C2)
+    assert Permissions.everything().can(p.RELEASE)
+    assert p.RELEASE in p.ACTIONS
+    # What a host sent as data keeps the meaning when it is read back.
+    assert Permissions.from_dict(old.to_dict()).can(p.RELEASE)
+
+
 def test_a_pushed_change_needs_to_read_where_it_writes_and_the_files_rights():
     class Who:
         name = "laptop"

@@ -38,7 +38,6 @@ from civex.db.models import (
     Dashboard,
     Dataset,
     RecordNote,
-    Release,
     Field,
     FileReference,
     Record,
@@ -58,6 +57,7 @@ from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.audit_diff import entry_snapshots
 from civex.domain.merge import value_at
 from civex.domain.sync import (
+    NOT_SYNCED_KINDS,
     LoginRequestDTO,
     OpResult,
     SyncBatchInfo,
@@ -75,7 +75,6 @@ from civex.repositories.local.record_repo import _to_dto as _record_dto
 from civex.repositories.local.schema_repo import _field_to_dto, _schema_to_dto
 from civex.repositories.local.dashboard_repo import _to_dto as _dashboard_dto
 from civex.repositories.local.note_repo import _to_dto as _note_dto
-from civex.repositories.local.release_repo import _to_dto as _release_dto
 from civex.repositories.local.view_repo import _to_dto as _view_dto
 
 _MODELS: dict[str, Any] = {
@@ -86,12 +85,14 @@ _MODELS: dict[str, Any] = {
     "dashboard": Dashboard,
     "record": Record,
     "note": RecordNote,
-    "release": Release,
 }
 # A column PostgreSQL maintains itself (a trigger), or one that is this copy's
-# own (a release's place in this copy's history); never written from a snapshot.
+# own; never written from a snapshot.
 _NOT_WRITTEN = frozenset({"search_vector", "local_seq", "indexed"})
 
+# What this copy's history holds that is never synced (a release is published
+# on a host): not sent, not numbered, not counted as unsent, not fed.
+_SYNCED = AuditLog.entity_type.not_in(sorted(NOT_SYNCED_KINDS))
 
 # The order changes were made in here: the number the database gave each entry
 # as it was written (`AuditLog.local_seq`), not its time, since a clock can step
@@ -124,10 +125,9 @@ def _parse(value: str | None) -> datetime | None:
 
 def _kept_owner():  # type: ignore[no-untyped-def]
     """A file_references row whose owner keeps the file on the authority: a
-    live record or a release (with `Record` outer-joined)."""
-    return (
-        FileReference.record_id.is_not(None) & Record.deleted_at.is_(None)
-    ) | FileReference.release_id.is_not(None)
+    live record (with `Record` outer-joined). A release owns files too, but it
+    is never synced, so what it keeps is not something to send or fetch."""
+    return FileReference.record_id.is_not(None) & Record.deleted_at.is_(None)
 
 
 LACK_RETRY_FIRST = timedelta(minutes=10)
@@ -235,7 +235,7 @@ class LocalSyncRepository:
         self, after: str, limit: int, unconfirmed: bool = False
     ) -> list[str]:
         """Hashes of the files live records cite (a deleted record's are sent if
-        it is restored) and of releases' bundles, in hash order, `limit` of them
+        it is restored), in hash order, `limit` of them
         after `after`; `unconfirmed`: only those the authority hasn't said it
         holds. The catalog is kept up to date as records are written, so
         what a device still owes its authority is worked out from it each time
@@ -269,9 +269,7 @@ class LocalSyncRepository:
             .exists()
         )
         query = select(sha).where(
-            sha > after,
-            (FileReference.record_id.is_not(None) & live_owner)
-            | FileReference.release_id.is_not(None),
+            sha > after, FileReference.record_id.is_not(None) & live_owner
         )
         if unconfirmed:
             query = query.where(
@@ -281,7 +279,7 @@ class LocalSyncRepository:
 
     def _referenced(self):  # type: ignore[no-untyped-def]
         """The column of every file this project needs the authority to hold:
-        those its live records and its releases own."""
+        those its live records own."""
         return (
             select(FileReference.sha256.label("sha256"))
             .outerjoin(Record, Record.id == FileReference.record_id)
@@ -292,7 +290,7 @@ class LocalSyncRepository:
         )
 
     def count_unconfirmed(self) -> int:
-        """How many files live records cite (or releases keep) that the
+        """How many files live records cite that the
         authority hasn't said it holds: not on the server yet, as far as this
         device knows."""
         page = self._referenced_page("", 2**31, True).subquery()
@@ -301,7 +299,7 @@ class LocalSyncRepository:
     def unconfirmed_totals(
         self, after: str = "", volumes: Iterable[str] | None = None
     ) -> tuple[int, int]:
-        """(files, bytes) of what live records cite (and releases keep) after
+        """(files, bytes) of what live records cite after
         `after` that the authority hasn't said it holds: one aggregate over the
         references and the inventory, never a list. Bytes are of the copy this
         computer holds on the `volumes` named (all, when None; a copy on a
@@ -521,12 +519,11 @@ class LocalSyncRepository:
     def _not_here(  # type: ignore[no-untyped-def]
         self, collections: set[uuid.UUID] | None = None, lacks: str = "hide"
     ):
-        """Files live records or releases here own that no drive here is
+        """Files live records here own that no drive here is
         recorded to hold (a deleted record's files are fetched if it comes back
         and is opened, not in the background), each with a collection that
-        uses it (none for a release's); with `collections`, only files records
-        in those use, and releases'. A release that came from another device
-        owns only its bundle here, so that is what it brings.
+        uses it; with `collections`, only files records in those use. Releases
+        are never synced, so what one keeps is not fetched.
 
         `lacks` says what to do with files the authority said it hasn't got:
         `hide` leaves out every one (and those a person ignored): what is
@@ -546,9 +543,7 @@ class LocalSyncRepository:
             .outerjoin(Record, Record.id == FileReference.record_id)
             .outerjoin(stored, stored.c.sha == FileReference.sha256)
             .outerjoin(ServerLack, ServerLack.sha256 == FileReference.sha256)
-            .where(
-                stored.c.sha.is_(None), record | FileReference.release_id.is_not(None)
-            )
+            .where(stored.c.sha.is_(None), record)
         )
         if lacks == "wait":
             query = query.where(
@@ -572,7 +567,7 @@ class LocalSyncRepository:
         shas: list[str] | None = None,
         collections: set[uuid.UUID] | None = None,
     ) -> list[tuple[str, uuid.UUID | None]]:
-        """Files the records here cite (or releases keep) that no drive here
+        """Files the records here cite that no drive here
         holds (another device added them), in hash order after `after`, each
         with a collection that uses it (to choose the drive it is written to).
         With `shas`, only those (asked for by name, so whatever the authority
@@ -1569,8 +1564,6 @@ class LocalSyncRepository:
             dicts = [_dashboard_dto(r).to_dict() for r in rows]
         elif kind == "note":
             dicts = [_note_dto(r).to_dict() for r in rows]
-        elif kind == "release":
-            dicts = [_release_dto(r).to_dict() for r in rows]
         else:
             dicts = [_record_dto(r).to_dict() for r in rows]
         return [wire_state(kind, d) or {} for d in dicts]
@@ -1607,21 +1600,6 @@ class LocalSyncRepository:
                 # it with this machine's clock, and the copies drift apart.
                 flag_modified(row, "updated_at")
         self._s.flush()
-        if kind == "release":
-            self._own_release(row)
-
-    def _own_release(self, row: Release) -> None:
-        """A release from the feed owns its bundle here (so it is fetched and
-        kept), until it is yanked: then it owns nothing. The files it cites are
-        owned once its bundle is read (`ReleaseService.index_waiting`), on the
-        copy that keeps everyone's files."""
-        from civex.repositories.local.release_repo import LocalReleaseRepository
-
-        releases = LocalReleaseRepository(self._s)
-        if row.yanked_at is not None:
-            releases.disown(row.id)
-        else:
-            releases.own(row.id, [row.bundle_sha256])
 
     def soft_delete(self, kind: str, id: uuid.UUID, stamp: datetime) -> None:
         """Delete as a person's delete does, but stamped `stamp`: a schema or
@@ -1730,7 +1708,7 @@ class LocalSyncRepository:
         `limit` of them, and the rest of the action the last one belongs to, so
         an action is never split across two pushes (it is taken whole or not)."""
         pending = self._s.query(AuditLog).filter(
-            AuditLog.sync_state == "pending", AuditLog.hub_seq.is_(None)
+            AuditLog.sync_state == "pending", AuditLog.hub_seq.is_(None), _SYNCED
         )
         rows = pending.order_by(*_WRITE_ORDER).limit(limit).all()
         if len(rows) == limit and rows[-1].op_id is not None:
@@ -1747,7 +1725,9 @@ class LocalSyncRepository:
     def count_pending(self) -> int:
         return (
             self._s.query(func.count(AuditLog.id))
-            .filter(AuditLog.sync_state == "pending", AuditLog.hub_seq.is_(None))
+            .filter(
+                AuditLog.sync_state == "pending", AuditLog.hub_seq.is_(None), _SYNCED
+            )
             .scalar()
             or 0
         )
@@ -1951,7 +1931,11 @@ class LocalSyncRepository:
         if started is None:
             self._s.execute(
                 update(AuditLog)
-                .where(AuditLog.sync_state == "pending", AuditLog.hub_seq.is_(None))
+                .where(
+                    AuditLog.sync_state == "pending",
+                    AuditLog.hub_seq.is_(None),
+                    _SYNCED,
+                )
                 .values(sync_state="seeding")
                 .execution_options(synchronize_session=False)
             )
@@ -2078,7 +2062,9 @@ class LocalSyncRepository:
         order they were made, so they join the feed. Returns how many."""
         rows = (
             self._s.query(AuditLog)
-            .filter(AuditLog.hub_seq.is_(None), AuditLog.sync_state == "pending")
+            .filter(
+                AuditLog.hub_seq.is_(None), AuditLog.sync_state == "pending", _SYNCED
+            )
             .order_by(*_WRITE_ORDER)
             .all()
         )
@@ -2096,7 +2082,7 @@ class LocalSyncRepository:
         half done at the device's commit."""
         rows = (
             self._s.query(AuditLog)
-            .filter(AuditLog.hub_seq > seq)
+            .filter(AuditLog.hub_seq > seq, _SYNCED)
             .order_by(AuditLog.hub_seq)
             .limit(limit + 1)
             .all()
@@ -2106,7 +2092,7 @@ class LocalSyncRepository:
         if more and rows and rows[-1].op_id is not None:
             rest = (
                 self._s.query(AuditLog)
-                .filter(AuditLog.hub_seq > rows[-1].hub_seq)
+                .filter(AuditLog.hub_seq > rows[-1].hub_seq, _SYNCED)
                 .order_by(AuditLog.hub_seq)
                 .limit(limit + 1)
                 .all()

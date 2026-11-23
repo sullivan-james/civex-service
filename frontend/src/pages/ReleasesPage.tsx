@@ -73,12 +73,12 @@ export default function ReleasesPage() {
       title="Releases"
       info="A release freezes the records with a version, a citation and a content hash, and keeps the files they cite where they are, so a paper can say exactly which data it used and the data can be had back later, however the project has moved on."
       action={
-        can('change_structure') ? (
+        can('release') ? (
           <Button variant="primary" to="/releases/new">
             New release
           </Button>
         ) : (
-          <Button variant="primary" disabled title={why('change_structure')}>
+          <Button variant="primary" disabled title={why('release')}>
             New release
           </Button>
         )

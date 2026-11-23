@@ -12,6 +12,7 @@ export type Action =
   | 'views'
   | 'manage_members'
   | 'manage_devices'
+  | 'release'
 
 export const PROJECT = 'project'
 
@@ -29,6 +30,7 @@ export const ACTIONS: Record<Action, string> = {
   views: 'save and change filters, exports and dashboards shared by everyone',
   manage_members: 'decide who may do what',
   manage_devices: 'invite, approve and revoke the devices that sync',
+  release: 'make, correct, withdraw and yank releases',
 }
 
 export type Allowed = Readonly<Record<string, readonly string[]>>

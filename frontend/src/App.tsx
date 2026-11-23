@@ -161,9 +161,30 @@ export default function App() {
             <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="/activity" element={<ActivityPage />} />
             <Route path="/exports" element={<ExportsPage />} />
-            <Route path="/releases" element={<ReleasesPage />} />
-            <Route path="/releases/new" element={<NewReleasePage />} />
-            <Route path="/releases/:name" element={<ReleasePage />} />
+            <Route
+              path="/releases"
+              element={
+                <Gated feature="releases">
+                  <ReleasesPage />
+                </Gated>
+              }
+            />
+            <Route
+              path="/releases/new"
+              element={
+                <Gated feature="releases">
+                  <NewReleasePage />
+                </Gated>
+              }
+            />
+            <Route
+              path="/releases/:name"
+              element={
+                <Gated feature="releases">
+                  <ReleasePage />
+                </Gated>
+              }
+            />
             <Route path="/exports/new" element={<ExportEditorPage />} />
             <Route
               path="/exports/:schema/:name"

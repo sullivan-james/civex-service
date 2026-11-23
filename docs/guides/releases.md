@@ -5,6 +5,21 @@ or a data deposit can say exactly which data it used ("release `v1`, content
 hash `sha256:4f1c…`"), and that data can be had back later, however much the
 project has changed since.
 
+!!! note "Releases are published on a civex hub"
+    A release made on a personal computer would be neither authentic nor
+    reachable by anyone else, so **a release is made, kept and shared by a host
+    (a civex hub), and is never synced**. Only a host switches it on (the
+    `releases` feature); the app on your computer has no Releases pages, and
+    `civex release` can no longer create, correct, withdraw or yank one. What a
+    bundle is to you (`civex bundle export`) is the free, local copy; a release
+    is the hub's layer over it: a permanent name, frozen content, a citation, a
+    public page and access control. A release already on your computer (made by
+    an earlier civex) stays readable: `civex release list`, `show`, `verify`,
+    `cite`, `diff`, and `civex release export NAME`, which writes it as one
+    bundle with its files so nothing is lost. Clean-up still keeps the files it
+    owns. To take a hub's release, `civex clone <repo-url> --release NAME` (see
+    below).
+
 A release has:
 
 - a **version** you choose (`v1`, `2026-thesis`): letters, digits, `.`, `_`
@@ -31,7 +46,7 @@ drives plugged in.
 
 ## Making one
 
-In the app: **Releases → New release**, or tick records in a collection's
+On a host that offers releases (a civex hub), in the app: **Releases → New release**, or tick records in a collection's
 explorer and press **Release these…**. The page has three steps:
 
 1. **What**: the whole project, some collections, a saved list, or the
@@ -42,26 +57,13 @@ explorer and press **Release these…**. The page has three steps:
 3. **Review**: the records per collection, the files by drive, and where
    history is.
 
-From the command line:
+There is no command that makes one: `civex release create` was removed, and
+`civex release` says "Releases are published on a civex hub".
 
-```bash
-civex release create v1 --title "Grey seal survey 2026" \
-    --author "Ada Lovelace|0000-0002-1825-0097|Analytical Society" \
-    --author "Grace Hopper" --licence CC-BY-4.0 -k seals -k acoustics
-civex release create north-only --title "North sites" -c north
-civex release create picked --title "…" -r <record id> -r <record id>
-civex release create v1 --title "…" --dry-run     # what it would hold
-```
-
-An author is `Name`, or `Name|ORCID|Affiliation` with either part left
-blank.
-
-Making a release needs permission to change the project's structure, as a
-schema does: others depend on it.
-
-On a project that syncs, a computer with changes the server hasn't got yet is
-asked to sync first, so the release is taken at a point every copy of the
-project shares (the server's feed number is recorded with it).
+Making, correcting, withdrawing and yanking a release need the **release**
+permission (`release`). A role that could change the project's structure
+(`change_structure`) has it too, unless the host withholds it, so a
+self-hosted authority that enables the feature behaves as it did.
 
 ## The content hash
 
@@ -175,40 +177,51 @@ civex release diff v1 --show removed
 ## Correcting, withdrawing and yanking
 
 A release's content never changes. Its citation details can be corrected (a
-typo in the title, a DOI issued later: **Edit details…** or
-`civex release correct v1 --doi 10.1234/abcd`).
+typo in the title, a DOI issued later: **Edit details…**).
 
-It can be **withdrawn** with a reason (**Withdraw…** or
-`civex release withdraw v1 -r "calibration error"`): it says so wherever it
+It can be **withdrawn** with a reason (**Withdraw…**): it says so wherever it
 is shown, and keeps its data, so work that cited it can still be checked.
 
-It can be **yanked** with a reason (**Yank…** or
-`civex release yank v1 -r "consent withdrawn"`) when its data must go. It
+It can be **yanked** with a reason (**Yank…**) when its data must go. It
 stops keeping its files and its bundle, so the next clean-up removes whatever
 nothing else uses. You are told first how many files that is, and how many
 stay for the records that still use them. What is left is the release's
 record: its name, content hash, citation, and who yanked it, when and why, so
 a citation still finds it. A yank can't be undone.
 
-Corrections, withdrawals and yanks are recorded in history, and on a project
-that syncs they reach every copy.
+Corrections, withdrawals and yanks are recorded in history.
 
 ## Getting the records back
 
-Save the bundle (**Copy to another project…**, onto a drive of this computer or as a download; or `civex release download v1`) and read
-it into a **new** project with `civex bundle import` (or **Collections →
-Bring in from another project…**). Records keep their ids and still name their files; put the
-files beside them with the release's folder export.
+A host serves each release as one bundle **with its files**
+(`GET /releases/{name}/bundle`, built on disk and streamed). Over plain HTTPS
+that is a download you read into a new project with `civex bundle import`; or
+let civex do both:
 
 ```bash
+civex clone https://hub.example.org/ada/seals/data --release v1
+```
+
+This makes a new project from the release: nothing is joined or synced, and
+it starts **read-only** (a copy to read and cite; `--writable` allows
+changes). A private repository needs the host's token (`--token`, or
+`CIVEX_TOKEN`). Workflows and plugins in the bundle are not installed.
+
+A release already on your computer comes back the same way:
+
+```bash
+civex release export v1 -o release-v1.civex.zip   # records and files, one file
 mkdir restored && cd restored && civex init
 civex bundle import ../release-v1.civex.zip
 ```
 
+`civex release files v1` lays its files out as a folder instead, by record.
+
 ## On a project that syncs
 
-The release syncs to every copy, and its bundle is sent to the server like a
-record's file. The server keeps the files the release cites once the bundle
-has arrived. Another computer keeps only the bundle (the server keeps the
-files), and downloads it when the release is first verified or downloaded
-there.
+**Releases are never synced** (sync protocol 6). A device does not send them,
+the authority does not feed or snapshot them and refuses one it is sent (the
+refusal code is `not_synced`), and the files a release keeps are not something
+a device sends or fetches. The files a release keeps stay on the host that
+made it (it owns them in its catalogue, so they are never cleaned up while the
+release is not yanked).

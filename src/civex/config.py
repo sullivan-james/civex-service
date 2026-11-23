@@ -70,6 +70,16 @@ class IdentityConfig:
 
 
 @dataclass
+class ProjectConfig:
+    """What this copy of the project may be used for. `read_only`: nothing in
+    it can be changed (a release read into a new project with `civex clone
+    --release` starts so; it is a copy to read and cite, not to edit). Take it
+    off by deleting the line from config.toml."""
+
+    read_only: bool = False
+
+
+@dataclass
 class SyncConfig:
     """Keeping this project in step with other copies of it (CIVEX-305): one
     instance is the *authority* and every other device follows it."""
@@ -348,6 +358,7 @@ class Config:
     automation: AutomationConfig = field(default_factory=AutomationConfig)
     sync: SyncConfig = field(default_factory=SyncConfig)
     identity: IdentityConfig = field(default_factory=IdentityConfig)
+    project: ProjectConfig = field(default_factory=ProjectConfig)
 
     @property
     def civex_dir(self) -> Path:
@@ -531,6 +542,9 @@ def parse_config(data: dict, root: Path) -> Config:
     )
 
     identity_name = str(data.get("identity", {}).get("name") or "").strip()[:100]
+    project_cfg = ProjectConfig(
+        read_only=bool(data.get("project", {}).get("read_only", False))
+    )
     sync_data = data.get("sync", {})
     sync_cfg = SyncConfig(
         remote=(str(sync_data["remote"]).rstrip("/") or None)
@@ -581,6 +595,7 @@ def parse_config(data: dict, root: Path) -> Config:
         automation=automation_cfg,
         sync=sync_cfg,
         identity=IdentityConfig(name=identity_name or None),
+        project=project_cfg,
     )
 
 
@@ -713,6 +728,9 @@ def render_config(config: Config) -> str:
 
     if config.identity.name:
         lines += ["\n[identity]\n", f"name = {_tv(config.identity.name)}\n"]
+
+    if config.project.read_only:
+        lines += ["\n[project]\n", "read_only = true\n"]
 
     sync = config.sync
     if (

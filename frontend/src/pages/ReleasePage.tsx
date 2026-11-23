@@ -85,7 +85,7 @@ export default function ReleasePage() {
   const [moving, setMoving] = useState(false)
   const features = useFeatures()
   const flow = useFlow()
-  const allowed = can('change_structure')
+  const allowed = can('release')
   const yanked = !!release?.yanked_at
 
   return (
@@ -116,7 +116,7 @@ export default function ReleasePage() {
               {
                 label: allowed
                   ? 'Edit details…'
-                  : `Edit details (${why('change_structure')})`,
+                  : `Edit details (${why('release')})`,
                 onClick: () => setEditing(true),
                 disabled: !allowed || yanked,
               },

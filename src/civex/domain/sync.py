@@ -25,7 +25,7 @@ from civex.domain import hlc
 # changed meaning); MIN goes up when an older one is no longer served. An
 # authority is upgraded first and answers a device on any version both speak.
 PROTOCOL_MIN = 3
-PROTOCOL_MAX = 5
+PROTOCOL_MAX = 6
 # The first version whose feed tells a device how far the authority looked
 # (`FeedPage.through`) and whose hello lists the collections it may read: what a
 # device whose person may not read the whole project needs to sync it.
@@ -57,8 +57,16 @@ ENTITY_ORDER = (
     "dashboard",
     "record",
     "note",
-    "release",
 )
+
+# A kind that is no longer synced (protocol 6): releases are published on a
+# host and never travel, so a device never sends one, the authority never feeds
+# or snapshots one and refuses one it is sent (`REFUSAL_NOT_SYNCED`). Kept out
+# of `ENTITY_ORDER`, so nothing seeds, joins or counts them.
+NOT_SYNCED_KINDS = frozenset({"release"})
+# Releases were part of protocols 4 and 5, so a device on either may still ask
+# for their snapshot: it is answered with an empty page, never an error.
+NOT_SYNCED_AFTER = 5
 
 # What of each kind travels, and nothing else: a column added for this machine
 # alone (a cache, a search index) stays off the wire, and adding one here is a
@@ -144,44 +152,13 @@ WIRE_FIELDS: dict[str, frozenset[str]] = {
             "deleted_at",
         }
     ),
-    # A release's manifest and citation (`domain/release`); its bundle travels
-    # as a file, and the files it cites are the records' own. `local_seq` and
-    # `indexed` are this copy's own and stay here.
-    "release": frozenset(
-        {
-            "id",
-            "name",
-            "title",
-            "description",
-            "authors",
-            "licence",
-            "doi",
-            "keywords",
-            "scope",
-            "content_hash",
-            "bundle_sha256",
-            "bundle_size",
-            "counts",
-            "feed_seq",
-            "civex_version",
-            "created_at",
-            "created_by",
-            "updated_at",
-            "withdrawn_at",
-            "withdrawn_by",
-            "withdrawn_reason",
-            "yanked_at",
-            "yanked_by",
-            "yanked_reason",
-        }
-    ),
 }
 
 # What each protocol version added, so a server still answers a device on an
 # older one with only what it can read (`kinds_for`, `entry_for`,
 # `snapshot_for`; applied in the peer router, never in the core): a kind, or a
 # kind's field, and the version it travels from.
-KINDS_SINCE: dict[str, int] = {"dashboard": 4, "note": 4, "release": 4}
+KINDS_SINCE: dict[str, int] = {"dashboard": 4, "note": 4}
 FIELDS_SINCE: dict[str, dict[str, int]] = {"schema": {"charts": 4}}
 
 
@@ -204,7 +181,9 @@ def entry_for(protocol: int, entry: SyncEntry) -> SyncEntry | None:
     """An entry as a peer on `protocol` can read it: None for a kind it
     doesn't know, else without the fields it doesn't (an edit of only those
     leaves an edit of nothing, which applies as no change)."""
-    if entry.entity_type not in kinds_for(protocol):
+    if entry.entity_type in NOT_SYNCED_KINDS or entry.entity_type not in kinds_for(
+        protocol
+    ):
         return None
     kind = entry.entity_type
     newer = {f for f, v in FIELDS_SINCE.get(kind, {}).items() if v > protocol}
@@ -336,6 +315,12 @@ RETRY_STATUSES = frozenset({DEFERRED})
 # again.
 REFUSAL_PERMISSION = "permission"
 REFUSAL_INVALID = "invalid"
+# The change is about a kind that is not synced (a release: those are published
+# on a host). Never sent again; the device keeps what it made.
+REFUSAL_NOT_SYNCED = "not_synced"
+NOT_SYNCED_MESSAGE = (
+    "Releases are published on a civex hub and are not synced: make this one there."
+)
 
 ACTIONS = frozenset({"create", "update", "delete", "restore", "purge"})
 # A delete's time becomes the `deleted_at` of what it deletes, so a device whose

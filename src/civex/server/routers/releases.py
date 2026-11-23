@@ -4,18 +4,19 @@ Make one (after a plan of what it would hold), list them, read one's manifest
 and citation, check it still holds what it was made with, see what changed
 since, correct its citation details, withdraw it or yank it (give its data
 up), get its files out the way any selection's are (a folder on a drive, a
-move onto one drive, a zip while it is small), and download its bundle of
-records (read into a new project with `POST /bundle/import`)."""
+move onto one drive, a zip while it is small), and download it as one bundle
+with its files (read into a new project with `POST /bundle/import`). Only a
+host offers these (`features.RELEASES`): a release is published on a civex
+hub, never made on a personal device."""
 
 from __future__ import annotations
 
 import dataclasses
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from civex import fs_open
@@ -30,7 +31,7 @@ from civex.domain.file_access import (
 )
 from civex.domain.features import OPEN_FOLDER, SERVER_PATH_EXPORT
 from civex.server.deps import get_ctx, reads_whole_project, requires
-from civex.server.downloads import new_temp_dir, serve, temp_paths
+from civex.server.downloads import new_temp_dir, new_temp_path, serve, temp_paths
 from civex.server.models import RecordQueryRequest
 from civex.server.routers.file_access import (
     _from_this_machine,
@@ -697,21 +698,31 @@ def save_release(
 
 @router.get(
     "/releases/{name}/bundle",
-    status_code=307,
-    responses={307: {"description": "Where the bundle is downloaded from."}},
+    response_class=FileResponse,
+    responses={200: {"content": {"application/zip": {}}}},
 )
 def download_release(name: str, ctx: AppContext = Depends(get_ctx)):
-    """Download a release's bundle of records: answered with where it is
-    (`/files/{bundle_sha256}`, named for the release), after fetching it from
-    the server on a copy that hasn't got it. 404 when it can't be had (or it
-    was yanked)."""
+    """Download a release as one bundle that carries its files: the frozen
+    records, `release.json` and `CITATION.cff`, and every file the records cite.
+    Read it into a new project with `civex clone <repo-url> --release NAME` or
+    `civex bundle import`. It is built on disk and streamed from there, so its
+    size is bounded by disk, not memory. A file that can't be read is named in
+    its `bundle.json`. 404 when the bundle can't be had (or the release was
+    yanked)."""
     release, here = ctx.release_svc.bundle_here(name)
     if not here:
         raise HTTPException(
             404,
             detail="The bundle is not on this computer and the server couldn't send it",
         )
-    file_name = quote(ctx.release_svc.file_name_for(release.name))
-    return RedirectResponse(
-        f"../../files/{release.bundle_sha256}?filename={file_name}", status_code=307
+    dest = new_temp_path(".civex.zip")
+    try:
+        ctx.release_svc.write_full_bundle(name, dest)
+    except BaseException:
+        dest.unlink(missing_ok=True)
+        raise
+    return serve(
+        dest,
+        "application/zip",
+        ctx.release_svc.file_name_for(release.name),
     )

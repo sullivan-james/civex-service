@@ -21,7 +21,7 @@ HOSTED = (
     f.LOCAL_FEATURES
     - {f.VOLUMES, f.TERMINAL, f.DESKTOP, f.LOCAL_WORKFLOWS}
     - MACHINE_TOUCHING
-)
+) | {f.RELEASES}
 
 
 @pytest.fixture()
@@ -69,9 +69,12 @@ def test_a_route_inside_a_shared_router_answers_501_in_plain_words(hosted: TestC
 def test_the_router_list_is_the_one_answer():
     """`api_routers` is what every host includes: with everything, every
     router; narrowed, exactly the routers whose feature is missing go."""
-    everything = {id(r) for r, _ in api_routers()}
+    every = f.LOCAL_FEATURES | {f.RELEASES}
+    everything = {id(r) for r, _ in api_routers(every)}
     narrowed = {id(r) for r, _ in api_routers(HOSTED)}
-    gone = {id(r) for r, feature in api_routers() if feature and feature not in HOSTED}
+    gone = {
+        id(r) for r, feature in api_routers(every) if feature and feature not in HOSTED
+    }
     assert narrowed == everything - gone
     assert all(feature is None or feature in f.FEATURES for _, feature in api_routers())
 

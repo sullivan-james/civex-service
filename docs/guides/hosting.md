@@ -81,6 +81,15 @@ Also leave out the features that need a machine: `volumes`, `store_admin`,
 `ai`, `open_folder`, `desktop`, `server_path_export`, `plugin_install` and
 `remote_dial`.
 
+**`releases` is the one feature a host turns *on*.** It is off by default and
+not part of a project on a machine: a release (a permanent, citable, frozen copy)
+is published by a host, never made on a personal device, and never synced. With it
+on, `/releases/*` (making, correcting, withdrawing, yanking, listing, reading,
+comparing, the files, and `/releases/{name}/bundle`, one bundle with its files that
+`civex clone <repo-url> --release NAME` reads into a new project) and the app's
+Releases pages exist; with it off they answer 404 and the app hides them. Pair it
+with the `release` permission below.
+
 The top-bar sync button and `/sync/review` need no feature: they appear only
 for a project that follows a remote, never for a hosted authority.
 
@@ -107,6 +116,7 @@ is held to nothing.
 | `views` | save and change filters, exports and the Analytics page |
 | `manage_members` | the host's own; civex has no member endpoints to guard |
 | `manage_devices` | every `/remote/authority*` route: invite, approve, revoke devices |
+| `release` | make, correct, withdraw and yank a release (with the `releases` feature on). A host that says nothing about it gives it wherever it gives `change_structure`, so existing roles behave as before; say it (or `lacking` it) to separate the two |
 
 `manage_files` still works as a name for `add_files` plus `delete_files`: grant it,
 deny it or ask it, and it means both. It is never reported on its own.
@@ -231,8 +241,7 @@ app's `/sync/v1`, with the permissions your resolver gave that request) sends on
 what the person may read: the feed, a joining device's copy, `hello.counts` and the
 files used only by hidden collections. A change to a hidden collection is never
 sent; a record moved across the line is sent as its removal or its full creation.
-Releases (bundles of records from anywhere) go only to a device whose person reads
-everything. The device's own pushes are refused through the ordinary not-taken
+Releases are not synced at all (protocol 6). The device's own pushes are refused through the ordinary not-taken
 path when they would write into, or point at, what it may not read.
 
 - **Widening** is automatic: the next sync's `hello` lists the readable collections

@@ -34,6 +34,7 @@ NOTES = "notes"
 VIEWS = "views"
 MANAGE_MEMBERS = "manage_members"
 MANAGE_DEVICES = "manage_devices"
+RELEASE = "release"
 
 # Every action, with what it lets a person do, in plain words (the detail of
 # the 403 when it is refused, and what the app explains beside a control).
@@ -48,11 +49,21 @@ ACTIONS: dict[str, str] = {
     VIEWS: "save and change filters, exports and dashboards shared by everyone",
     MANAGE_MEMBERS: "decide who may do what",
     MANAGE_DEVICES: "invite, approve and revoke the devices that sync",
+    RELEASE: "make, correct, withdraw and yank releases",
 }
 
 # A name that stands for several actions: granting, denying or asking it is
 # doing so for each.
 ALIASES: dict[str, tuple[str, ...]] = {MANAGE_FILES: (ADD_FILES, DELETE_FILES)}
+
+# An action a host that never heard of it gets wherever another goes: notes
+# and shared filters with writing records, releases with changing the
+# structure (so a role that could make a release as it was keeps it).
+FOLLOWS: dict[str, str] = {
+    NOTES: WRITE_RECORDS,
+    VIEWS: WRITE_RECORDS,
+    RELEASE: CHANGE_STRUCTURE,
+}
 
 # What is said when a save cites a file the caller could not download: the
 # same words whatever the reason, so the refusal tells nothing about the file.
@@ -149,24 +160,25 @@ class Permissions:
     derived: frozenset[str] = field(default=frozenset(), compare=False, repr=False)
 
     def _follow_writing(self) -> None:
-        """Notes and shared filters were once part of writing records. A host
-        that says nothing about `NOTES` or `VIEWS` (neither granted nor denied,
-        not even to nowhere) keeps it so: they go where `WRITE_RECORDS` goes,
-        denials included. Saying anything about one, `lacking` included, ends
-        that for it."""
+        """Notes and shared filters were once part of writing records, and
+        releases part of changing the structure. A host that says nothing about
+        `NOTES`, `VIEWS` or `RELEASE` (neither granted nor denied, not even to
+        nowhere) keeps it so: each goes where the action it came from goes
+        (`FOLLOWS`), denials included. Saying anything about one, `lacking`
+        included, ends that for it."""
         allowed = dict(self.allowed)
         denied = dict(self.denied)
         derived = set(self.derived)
-        for action in (NOTES, VIEWS):
+        for action, parent in FOLLOWS.items():
             if action not in derived and (action in allowed or action in denied):
                 continue
             derived.add(action)
             allowed.pop(action, None)
             denied.pop(action, None)
-            if WRITE_RECORDS in allowed:
-                allowed[action] = allowed[WRITE_RECORDS]
-            if WRITE_RECORDS in denied:
-                denied[action] = denied[WRITE_RECORDS]
+            if parent in allowed:
+                allowed[action] = allowed[parent]
+            if parent in denied:
+                denied[action] = denied[parent]
         object.__setattr__(self, "allowed", allowed)
         object.__setattr__(self, "denied", denied)
         object.__setattr__(self, "derived", frozenset(derived))

@@ -15,52 +15,27 @@ from civex.cli.utils import get_ctx
 from civex.console import console
 from civex.domain.dtos import ReleaseDTO
 from civex.domain.exceptions import CivexError
-from civex.services.release_service import ReleasePlan, ReleaseScope
+
+HUB_ONLY = "Releases are published on a civex hub."
 
 app = typer.Typer(
     help=(
-        "Freeze the data as a named, citable release (its records with a "
-        "content hash and a citation; the files stay where they are and the "
-        "release keeps them), check it, cite it, get its files out, see what "
-        "changed since, and withdraw or yank it."
+        "Releases are published on a civex hub, not made here. A release already "
+        "on this computer stays readable: list it, check it, cite it, compare "
+        "it with the data now, and export it as a bundle."
     ),
-    no_args_is_help=True,
+    invoke_without_command=True,
 )
 
 
-def _scope(
-    collection: Optional[list[str]],
-    query_json: Optional[str],
-    record: Optional[list[str]] = None,
-    only_chosen: bool = False,
-) -> ReleaseScope:
-    query = None
-    if query_json:
-        try:
-            raw = json.loads(query_json)
-        except json.JSONDecodeError as e:
-            console.print(f"[error]--query-json is not JSON: {e}[/error]")
-            raise typer.Exit(1)
-        query = ReleaseScope.from_dict({"query": raw}).query
-    return ReleaseScope(
-        collections=collection or None,
-        query=query,
-        records=record or None,
-        # Chosen records come with everything inside them, unless told not to.
-        below=bool(query or record) and not only_chosen,
-    )
-
-
-def _authors(raw: Optional[list[str]]) -> list[dict[str, str]] | None:
-    """`Name`, or `Name|ORCID|Affiliation` (either part may be left empty)."""
-    if raw is None:
-        return None
-    out = []
-    for text in raw:
-        name, _, rest = text.partition("|")
-        orcid, _, affiliation = rest.partition("|")
-        out.append({"name": name, "orcid": orcid, "affiliation": affiliation})
-    return out
+@app.callback()
+def _hub_only(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        console.print(
+            f"{HUB_ONLY} Releases already on this computer can still be read: "
+            "`civex release list`, and `civex release export NAME` writes one "
+            "as a bundle."
+        )
 
 
 def _describe_scope(scope: dict) -> str:
@@ -78,28 +53,6 @@ def _describe_scope(scope: dict) -> str:
 def _author_text(a: dict) -> str:
     extra = ", ".join(x for x in (a.get("orcid"), a.get("affiliation")) if x)
     return a["name"] + (f" ({extra})" if extra else "")
-
-
-def _print_plan(plan: ReleasePlan, title: str) -> None:
-    table = Table(title=title, show_header=False, box=None)
-    table.add_row("Records", str(plan.records))
-    for name, n in plan.collections.items():
-        table.add_row("", f"{name}: {n}")
-    table.add_row("Schemas", str(plan.schemas))
-    table.add_row(
-        "Files",
-        f"{plan.files} ({_size(plan.file_bytes)}), kept where they are",
-    )
-    for d in plan.by_drive:
-        table.add_row("", f"{d['volume'] or 'not on this computer'}: {d['files']}")
-    table.add_row("Workflows", f"{plan.workflows} workflows, {plan.plugins} plugins")
-    position = f"entry {plan.local_seq}"
-    if plan.feed_seq is not None:
-        position += f", server feed number {plan.feed_seq}"
-    table.add_row("History position", position)
-    if plan.unsent:
-        table.add_row("[warning]Unsent[/warning]", f"{plan.unsent} changes: sync first")
-    console.print(table)
 
 
 class _Bar:
@@ -163,98 +116,6 @@ def _print_release(r: ReleaseDTO) -> None:
 def _fail(e: Exception) -> None:
     console.print(f"[error]{e}[/error]")
     raise typer.Exit(1)
-
-
-@app.command("create")
-def create(
-    name: str = typer.Argument(..., help="The version, e.g. v1 or 2026-thesis"),
-    title: str = typer.Option(..., "--title", "-t", help="What the data is"),
-    description: Optional[str] = typer.Option(
-        None, "--description", "-d", help="A longer account of the data"
-    ),
-    author: Optional[list[str]] = typer.Option(
-        None,
-        "--author",
-        "-a",
-        help="An author, as Name or Name|ORCID|Affiliation (repeatable, in citation order)",
-    ),
-    licence: Optional[str] = typer.Option(
-        None, "--licence", "--license", help="An SPDX id, e.g. CC-BY-4.0"
-    ),
-    doi: Optional[str] = typer.Option(None, "--doi", help="A DOI, if it has one"),
-    keyword: Optional[list[str]] = typer.Option(
-        None, "--keyword", "-k", help="A keyword (repeatable)"
-    ),
-    collection: Optional[list[str]] = typer.Option(
-        None,
-        "--collection",
-        "-c",
-        help="Only these collections (repeatable); default the whole project",
-    ),
-    query_json: Optional[str] = typer.Option(
-        None,
-        "--query-json",
-        help=(
-            "Only the records a query lists (and the records above them), as "
-            'JSON, e.g. {"dataset": "study", "schema": "sample"}'
-        ),
-    ),
-    record: Optional[list[str]] = typer.Option(
-        None, "--record", "-r", help="Exactly these records, by id (repeatable)"
-    ),
-    only_chosen: bool = typer.Option(
-        False,
-        "--only-chosen",
-        help="With --record or --query-json: leave out the records inside the "
-        "ones chosen (they are taken by default)",
-    ),
-    with_workflows: bool = typer.Option(
-        False,
-        "--with-workflows",
-        help="Also carry the project's workflows and plugins (their code); "
-        "left out unless asked for",
-    ),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", help="Say what it would hold without making it"
-    ),
-) -> None:
-    """Freeze the data as a release.
-
-    Writes the records of the whole project, some collections, the records
-    a query lists or chosen records into a small bundle, hashes it (each cited
-    file by its hash, so no file is read), adds a CITATION.cff, and keeps it
-    in the project's storage. The files stay where they are: the release
-    keeps them, so a clean-up never removes them. A release never changes
-    afterwards: its citation details can be corrected, and it can be
-    withdrawn or yanked, each recorded in history.
-    """
-    ctx = get_ctx()
-    try:
-        scope = _scope(collection, query_json, record, only_chosen)
-        if dry_run:
-            _print_plan(
-                ctx.release_svc.plan(scope, with_workflows),
-                f"Release {name} would hold",
-            )
-            return
-        made = ctx.release_svc.create(
-            name,
-            title,
-            scope,
-            description=description,
-            authors=_authors(author) or [],
-            licence=licence,
-            doi=doi,
-            keywords=keyword or [],
-            include_workflows=with_workflows,
-        )
-        ctx.commit()
-        _print_release(made)
-        console.print(f"[success]Made release {made.name}[/success]")
-    except CivexError as e:
-        _fail(e)
-    finally:
-        ctx.close()
 
 
 @app.command("list")
@@ -340,56 +201,36 @@ def verify(
     raise typer.Exit(1)
 
 
-@app.command("withdraw")
-def withdraw(
-    name: str = typer.Argument(..., help="The release's name or id"),
-    reason: str = typer.Option(..., "--reason", "-r", help="Why it is withdrawn"),
-) -> None:
-    """Mark a release withdrawn. It keeps its data, so work that cited it can
-    still be checked, and it says why wherever it is shown. To give the data
-    up, yank it."""
-    ctx = get_ctx()
-    try:
-        r = ctx.release_svc.withdraw(name, reason)
-        ctx.commit()
-        console.print(f"[success]Withdrew release {r.name}[/success]")
-    except CivexError as e:
-        _fail(e)
-    finally:
-        ctx.close()
-
-
-@app.command("yank")
-def yank(
-    name: str = typer.Argument(..., help="The release's name or id"),
-    reason: str = typer.Option(..., "--reason", "-r", help="Why its data goes"),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask to confirm"),
-) -> None:
-    """Give a release's data up for good. It stops keeping its files and its
-    bundle, so the next clean-up removes whatever nothing else uses; what is
-    left is a record of it that a citation still finds. Says first how much
-    would go. Can't be undone."""
-    ctx = get_ctx()
-    try:
-        plan = ctx.release_svc.plan_yank(name)
-        console.print(
-            f"Yanking {plan.name} gives up {plan.files} files: {plan.unused_files} "
-            f"({_size(plan.unused_bytes)}) are used by nothing else and a clean-up "
-            f"then removes them; {plan.kept_files} stay for their other users."
-        )
-        if not yes and not typer.confirm("Yank it? This can't be undone"):
-            raise typer.Exit(1)
-        r = ctx.release_svc.yank(name, reason)
-        ctx.commit()
-        console.print(f"[success]Yanked release {r.name}[/success]")
-    except CivexError as e:
-        _fail(e)
-    finally:
-        ctx.close()
-
-
 @app.command("export")
 def export(
+    name: str = typer.Argument(..., help="The release's name or id"),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Where to write it (default release-<name>.civex.zip)",
+    ),
+) -> None:
+    """Write a release as one bundle, with its files, so nobody loses a release
+    made on this computer. Read it into a new project with `civex bundle
+    import`. A file that can't be reached is named in the bundle and left out."""
+    ctx = get_ctx()
+    try:
+        target = output or Path(
+            ctx.release_svc.file_name_for(ctx.release_svc.get(name).name)
+        )
+        release = ctx.release_svc.write_full_bundle(name, target)
+    except FileNotFoundError:
+        _fail(Exception("The bundle is not on this computer and couldn't be fetched"))
+    except CivexError as e:
+        _fail(e)
+    finally:
+        ctx.close()
+    console.print(f"[success]Wrote release {release.name} to {target}[/success]")
+
+
+@app.command("files")
+def files(
     name: str = typer.Argument(..., help="The release's name or id"),
     mode: str = typer.Option(
         "link",
@@ -404,7 +245,8 @@ def export(
 ) -> None:
     """Make a folder of a release's files, laid out like any export (a folder
     per record), with manifest-sha256.txt (each file's hash and path),
-    release.json and CITATION.cff beside them."""
+    release.json and CITATION.cff beside them. To take the whole release with
+    you, as one file, use `civex release export`."""
     from civex.domain.file_access import FilesUnavailableError
 
     ctx = get_ctx()
@@ -452,52 +294,6 @@ def gather(
     finally:
         ctx.close()
     _start(spec, dry_run)
-
-
-@app.command("correct")
-def correct(
-    name: str = typer.Argument(..., help="The release's name or id"),
-    title: Optional[str] = typer.Option(None, "--title", "-t", help="The new title"),
-    description: Optional[str] = typer.Option(
-        None, "--description", "-d", help="A longer account of the data"
-    ),
-    author: Optional[list[str]] = typer.Option(
-        None,
-        "--author",
-        "-a",
-        help="The authors, all of them, as Name or Name|ORCID|Affiliation (repeatable)",
-    ),
-    licence: Optional[str] = typer.Option(
-        None, "--licence", "--license", help="An SPDX id (e.g. CC-BY-4.0) or a name"
-    ),
-    doi: Optional[str] = typer.Option(None, "--doi", help="The DOI it was given"),
-    keyword: Optional[list[str]] = typer.Option(
-        None, "--keyword", "-k", help="The keywords, all of them (repeatable)"
-    ),
-) -> None:
-    """Correct a release's citation details (a typo in the title, a DOI
-    issued later). Its content never changes; the correction is in history."""
-    values = {
-        k: v
-        for k, v in {
-            "title": title,
-            "description": description,
-            "authors": _authors(author),
-            "licence": licence,
-            "doi": doi,
-            "keywords": keyword,
-        }.items()
-        if v is not None
-    }
-    ctx = get_ctx()
-    try:
-        r = ctx.release_svc.correct(name, **values)
-        ctx.commit()
-        _print_release(r)
-    except CivexError as e:
-        _fail(e)
-    finally:
-        ctx.close()
 
 
 @app.command("cite")
