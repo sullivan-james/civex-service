@@ -1065,8 +1065,62 @@ def _data_changed(target: Any, attr: str) -> bool:
 
 @event.listens_for(Record, "after_insert")
 def _record_inserted(mapper: Any, connection: Any, target: Record) -> None:
-    _sync_file_refs(connection, "record_id", target.id, target.data, is_new=True)
-    _sync_record_refs(connection, target.id, target.data, is_new=True)
+    insert_record_refs(connection, [(target.id, target.data)])
+
+
+def insert_record_refs(connection: Any, records: list[tuple[uuid.UUID, Any]]) -> None:
+    """The file and record references of records just inserted, for all of them
+    at once (one lookup of where each file is kept, one insert per table). The
+    hook above and a bulk insert (`SyncRepository.insert_records`, which skips
+    the hook) both come here, so they cannot drift apart."""
+    from civex.domain.file_refs import collect_sha256_refs
+    from civex.domain.references import collect_record_refs
+
+    files: list[tuple[uuid.UUID, set[str]]] = []
+    refs: list[tuple[uuid.UUID, set[tuple[uuid.UUID, uuid.UUID]]]] = []
+    for record_id, data in records:
+        if wanted := collect_sha256_refs(data):
+            files.append((record_id, wanted))
+        if cited := collect_record_refs(data):
+            refs.append((record_id, cited))
+    if files:
+        table = cast(Table, FileReference.__table__)
+        stored = cast(Table, StoredObject.__table__)
+        every = sorted({sha for _, shas in files for sha in shas})
+        # Each points at the file's newest copy: the one an upload just wrote
+        # (or reused, on the collection's own drive when it has one). None
+        # until a copy is here; recording one then points at it.
+        newest: dict[str, str] = {}
+        for at in range(0, len(every), 5000):
+            for sha, volume in connection.execute(
+                select(stored.c.sha256, stored.c.volume)
+                .where(stored.c.sha256.in_(every[at : at + 5000]))
+                .order_by(stored.c.created_at, stored.c.volume)
+            ):
+                newest[sha] = volume
+        connection.execute(
+            insert(table),
+            [
+                {
+                    "id": row_id(),
+                    "sha256": sha,
+                    "record_id": record_id,
+                    "job_id": None,
+                    "volume": newest.get(sha),
+                }
+                for record_id, shas in files
+                for sha in sorted(shas)
+            ],
+        )
+    if refs:
+        connection.execute(
+            insert(cast(Table, RecordReference.__table__)),
+            [
+                {"record_id": record_id, "field_id": f, "target_id": t}
+                for record_id, cited in refs
+                for f, t in sorted(cited)
+            ],
+        )
 
 
 @event.listens_for(Record, "after_update")

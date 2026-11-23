@@ -88,6 +88,20 @@ from the next tag forward.
     took 0.3 s or more for 3 s, so the screen's refreshes while sync runs don't
     each recompute every file; any other `/file-access` call drops it.
   - `benchmarks/bench_first_upload.py` measures it on PostgreSQL.
+- **An authority writes a pushed batch of new records in bulk.** A run of
+  records made new (no parent, no uniqueness key, no references to other records)
+  is validated against schemas and collections read once per run, then written
+  with one statement each for the records (and their file and record
+  references), the history rows, the answers kept and the feed numbers (one
+  `head_seq` update), instead of about 11 statements per record. On PostgreSQL
+  with 200k records already held, a seed batch of 250 went from about 7.0 ms to
+  0.4 ms per record on the authority. The answers, the rows and the numbers are
+  those of settling each change alone (tests compare the two); anything else (a
+  refused or invalid change, a clash, an edit, a delete, a child record, one
+  whose id or entry appears twice in the push) is settled one at a time as
+  before, in the order sent. The first upload's client does one lookup of open
+  refusals per batch rather than one per change (0.65 to 0.14 ms per record on
+  PostgreSQL). `benchmarks/bench_bulk_push.py` measures both.
 
 ### v2.2.1
 

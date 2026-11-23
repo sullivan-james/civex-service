@@ -21,6 +21,7 @@ from sqlalchemy import (
     cast,
     delete,
     func,
+    insert,
     or_,
     select,
     update,
@@ -53,6 +54,7 @@ from civex.db.models import (
     SyncOp,
     View,
     _UTCDateTime,
+    insert_record_refs,
 )
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.audit_diff import entry_snapshots
@@ -148,6 +150,10 @@ class LocalSyncRepository:
         self._ops: dict[uuid.UUID, OpResult | None] | None = None
         # Records known not to be there, for the length of one push.
         self._absent: set[uuid.UUID] | None = None
+        # The records the push names; `_absent` is read again from these when
+        # something that reached other records has made it unsure.
+        self._wanted: list[uuid.UUID] = []
+        self._stale = False
         self._held: list[Record] = []
         self._meta_held: SyncMeta | None = None
 
@@ -1080,6 +1086,7 @@ class LocalSyncRepository:
             held,
             pinned,
         )
+        self._wanted, self._stale = record_ids, False
         try:
             yield
         finally:
@@ -1100,6 +1107,7 @@ class LocalSyncRepository:
             self._s.expire(self._meta_held)
         if self._absent:
             self._absent = set()  # look for them again
+            self._stale = True
 
     @staticmethod
     def _op_result(row: SyncOp) -> OpResult:
@@ -1142,6 +1150,126 @@ class LocalSyncRepository:
         self._s.flush()
         if self._ops is not None:
             self._ops[entry.id] = result
+
+    def record_absent(self, id: uuid.UUID) -> bool:
+        """Whether this push has found no record with this id (so a lookup of
+        it would find nothing)."""
+        if self._absent is None:
+            return False
+        if self._stale:
+            self._stale = False
+            present: set[uuid.UUID] = set()
+            for at in range(0, len(self._wanted), 500):
+                present.update(
+                    self._s.scalars(
+                        select(Record.id).where(
+                            Record.id.in_(self._wanted[at : at + 500])
+                        )
+                    )
+                )
+            self._absent = set(self._wanted) - present
+        return id in self._absent
+
+    def reserve_hub_seqs(self, count: int) -> int:
+        """Take `count` consecutive numbers in one statement; the first is
+        returned. What `next_hub_seq` does, for a batch."""
+        row = self._meta_row()
+        statement = (
+            update(SyncMeta)
+            .where(SyncMeta.id == 1)
+            .values(head_seq=SyncMeta.head_seq + count)
+        )
+        if self._returning():
+            new = self._s.execute(statement.returning(SyncMeta.head_seq)).scalar_one()
+            set_committed_value(row, "head_seq", new)
+            return int(new) - count + 1
+        self._s.execute(statement)
+        self._s.expire_all()
+        return self._meta_row().head_seq - count + 1
+
+    def insert_records(self, states: list[dict[str, Any]]) -> None:
+        """Make these records exist, none of them held: what `apply_snapshot`
+        does for each, in a few statements (its references too, which the ORM
+        writes through a hook this skips). Values are read as `apply_snapshot`
+        reads them (`record_values`), so one that can't be raises before
+        anything is written."""
+        if not states:
+            return
+        groups: dict[frozenset[str], list[dict[str, Any]]] = {}
+        for values in (record_values(state) for state in states):
+            groups.setdefault(frozenset(values), []).append(values)
+        self._s.flush()
+        conn = self._s.connection()
+        for rows in groups.values():
+            conn.execute(insert(Record), rows)
+        every = [v for rows in groups.values() for v in rows]
+        insert_record_refs(conn, [(v["id"], v.get("data")) for v in every])
+        if self._absent is not None:
+            self._absent.difference_update(v["id"] for v in every)
+
+    def insert_entries(self, rows: list[tuple[SyncEntry, int]]) -> None:
+        """Keep entries made elsewhere (each with its number), as
+        `insert_entry` does, in one statement; none belongs to a batch."""
+        if not rows:
+            return
+        self._s.flush()
+        self._s.connection().execute(
+            insert(AuditLog),
+            [
+                {
+                    "id": e.id,
+                    "action": e.action,
+                    "entity_type": e.entity_type,
+                    "entity_id": e.entity_id,
+                    "old_data": e.old_data,
+                    "new_data": e.new_data,
+                    "delta": e.delta,
+                    "format": 2 if e.delta is not None else 1,
+                    "op_id": uuid.UUID(e.op) if e.op else None,
+                    "timestamp": _parse(e.timestamp),
+                    "batch_id": None,
+                    "actor": e.actor,
+                    "device": e.device,
+                    "device_id": uuid.UUID(e.device_id) if e.device_id else None,
+                    "hlc": e.hlc,
+                    "hub_seq": seq,
+                    "sync_state": "synced",
+                    "apply_state": "applied",
+                }
+                for e, seq in rows
+            ],
+        )
+
+    def save_ops(
+        self,
+        items: list[tuple[SyncEntry, OpResult]],
+        device_id: str | None,
+        device_name: str | None,
+    ) -> None:
+        """`save_op` for several, in one statement."""
+        if not items:
+            return
+        self._s.flush()
+        self._s.connection().execute(
+            insert(SyncOp),
+            [
+                {
+                    "op_id": entry.id,
+                    "device_id": device_id,
+                    "device_name": device_name,
+                    "entity_type": entry.entity_type,
+                    "entity_id": entry.entity_id,
+                    "status": result.status,
+                    "message": result.message,
+                    "conflicts": result.conflicts,
+                    "hub_seq": result.hub_seq,
+                }
+                for entry, result in items
+            ],
+        )
+        if self._ops is not None:
+            for entry, result in items:
+                self._ops[entry.id] = result
 
     def drop_op(self, op_id: uuid.UUID) -> None:
         """Forget an op that is to be tried again (it was deferred)."""
@@ -1333,6 +1461,24 @@ class LocalSyncRepository:
         if entity_id:
             q = q.filter(SyncConflict.entity_id == entity_id)
         return [_conflict_dto(r) for r in q.order_by(SyncConflict.created_at)]
+
+    def with_open_refusals(self, entity_ids: Iterable[uuid.UUID]) -> set[uuid.UUID]:
+        """Which of these things have an open refusal, one query per chunk."""
+        wanted = list(dict.fromkeys(entity_ids))
+        found: set[uuid.UUID] = set()
+        for at in range(0, len(wanted), 500):
+            found.update(
+                self._s.scalars(
+                    select(SyncConflict.entity_id)
+                    .where(
+                        SyncConflict.status == "open",
+                        SyncConflict.kind == "rejected",
+                        SyncConflict.entity_id.in_(wanted[at : at + 500]),
+                    )
+                    .distinct()
+                )
+            )
+        return found
 
     def resolve_conflicts(self, ids: list[uuid.UUID], resolution: str) -> int:
         """Mark open conflicts settled, in one statement. Returns how many were."""
@@ -2182,6 +2328,18 @@ class LocalSyncRepository:
             ).on_the_wire()
             for r in rows
         ]
+
+
+def record_values(snap: dict[str, Any]) -> dict[str, Any]:
+    """A record snapshot as the columns it fills, in the types they hold."""
+    columns = {
+        c.name: c for c in Record.__table__.columns if c.name not in _NOT_WRITTEN
+    }
+    return {
+        name: _coerce(columns[name], value)
+        for name, value in snap.items()
+        if name in columns
+    }
 
 
 def _coerce(column: Any, value: Any) -> Any:

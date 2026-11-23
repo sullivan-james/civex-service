@@ -2016,6 +2016,11 @@ class SyncService:
         goes in as a whole (`whole`), its refusal is settled by that. Returns
         how many changes it held back."""
         held = 0
+        # Which things have a refusal waiting: asked once, not of each (almost
+        # none do), and kept up as refusals are added below.
+        refused = self._repo.with_open_refusals(
+            e.entity_id for r in results if (e := sent.get(r.op_id)) is not None
+        )
         for result in results:
             entry = sent.get(result.op_id)
             if entry is None:
@@ -2023,13 +2028,17 @@ class SyncService:
             if result.status == DEFERRED:
                 held += 1
                 continue
-            waiting = [
-                c
-                for c in self._repo.find_open_conflicts(
-                    kind="rejected", entity_id=entry.entity_id
-                )
-                if c.op_id != result.op_id
-            ]
+            waiting = (
+                [
+                    c
+                    for c in self._repo.find_open_conflicts(
+                        kind="rejected", entity_id=entry.entity_id
+                    )
+                    if c.op_id != result.op_id
+                ]
+                if entry.entity_id in refused
+                else []
+            )
             retried: list[uuid.UUID] = []
             if result.status == REJECTED:
                 if waiting:
@@ -2094,6 +2103,8 @@ class SyncService:
                     message=problem.get("message"),
                     code=problem.get("code") if kind == "rejected" else None,
                 )
+                if kind == "rejected":
+                    refused.add(entry.entity_id)
         return held
 
     # ------------------------------------------------------------------
