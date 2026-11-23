@@ -72,7 +72,46 @@ class _Dropper:
         self._admin.dispose()
 
 
+def _proxy(spec: str) -> None:
+    """listen:target:MBps — forward to the target, each connection held to MB/s
+    (what arrives from the client; answers are small)."""
+    import asyncio
+
+    listen, target, rate = spec.split(":")
+    rate_bps = float(rate) * 1e6
+
+    async def pipe(r, w, paced: bool) -> None:
+        began = time.monotonic()
+        total = 0
+        try:
+            while data := await r.read(65536):
+                w.write(data)
+                await w.drain()
+                if paced:
+                    total += len(data)
+                    ahead = total / rate_bps - (time.monotonic() - began)
+                    if ahead > 0:
+                        await asyncio.sleep(ahead)
+        except ConnectionError:
+            pass
+        finally:
+            w.close()
+
+    async def handle(cr, cw) -> None:
+        sr, sw = await asyncio.open_connection("127.0.0.1", int(target))
+        await asyncio.gather(pipe(cr, sw, True), pipe(sr, cw, False))
+
+    async def main() -> None:
+        server = await asyncio.start_server(handle, "127.0.0.1", int(listen))
+        async with server:
+            await server.serve_forever()
+
+    asyncio.run(main())
+
+
 def main() -> None:
+    if len(sys.argv) == 3 and sys.argv[1] == "--proxy":
+        return _proxy(sys.argv[2])
     ap = argparse.ArgumentParser()
     ap.add_argument("--shape", choices=["small", "huge"], required=True)
     ap.add_argument("--store", choices=["fs", "s3"], default="fs")
@@ -80,6 +119,13 @@ def main() -> None:
     ap.add_argument("--small-mb", type=float, default=0.3)
     ap.add_argument("--big-count", type=int, default=5)
     ap.add_argument("--big-gb", type=float, default=2.0)
+    ap.add_argument(
+        "--per-conn-mb",
+        type=float,
+        default=0.0,
+        help="cap each connection to the authority at this many MB/s (a proxy "
+        "stands in for a link where one TCP stream cannot fill the line)",
+    )
     ap.add_argument("--work", default=str(Path.home() / ".cache" / "bench-bulk"))
     ap.add_argument("--label", default="")
     args = ap.parse_args()
@@ -135,7 +181,10 @@ def run(args, work: Path, procs: list) -> dict:
         import boto3
 
         port = _free_port()
-        moto = Path.home() / ".cache" / "bulk-moto-venv" / "bin" / "moto_server"
+        moto = Path(
+            os.environ.get("MOTO_SERVER")
+            or Path.home() / ".cache" / "bulk-moto-venv" / "bin" / "moto_server"
+        )
         procs.append(
             subprocess.Popen(
                 [str(moto), "-H", "127.0.0.1", "-p", str(port)],
@@ -173,6 +222,20 @@ def run(args, work: Path, procs: list) -> dict:
         )
     procs.append(subprocess.Popen([sys.executable, "-c", code]))
     _wait(port)
+    if args.per_conn_mb:
+        shaped = _free_port()
+        procs.append(
+            subprocess.Popen(
+                [
+                    sys.executable,
+                    __file__,
+                    "--proxy",
+                    f"{shaped}:{port}:{args.per_conn_mb}",
+                ]
+            )
+        )
+        _wait(shaped)
+        port = shaped
     url = f"http://127.0.0.1:{port}"
 
     projects = Projects(work / "devices")
