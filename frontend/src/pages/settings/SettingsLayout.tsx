@@ -1,8 +1,9 @@
 import { Suspense } from 'react'
-import { Outlet, useLocation, useSearchParams } from 'react-router'
+import { Navigate, Outlet, useLocation, useSearchParams } from 'react-router'
 import { InfoTip, Page, Skeleton, TabNav } from '../../components/ui'
-import { useFeatures } from '../../hooks/useFeatures'
-import { offered } from '../../utils/features'
+import { useFeatures, useFeaturesSettled } from '../../hooks/useFeatures'
+import { offered, SETTINGS_SECTION_FEATURES } from '../../utils/features'
+import { NotAvailable } from '../../components/FeatureGate'
 import { useSlot } from '../../hooks/useSlot'
 
 /** Settings is a set of pages, one per area, each with its own address
@@ -16,14 +17,11 @@ const settingsSections = [
   },
   {
     to: 'database',
-    feature: 'db_admin',
     label: 'Database',
     info: 'Where this project’s records are stored. You can move them to another kind of database at any time; your original is kept.',
   },
   {
     to: 'storage',
-    // Drives, or the bucket a project keeps its files in instead.
-    feature: 'store_admin',
     label: 'Storage',
     info: 'Where Civex keeps your files, and which collections use which drive.',
   },
@@ -34,7 +32,6 @@ const settingsSections = [
   },
   {
     to: 'members',
-    feature: 'accounts',
     label: 'Members & access',
     info: 'Who you are here and what you may do. Members and their roles are managed on the host’s own pages.',
   },
@@ -50,13 +47,11 @@ const settingsSections = [
   },
   {
     to: 'updates',
-    feature: 'updates',
     label: 'Updates',
     info: 'Which version of civex this is, and updating it. An update closes civex, installs the new version and starts it again.',
   },
   {
     to: 'logs',
-    feature: 'logs',
     label: 'Logs',
     info: 'Every log civex keeps on this computer: this project’s server, the desktop app and its launcher, and updates. Anything that mentions a log links here.',
   },
@@ -71,7 +66,7 @@ interface Section {
   to: string
   label: string
   info: string
-  feature?: string
+  feature?: string | readonly string[]
 }
 
 /** Under a host with accounts the project is the authority its devices
@@ -79,6 +74,7 @@ interface Section {
 const HOSTED_SYNC: Section = {
   to: 'sync',
   label: 'Devices',
+  feature: 'settings_devices',
   info: 'The computers that keep a copy of this project and sync with it. Each one signed in as a person who may use this project.',
 }
 
@@ -94,13 +90,18 @@ export default function SettingsLayout() {
   const { pathname } = useLocation()
   const [params] = useSearchParams()
   const features = useFeatures()
+  const settled = useFeaturesSettled()
   const extensions = useSlot('settings.sections')
   const sections: Section[] = [
     ...(settingsSections as readonly Section[])
-      .filter((s) => offered(features, s))
       .map((s) =>
         s.to === 'sync' && features.has('accounts') ? HOSTED_SYNC : s,
-      ),
+      )
+      .map((s) => ({
+        ...s,
+        feature: s.feature ?? SETTINGS_SECTION_FEATURES[s.to],
+      }))
+      .filter((s) => offered(features, s)),
     // A host's own sections (`utils/slots`), at `/settings/x/<id>`.
     ...extensions.map((e) => ({
       to: `x/${e.id}`,
@@ -109,6 +110,10 @@ export default function SettingsLayout() {
     })),
   ]
   const [, , area, sub] = pathname.split('/')
+  // `/settings` alone opens the first section a host leaves on.
+  if (!area && settled && sections[0])
+    return <Navigate to={sections[0].to} replace />
+  if (!area && settled) return <NotAvailable />
   const current = sections.find(
     (s) => s.to === area || s.to === `${area}/${sub}`,
   )

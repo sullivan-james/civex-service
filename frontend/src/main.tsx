@@ -8,7 +8,7 @@ import { ThemeProvider } from './hooks/useTheme'
 import { applyUiSize } from './hooks/useUiSize'
 import { ToastProvider } from './components/ui/ToastProvider'
 import { ApiError } from './api/client'
-import { basePath } from './utils/host'
+import { applyBootTheme, basePath } from './utils/host'
 import { loadExtensions } from './utils/extensions'
 
 const queryClient = new QueryClient({
@@ -30,6 +30,8 @@ const queryClient = new QueryClient({
 
 // The chosen size before the first paint, so a page never flashes at another.
 applyUiSize()
+// A host's colours, likewise before the first paint.
+applyBootTheme()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

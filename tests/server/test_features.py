@@ -160,6 +160,9 @@ def test_me_says_who_and_what_they_may_do(client: TestClient, tmp_path: Path):
     assert me["permissions"]["actions"] == {
         "read": ["project"],
         "write_records": [f"collection:{mine['id']}"],
+        # notes and shared views follow writing for a host that is silent on them
+        "notes": [f"collection:{mine['id']}"],
+        "views": [f"collection:{mine['id']}"],
     }
     body = {"schema_name": "sample", "data": {}}
     assert hosted.post("/api/collections/mine/records", json=body).status_code == 201
@@ -210,6 +213,28 @@ def test_a_host_without_remote_dial_cannot_connect_out_but_can_administer(
     assert hosted.get("/api/remote/library").status_code == 501
     # The authority side (devices that connect to this server) is untouched.
     assert hosted.get("/api/remote/authority").status_code == 200
+
+
+@pytest.mark.parametrize(
+    "method, path, body",
+    [
+        ("get", "/api/remote", None),
+        ("patch", "/api/remote", {"paused": True}),
+        ("get", "/api/remote/files", None),
+        ("patch", "/api/remote/files/c", {"mode": "keep"}),
+        ("post", "/api/remote/files/c/free-up", None),
+        ("get", "/api/remote/conflicts", None),
+        ("post", "/api/remote/conflicts/x/resolve", {"take": "theirs"}),
+        ("post", "/api/remote/conflicts/resolve-many", {"ids": [], "take": "theirs"}),
+        ("post", "/api/remote/conflicts/reopen", {"ids": []}),
+    ],
+)
+def test_the_rest_of_the_dial_out_routes_answer_501_on_a_host(
+    hosted: TestClient, method: str, path: str, body: dict | None
+):
+    answer = getattr(hosted, method)(path, **({} if body is None else {"json": body}))
+    assert answer.status_code == 501, answer.text
+    assert answer.json()["detail"] == f.unavailable_message(f.REMOTE_DIAL)
 
 
 @pytest.mark.parametrize(

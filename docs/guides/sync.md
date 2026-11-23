@@ -34,7 +34,11 @@ civex sync connect https://… --invite civex_inv_…   # an existing project
   (`ABCD-2345`) and waits. On the authority, `civex sync device approve
   ABCD-2345 laptop` (or Settings → Sync → *Asking to join*) lets it in by name,
   `civex sync device deny` turns it away, and a code nobody approves in 15
-  minutes lapses. The device is then a device like any invited one.
+  minutes lapses. The device is then a device like any invited one. When the
+  server has a page for it (the hub does), the device shows that address with
+  the code instead: open it and enter the code. `civex clone <address>` does
+  the same without `--invite`, and `civex auth status` shows this device's
+  name, id, whether it has joined, and the last sync error.
 - **Keys:** joining makes the device a key pair. It then signs in with its key for
   short sessions, and checks the authority's key, so a different server at the
   same address gets nothing. `civex sync device revoke <name>` stops a device at
@@ -180,10 +184,62 @@ the device is sent back the authority's state, marked **not taken**.
 
 A project in a folder is yours: everything is allowed. A hosted civex knows who
 is signed in and what they may do (`GET /api/me`: read, write records, change
-the structure, add files, delete, manage members, each everywhere or in named
-collections), and holds a person's device to the same rule as their browser: a
-change a device pushes that its person may not make is refused like any change
-that breaks a rule, and the app shows the control switched off, saying why.
+the structure, add or delete files, notes, shared views, delete, manage members
+and devices, each everywhere or in named collections), and holds a person's
+device to the same rule as their browser: a change a device pushes that its
+person may not make is refused like any change that breaks a rule, and the app
+shows the control switched off, saying why.
+
+### A device that may not read everything
+
+When its person may not read some collections, their device holds a **partial
+copy**: it simply never has those collections. The authority leaves them out of
+everything it sends that device (the feed, the copy a joining device reads, the
+counts it reports, and the files only they use), so no record, note, id or count
+of a hidden collection reaches it. A change that would put something in a
+collection the device may not read, or point at a record in one, is refused (the
+change is marked **not taken**, as any refused change), and so is one that names a
+collection it may write to for a record the authority holds in one it may not.
+A record moved out of sight is removed from such a device (it is never told
+where it went); one moved into sight is sent whole.
+
+If the person is **given more** later, the device asks for it by itself: the
+authority says which collections the device may read (sync protocol 5), and the
+device reads the ones it did not have as they are now, then carries on with the
+feed. That includes a record that moved out of a collection it could not read
+into one it can, while it was away: such a record is read too (`snapshot` with
+`dataset` and `left_after`), so the feed's later changes to it apply. A device that
+was never told what it could read (it synced on an older protocol) reads any
+collection it lacks the first time it is.
+
+A device whose person may not read everything needs **protocol 5**: on an older
+one the authority answers 426 ("update civex on this device"), because it could not
+be told how far the authority looked or of a collection it is given. A device whose
+person reads everything works on any supported protocol.
+
+History stored by an older civex carries the collection a device *claimed*, not where
+the authority had the record. The upgrade records the feed number it happened at
+(`sync_meta.placed_from`, no rewrite of history); a limited device is sent an entry
+from before it only while its record is still somewhere that device may read, so a
+stale claim cannot carry a value out of a collection. Fetching history before joining
+remembers how far it looked (`sync_meta.history_scan`), so it can be done in steps.
+Values written while a record was hidden, before the upgrade, can reach a device once
+the record is visible again (a record carries its earlier history with it, as in
+`hosting.md`); after the upgrade the feed sends such a record only as a whole creation,
+and a note is placed only by changes made since the upgrade.
+
+A hidden stretch of the feed is looked past in bounded steps: one request reads at
+most 2,000 entries, and when nothing in them is for the device it answers an empty
+page with `more` and `through`, and the device asks again from there.
+
+If the person is **given less**, the authority stops sending, and that is all it
+can do: **what the device already holds cannot be taken back.** The records it
+copied stay on that computer, and its person can read them there. A copy made
+again from the authority (an authority that pruned its history does this) drops
+what the device may no longer read. A host that needs a person never to keep
+data it once showed them should not give it to a device at all.
+Hidden collections' ids can still appear in shared things that are project-wide:
+the Analytics page, and the number of changes (gaps in feed numbers).
 
 ## Who a change is recorded as
 

@@ -13,7 +13,7 @@ import dataclasses
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Any, Protocol
 
 from civex.domain import features
@@ -25,7 +25,11 @@ from civex.domain import hlc
 # changed meaning); MIN goes up when an older one is no longer served. An
 # authority is upgraded first and answers a device on any version both speak.
 PROTOCOL_MIN = 3
-PROTOCOL_MAX = 4
+PROTOCOL_MAX = 5
+# The first version whose feed tells a device how far the authority looked
+# (`FeedPage.through`) and whose hello lists the collections it may read: what a
+# device whose person may not read the whole project needs to sync it.
+SCOPED_PROTOCOL = 5
 # The oldest version this civex still serves but its next release will not, so
 # devices still on it are told to update before they are cut off (`Hello.
 # protocol_retiring`). None while nothing is being retired. Raise
@@ -510,6 +514,9 @@ class OpResult:
     # For `conflict`/`merged`: the values that did not go in.
     conflicts: list[dict[str, Any]] = field(default_factory=list)
     hub_seq: int | None = None
+    # Set on an answer given again to a change sent before (never on the wire):
+    # nothing was done this time, so it is not news to a host.
+    replayed: bool = field(default=False, compare=False, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -547,18 +554,83 @@ class PushResult:
         return cls([OpResult.from_dict(r) for r in d["results"]], int(d["head_seq"]))
 
 
+@dataclass(frozen=True)
+class PushAccepted:
+    """What a host is told after a device's push has been committed
+    (`Project.push_accepted`): who sent it and what the authority took, so a
+    host can attribute and count pushes without reading its responses. `taken`
+    are the ids of the changes taken into the project (`APPLIED` or `MERGED`),
+    and `counts` how many changes ended in each status, refused ones included.
+    There is no commit as such: a change is numbered (`first_seq`..`last_seq`,
+    the positions in the feed)."""
+
+    device_id: str | None
+    device: str
+    actor: str | None
+    taken: tuple[uuid.UUID, ...]
+    counts: Mapping[str, int]
+    changed: Mapping[str, int]  # taken changes by kind of thing (record, note, ...)
+    first_seq: int | None
+    last_seq: int | None
+    head_seq: int
+
+    @classmethod
+    def of(
+        cls,
+        who: Principal,
+        actor: str | None,
+        entries: Sequence[SyncEntry],
+        result: PushResult,
+    ) -> PushAccepted | None:
+        """The report of a push, or None when it took nothing (all refused,
+        repeated or held back): nothing happened that a host would count."""
+        kinds = {e.id: e.entity_type for e in entries}
+        # A change sent again is answered as before and done no more than once.
+        fresh = [r for r in result.results if not r.replayed]
+        taken = [r for r in fresh if r.status in (APPLIED, MERGED)]
+        if not taken:
+            return None
+        counts: dict[str, int] = {}
+        for r in fresh:
+            counts[r.status] = counts.get(r.status, 0) + 1
+        changed: dict[str, int] = {}
+        for r in taken:
+            kind = kinds.get(r.op_id, "unknown")
+            changed[kind] = changed.get(kind, 0) + 1
+        seqs = [r.hub_seq for r in taken if r.hub_seq is not None]
+        return cls(
+            device_id=who.device_id,
+            device=who.name,
+            actor=actor,
+            taken=tuple(r.op_id for r in taken),
+            counts=counts,
+            changed=changed,
+            first_seq=min(seqs) if seqs else None,
+            last_seq=max(seqs) if seqs else None,
+            head_seq=result.head_seq,
+        )
+
+
 @dataclass
 class FeedPage:
     entries: list[SyncEntry]
     head_seq: int  # the authority's latest number
     more: bool  # there are entries past this page
+    # Protocol 5: the last number the authority looked at to make this page. A
+    # caller who may not see some changes is given only the others, so the last
+    # entry sent is not where reading got to: a device moves its cursor to this,
+    # or it would read the same unseen run again at every sync.
+    through: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "entries": [e.to_dict() for e in self.entries],
             "head_seq": self.head_seq,
             "more": self.more,
         }
+        if self.through is not None:
+            out["through"] = self.through
+        return out
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> FeedPage:
@@ -579,7 +651,13 @@ class FeedPage:
             )
             if dtype is not None:
                 raise newer_field_type(dtype)
-        return cls(entries, int(d["head_seq"]), bool(d["more"]))
+        through = d.get("through")
+        return cls(
+            entries,
+            int(d["head_seq"]),
+            bool(d["more"]),
+            int(through) if through is not None else None,
+        )
 
 
 @dataclass
@@ -607,9 +685,16 @@ class Hello:
     # The oldest version it still speaks but will stop accepting at its next
     # update (`PROTOCOL_RETIRING`), so a device still on it can say so.
     protocol_retiring: int | None = None
+    # Protocol 5: the collections this caller may read, each `{"id", "seq"}`
+    # (`seq`: the number its creation was given in the feed, 0 when it has none),
+    # so a device can tell when it has been given one it does not hold and ask
+    # for it (`snapshot` with `dataset`): one made after the device's cursor
+    # comes in the feed, one made before it has to be asked for. None: not said
+    # (an older authority or protocol), so the device assumes nothing changed.
+    readable: list[dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "protocol_version": self.protocol_version,
             "project_id": str(self.project_id),
             "head_seq": self.head_seq,
@@ -624,6 +709,9 @@ class Hello:
             "capabilities": self.capabilities,
             "protocol_retiring": self.protocol_retiring,
         }
+        if self.readable is not None:
+            out["readable"] = self.readable
+        return out
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Hello:
@@ -645,6 +733,14 @@ class Hello:
             protocol_retiring=(
                 int(d["protocol_retiring"])
                 if d.get("protocol_retiring") is not None
+                else None
+            ),
+            readable=(
+                [
+                    {"id": str(c["id"]), "seq": int(c.get("seq") or 0)}
+                    for c in d["readable"]
+                ]
+                if d.get("readable") is not None
                 else None
             ),
         )
@@ -1146,7 +1242,14 @@ class SyncTransport(Protocol):
     def hello(self) -> Hello: ...
     def push(self, entries: list[SyncEntry]) -> PushResult: ...
     def feed(self, after: int, limit: int) -> FeedPage: ...
-    def snapshot(self, kind: str, after: str | None, limit: int) -> SnapshotPage: ...
+    def snapshot(
+        self,
+        kind: str,
+        after: str | None,
+        limit: int,
+        dataset: str | None = None,
+        left_after: int | None = None,
+    ) -> SnapshotPage: ...
     def missing_files(self, shas: list[str]) -> list[str]: ...
     def upload_file(self, sha256: str, source: UploadSource, size: int) -> None:
         """Send `size` bytes read from `source` (from where it is now; read

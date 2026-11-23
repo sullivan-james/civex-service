@@ -12,12 +12,14 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from civex.config import Config, ConfigStore, FileConfigStore
 from civex.domain.accounts import Account
 from civex.domain.features import LOCAL_FEATURES
 from civex.domain.permissions import EVERYTHING, Permissions
+from civex.domain.sync import PushAccepted
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Engine
@@ -59,6 +61,11 @@ class Project:
     permissions: Permissions = EVERYTHING
     # Who that is, as the host knows them; None: whoever sits at this machine.
     account: Account | None = None
+    # Called once, after a device's push has been committed and only when it
+    # took at least one change (`domain.sync.PushAccepted`), so a host can
+    # attribute and count pushes (who sent them, how much) without reading its
+    # own responses. A failure in it is logged and never fails the push.
+    push_accepted: Callable[[PushAccepted], None] | None = None
 
     @classmethod
     def local(cls, config: Config) -> Project:

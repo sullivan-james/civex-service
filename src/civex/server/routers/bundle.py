@@ -16,7 +16,7 @@ from civex.context import AppContext
 from civex.domain.bundle import EXTENSION, BundleError, ExportOptions
 from civex.domain.exceptions import CivexError, NotFoundError
 from civex.domain.features import OPEN_FOLDER, PLUGIN_INSTALL, SERVER_PATH_EXPORT
-from civex.server.deps import get_ctx, requires
+from civex.server.deps import get_ctx, reads_whole_project, requires
 from civex.server.downloads import new_temp_path, serve, temp_paths
 from civex.server.routers.file_access import _from_this_machine, report_progress
 from civex.services.progress import Progress
@@ -223,7 +223,11 @@ def save_bundle(
     return SavedResponse(path=str(dest), opened=bool(opened))
 
 
-@router.post("/bundle/import", response_model=BundleImportResponse)
+@router.post(
+    "/bundle/import",
+    response_model=BundleImportResponse,
+    dependencies=[reads_whole_project()],
+)
 async def import_bundle(
     file: UploadFile,
     progress: Progress | None = Depends(report_progress),

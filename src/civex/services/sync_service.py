@@ -49,6 +49,7 @@ from civex.domain.exceptions import (
 )
 from civex.domain.file_refs import without_file_locations
 from civex.domain.hosts import is_loopback
+from civex.domain.dtos import MissingFileGroupDTO, MissingFilesRemovalDTO
 from civex.domain.sync import (
     REFUSAL_PERMISSION,
     is_lock_contention,
@@ -215,6 +216,48 @@ class SyncStatus:
     files_to_send: int = 0
     # Why those haven't gone (`SyncService.files_waiting`), when there are any.
     files_waiting: FilesWaiting | None = None
+    # Missing files a person chose to stop being told about.
+    files_ignored: int = 0
+    # files records here cite that the server said it hasn't got and no drive
+    # here holds (less the ignored): missing everywhere, not downloading
+    files_missing: int = 0
+
+
+@dataclass
+class MissingFilesReport:
+    """Files records here cite that this project never stored and that nothing
+    can supply (no copy on any drive here, and the authority hasn't got it
+    either): `shas`, with where records cite them (`groups`), and `ignored`,
+    those a person chose to stop hearing about."""
+
+    shas: list[str] = field(default_factory=list)
+    ignored: list[str] = field(default_factory=list)
+    groups: list[MissingFileGroupDTO] = field(default_factory=list)
+    # False when a remote is set but couldn't be asked whether it holds them:
+    # the list is then only what is missing here.
+    server_checked: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "shas": self.shas,
+            "ignored": self.ignored,
+            "groups": [g.to_dict() for g in self.groups],
+            "server_checked": self.server_checked,
+        }
+
+
+@dataclass(frozen=True)
+class DeviceIdentity:
+    """Who this computer is to the authority of the current project."""
+
+    remote: str | None
+    device_id: str | None  # None until joined: asking never makes one
+    joined: bool  # this computer holds the authority's key: it was let in
+    device_name: (
+        str | None
+    )  # what the authority calls it; None when unasked/unreachable
+    last_error: str | None
+    last_error_at: str | None
 
 
 @dataclass
@@ -232,6 +275,8 @@ class FilesWaiting:
     # them), and the collections whose records cite them, as (name, records).
     never_stored: int = 0
     never_stored_in: list[tuple[str, int]] = field(default_factory=list)
+    # Missing files a person chose to stop being told about.
+    ignored: int = 0
 
 
 class SyncService:
@@ -269,6 +314,34 @@ class SyncService:
     def configured(self) -> bool:
         return bool(self._config.sync.remote)
 
+    def identity(self, *, ask: bool = True) -> DeviceIdentity:
+        """This computer's standing with the authority. `ask` lets it say its
+        name for the device (one request); an authority that can't be reached
+        leaves the name `None`."""
+        meta = self._repo.meta()
+        remote = self._config.sync.remote
+        joined = bool(remote and user_state.authority_for(remote))
+        name: str | None = None
+        if ask and joined and remote:
+            try:
+                name = (
+                    self._make_transport(remote, self._credentials(remote))
+                    .hello()
+                    .device_name
+                )
+            except (SyncError, OSError):
+                name = None
+        return DeviceIdentity(
+            remote=remote,
+            device_id=(
+                str(user_state.device_id_for(meta.project_id)) if joined else None
+            ),
+            joined=joined,
+            device_name=name,
+            last_error=meta.last_error,
+            last_error_at=meta.last_error_at,
+        )
+
     def status(self) -> SyncStatus:
         meta = self._repo.meta()
         # Files the server hasn't got, and why (asked only when there are any).
@@ -289,7 +362,9 @@ class SyncService:
             interval_seconds=self._config.sync.interval_seconds,
             serving=self._config.sync.serve,
             download_files=self._config.sync.download_files,
+            files_ignored=len(self._repo.ignored_missing()),
             files_to_fetch=self.files_to_fetch(),
+            files_missing=self.files_missing(),
             files_to_send=(
                 waiting.ready + sum(n for _, n, _ in waiting.offline) if waiting else 0
             ),
@@ -333,12 +408,129 @@ class SyncService:
             else:
                 offline[volumes[0]] = offline.get(volumes[0], 0) + 1
         waiting.offline = [(v, n, status[v].reason) for v, n in sorted(offline.items())]
+        ignored = self._repo.ignored_missing()
+        absent = {s for s, v in copies.items() if not v and s in lacking}
+        waiting.ignored = len(absent & ignored)
+        waiting.missing -= waiting.ignored
         if waiting.missing:
-            absent = {s for s, v in copies.items() if not v and s in lacking}
-            never = self._repo.never_stored(absent)
+            never = self._repo.never_stored(absent - ignored)
             waiting.never_stored = len(never)
             waiting.never_stored_in = self._citing_collections(never)
         return waiting
+
+    # -- files nothing can supply -----------------------------------------
+
+    def _forget_found(self) -> set[str]:
+        """The files chosen to be ignored, less any that have since turned up
+        here (they are not ignored any more, and go to the server as usual)."""
+        ignored = self._repo.ignored_missing()
+        found = ignored - self._repo.never_stored(ignored)
+        if found:
+            self._repo.unignore_missing(found)
+            self._commit()
+        return ignored - found
+
+    def missing_files(
+        self, include_ignored: bool = False, with_groups: bool = True
+    ) -> MissingFilesReport:
+        """The files live records cite that this project has never stored, that
+        no drive here holds, and (with a remote set) that the authority hasn't
+        got either: the ones nothing can supply, with where records cite them.
+        Never a file that exists anywhere here or on the server. A remote that
+        can't be reached leaves `server_checked` false."""
+        ignored = self._forget_found()
+        candidates: list[str] = []
+        after = ""
+        while page := self._repo.referenced_shas(after, FILE_CHECK_PAGE):
+            after = page[-1]
+            candidates.extend(
+                s
+                for s in self._repo.never_stored(page)
+                if self._files.size_of(s) is None
+            )
+        report = MissingFilesReport()
+        if candidates and self.configured and self.fetches_files:
+            try:
+                transport = self._transport()
+                lacking: set[str] = set()
+                for at in range(0, len(candidates), FILE_CHECK_PAGE):
+                    lacking.update(
+                        transport.missing_files(candidates[at : at + FILE_CHECK_PAGE])
+                    )
+                candidates = [s for s in candidates if s in lacking]
+                # Noted, so they are not counted as downloading or asked for
+                # again until their wait is over.
+                self._repo.note_server_lacks(candidates, backoff=False)
+                self._commit()
+            except SyncError:
+                report.server_checked = False
+        report.ignored = sorted(s for s in candidates if s in ignored)
+        report.shas = sorted(s for s in candidates if s not in ignored)
+        shown = set(candidates) if include_ignored else set(report.shas)
+        if shown and with_groups:
+            plan = self._records.remove_files(
+                shown, [str(r) for r in self._repo.citing_records(shown)], dry_run=True
+            )
+            for planned in plan:
+                report.groups = planned.groups
+        return report
+
+    def ignore_missing(self, shas: list[str] | None = None) -> int:
+        """Stop warning about these missing files (the references stay), or
+        every one listed when `shas` is None. Only files `missing_files` lists
+        can be ignored."""
+        report = self.missing_files(with_groups=False)
+        if not report.server_checked:
+            raise SyncError(
+                "The server couldn't be asked whether it has these files, so none "
+                "was ignored. Try again when it can be reached."
+            )
+        chosen = set(report.shas) if shas is None else set(shas) & set(report.shas)
+        self._repo.ignore_missing(chosen)
+        self._commit()
+        return len(chosen)
+
+    def ignored_missing(self) -> set[str]:
+        return self._repo.ignored_missing()
+
+    def unignore_missing(self, shas: list[str]) -> int:
+        n = self._repo.unignore_missing(shas)
+        self._commit()
+        return n
+
+    def remove_missing(
+        self, shas: list[str] | None = None, dry_run: bool = False
+    ) -> MissingFilesRemovalDTO:
+        """Take missing files out of the records citing them (the field no longer
+        points at them), as one batch of ordinary edits: validated, in the
+        history, synced, undone whole from Activity. Only files `missing_files`
+        lists (never one that exists here or that the authority holds), and
+        never when the authority couldn't be asked. A required field that would
+        be left empty leaves its record as it is, named in the result. Every
+        such file when `shas` is None. Raises `SyncError` when the authority
+        can't be asked."""
+        report = self.missing_files(include_ignored=True, with_groups=False)
+        if not report.server_checked:
+            raise SyncError(
+                "The server couldn't be asked whether it has these files, so none "
+                "was removed. Try again when it can be reached."
+            )
+        every = set(report.shas) | set(report.ignored)
+        chosen = every if shas is None else set(shas) & every
+        result = MissingFilesRemovalDTO()
+        if not chosen:
+            return result
+        ids = [str(r) for r in self._repo.citing_records(chosen)]
+        for result in self._records.remove_files(chosen, ids, dry_run=dry_run):
+            if not dry_run:
+                self._commit()
+        if not dry_run:
+            # Forget the ignoring of files no record cites now; one a record
+            # was left citing (a required field) keeps it.
+            still = set().union(*self._repo.citing_records(chosen).values())
+            self._repo.unignore_missing(chosen - still)
+            self._commit()
+        return result
 
     def _citing_collections(self, shas: set[str]) -> list[tuple[str, int]]:
         """The collections whose live records cite these files, as (name,
@@ -897,6 +1089,7 @@ class SyncService:
         )
         if meta.cursor < hello.feed_floor:
             self._copy_again(transport, hello, report)
+        self._catch_up_readable(transport, hello)
         report.pulled += self._pull(transport)
         report.pushed += self._push(transport, report)
         report.retried = self._resend_permission_refusals()
@@ -985,6 +1178,21 @@ class SyncService:
                             if entry.entity_type == "record":
                                 touched.append(entry.entity_id)
                         cursor = entry.hub_seq
+                    # The server may have looked past changes it did not send
+                    # (ones this device may not see): the cursor goes where it
+                    # got to, or they would be read again at every sync.
+                    if page.through is not None and page.through > cursor:
+                        cursor = page.through
+                    # A collection that came in the feed is one this device
+                    # holds: it is not read again when the next hello lists it.
+                    born = {
+                        str(e.entity_id)
+                        for e in page.entries
+                        if e.entity_type == "dataset" and e.action == "create"
+                    }
+                    known = self._repo.readable() if born else None
+                    if known is not None:
+                        self._repo.set_readable(known | born)
                     self._repo.set_cursor(cursor)
                     # What this page settled may have freed a held change (a
                     # parent's move held while a child's change was unsent,
@@ -1123,6 +1331,7 @@ class SyncService:
         try:
             with self._repo.savepoint():
                 self._applier.apply_entry(entry)
+            self._recheck_cited_lacks(entry)
         except ValidationError as e:
             self._repo.add_conflict(
                 kind="not_applied",
@@ -1135,6 +1344,14 @@ class SyncService:
                 device_name=entry.actor,
                 message=f"Could not apply a change from the server: {e}",
             )
+
+    def _recheck_cited_lacks(self, entry: SyncEntry) -> None:
+        """A change from the authority to a record that cites a file it said
+        it hadn't got is the sign the file may have arrived there (the wire has
+        no news of uploads): it is asked for again at the next pass, not at the
+        end of its wait."""
+        if entry.entity_type == "record" and self.fetches_files:
+            self._repo.forget_record_lacks(entry.entity_id)
 
     def _catch_up(self) -> set[tuple[str, uuid.UUID]]:
         """Apply what was held back for things that are free now: each from its
@@ -1272,6 +1489,7 @@ class SyncService:
         report = FileSendReport()
         if not self.fetches_files:
             return report
+        self._forget_found()
         shas: list[str] = []
         after = ""
         while page := self._repo.referenced_shas(
@@ -1291,6 +1509,10 @@ class SyncService:
         """One line for the files the authority lacks that can't be read here:
         how many, a few ids, and (for those this project never stored) which
         collections cite them. Each file is at DEBUG."""
+        ignored = self._repo.ignored_missing()
+        report.owed = [s for s in report.owed if s not in ignored]
+        if not report.owed:
+            return
         report.never_stored = sorted(self._repo.never_stored(report.owed))
         report.never_stored_in = self._citing_collections(set(report.never_stored))
         where = ", ".join(f"{n} in {name}" for name, n in report.never_stored_in[:5])
@@ -1326,7 +1548,7 @@ class SyncService:
             page = shas[at : at + FILE_CHECK_PAGE]
             missing = set(transport.missing_files(page))
             self._repo.confirm_on_server(set(page) - missing)
-            self._repo.note_server_lacks(missing)
+            self._repo.note_server_lacks(missing, backoff=False)
             lacking.extend(sha for sha in page if sha in missing)
         if not lacking:
             return
@@ -1520,6 +1742,9 @@ class SyncService:
         head = head or 0
         self._repo.set_cursor(head)
         self._repo.set_history_from(head or None)
+        self._repo.set_history_scan(None)
+        if hello.readable is not None:
+            self._repo.set_readable({c["id"] for c in hello.readable})
         self._commit()
         self._pull(transport)
 
@@ -1572,6 +1797,104 @@ class SyncService:
                 )
         return head or 0, held
 
+    def _catch_up_readable(self, transport: SyncTransport, hello: Hello) -> None:
+        """Take the collections this device has been given access to since it
+        last synced. The feed past the cursor carries only what changes from
+        now on, so what those collections already held is read as it is now,
+        and what this device held of them from before (it may have lost access
+        and been given it back) is made to match: what the authority no longer
+        has goes, except changes still waiting to be sent. What a device held of
+        a collection it *lost* access to is left as it is: nothing it holds can
+        be taken back, the authority only stops sending."""
+        if hello.readable is None:
+            return  # an authority that does not say (protocol 4): nothing to ask
+        made = {c["id"]: c["seq"] for c in hello.readable}
+        now = set(made)
+        had = self._repo.readable()
+        if had is None:
+            # First told (a device from before, or one that has just seeded):
+            # it holds the collections it has. One it was given while on an
+            # older protocol, which did not tell it, is one it does not have
+            # and is read now like any other it was given.
+            had = self._repo.existing_ids("dataset", now)
+            # (Kept before any is read, so one cut short is still to do.)
+            self._repo.set_readable(had)
+            self._commit()
+        cursor = self._repo.meta().cursor
+        for collection in sorted(now - had):
+            # One made after the cursor (the authority numbered it later than
+            # this device has read) arrives in the feed like anything new; only
+            # one that was already there is one this device was not allowed.
+            if made[collection] <= cursor:
+                self._copy_collection(
+                    transport, collection, hello.protocol_version, cursor
+                )
+                if self._repo.meta().history_from:
+                    # What this device was sent of the earlier history was
+                    # without that collection: it is read again from the start
+                    # (what is held is not stored twice).
+                    self._repo.set_history_scan(0)
+            had.add(collection)
+            self._repo.set_readable(had)
+            self._commit()
+        if now != had:
+            self._repo.set_readable(now)
+            self._commit()
+
+    def _copy_collection(
+        self, transport: SyncTransport, collection: str, protocol: int, cursor: int
+    ) -> None:
+        """One collection, its records and their notes, as the authority holds
+        them now (`snapshot` with `dataset`), and then the records that left it
+        since `cursor` for another collection this device may read: the feed
+        past the cursor will say they moved, and the device must hold them by
+        then or that, and every change after it, would be to a record it lacks."""
+        dirty = {(kind, str(i)) for kind, i in self._repo.dirty_entities()}
+        held: set[str] = set()
+        passes: list[tuple[str, int | None]] = [
+            ("dataset", None),
+            ("record", None),
+            ("note", None),
+            ("record", cursor),
+            ("note", cursor),
+        ]
+        for kind, left_after in passes:
+            if kind not in kinds_for(protocol):
+                continue
+            after: str | None = None
+            # Things under another of their kind that is on a later page wait
+            # for it across pages (as in `_copy_state`).
+            waiting: dict[str, list[dict[str, Any]]] = {}
+            while True:
+                page = transport.snapshot(
+                    kind, after, SNAPSHOT_PAGE, collection, left_after
+                )
+                above = {p for snap in page.items if (p := _sits_under(kind, snap))}
+                present = self._repo.existing_ids(kind, above)
+                for snap in page.items:
+                    if kind == "record" and left_after is None:
+                        held.add(snap["id"])
+                    if (kind, snap["id"]) not in dirty:
+                        self._join_one(kind, snap, present, waiting)
+                self._commit()
+                if not page.more:
+                    break
+                after = page.next
+            if waiting:
+                log.info(
+                    "catching up on a collection: %d %s(s) whose parent was "
+                    "removed meanwhile were left out",
+                    sum(len(v) for v in waiting.values()),
+                    kind,
+                )
+        # (What this device made while the pages were read is its own to send.)
+        dirty = {(kind, str(i)) for kind, i in self._repo.dirty_entities()}
+        gone = self._repo.record_ids_in(uuid.UUID(collection)) - held
+        for thing in sorted(gone):
+            if ("record", thing) not in dirty:
+                self._applier.apply_purge("record", uuid.UUID(thing))
+        self._commit()
+
     def _copy_again(
         self, transport: SyncTransport, hello: Hello, report: SyncReport
     ) -> None:
@@ -1599,6 +1922,8 @@ class SyncService:
                     self._applier.apply_purge(kind, uuid.UUID(thing))
             self._commit()
         self._repo.set_cursor(head)
+        if hello.readable is not None:
+            self._repo.set_readable({c["id"] for c in hello.readable})
         self._commit()
 
     def fetch_history(
@@ -1615,7 +1940,10 @@ class SyncService:
             return True
         with sync_lock(self._config.civex_dir):
             transport = self._transport()
-            after = self._repo.history_fetched_upto(upto)
+            # Where it got to, which a device that may not read everything can
+            # have taken past the last entry it holds (a hidden run).
+            scan = self._repo.history_scan()
+            after = scan if scan is not None else self._repo.history_fetched_upto(upto)
             read = 0
             while after < upto and (pages is None or read < pages):
                 page = transport.feed(after, FEED_PAGE)
@@ -1626,14 +1954,22 @@ class SyncService:
                     if not self._repo.has_entry(entry.id):
                         self._repo.insert_entry(entry, hub_seq=entry.hub_seq)
                     after = entry.hub_seq
+                # (A device that may not read everything is told how far the
+                # authority looked: past entries it was not sent too.)
+                if page.through is not None and page.through > after:
+                    after = min(page.through, upto)
+                self._repo.set_history_scan(after)
                 self._commit()
                 if progress:
                     progress(SyncProgress(HISTORY, min(after, upto), upto))
                 last = page.entries[-1].hub_seq if page.entries else None
+                if page.through is not None and page.more and after < upto:
+                    continue  # more to look through, nothing to conclude yet
                 if not page.more or last is None or last > upto:
                     after = upto  # nothing more up to it (some may be pruned)
             if after >= upto:
                 self._repo.set_history_from(None)
+                self._repo.set_history_scan(None)
                 self._commit()
                 return True
             return False
@@ -1663,6 +1999,23 @@ class SyncService:
         if not self.fetches_files:
             return 0
         return self._repo.count_files_not_here(self._kept_collections())
+
+    def files_to_try(self) -> int:
+        """What a background download pass has to request: `files_to_fetch`,
+        plus the files the server said it hadn't got that are due to be asked
+        about again (see `LACK_RETRY_FIRST`)."""
+        if not self.fetches_files:
+            return 0
+        return self._repo.count_files_not_here(self._kept_collections(), "wait")
+
+    def files_missing(self) -> int:
+        """How many files records here cite that no drive here holds and the
+        server said it hasn't got: missing everywhere, so nothing is
+        downloading them (`civex files missing` lists them). Files a person
+        chose to ignore are not counted."""
+        if not self.fetches_files:
+            return 0
+        return self._repo.count_files_not_here(None, "only")
 
     def collection_mode(self, collection_id: str) -> str:
         """Whether a collection's files are kept on this computer (`keep`) or
@@ -1870,7 +2223,9 @@ class SyncService:
                     chunks = transport.file_chunks(sha)
                 except FileNotFoundError:
                     report.absent.append(sha)
-                    self._repo.note_server_lacks([sha])
+                    # A file asked for by name (opened) doesn't lengthen the
+                    # background wait.
+                    self._repo.note_server_lacks([sha], backoff=shas is None)
                     continue
                 # Straight onto the drive (the one asked for, when it is
                 # fetched to go there, else its collection's): each byte

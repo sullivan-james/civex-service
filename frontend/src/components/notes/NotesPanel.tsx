@@ -36,8 +36,8 @@ export function NotesPanel({
   const actions = useNoteActions(recordId)
   const { can, why } = usePermissions()
   const me = useAccount().name
-  const mayWrite = can('write_records', collectionId)
-  const refusal = mayWrite ? undefined : why('write_records')
+  const mayWrite = can('notes', collectionId)
+  const refusal = mayWrite ? undefined : why('notes')
   const [draft, setDraft] = useState('')
   const [replies, setReplies] = useState<Record<string, string>>({})
   const [editing, setEditing] = useState<{ id: string; body: string } | null>(
@@ -218,7 +218,7 @@ export function NotesPanel({
           placeholder={
             mayWrite
               ? 'Leave a note: what to check, what you found…'
-              : why('write_records')
+              : why('notes')
           }
           value={draft}
           maxLength={MAX_LENGTH}

@@ -13,7 +13,7 @@ from civex.domain.exceptions import (
     ValidationError,
     VolumeUnavailableError,
 )
-from civex.server.deps import get_ctx
+from civex.server.deps import get_ctx, reads_whole_project
 from civex.server.models import (
     CollectionStorageResponse,
     AddVolumeRequest,
@@ -31,7 +31,9 @@ from civex.server.models import (
 )
 from civex.services.store_service import _UNSET
 
-router = APIRouter(prefix="/store", tags=["store"])
+router = APIRouter(
+    prefix="/store", tags=["store"], dependencies=[reads_whole_project()]
+)
 
 
 @router.get("/volumes", response_model=list[VolumeStatsResponse])

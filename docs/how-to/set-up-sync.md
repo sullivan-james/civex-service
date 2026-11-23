@@ -52,7 +52,9 @@ Copy the invite now: it is shown once, works once, and expires after 24 hours
 **Without an invite:** connect the device anyway (step 3 with no `--invite`).
 It shows a code like `ABCD-2345` and waits; on the authority, `civex sync
 device approve ABCD-2345 laptop` lets it in (the app lists devices *Asking to
-join* in the same place). Handy when the device is in front of you and the
+join* in the same place; when the server has its own page, the device shows that
+address to open instead). `civex clone <address>` without `--invite` signs in the
+same way. `civex auth status` shows where a device stands. Handy when the device is in front of you and the
 authority is a terminal away.
 
 ## 3. On the authority: start the sync server

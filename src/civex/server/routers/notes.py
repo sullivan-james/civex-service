@@ -43,7 +43,7 @@ def list_notes(
 @router.post("/records/{record_id}/notes", response_model=NoteResponse, status_code=201)
 def add_note(record_id: str, body: NoteRequest, ctx: AppContext = Depends(get_ctx)):
     """Leave a note on a record, starting a thread, as whoever is asking.
-    Needs permission to write records in its collection."""
+    Needs permission to add notes in its collection."""
     note = ctx.note_svc.add(record_id, body.body)
     ctx.commit()
     return NoteResponse.from_dto(note)

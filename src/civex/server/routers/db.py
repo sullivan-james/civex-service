@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from civex.domain.exceptions import ValidationError
 from civex.project import Project
-from civex.server.deps import current_project
+from civex.server.deps import current_project, reads_whole_project
 from civex.server.models import (
     ConnectionCheckResponse,
     DatabaseSummaryResponse,
@@ -22,7 +22,7 @@ from civex.services import db_move_service as moves
 from civex.services import db_service
 from civex.services.db_move_jobs import MoveJob, jobs
 
-router = APIRouter(prefix="/db", tags=["db"])
+router = APIRouter(prefix="/db", tags=["db"], dependencies=[reads_whole_project()])
 
 # Deliberately does not use Depends(get_ctx): these routes must keep working
 # even when the configured database itself is unreachable or misconfigured

@@ -336,12 +336,12 @@ class ReleaseService:
     # -- reading ---------------------------------------------------------------
 
     def list_all(self) -> list[ReleaseDTO]:
-        self._permissions.require(permissions.READ)
+        self._permissions.require_somewhere(permissions.READ)
         return self._repo.list_all()
 
     def get(self, name: str) -> ReleaseDTO:
         """A release by its name, its id, or the start of its id."""
-        self._permissions.require(permissions.READ)
+        self._permissions.require_somewhere(permissions.READ)
         found = self._repo.get_by_name(name) or self._repo.get_by_prefix(name)
         if found is None:
             raise NotFoundError(f"Release '{name}' not found")
@@ -352,7 +352,7 @@ class ReleaseService:
     ) -> ReleasePlan:
         """What a release of `scope` would hold (the bundle's own walk, so the
         count can't disagree with the release), from the catalog."""
-        self._permissions.require(permissions.READ)
+        self._permissions.require_somewhere(permissions.READ)
         scope = scope or ReleaseScope()
         counted = self._bundles.plan_export(scope.options(include_workflows))
         collections, ids = self._owners(scope)

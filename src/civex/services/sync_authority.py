@@ -13,7 +13,11 @@ not arrived) is neither recorded nor refused, and is sent again later.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
+from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
+from functools import wraps
 
 import uuid
 from types import SimpleNamespace
@@ -30,7 +34,10 @@ from civex.domain.audit_diff import (
     identity,
 )
 from civex.domain.exceptions import ValidationError
+from civex.domain.permissions import FILE_UNAVAILABLE, file_changes
 from civex.domain.merge import LIFECYCLE_KEYS, DERIVED_KEYS, merge
+from civex.domain.permissions import ReadScope
+from civex.services.sync_scope import FeedShaper
 from civex.domain.sync import (
     APPLIED,
     CAPABILITIES,
@@ -38,6 +45,7 @@ from civex.domain.sync import (
     DEFERRED,
     ENTITY_ORDER,
     MERGED,
+    SCOPED_PROTOCOL,
     PROTOCOL_MAX,
     PROTOCOL_RETIRING,
     PROTOCOL_MIN,
@@ -63,11 +71,23 @@ from civex.services.record_service import RecordService
 from civex.services.sync_applier import SyncApplier, stamp_of
 
 FEED_MAX = 500
+# The most raw entries one request to a restricted device looks at, whatever it
+# may see of them (`feed`).
+FEED_SCAN_MAX = 2000
 SNAPSHOT_MAX = 500
 PUSH_MAX = 500
 
 
 log = logging.getLogger(__name__)
+
+
+def _whole_project(method: Callable[..., Any]) -> Callable[..., Any]:
+    @wraps(method)
+    def run(self: SyncAuthorityService, *args: Any, **kwargs: Any) -> Any:
+        with self._unscoped():
+            return method(self, *args, **kwargs)
+
+    return run
 
 
 class SyncAuthorityService:
@@ -83,8 +103,24 @@ class SyncAuthorityService:
         capabilities: tuple[str, ...] = CAPABILITIES,
         notes: Any = None,
         releases: Any = None,
+        unscoped: Callable[[], AbstractContextManager[None]] | None = None,
+        readable: Callable[[str], bool] | None = None,
+        sees: Callable[[Any], bool] | None = None,
+        scope: Callable[[], ReadScope] | None = None,
     ) -> None:
         self._repo = repo
+        # Whether the device may see a collection, None when it may see all.
+        self._sees = sees
+        # Whether a file may be given to this device, None when it may have
+        # every one: a file it may not read is neither cited by it nor said to
+        # be here (`missing_files`).
+        self._readable = readable
+        # Lifts the host's limit on which collections a query can see, for the
+        # work that settles a push or serves a device: those see the whole
+        # project and ask `policy` about each thing, never the query layer.
+        self._unscoped = unscoped or nullcontext
+        # Which collections the caller may read (everything when not given).
+        self._scope = scope or (lambda: ReadScope())
         # () -> ReleaseService: whether a pushed release is one a person could
         # have made, and that a made one's content stays as it is.
         self._releases = releases
@@ -121,13 +157,35 @@ class SyncAuthorityService:
     # ------------------------------------------------------------------
 
     def hello(self, who: Principal, protocol: int) -> Hello:
-        meta = self._repo.meta()
+        scope = self._scope()
+        with self._unscoped():
+            meta = self._repo.meta()
+            head = self._head()
+            # Whether it holds anything at all is about the project, not about
+            # what this caller may see of it: a caller who sees nothing must
+            # not take an authority that holds data for an empty one. Asked of
+            # a caller who sees it all by the counts below; of any other by
+            # looking for one thing of any kind, never by counting twice.
+            holds = None if scope.unrestricted else self._repo.holds_anything()
+        # What this caller may see of it (the session is limited to that).
         counts = self._repo.entity_counts()
+        empty = (sum(counts.values()) == 0) if holds is None else not holds
+        if not scope.unrestricted:
+            counts["release"] = 0
+        readable = None
+        if protocol >= SCOPED_PROTOCOL:
+            # Which collections this caller may read, so a device can tell when
+            # it has been given one it does not hold. Their creation numbers
+            # are found by key (their own history), never by scanning it.
+            ids = self._repo.all_ids("dataset")
+            with self._unscoped():
+                made = self._repo.dataset_created_seqs(ids)
+            readable = [{"id": i, "seq": made.get(i, 0)} for i in sorted(ids)]
         return Hello(
             protocol_version=protocol,
             project_id=meta.project_id,
-            head_seq=self._head(),
-            empty=sum(counts.values()) == 0,
+            head_seq=head,
+            empty=empty,
             seeded_by=meta.seeded_by,
             device_name=who.name,
             counts=counts,
@@ -137,18 +195,44 @@ class SyncAuthorityService:
             server_version=__version__,
             capabilities=list(self._capabilities),
             protocol_retiring=PROTOCOL_RETIRING,
+            readable=readable,
         )
 
-    def snapshot(self, kind: str, after: str | None, limit: int) -> SnapshotPage:
+    def snapshot(
+        self,
+        kind: str,
+        after: str | None,
+        limit: int,
+        dataset: uuid.UUID | None = None,
+        left_after: int | None = None,
+    ) -> SnapshotPage:
         """A page of one kind as it is now, for a device joining, continuing
         after the cursor `after` (None: the first page). `head_seq` is read
-        first: what changes while the device reads is in the feed past it."""
+        first: what changes while the device reads is in the feed past it.
+        What the caller may not read is not in it (the session is limited to
+        what they may see), whole pages of it included; `dataset` asks for one
+        collection's own things (a collection newly readable), or with
+        `left_after` those of its records that have since left it."""
         if kind not in ENTITY_ORDER:
             raise ValidationError(f"Unknown kind '{kind}'")
-        head = self._head()
+        with self._unscoped():
+            head = self._head()
         limit = max(1, min(limit, SNAPSHOT_MAX))
+        if left_after is not None:
+            # Never before what this authority still holds history of: a request
+            # to look back over all of it is not a thing a device needs.
+            left_after = max(left_after, self._repo.meta().feed_floor)
+        if dataset is not None and not self._scope().sees(dataset):
+            # A collection the caller may not read is asked about like one that
+            # is not there: an empty page, never what once lived in it.
+            return SnapshotPage(kind, [], False, head, None)
+        if kind == "release" and not self._scope().unrestricted:
+            # A release is a bundle of records from anywhere in the project.
+            return SnapshotPage(kind, [], False, head, None)
         try:
-            items = self._repo.snapshots_page(kind, after, limit + 1)
+            items = self._repo.snapshots_page(
+                kind, after, limit + 1, dataset, left_after
+            )
         except ValueError as e:
             raise ValidationError(f"Not a page cursor: {after!r}") from e
         page = items[:limit]
@@ -167,17 +251,63 @@ class SyncAuthorityService:
     # The feed
     # ------------------------------------------------------------------
 
+    @_whole_project
     def feed(self, after: int, limit: int = 200) -> FeedPage:
         head = self._head()
-        entries, more = self._repo.entries_after(after, max(1, min(limit, FEED_MAX)))
-        return FeedPage(entries, head, more)
+        limit = max(1, min(limit, FEED_MAX))
+        scope = self._scope()
+        if scope.unrestricted:
+            entries, more = self._repo.entries_after(after, limit)
+            return FeedPage(entries, head, more)
+        shaper = FeedShaper(
+            scope,
+            self._records.records_repo.dataset_of,
+            lambda record: self._repo.snapshot("record", record),
+            self._repo.note_snapshots,
+            self._repo.collection_trails,
+            self._repo.placed_from(),
+        )
+        # What the device may not see is looked past, but only so far in one
+        # request: a long hidden run is answered with an empty page that says
+        # how far was looked (`through`, `more`), and the device asks again
+        # from there, so no request scans without end.
+        through = after
+        scanned = 0
+        while scanned < FEED_SCAN_MAX:
+            # Always in whole batches, whatever the page asked for: a small
+            # `limit` must not turn one request into thousands of lookups.
+            raw, more = self._repo.entries_after(through, FEED_MAX)
+            if raw:
+                through = raw[-1].hub_seq or through
+            scanned += len(raw)
+            kept: list[SyncEntry] = []
+            for i, group in enumerate(shaper.shape_each(raw)):
+                if (
+                    kept
+                    and len(kept) + len(group) > limit
+                    and (not raw[i].op or raw[i].op != raw[i - 1].op)
+                ):
+                    # The page asked for is full: it ends before this change (an
+                    # action is never cut), and the device asks again from there.
+                    return FeedPage(kept, head, True, raw[i - 1].hub_seq or through)
+                kept += group
+            if kept or not more:
+                return FeedPage(kept, head, more, through)
+        return FeedPage([], head, True, through)
 
     # ------------------------------------------------------------------
     # Files
     # ------------------------------------------------------------------
 
     def missing_files(self, shas: list[str]) -> list[str]:
-        return [s for s in dict.fromkeys(shas) if not self._files.exists(s)]
+        """Those not here, a file the device may not read counted as not here:
+        it is asked for like any other, and nothing says one is held."""
+        readable = self._readable
+        return [
+            s
+            for s in dict.fromkeys(shas)
+            if not self._files.exists(s) or (readable is not None and not readable(s))
+        ]
 
     # ------------------------------------------------------------------
     # Accepting changes
@@ -189,6 +319,7 @@ class SyncAuthorityService:
         if self._releases is not None:
             self._releases().index_waiting(sha256)
 
+    @_whole_project
     def push(self, who: Principal, entries: list[SyncEntry]) -> PushResult:
         """Settle each change, in the order sent. Stops at the first that has
         to wait (later ones may depend on it); those are simply not answered.
@@ -239,7 +370,8 @@ class SyncAuthorityService:
     def _settle(self, who: Principal, entry: SyncEntry) -> OpResult:
         prior = self._repo.get_op(entry.id)
         if prior is not None:
-            return prior  # sent before: the same answer, nothing done again
+            # sent before: the same answer, nothing done again
+            return dataclasses.replace(prior, replayed=True)
         self._covered = {(entry.entity_type, entry.entity_id)}
         if problem := self._problem(who, entry):
             return self._refuse(who, entry, problem[0], code=problem[1])
@@ -249,8 +381,12 @@ class SyncAuthorityService:
                 self._rules.check(_changed([entry]))
         except ValidationError as e:
             head = self._applier.head(entry.entity_type, entry.entity_id)
-            if head is not None and (
-                entry.entity_type != "record" or _moves(entry, head)
+            if isinstance(e, _Denied):
+                return self._refuse(who, entry, str(e), code=REFUSAL_PERMISSION)
+            if (
+                head is not None
+                and (entry.entity_type != "record" or _moves(entry, head))
+                and not self._unseen(entry)
             ):
                 # A record a refused change would have moved is put back too:
                 # left where the device put it, it would sit under a parent
@@ -265,7 +401,9 @@ class SyncAuthorityService:
         self._repo.save_op(entry, result, who.device_id, who.name)
         return result
 
-    def _problem(self, who: Principal, entry: SyncEntry) -> tuple[str, str] | None:
+    def _problem(
+        self, who: Principal, entry: SyncEntry
+    ) -> tuple[str, str | None] | None:
         """Why a change can't be taken whatever is held, with the code of the
         refusal (`REFUSAL_INVALID` for its shape, `REFUSAL_PERMISSION` for what
         the caller may change: a person may be given that later)."""
@@ -273,6 +411,72 @@ class SyncAuthorityService:
             return shape, REFUSAL_INVALID
         if self._policy and (denied := self._policy.refuses(who, entry)):
             return denied, REFUSAL_PERMISSION
+        if self._readable is not None and entry.entity_type == "record":
+            # Citing a file makes it the record's, readable by whoever reads
+            # the record: only one this device could download may be cited.
+            added, _ = file_changes(entry)
+            if any(not self._readable(sha) for sha in sorted(added)):
+                return FILE_UNAVAILABLE, REFUSAL_PERMISSION
+        if (
+            entry.entity_type == "record"
+            and entry.action in ("update", "restore", "delete", "purge")
+            and self._unseen(entry)
+        ):
+            # Held here, where the device may not look: answered as the same
+            # change to a record that is not here at all, in the same words and
+            # with the same (absent) code.
+            return NOT_HERE, None
+        if (
+            self._policy
+            and entry.entity_type == "dataset"
+            and entry.action == "create"
+            and self._repo.existing_ids("dataset", {str(entry.entity_id)})
+        ):
+            # A "create" of a collection that is already here is a change to
+            # it: judged as one, so it cannot be used to reach one hidden from
+            # the device.
+            as_change = dataclasses.replace(entry, action="update")
+            if denied := self._policy.refuses(who, as_change):
+                return denied, REFUSAL_PERMISSION
+        if self._policy and entry.entity_type == "note":
+            # A note already held here is judged where it is, not where the
+            # device says its record is (or it could move a hidden note onto a
+            # record it may read).
+            on = self._repo.note_record_id(entry.entity_id)
+            where = self._records.records_repo.dataset_of(on) if on else None
+            if where is not None:
+                held_note = cast(Any, SimpleNamespace)(
+                    entity_type="note",
+                    action=entry.action,
+                    new_data={"dataset_id": str(where)},
+                    old_data=None,
+                )
+                if denied := self._policy.refuses(who, held_note):
+                    return denied, REFUSAL_PERMISSION
+        if self._policy and entry.entity_type == "record":
+            # Where the record is *here* counts as much as where the device
+            # says it is: it may not take over or overwrite a record of a
+            # collection it is not allowed into by naming another.
+            held = self._records.records_repo.dataset_of(entry.entity_id)
+            if held is not None:
+                # The same change judged where the record is held: its files
+                # and its removal count there, and where the delta says it
+                # goes is asked about separately (`refuses` above).
+                delta = {
+                    k: v for k, v in (entry.delta or {}).items() if k != "dataset_id"
+                }
+                held_entry = cast(Any, SimpleNamespace)(
+                    entity_type="record",
+                    action=entry.action,
+                    new_data={
+                        "dataset_id": str(held),
+                        "data": (entry.new_data or {}).get("data"),
+                    },
+                    old_data=entry.old_data and {"data": entry.old_data.get("data")},
+                    delta=delta or None,
+                )
+                if denied := self._policy.refuses(who, held_entry):
+                    return denied, REFUSAL_PERMISSION
         return None
 
     def _settle_action(self, who: Principal, action: list[SyncEntry]) -> list[OpResult]:
@@ -294,7 +498,8 @@ class SyncAuthorityService:
           on the device for review."""
         priors = [self._repo.get_op(e.id) for e in action]
         if all(p is not None for p in priors):
-            return [p for p in priors if p is not None]  # sent before
+            # sent before
+            return [dataclasses.replace(p, replayed=True) for p in priors if p]
         self._covered = {(e.entity_type, e.entity_id) for e in action}
         for entry in action:
             if problem := self._problem(who, entry):
@@ -316,7 +521,12 @@ class SyncAuthorityService:
                 why or "Something it changes was changed on the server meanwhile",
             )
         except ValidationError as e:
-            return self._refuse_action(who, action, str(e))
+            return self._refuse_action(
+                who,
+                action,
+                str(e),
+                code=REFUSAL_PERMISSION if isinstance(e, _Denied) else None,
+            )
         except (ValueError, TypeError, KeyError, AttributeError) as e:
             return self._refuse_action(who, action, f"A value is not valid: {e}")
         for entry, result in zip(action, results):
@@ -334,9 +544,29 @@ class SyncAuthorityService:
         return [
             self._put_back(who, entry, message)
             if self._applier.head(entry.entity_type, entry.entity_id) is not None
+            and not self._unseen(entry)
             else self._refuse(who, entry, message, code=code)
             for entry in action
         ]
+
+    def _unseen(self, entry: SyncEntry) -> bool:
+        """Whether the thing an entry is about is held here in a collection the
+        device may not see. It is answered as a thing that is not here at all
+        (refused, never put back), so that what a refusal does with an entry
+        does not tell the device which ids exist."""
+        if self._sees is None:
+            return False
+        kind = entry.entity_type
+        if kind == "dataset":
+            where: Any = entry.entity_id
+        elif kind == "record":
+            where = self._records.records_repo.dataset_of(entry.entity_id)
+        elif kind == "note":
+            on = self._repo.note_record_id(entry.entity_id)
+            where = self._records.records_repo.dataset_of(on) if on else None
+        else:
+            return False
+        return where is not None and not self._sees(where)
 
     def _put_back(self, who: Principal, entry: SyncEntry, why: str) -> OpResult:
         """Answer that a change was not taken, and send what is here instead,
@@ -435,6 +665,40 @@ class SyncAuthorityService:
         self._repo.save_op(entry, result, who.device_id, who.name)
         return result
 
+    def _check_parent(self, state: dict[str, Any]) -> None:
+        """The record a pushed record sits under must be there as the caller
+        finds it: one the caller cannot see is refused in the same words as one
+        that does not exist (never taken in, never an error at commit)."""
+        parent = state.get("parent_record_id")
+        if not parent:
+            return  # (a deleted record under a parent needs it just the same)
+        try:
+            wanted = uuid.UUID(str(parent))
+        except ValueError:
+            raise ValidationError(PARENT_GONE) from None
+        with self._records.as_caller():
+            found = self._records.records_repo.get_by_id(wanted, include_deleted=True)
+        if found is None:
+            raise ValidationError(PARENT_GONE)
+
+    def _check_placement(
+        self, who: Principal, entry: SyncEntry, placed: dict[str, Any]
+    ) -> None:
+        """A record sits in its parent's collection, so where it is settled can
+        differ from where the device said: that collection is judged as a write
+        and a read, as the one the device named was."""
+        if not self._policy:
+            return
+        settled = cast(Any, SimpleNamespace)(
+            entity_type="record",
+            action=entry.action,
+            new_data={"dataset_id": str(placed.get("dataset_id")), "data": None},
+            old_data=None,
+            delta=None,
+        )
+        if denied := self._policy.refuses(who, settled):
+            raise _Denied(denied)
+
     def _take(self, who: Principal, entry: SyncEntry) -> OpResult:
         """Merge the change into what is held, write it, and record it."""
         kind, eid = entry.entity_type, entry.entity_id
@@ -443,6 +707,16 @@ class SyncAuthorityService:
                 "A release is never deleted: it can be withdrawn, or yanked"
             )
         head = self._applier.head(kind, eid)
+        if (
+            kind == "record"
+            and head is None
+            and entry.action in ("delete", "purge", "restore")
+            and self._sees is not None
+        ):
+            # For a device limited to some collections, a record that is not
+            # here is refused as one that is held out of its sight is: the two
+            # are told apart by nothing in the answer.
+            raise ValidationError(NOT_HERE)
         cascade = self._cascade_before(entry, head)
         conflicts: list[dict[str, Any]] = []
         final: dict[str, Any] | None = None  # the state the thing ends in, if it exists
@@ -452,10 +726,7 @@ class SyncAuthorityService:
         if entry.action in ("create", "update", "restore"):
             if head is None:
                 if entry.action == "update" or entry.delta is not None:
-                    raise ValidationError(
-                        "It is not on the server (deleted for good there, or "
-                        "never taken)"
-                    )
+                    raise ValidationError(NOT_HERE)
                 incoming = entry.new_data or {}
                 final = dict(incoming)
             else:
@@ -497,7 +768,14 @@ class SyncAuthorityService:
                         )
                     )
             if kind == "record":
-                final = self._records.placed_with_parent(final)
+                if head is None or str(head.get("parent_record_id") or "") != str(
+                    final.get("parent_record_id") or ""
+                ):
+                    self._check_parent(final)
+                placed = self._records.placed_with_parent(final)
+                if placed is not final:
+                    self._check_placement(who, entry, placed)
+                final = placed
                 self._records.check_incoming(final, head)
             elif kind == "note" and self._notes is not None:
                 self._check_note(who, final)
@@ -575,7 +853,7 @@ class SyncAuthorityService:
             refusal = self._policy.refuses(
                 who,
                 cast(Any, SimpleNamespace)(
-                    entity_type="record",
+                    entity_type="note",
                     action="update",
                     new_data={"dataset_id": str(collection)},
                     old_data=None,
@@ -719,13 +997,14 @@ class SyncAuthorityService:
         # this change and every device would apply it last.
         self._repo.sequence_local_entries()
         seq = self._repo.next_hub_seq()
+        stored = _as_placed(entry, head, final)
         sent = SyncEntry(
             id=entry.id,
             action=entry.action,
             entity_type=entry.entity_type,
             entity_id=entry.entity_id,
-            old_data=entry.old_data,
-            new_data=entry.new_data,
+            old_data=stored.old_data,
+            new_data=stored.new_data,
             timestamp=entry.timestamp,
             # Which device sent it is what the token says, never what was
             # claimed; who made it is `_author`.
@@ -734,7 +1013,7 @@ class SyncAuthorityService:
             device_id=who.device_id,
             hlc=self._believable(entry.hlc),
             batch=entry.batch,
-            delta=entry.delta,
+            delta=stored.delta,
         )
         self._repo.insert_entry(sent, hub_seq=seq)
         if entry.action in ("create", "update", "restore", "delete") and (
@@ -769,6 +1048,50 @@ class SyncAuthorityService:
         if stamp is None or not hlc.is_ahead(stamp, _now_ms()):
             return stamp
         return hlc.tick(self._repo.latest_hlc(), _now_ms())
+
+
+PARENT_GONE = "The record it sits under is not here."
+NOT_HERE = "It is not on the server (deleted for good there, or never taken)"
+
+
+class _Denied(ValidationError):
+    """A change refused for what the caller may do (not for its shape)."""
+
+
+def _as_placed(
+    entry: SyncEntry, head: dict[str, Any] | None, final: dict[str, Any] | None
+) -> SyncEntry:
+    """A record change as it is stored: naming the collections the authority
+    actually had the record in before and after it, not the ones the device
+    claimed (a stale or forged claim would otherwise be what everything that
+    reads the feed, a device limited to some collections included, judges the
+    change by)."""
+    if entry.entity_type != "record":
+        return entry
+    before = str(head["dataset_id"]) if head and head.get("dataset_id") else None
+    settled = final if final is not None else head
+    after = (
+        str(settled["dataset_id"]) if settled and settled.get("dataset_id") else None
+    )
+    if before is None and after is None:
+        return entry
+
+    def named(data: dict[str, Any] | None, where: str | None) -> dict[str, Any] | None:
+        if data is None or where is None:
+            return data
+        return {**data, "dataset_id": where}
+
+    delta = entry.delta
+    if delta is not None:
+        delta = {k: v for k, v in delta.items() if k != "dataset_id"}
+        if before is not None and after is not None and before != after:
+            delta["dataset_id"] = {"before": before, "after": after}
+    return dataclasses.replace(
+        entry,
+        old_data=named(entry.old_data, before or after),
+        new_data=named(entry.new_data, after or before),
+        delta=delta,
+    )
 
 
 class _NotWhole(Exception):

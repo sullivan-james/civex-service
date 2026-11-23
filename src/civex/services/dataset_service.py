@@ -60,6 +60,13 @@ class DatasetService:
             msg += f" and {total - len(shown)} more"
         raise ValidationError(msg)
 
+    def _check_name_free(self, name: str) -> None:
+        """Names are unique across every collection, the ones the caller cannot
+        see and the deleted ones too: a name held by one of those is refused
+        in the same words as any other, so it says nothing about them."""
+        if self._datasets.get_by_name(name) or self._datasets.name_taken(name):
+            raise AlreadyExistsError(f"Dataset '{name}' already exists")
+
     def create(
         self,
         name: str,
@@ -68,8 +75,7 @@ class DatasetService:
         scope: str = LOCAL,
     ) -> DatasetDTO:
         self._permissions.require(permissions.CHANGE_STRUCTURE)
-        if self._datasets.get_by_name(name):
-            raise AlreadyExistsError(f"Dataset '{name}' already exists")
+        self._check_name_free(name)
         if timezone:
             timezone = validate_timezone(timezone)
         scope = validate_scope(scope)
@@ -148,8 +154,7 @@ class DatasetService:
             timezone = validate_timezone(timezone)
         dataset = self.get(name)
         if new_name and new_name != name:
-            if self._datasets.get_by_name(new_name):
-                raise AlreadyExistsError(f"Dataset '{new_name}' already exists")
+            self._check_name_free(new_name)
         if scope is not None:
             scope = validate_scope(scope)
             if scope == LOCAL and dataset.scope == GLOBAL:

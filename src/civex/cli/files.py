@@ -289,6 +289,131 @@ def files_list(
         _print_unreachable(plan)
 
 
+def _missing_picked(pool: list[str], pick: str | None) -> list[str]:
+    """The files an option names: `all`, or one by hash (or the start of it)."""
+    if pick == "all":
+        return pool
+    found = [s for s in pool if pick and s.startswith(pick)]
+    if not found:
+        console.print(f"[error]No such missing file: '{escape(pick or '')}'.[/error]")
+        raise typer.Exit(1)
+    if len(found) > 1:
+        console.print(
+            f"[error]'{escape(pick or '')}' starts {len(found)} missing files: "
+            "give more of the hash, or `all`.[/error]"
+        )
+        raise typer.Exit(1)
+    return found
+
+
+@app.command("missing")
+def files_missing(
+    ignore: Optional[str] = typer.Option(
+        None,
+        "--ignore",
+        help="Stop warning about a missing file: its hash (or the start of it), "
+        "or `all`. The records keep citing it. Reversible with --unignore.",
+    ),
+    unignore: Optional[str] = typer.Option(
+        None, "--unignore", help="Warn about an ignored file again: hash, or `all`."
+    ),
+    remove: Optional[str] = typer.Option(
+        None,
+        "--remove",
+        help="Clear a missing file (hash, or `all`) from the records citing it, "
+        "as an ordinary edit (history, sync) that Activity can undo.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="With --remove: say what would change, and change nothing.",
+    ),
+) -> None:
+    """List files records cite that this project never stored and nothing can
+    supply (not on any drive here, nor on the server), by collection and field.
+
+    Only these are ever ignored or removed: never a file that exists here or on
+    the server. A record whose required field would be left empty is left as it
+    is and named.
+    """
+    if sum(o is not None for o in (ignore, unignore, remove)) > 1:
+        console.print("[error]Give one of --ignore, --unignore, --remove.[/error]")
+        raise typer.Exit(1)
+    if dry_run and remove is None:
+        console.print("[error]--dry-run goes with --remove.[/error]")
+        raise typer.Exit(1)
+    ctx = get_ctx()
+    try:
+        svc = ctx.sync_svc
+        if unignore is not None:
+            held = sorted(svc.ignored_missing())
+            n = svc.unignore_missing(_missing_picked(held, unignore))
+            console.print(f"Warning again about {n} file(s).")
+            return
+        report = svc.missing_files(include_ignored=remove is not None)
+        if not report.server_checked:
+            console.print(
+                "[warning]The server couldn't be asked, so this is only what is "
+                "missing here.[/warning]"
+            )
+        if ignore is not None:
+            n = svc.ignore_missing(_missing_picked(report.shas, ignore))
+            console.print(f"Ignoring {n} file(s).")
+            return
+        if remove is not None:
+            pool = sorted(set(report.shas) | set(report.ignored))
+            result = svc.remove_missing(_missing_picked(pool, remove), dry_run=dry_run)
+            verb = "Would clear" if dry_run else "Cleared"
+            console.print(f"{verb} the files from {result.changed} record(s).")
+            for g in result.groups:
+                console.print(
+                    f"  {escape(g.collection or '-')} / "
+                    f"{escape(g.schema)}.{escape(g.field)}: "
+                    f"{g.records} record(s), {g.files} file(s)"
+                )
+            if result.skipped_count:
+                console.print(
+                    f"[warning]{result.skipped_count} record(s) left as they are:"
+                    "[/warning]"
+                )
+                for sk in result.skipped:
+                    name = sk.name or str(sk.record_id)
+                    console.print(f"  {escape(name)}: {escape(sk.reason)}")
+            if not dry_run and result.changed:
+                console.print("[dim]Undo it from Activity (one event).[/dim]")
+            return
+    except CivexError as e:
+        console.print(f"[error]{escape(str(e))}[/error]")
+        raise typer.Exit(1)
+    finally:
+        ctx.close()
+    if not report.shas and not report.ignored:
+        console.print("[dim]No missing files.[/dim]")
+        return
+    if report.shas:
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("Collection")
+        table.add_column("Field")
+        table.add_column("Records", justify="right")
+        table.add_column("Files", justify="right")
+        for g in report.groups:
+            table.add_row(
+                escape(g.collection or "-"),
+                escape(f"{g.schema}.{g.field}"),
+                str(g.records),
+                str(g.files),
+            )
+        console.print(table)
+        for sha in report.shas:
+            console.print(f"[dim]{sha}[/dim]")
+        console.print(
+            "[dim]--ignore <hash|all> stops the warning; --remove <hash|all> "
+            "[--dry-run] clears them from the records.[/dim]"
+        )
+    if report.ignored:
+        console.print(f"[dim]{len(report.ignored)} ignored (--unignore all).[/dim]")
+
+
 @app.command("export")
 def files_export(
     dest: Optional[Path] = typer.Argument(

@@ -60,7 +60,7 @@ class Rig:
             ),
             sync_svc=SimpleNamespace(
                 sync=sync,
-                files_to_fetch=lambda: self.to_fetch,
+                files_to_try=lambda: self.to_fetch,
                 fetch_files=fetch_files,
                 send_files=send_files,
             ),

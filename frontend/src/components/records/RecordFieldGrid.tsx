@@ -149,7 +149,7 @@ function FileControl({
     sender,
   )
   const { can, why } = usePermissions()
-  const cannotAdd = can('manage_files') ? undefined : why('manage_files')
+  const cannotAdd = can('add_files') ? undefined : why('add_files')
   const { accept, maxSize } = toInputProps(field)
   const label = displayLabel(field.name, field.label)
 

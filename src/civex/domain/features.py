@@ -29,6 +29,13 @@ HUB_COMPUTE = "hub_compute"
 SERVER_PATH_EXPORT = "server_path_export"
 PLUGIN_INSTALL = "plugin_install"
 REMOTE_DIAL = "remote_dial"
+SETTINGS = "settings"
+SETTINGS_APPEARANCE = "settings_appearance"
+SETTINGS_RETENTION = "settings_retention"
+SETTINGS_MAP = "settings_map"
+SETTINGS_ADVANCED = "settings_advanced"
+SETTINGS_DEVICES = "settings_devices"
+SETTINGS_MEMBERS = "settings_members"
 
 # Every feature a server may offer, with what it means in plain words (the
 # detail of the 501 a route answers when its feature is off).
@@ -50,7 +57,30 @@ FEATURES: dict[str, str] = {
     SERVER_PATH_EXPORT: "writing exports to a folder on the server's machine",
     PLUGIN_INSTALL: "installing plugins and workflows from a bundle onto the server",
     REMOTE_DIAL: "connecting out from the server to another civex",
+    SETTINGS: "the Settings area",
+    SETTINGS_APPEARANCE: "appearance settings",
+    SETTINGS_RETENTION: "the retention settings",
+    SETTINGS_MAP: "map settings",
+    SETTINGS_ADVANCED: "advanced settings",
+    SETTINGS_DEVICES: "the Devices section of the settings",
+    SETTINGS_MEMBERS: "the members and access page",
 }
+
+# The settings surfaces a host that owns all settings turns off. `SETTINGS` is
+# the whole area; each of the others is one section of it. A section feature
+# hides that section of the app and refuses only the routes that edit its
+# stored settings, never the operational routes a host drives itself.
+SETTINGS_FEATURES: frozenset[str] = frozenset(
+    {
+        SETTINGS,
+        SETTINGS_APPEARANCE,
+        SETTINGS_RETENTION,
+        SETTINGS_MAP,
+        SETTINGS_ADVANCED,
+        SETTINGS_DEVICES,
+        SETTINGS_MEMBERS,
+    }
+)
 
 # What `civex serve` and the CLI offer: a project in a folder on this machine.
 LOCAL_FEATURES: frozenset[str] = frozenset(
@@ -70,7 +100,27 @@ LOCAL_FEATURES: frozenset[str] = frozenset(
         PLUGIN_INSTALL,
         REMOTE_DIAL,
     }
+    | SETTINGS_FEATURES
 )
+
+
+def lacks(features: frozenset[str] | set[str], feature: str) -> str | None:
+    """The feature to blame when `feature` is not on, or None when it is: a
+    settings section is off whenever the `SETTINGS` umbrella is, whatever the
+    section's own feature says. The one place that rule is written down (the
+    app's `utils/features.ts` mirrors it)."""
+    if (
+        feature in SETTINGS_FEATURES
+        and feature != SETTINGS
+        and SETTINGS not in features
+    ):
+        return SETTINGS
+    return None if feature in features else feature
+
+
+def enabled(features: frozenset[str] | set[str], feature: str) -> bool:
+    """Whether a host offering `features` offers `feature` (see `lacks`)."""
+    return lacks(features, feature) is None
 
 
 def unavailable_message(feature: str) -> str:

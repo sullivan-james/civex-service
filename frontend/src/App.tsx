@@ -5,6 +5,8 @@ import HomePage from './pages/HomePage'
 import { useDateFormat } from './hooks/useDateFormat'
 import { RouteErrorBoundary } from './components/RouteErrorBoundary'
 import { LoadingState } from './components/ui/States'
+import { Gated, GatedFollowsRemote } from './components/FeatureGate'
+import { SETTINGS_SECTION_FEATURES } from './utils/features'
 
 const CollectionsPage = lazy(() => import('./pages/CollectionsPage'))
 const CollectionDetailPage = lazy(() => import('./pages/CollectionDetailPage'))
@@ -108,18 +110,54 @@ export default function App() {
               path="/trash"
               element={<Navigate to={DELETED_VIEW} replace />}
             />
-            <Route path="/workflows" element={<WorkflowsPage />} />
+            <Route
+              path="/workflows"
+              element={
+                <Gated feature="local_workflows">
+                  <WorkflowsPage />
+                </Gated>
+              }
+            />
             <Route
               path="/workflows/new"
-              element={<WorkflowEditorPage isNew />}
+              element={
+                <Gated feature="local_workflows">
+                  <WorkflowEditorPage isNew />
+                </Gated>
+              }
             />
-            <Route path="/workflows/:stem" element={<WorkflowPage />} />
+            <Route
+              path="/workflows/:stem"
+              element={
+                <Gated feature="local_workflows">
+                  <WorkflowPage />
+                </Gated>
+              }
+            />
             <Route
               path="/workflows/:stem/edit"
-              element={<WorkflowEditorPage />}
+              element={
+                <Gated feature="local_workflows">
+                  <WorkflowEditorPage />
+                </Gated>
+              }
             />
-            <Route path="/runs" element={<JobsPage />} />
-            <Route path="/runs/:id" element={<JobDetailPage />} />
+            <Route
+              path="/runs"
+              element={
+                <Gated feature="local_workflows">
+                  <JobsPage />
+                </Gated>
+              }
+            />
+            <Route
+              path="/runs/:id"
+              element={
+                <Gated feature="local_workflows">
+                  <JobDetailPage />
+                </Gated>
+              }
+            />
             <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="/activity" element={<ActivityPage />} />
             <Route path="/exports" element={<ExportsPage />} />
@@ -131,40 +169,159 @@ export default function App() {
               path="/exports/:schema/:name"
               element={<ExportEditorPage />}
             />
-            <Route path="/sync/review" element={<SyncReviewPage />} />
+            <Route
+              path="/sync/review"
+              element={
+                <GatedFollowsRemote>
+                  <SyncReviewPage />
+                </GatedFollowsRemote>
+              }
+            />
             {/* Legacy redirects */}
             <Route path="/jobs" element={<Navigate to="/runs" replace />} />
             <Route path="/jobs/:id" element={<Navigate to="/runs" replace />} />
-            <Route path="/terminal" element={<TerminalPage />} />
-            <Route path="/ai" element={<AiPage />} />
-            <Route path="/plugins" element={<PluginsPage />} />
-            <Route path="/plugins/new" element={<PluginEditorPage isNew />} />
-            <Route path="/plugins/:stem/edit" element={<PluginEditorPage />} />
+            <Route
+              path="/terminal"
+              element={
+                <Gated feature="terminal">
+                  <TerminalPage />
+                </Gated>
+              }
+            />
+            <Route
+              path="/ai"
+              element={
+                <Gated feature="ai">
+                  <AiPage />
+                </Gated>
+              }
+            />
+            <Route
+              path="/plugins"
+              element={
+                <Gated feature="plugin_editor">
+                  <PluginsPage />
+                </Gated>
+              }
+            />
+            <Route
+              path="/plugins/new"
+              element={
+                <Gated feature="plugin_editor">
+                  <PluginEditorPage isNew />
+                </Gated>
+              }
+            />
+            <Route
+              path="/plugins/:stem/edit"
+              element={
+                <Gated feature="plugin_editor">
+                  <PluginEditorPage />
+                </Gated>
+              }
+            />
             <Route
               path="/plugins/container/:name/edit"
-              element={<ContainerPluginEditorPage />}
+              element={
+                <Gated feature="plugin_editor">
+                  <ContainerPluginEditorPage />
+                </Gated>
+              }
             />
             <Route
               path="/settings/storage/volumes/:name"
-              element={<VolumePage />}
+              element={
+                <Gated feature={['settings', 'volumes']}>
+                  <VolumePage />
+                </Gated>
+              }
             />
-            <Route path="/settings" element={<SettingsLayout />}>
-              <Route index element={<Navigate to="appearance" replace />} />
-              <Route path="appearance" element={<ThemeSection />} />
-              <Route path="database" element={<DatabaseSection />} />
-              <Route path="storage" element={<StorageSettings />} />
-              <Route path="retention" element={<RetentionSection />} />
+            <Route
+              path="/settings"
+              element={
+                <Gated feature="settings">
+                  <SettingsLayout />
+                </Gated>
+              }
+            >
+              <Route
+                path="appearance"
+                element={
+                  <Gated feature={SETTINGS_SECTION_FEATURES.appearance}>
+                    <ThemeSection />
+                  </Gated>
+                }
+              />
+              <Route
+                path="database"
+                element={
+                  <Gated feature={SETTINGS_SECTION_FEATURES.database}>
+                    <DatabaseSection />
+                  </Gated>
+                }
+              />
+              <Route
+                path="storage"
+                element={
+                  <Gated feature={SETTINGS_SECTION_FEATURES.storage}>
+                    <StorageSettings />
+                  </Gated>
+                }
+              />
+              <Route
+                path="retention"
+                element={
+                  <Gated feature={SETTINGS_SECTION_FEATURES.retention}>
+                    <RetentionSection />
+                  </Gated>
+                }
+              />
               <Route
                 path="recently-deleted"
                 element={<Navigate to="/settings/retention" replace />}
               />
-              <Route path="members" element={<MembersSection />} />
+              <Route
+                path="members"
+                element={
+                  <Gated feature={SETTINGS_SECTION_FEATURES.members}>
+                    <MembersSection />
+                  </Gated>
+                }
+              />
               <Route path="sync" element={<SyncSection />} />
               <Route path="x/:id" element={<ExtensionSection />} />
-              <Route path="map" element={<MapSection />} />
-              <Route path="updates" element={<UpdatesSection />} />
-              <Route path="logs" element={<LogsSection />} />
-              <Route path="advanced" element={<AdvancedSection />} />
+              <Route
+                path="map"
+                element={
+                  <Gated feature={SETTINGS_SECTION_FEATURES.map}>
+                    <MapSection />
+                  </Gated>
+                }
+              />
+              <Route
+                path="updates"
+                element={
+                  <Gated feature={SETTINGS_SECTION_FEATURES.updates}>
+                    <UpdatesSection />
+                  </Gated>
+                }
+              />
+              <Route
+                path="logs"
+                element={
+                  <Gated feature={SETTINGS_SECTION_FEATURES.logs}>
+                    <LogsSection />
+                  </Gated>
+                }
+              />
+              <Route
+                path="advanced"
+                element={
+                  <Gated feature={SETTINGS_SECTION_FEATURES.advanced}>
+                    <AdvancedSection />
+                  </Gated>
+                }
+              />
             </Route>
             {/* Legacy redirect — Storage lives under Settings */}
             <Route

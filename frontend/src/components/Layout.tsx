@@ -33,7 +33,9 @@ import { useToast } from './ui/ToastProvider'
 import { Button } from './ui/Button'
 import { IconButton } from './ui/IconButton'
 import { Menu as Dropdown } from './ui/Menu'
-import { basePath } from '../utils/host'
+import { basePath, brand, isEmbedded } from '../utils/host'
+import { useNavigationEvents } from '../hooks/useNavigationEvents'
+import { Slot } from './host/Slot'
 import { HostProject } from './host/HostProject'
 import {
   RefreshCw,
@@ -183,6 +185,7 @@ const settingsNavItem: NavItemDef = {
   to: '/settings',
   label: 'Settings',
   icon: Settings,
+  feature: 'settings',
 }
 
 function NavItem({
@@ -331,7 +334,8 @@ function NavGroups({
 function SyncButton() {
   const { data } = useRemoteStatus()
   const { request, spinning } = useManualSync()
-  if (!data?.configured) return null
+  // A hosted authority is what devices follow; it follows nothing itself.
+  if (!data?.configured || data.serving) return null
   const state = syncButtonState(data, spinning)
   const busy = state.tone === 'busy'
   return (
@@ -349,6 +353,7 @@ function SyncButton() {
 
 export default function Layout({ children }: { children: ReactNode }) {
   useRefreshOnSync()
+  useNavigationEvents()
   useDesktopKeys()
   useDesktopZoomKeys()
   const isDesktop = useIsDesktop()
@@ -360,10 +365,15 @@ export default function Layout({ children }: { children: ReactNode }) {
   const drawerRef = useRef<HTMLDivElement>(null)
   const drawerTitleId = useId()
   const toast = useToast()
+  // A host that draws its own chrome (`utils/host`) leaves civex the page.
+  const embedded = isEmbedded()
+  const { name: brandName, logo_url: brandLogo } = brand()
+  const location = useLocation()
 
   const { data: uiSettings } = useUISettings()
   const showAdvanced = uiSettings?.show_advanced ?? false
   const features = useFeatures()
+  const showSettings = offered(features, settingsNavItem)
 
   const aiSplitLayout = useDefaultLayout({
     id: 'civex-ai-split',
@@ -409,128 +419,142 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   return (
     <div className="h-screen flex flex-col">
+      {/* The host's own header and tabs, when it registered any. */}
+      <Slot
+        name="app.header"
+        props={{ path: location.pathname + location.search }}
+      />
       {/* Top bar — always dark regardless of theme, so it needs its own
           border to stay visible against a dark-theme canvas instead of
           blending into it. Global actions only; section navigation lives
           in the left rail below. */}
-      <header className="shrink-0 bg-nav-bg border-b border-nav-border px-4 py-2.5 flex items-center gap-3">
-        <IconButton
-          icon={Menu}
-          variant="nav"
-          onClick={() => setDrawerOpen(true)}
-          aria-label="Open navigation"
-          className="min-[900px]:hidden"
-        />
+      {!embedded && (
+        <header className="shrink-0 bg-nav-bg border-b border-nav-border px-4 py-2.5 flex items-center gap-3">
+          <IconButton
+            icon={Menu}
+            variant="nav"
+            onClick={() => setDrawerOpen(true)}
+            aria-label="Open navigation"
+            className="min-[900px]:hidden"
+          />
 
-        <NavLink
-          to="/"
-          className="text-nav-fg font-semibold text-base tracking-tight"
-        >
-          civex
-        </NavLink>
-
-        <HostProject />
-
-        <Button
-          variant="nav"
-          size="sm"
-          onClick={() => setPaletteOpen(true)}
-          aria-keyshortcuts="Control+K Meta+K"
-        >
-          <Search size={14} />
-          Jump to
-          <kbd className="ml-1 hidden rounded-md border border-nav-border px-1 text-xs sm:inline">
-            Ctrl K
-          </kbd>
-        </Button>
-
-        <SyncButton />
-
-        {offered(features, { feature: 'ai' }) && (
-          <Button
-            variant={aiOpen ? 'navActive' : 'nav'}
-            size="sm"
-            aria-pressed={aiOpen}
-            onClick={() => setAiOpen((o) => !o)}
+          <NavLink
+            to="/"
+            className="text-nav-fg font-semibold text-base tracking-tight"
           >
-            <Sparkles size={14} /> Ask AI
-          </Button>
-        )}
+            {brandLogo && (
+              <img src={brandLogo} alt="" className="mr-2 inline h-5 w-auto" />
+            )}
+            {brandName}
+          </NavLink>
 
-        {isDesktop && (
-          <>
-            <div className="h-5 w-px bg-nav-border" aria-hidden="true" />
-            <Dropdown
-              align="left"
-              items={[
-                {
-                  label: 'Start screen',
-                  icon: House,
-                  onClick: () => window.pywebview!.api.show_start(),
-                },
-                { separator: true },
-                {
-                  label: 'Open project',
-                  icon: FolderOpen,
-                  onClick: () => window.pywebview!.api.open_project(),
-                },
-                {
-                  label: 'New project',
-                  icon: FolderPlus,
-                  onClick: () => window.pywebview!.api.create_project(),
-                },
-                {
-                  label: fileManagerLabel(),
-                  icon: Folder,
-                  onClick: async () => {
-                    const r = await window.pywebview!.api.open_data_dir()
-                    if (r?.error) toast.error(r.error)
+          <HostProject />
+
+          <Button
+            variant="nav"
+            size="sm"
+            onClick={() => setPaletteOpen(true)}
+            aria-keyshortcuts="Control+K Meta+K"
+          >
+            <Search size={14} />
+            Jump to
+            <kbd className="ml-1 hidden rounded-md border border-nav-border px-1 text-xs sm:inline">
+              Ctrl K
+            </kbd>
+          </Button>
+
+          <SyncButton />
+
+          {offered(features, { feature: 'ai' }) && (
+            <Button
+              variant={aiOpen ? 'navActive' : 'nav'}
+              size="sm"
+              aria-pressed={aiOpen}
+              onClick={() => setAiOpen((o) => !o)}
+            >
+              <Sparkles size={14} /> Ask AI
+            </Button>
+          )}
+
+          {isDesktop && (
+            <>
+              <div className="h-5 w-px bg-nav-border" aria-hidden="true" />
+              <Dropdown
+                align="left"
+                items={[
+                  {
+                    label: 'Start screen',
+                    icon: House,
+                    onClick: () => window.pywebview!.api.show_start(),
                   },
-                },
-              ]}
-              trigger={({ toggle }) => (
-                <Button variant="nav" size="sm" onClick={toggle}>
-                  <Folder size={14} />
-                  Project
-                  <ChevronDown size={14} />
-                </Button>
-              )}
-            />
-          </>
-        )}
-      </header>
+                  { separator: true },
+                  {
+                    label: 'Open project',
+                    icon: FolderOpen,
+                    onClick: () => window.pywebview!.api.open_project(),
+                  },
+                  {
+                    label: 'New project',
+                    icon: FolderPlus,
+                    onClick: () => window.pywebview!.api.create_project(),
+                  },
+                  {
+                    label: fileManagerLabel(),
+                    icon: Folder,
+                    onClick: async () => {
+                      const r = await window.pywebview!.api.open_data_dir()
+                      if (r?.error) toast.error(r.error)
+                    },
+                  },
+                ]}
+                trigger={({ toggle }) => (
+                  <Button variant="nav" size="sm" onClick={toggle}>
+                    <Folder size={14} />
+                    Project
+                    <ChevronDown size={14} />
+                  </Button>
+                )}
+              />
+            </>
+          )}
+        </header>
+      )}
 
       <div className="flex-1 flex min-h-0">
         {/* Persistent left nav, collapsible to an icon rail. Hidden below
             the drawer breakpoint in favour of the off-canvas nav rendered
             further down. */}
-        <nav
-          aria-label="Primary"
-          className={`hidden min-[900px]:flex shrink-0 flex-col overflow-y-auto border-r border-border bg-canvas-subtle py-3 ${
-            collapsed ? 'w-16 px-2' : 'w-56 px-3'
-          }`}
-        >
-          <div
-            className={`flex pb-5 ${collapsed ? 'justify-center' : 'justify-end'}`}
+        {!embedded && (
+          <nav
+            aria-label="Primary"
+            className={`hidden min-[900px]:flex shrink-0 flex-col overflow-y-auto border-r border-border bg-canvas-subtle py-3 ${
+              collapsed ? 'w-16 px-2' : 'w-56 px-3'
+            }`}
           >
-            <IconButton
-              icon={collapsed ? PanelLeftOpen : PanelLeftClose}
-              aria-label={
-                collapsed ? 'Expand navigation' : 'Collapse navigation'
-              }
-              onClick={toggleCollapsed}
-            />
-          </div>
-          <NavGroups collapsed={collapsed} showAdvanced={showAdvanced} />
-          <div className="flex-1" />
-          <div className="flex flex-col gap-1 pt-2 border-t border-border-muted">
-            {!collapsed && <NavGroupHeading>Settings</NavGroupHeading>}
-            <NavItem {...settingsNavItem} collapsed={collapsed} />
-          </div>
-        </nav>
+            <div
+              className={`flex pb-5 ${collapsed ? 'justify-center' : 'justify-end'}`}
+            >
+              <IconButton
+                icon={collapsed ? PanelLeftOpen : PanelLeftClose}
+                aria-label={
+                  collapsed ? 'Expand navigation' : 'Collapse navigation'
+                }
+                onClick={toggleCollapsed}
+              />
+            </div>
+            <NavGroups collapsed={collapsed} showAdvanced={showAdvanced} />
+            <div className="flex-1" />
+            {showSettings && (
+              <div className="flex flex-col gap-1 pt-2 border-t border-border-muted">
+                {!collapsed && <NavGroupHeading>Settings</NavGroupHeading>}
+                <NavItem {...settingsNavItem} collapsed={collapsed} />
+              </div>
+            )}
+          </nav>
+        )}
 
         {/* Off-canvas nav drawer for narrow viewports. */}
-        {drawerOpen && (
+        {drawerOpen && !embedded && (
           <div
             ref={drawerWrapperRef}
             className="fixed inset-0 z-40 min-[900px]:hidden"
@@ -566,14 +590,16 @@ export default function Layout({ children }: { children: ReactNode }) {
                 onNavigate={closeDrawer}
               />
               <div className="flex-1" />
-              <div className="flex flex-col gap-1 pt-2 border-t border-border-muted">
-                <NavGroupHeading>Settings</NavGroupHeading>
-                <NavItem
-                  {...settingsNavItem}
-                  collapsed={false}
-                  onNavigate={closeDrawer}
-                />
-              </div>
+              {showSettings && (
+                <div className="flex flex-col gap-1 pt-2 border-t border-border-muted">
+                  <NavGroupHeading>Settings</NavGroupHeading>
+                  <NavItem
+                    {...settingsNavItem}
+                    collapsed={false}
+                    onNavigate={closeDrawer}
+                  />
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -624,22 +650,24 @@ export default function Layout({ children }: { children: ReactNode }) {
       {/* Footer */}
       {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} />}
 
-      <footer className="shrink-0 border-t border-border bg-canvas px-6 py-3 flex items-center justify-center gap-4">
-        <NavLink
-          to="/legal"
-          className="text-xs text-fg-muted hover:text-fg hover:underline"
-        >
-          Licenses &amp; policies
-        </NavLink>
-        <a
-          href={`${basePath()}/docs`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-xs text-fg-muted hover:text-fg hover:underline"
-        >
-          API docs <ExternalLink size={12} />
-        </a>
-      </footer>
+      {!embedded && (
+        <footer className="shrink-0 border-t border-border bg-canvas px-6 py-3 flex items-center justify-center gap-4">
+          <NavLink
+            to="/legal"
+            className="text-xs text-fg-muted hover:text-fg hover:underline"
+          >
+            Licenses &amp; policies
+          </NavLink>
+          <a
+            href={`${basePath()}/docs`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-xs text-fg-muted hover:text-fg hover:underline"
+          >
+            API docs <ExternalLink size={12} />
+          </a>
+        </footer>
+      )}
     </div>
   )
 }

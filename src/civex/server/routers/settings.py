@@ -7,7 +7,14 @@ from civex import launcher
 from civex.identity import choose_name, local_actor
 from civex.domain.exceptions import ConfigError
 from civex.project import Project
-from civex.domain.features import DESKTOP
+from civex.domain.features import (
+    DESKTOP,
+    SETTINGS,
+    SETTINGS_ADVANCED,
+    SETTINGS_APPEARANCE,
+    SETTINGS_MAP,
+    SETTINGS_RETENTION,
+)
 from civex.server.deps import current_project, requires
 from civex.server.models import (
     MapSettingsResponse,
@@ -56,7 +63,9 @@ def get_identity(project: Project = Depends(current_project)):
     return _identity(project.config)
 
 
-@router.patch("/identity", response_model=IdentityResponse)
+@router.patch(
+    "/identity", response_model=IdentityResponse, dependencies=[requires(SETTINGS)]
+)
 def update_identity(
     body: UpdateIdentityRequest, project: Project = Depends(current_project)
 ):
@@ -65,14 +74,21 @@ def update_identity(
     return _identity(choose_name(project.config_store, body.name))
 
 
-@router.get("/ui", response_model=UISettingsResponse)
+@router.get(
+    "/ui",
+    response_model=UISettingsResponse,
+)
 def get_ui_settings(project: Project = Depends(current_project)):
     """Return this project's UI preferences."""
     config = project.config
     return UISettingsResponse(show_advanced=config.ui.show_advanced)
 
 
-@router.patch("/ui", response_model=UISettingsResponse)
+@router.patch(
+    "/ui",
+    response_model=UISettingsResponse,
+    dependencies=[requires(SETTINGS_APPEARANCE)],
+)
 def update_ui_settings(
     body: UpdateUISettingsRequest, project: Project = Depends(current_project)
 ):
@@ -115,7 +131,10 @@ def create_shortcut(project: Project = Depends(current_project)):
     return _shortcut_state(root)
 
 
-@router.get("/map", response_model=MapSettingsResponse)
+@router.get(
+    "/map",
+    response_model=MapSettingsResponse,
+)
 def get_map_settings(project: Project = Depends(current_project)):
     """Where the location editor gets street-level map tiles, if anywhere."""
     config = project.config
@@ -124,7 +143,11 @@ def get_map_settings(project: Project = Depends(current_project)):
     )
 
 
-@router.patch("/map", response_model=MapSettingsResponse)
+@router.patch(
+    "/map",
+    response_model=MapSettingsResponse,
+    dependencies=[requires(SETTINGS_MAP)],
+)
 def update_map_settings(
     body: UpdateMapSettingsRequest, project: Project = Depends(current_project)
 ):
@@ -159,14 +182,21 @@ def _retention_response(config) -> RetentionSettingsResponse:
     )
 
 
-@router.get("/retention", response_model=RetentionSettingsResponse)
+@router.get(
+    "/retention",
+    response_model=RetentionSettingsResponse,
+)
 def get_retention_settings(project: Project = Depends(current_project)):
     """Return how long this project keeps deleted items, change history and
     workflow runs. Nothing is removed by itself: a clean-up applies these."""
     return _retention_response(project.config)
 
 
-@router.patch("/retention", response_model=RetentionSettingsResponse)
+@router.patch(
+    "/retention",
+    response_model=RetentionSettingsResponse,
+    dependencies=[requires(SETTINGS_RETENTION)],
+)
 def update_retention_settings(
     body: UpdateRetentionSettingsRequest, project: Project = Depends(current_project)
 ):
@@ -216,7 +246,10 @@ def _command_line(found) -> CommandLineResponse:
     )
 
 
-@router.get("/command-line", response_model=CommandLineResponse)
+@router.get(
+    "/command-line",
+    response_model=CommandLineResponse,
+)
 def get_command_line():
     """Whether the desktop app's `civex` can be typed in a terminal."""
     from civex import command_line
@@ -224,7 +257,11 @@ def get_command_line():
     return _command_line(command_line.state())
 
 
-@router.post("/command-line", response_model=CommandLineResponse)
+@router.post(
+    "/command-line",
+    response_model=CommandLineResponse,
+    dependencies=[requires(SETTINGS_ADVANCED)],
+)
 def add_command_line():
     """Put the desktop app's `civex` on PATH: the user PATH on Windows (no
     administrator), a link in ~/.local/bin on macOS and Linux. 409 when this
@@ -239,7 +276,11 @@ def add_command_line():
         raise HTTPException(500, detail=f"Could not change PATH: {e}")
 
 
-@router.delete("/command-line", response_model=CommandLineResponse)
+@router.delete(
+    "/command-line",
+    response_model=CommandLineResponse,
+    dependencies=[requires(SETTINGS_ADVANCED)],
+)
 def remove_command_line():
     """Take the desktop app's `civex` off PATH again (only ever its own entry
     or link)."""

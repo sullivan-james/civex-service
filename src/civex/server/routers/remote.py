@@ -17,7 +17,8 @@ from civex.domain.exceptions import NotAllowedError, NotFoundError, ValidationEr
 from civex.domain.library import InstallPlan, LibraryItemDTO
 from civex.domain.sync import INVITE_HOURS, SyncError
 from civex.domain.features import PLUGIN_INSTALL, REMOTE_DIAL
-from civex.server.deps import get_ctx, requires
+from civex.domain.permissions import MANAGE_DEVICES
+from civex.server.deps import allows, get_ctx, requires
 from civex.services.sync_jobs import sync_jobs
 
 router = APIRouter(prefix="/remote", tags=["sync"])
@@ -58,6 +59,12 @@ class RemoteStatusResponse(BaseModel):
     )
     files_to_fetch: int = Field(
         description="Files records here cite that aren't on this computer yet."
+    )
+    files_missing: int = Field(
+        default=0,
+        description="Files records here cite that no drive here holds and the "
+        "server said it hasn't got either (less any ignored): missing "
+        "everywhere, so not downloading. `civex files missing` lists them.",
     )
     files_to_send: int = Field(
         default=0,
@@ -117,6 +124,56 @@ class OfflineDriveFiles(BaseModel):
     reason: str = Field(description="Why the drive can't be read, in its own words.")
 
 
+class MissingFileGroupResponse(BaseModel):
+    collection: str | None
+    schema_name: str = Field(description="The kind of record.")
+    field: str
+    records: int
+    files: int
+
+
+class MissingFilesResponse(BaseModel):
+    shas: list[str] = Field(
+        description="Files records cite that this project never stored and "
+        "nothing can supply (no copy here, none on the server)."
+    )
+    ignored: list[str] = Field(
+        description="Those a person chose to stop hearing about."
+    )
+    groups: list[MissingFileGroupResponse] = Field(
+        description="Where records cite them, by collection and field."
+    )
+    server_checked: bool = Field(
+        description="False when the server could not be asked whether it has them."
+    )
+
+
+class MissingFilesRequest(BaseModel):
+    shas: list[str] | None = Field(
+        default=None, description="Which files; leave out for every one."
+    )
+    dry_run: bool = Field(default=False, description="Remove only: change nothing.")
+
+
+class MissingFilesDone(BaseModel):
+    count: int = Field(description="Files ignored or forgotten.")
+
+
+class SkippedRecord(BaseModel):
+    record_id: str
+    name: str | None
+    reason: str
+
+
+class MissingFilesRemoved(BaseModel):
+    changed: int = Field(description="Records the files were cleared from.")
+    groups: list[MissingFileGroupResponse]
+    skipped: list[SkippedRecord] = Field(
+        description="Records left as they are (a required field would be empty)."
+    )
+    skipped_count: int
+
+
 class FilesWaitingResponse(BaseModel):
     ready: int = Field(description="Files sending can move now.")
     offline: list[OfflineDriveFiles] = Field(
@@ -125,6 +182,12 @@ class FilesWaitingResponse(BaseModel):
     missing: int = Field(
         description="Files on no drive here that the server said it hasn't got "
         "either: nothing here can send them (not in `files_to_send`)."
+    )
+    never_stored: int = Field(
+        default=0, description="Of `missing`, those this project never stored."
+    )
+    ignored: int = Field(
+        default=0, description="Missing files a person chose to stop hearing about."
     )
 
 
@@ -366,6 +429,7 @@ def _status(ctx: AppContext) -> RemoteStatusResponse:
         running=s.running,
         download_files=s.download_files,
         files_to_fetch=s.files_to_fetch,
+        files_missing=s.files_missing,
         files_to_send=s.files_to_send,
         files_waiting=(
             FilesWaitingResponse(
@@ -375,6 +439,8 @@ def _status(ctx: AppContext) -> RemoteStatusResponse:
                     for v, n, r in w.offline
                 ],
                 missing=w.missing,
+                never_stored=w.never_stored,
+                ignored=w.ignored,
             )
             if (w := s.files_waiting)
             else None
@@ -405,7 +471,9 @@ def _refuse(e: SyncError) -> HTTPException:
     return HTTPException(502 if e.retryable else 400, detail=str(e))
 
 
-@router.get("", response_model=RemoteStatusResponse)
+@router.get(
+    "", dependencies=[requires(REMOTE_DIAL)], response_model=RemoteStatusResponse
+)
 def status(ctx: AppContext = Depends(get_ctx)):
     """How this project stands with its authority."""
     return _status(ctx)
@@ -473,7 +541,102 @@ def send_files_now(ctx: AppContext = Depends(get_ctx)):
     return {"requested": True}
 
 
-@router.patch("", response_model=RemoteStatusResponse)
+def _missing_response(report) -> MissingFilesResponse:  # noqa: ANN001
+    return MissingFilesResponse(
+        shas=report.shas,
+        ignored=report.ignored,
+        groups=[
+            MissingFileGroupResponse(
+                collection=g.collection,
+                schema_name=g.schema,
+                field=g.field,
+                records=g.records,
+                files=g.files,
+            )
+            for g in report.groups
+        ],
+        server_checked=report.server_checked,
+    )
+
+
+@router.get(
+    "/files/missing",
+    response_model=MissingFilesResponse,
+    dependencies=[requires(REMOTE_DIAL)],
+)
+def missing_files(ctx: AppContext = Depends(get_ctx)):
+    """Files records cite that this project never stored and nothing can supply,
+    by collection and field."""
+    try:
+        return _missing_response(ctx.sync_svc.missing_files())
+    except SyncError as e:
+        raise _refuse(e)
+
+
+@router.post(
+    "/files/missing/ignore",
+    response_model=MissingFilesDone,
+    dependencies=[requires(REMOTE_DIAL)],
+)
+def ignore_missing_files(body: MissingFilesRequest, ctx: AppContext = Depends(get_ctx)):
+    """Stop warning about these missing files (the records keep citing them)."""
+    try:
+        return MissingFilesDone(count=ctx.sync_svc.ignore_missing(body.shas))
+    except SyncError as e:
+        raise _refuse(e)
+
+
+@router.post(
+    "/files/missing/unignore",
+    response_model=MissingFilesDone,
+    dependencies=[requires(REMOTE_DIAL)],
+)
+def unignore_missing_files(
+    body: MissingFilesRequest, ctx: AppContext = Depends(get_ctx)
+):
+    """Warn about ignored files again."""
+    shas = (
+        body.shas if body.shas is not None else sorted(ctx.sync_svc.ignored_missing())
+    )
+    return MissingFilesDone(count=ctx.sync_svc.unignore_missing(shas))
+
+
+@router.post(
+    "/files/missing/remove",
+    response_model=MissingFilesRemoved,
+    dependencies=[requires(REMOTE_DIAL)],
+)
+def remove_missing_files(body: MissingFilesRequest, ctx: AppContext = Depends(get_ctx)):
+    """Clear these missing files from the records citing them: ordinary edits
+    (history, sync), one event in Activity. A record whose required field would
+    be left empty is left as it is and named."""
+    try:
+        result = ctx.sync_svc.remove_missing(body.shas, dry_run=body.dry_run)
+    except SyncError as e:
+        raise _refuse(e)
+    return MissingFilesRemoved(
+        changed=result.changed,
+        groups=[
+            MissingFileGroupResponse(
+                collection=g.collection,
+                schema_name=g.schema,
+                field=g.field,
+                records=g.records,
+                files=g.files,
+            )
+            for g in result.groups
+        ],
+        skipped=[
+            SkippedRecord(record_id=str(s.record_id), name=s.name, reason=s.reason)
+            for s in result.skipped
+        ],
+        skipped_count=result.skipped_count,
+    )
+
+
+@router.patch(
+    "", dependencies=[requires(REMOTE_DIAL)], response_model=RemoteStatusResponse
+)
 def update(body: RemoteUpdateRequest, ctx: AppContext = Depends(get_ctx)):
     """Pause or resume the schedule, change how often it looks, or choose which
     files this device keeps a copy of."""
@@ -484,11 +647,15 @@ def update(body: RemoteUpdateRequest, ctx: AppContext = Depends(get_ctx)):
     if body.download_files is not None:
         ctx.sync_svc.set_download_files(body.download_files)
         if body.download_files == "all" and ctx.sync_svc.fetches_files:
-            sync_jobs.fetch_now(ctx.sync_svc.files_to_fetch())
+            sync_jobs.fetch_now(ctx.sync_svc.files_to_try())
     return _status(ctx)
 
 
-@router.get("/conflicts", response_model=list[ConflictResponse])
+@router.get(
+    "/conflicts",
+    dependencies=[requires(REMOTE_DIAL)],
+    response_model=list[ConflictResponse],
+)
 def conflicts(
     status: str | None = Query(default="open", description="open, resolved, or all."),
     record: str | None = Query(
@@ -504,7 +671,11 @@ def conflicts(
     return [ConflictResponse(**c.to_dict()) for c in found]
 
 
-@router.post("/conflicts/{conflict_id}/resolve", response_model=RemoteStatusResponse)
+@router.post(
+    "/conflicts/{conflict_id}/resolve",
+    dependencies=[requires(REMOTE_DIAL)],
+    response_model=RemoteStatusResponse,
+)
 def resolve(conflict_id: str, body: ResolveRequest, ctx: AppContext = Depends(get_ctx)):
     """Settle a conflict. Putting a value back is an ordinary edit (checked, in the
     history, synced); it answers 409 with what is there now when the record's value
@@ -520,7 +691,11 @@ def resolve(conflict_id: str, body: ResolveRequest, ctx: AppContext = Depends(ge
     return _status(ctx)
 
 
-@router.post("/conflicts/resolve-many", response_model=ResolveManyResponse)
+@router.post(
+    "/conflicts/resolve-many",
+    dependencies=[requires(REMOTE_DIAL)],
+    response_model=ResolveManyResponse,
+)
 def resolve_many(body: ResolveManyRequest, ctx: AppContext = Depends(get_ctx)):
     """Settle every open conflict that matches (the given ids, kind and record; all
     of them if none is given) the same way, in one request. Conflicts that don't
@@ -545,7 +720,11 @@ def resolve_many(body: ResolveManyRequest, ctx: AppContext = Depends(get_ctx)):
     )
 
 
-@router.post("/conflicts/reopen", response_model=ReopenResponse)
+@router.post(
+    "/conflicts/reopen",
+    dependencies=[requires(REMOTE_DIAL)],
+    response_model=ReopenResponse,
+)
 def reopen(body: ReopenRequest, ctx: AppContext = Depends(get_ctx)):
     """Open conflicts again that were settled with `theirs` (an undo: that choice
     changed nothing). Others are ignored; undo those from Activity."""
@@ -675,14 +854,22 @@ def _authority(ctx: AppContext) -> AuthorityResponse:
     )
 
 
-@router.get("/authority", response_model=AuthorityResponse)
+@router.get(
+    "/authority",
+    response_model=AuthorityResponse,
+    dependencies=[allows(MANAGE_DEVICES)],
+)
 def authority(ctx: AppContext = Depends(get_ctx)):
     """Whether this project accepts devices, the devices that joined, and the
     invites waiting."""
     return _authority(ctx)
 
 
-@router.patch("/authority", response_model=AuthorityResponse)
+@router.patch(
+    "/authority",
+    response_model=AuthorityResponse,
+    dependencies=[allows(MANAGE_DEVICES)],
+)
 def update_authority(body: AuthorityUpdateRequest, ctx: AppContext = Depends(get_ctx)):
     """Start or stop accepting devices (the devices stay on record), and say
     what the library takes from them."""
@@ -696,7 +883,11 @@ def update_authority(body: AuthorityUpdateRequest, ctx: AppContext = Depends(get
     return _authority(ctx)
 
 
-@router.post("/authority/invites", response_model=InvitedResponse)
+@router.post(
+    "/authority/invites",
+    response_model=InvitedResponse,
+    dependencies=[allows(MANAGE_DEVICES)],
+)
 def invite_device(body: InviteRequest, ctx: AppContext = Depends(get_ctx)):
     """Invite a device. The answer is the only time the invite is shown."""
     try:
@@ -707,7 +898,11 @@ def invite_device(body: InviteRequest, ctx: AppContext = Depends(get_ctx)):
     return InvitedResponse(**_authority(ctx).model_dump(), invite=code)
 
 
-@router.post("/authority/invites/{name}/cancel", response_model=AuthorityResponse)
+@router.post(
+    "/authority/invites/{name}/cancel",
+    response_model=AuthorityResponse,
+    dependencies=[allows(MANAGE_DEVICES)],
+)
 def cancel_invite(name: str, ctx: AppContext = Depends(get_ctx)):
     """Cancel a device's invite before it is used."""
     if not ctx.device_keys.cancel_invite(name):
@@ -716,7 +911,11 @@ def cancel_invite(name: str, ctx: AppContext = Depends(get_ctx)):
     return _authority(ctx)
 
 
-@router.post("/authority/logins/{code}/approve", response_model=AuthorityResponse)
+@router.post(
+    "/authority/logins/{code}/approve",
+    response_model=AuthorityResponse,
+    dependencies=[allows(MANAGE_DEVICES)],
+)
 def approve_login(
     code: str, body: ApproveLoginRequest, ctx: AppContext = Depends(get_ctx)
 ):
@@ -730,7 +929,11 @@ def approve_login(
     return _authority(ctx)
 
 
-@router.post("/authority/logins/{code}/deny", response_model=AuthorityResponse)
+@router.post(
+    "/authority/logins/{code}/deny",
+    response_model=AuthorityResponse,
+    dependencies=[allows(MANAGE_DEVICES)],
+)
 def deny_login(code: str, ctx: AppContext = Depends(get_ctx)):
     """Turn away the device showing this code."""
     if not ctx.device_keys.deny_login(code):
@@ -739,7 +942,11 @@ def deny_login(code: str, ctx: AppContext = Depends(get_ctx)):
     return _authority(ctx)
 
 
-@router.post("/authority/devices/{name}/revoke", response_model=AuthorityResponse)
+@router.post(
+    "/authority/devices/{name}/revoke",
+    response_model=AuthorityResponse,
+    dependencies=[allows(MANAGE_DEVICES)],
+)
 def revoke_device(name: str, ctx: AppContext = Depends(get_ctx)):
     """Stop a device syncing, at once: its session is refused from now on."""
     if not ctx.device_keys.revoke_device(name):
@@ -748,7 +955,11 @@ def revoke_device(name: str, ctx: AppContext = Depends(get_ctx)):
     return _authority(ctx)
 
 
-@router.post("/authority/devices/{name}/publish", response_model=AuthorityResponse)
+@router.post(
+    "/authority/devices/{name}/publish",
+    response_model=AuthorityResponse,
+    dependencies=[allows(MANAGE_DEVICES)],
+)
 def allow_publish(
     name: str, body: DevicePublishRequest, ctx: AppContext = Depends(get_ctx)
 ):
@@ -1071,14 +1282,22 @@ class FreeUpResponse(BaseModel):
     done: bool = Field(description="False when only counted.")
 
 
-@router.get("/files", response_model=list[CollectionFilesResponse])
+@router.get(
+    "/files",
+    dependencies=[requires(REMOTE_DIAL)],
+    response_model=list[CollectionFilesResponse],
+)
 def collection_files(ctx: AppContext = Depends(get_ctx)):
     """Each collection's files on this computer: how many are here and their
     size, how many are only on the server, and whether it keeps a copy here."""
     return [CollectionFilesResponse(**vars(c)) for c in ctx.sync_svc.collection_files()]
 
 
-@router.patch("/files/{collection}", response_model=list[CollectionFilesResponse])
+@router.patch(
+    "/files/{collection}",
+    dependencies=[requires(REMOTE_DIAL)],
+    response_model=list[CollectionFilesResponse],
+)
 def set_collection_mode(
     collection: str, body: CollectionModeRequest, ctx: AppContext = Depends(get_ctx)
 ):
@@ -1087,11 +1306,15 @@ def set_collection_mode(
     download of what is missing."""
     mode = ctx.sync_svc.set_collection_mode(collection, body.mode)
     if mode == "keep" and ctx.sync_svc.fetches_files:
-        sync_jobs.fetch_now(ctx.sync_svc.files_to_fetch())
+        sync_jobs.fetch_now(ctx.sync_svc.files_to_try())
     return [CollectionFilesResponse(**vars(c)) for c in ctx.sync_svc.collection_files()]
 
 
-@router.post("/files/{collection}/free-up", response_model=FreeUpResponse)
+@router.post(
+    "/files/{collection}/free-up",
+    dependencies=[requires(REMOTE_DIAL)],
+    response_model=FreeUpResponse,
+)
 def free_up(
     collection: str,
     dry_run: bool = Query(default=True, description="Only count (the default)."),

@@ -72,11 +72,20 @@ def _connect_showing_progress(c, url: str, invite: str | None) -> str:
         def approve(started) -> None:  # noqa: ANN001 - LoginStarted
             bar.update(task, description="Waiting to be approved")
             until = datetime.fromtimestamp(started.expires_at).strftime("%H:%M")
-            console.print(
-                "This computer has asked to join. On the server, approve it with\n\n"
-                f"  civex sync device approve {started.user_code} <name>\n\n"
-                f"(or in Settings → Sync). Waiting until {until}; Ctrl+C stops."
-            )
+            if started.verify_url:
+                console.print(
+                    "This computer has asked to join. Open "
+                    f"{escape(started.verify_url)} and enter the code\n\n"
+                    f"  {escape(started.user_code)}\n\n"
+                    f"Waiting until {until}; Ctrl+C stops."
+                )
+            else:
+                console.print(
+                    "This computer has asked to join. On the server, approve it "
+                    "with\n\n"
+                    f"  civex sync device approve {started.user_code} <name>\n\n"
+                    f"(or in Settings → Sync). Waiting until {until}; Ctrl+C stops."
+                )
 
         mode = c.sync_svc.connect(url, invite, progress=show, on_code=approve)
         c.commit()
@@ -222,7 +231,7 @@ def _never_stored(waiting) -> None:  # noqa: ANN001 — FilesWaiting
         f"[dim]{waiting.never_stored} of them were never stored in this project "
         f"(records cite them without their contents). Records affected: {where}. "
         "Attach the file to those records again, or sync from the computer "
-        "that has it.[/dim]"
+        "that has it. `civex files missing` lists, ignores or removes them.[/dim]"
     )
 
 
@@ -374,6 +383,11 @@ def files(
             f"{s.files_to_fetch} kept file(s) not downloaded yet "
             "(`civex sync fetch` downloads them now)."
         )
+    if s.files_missing:
+        console.print(
+            f"{s.files_missing} file(s) are missing everywhere: the server hasn't "
+            "got them either (`civex files missing` lists them)."
+        )
 
 
 @app.command("keep")
@@ -454,9 +468,15 @@ def fetch() -> None:
     try:
         if not c.sync_svc.fetches_files:
             raise _fail(ValueError("This project doesn't follow an authority."))
-        total = c.sync_svc.files_to_fetch()
+        total = c.sync_svc.files_to_try()
         if not total:
-            console.print("Every file is here.")
+            missing = c.sync_svc.files_missing()
+            console.print(
+                f"Every file the server has is here. {missing} more are missing "
+                "everywhere (`civex files missing`)."
+                if missing
+                else "Every file is here."
+            )
             return
         with Progress(
             TextColumn("Downloading files"),
@@ -537,6 +557,16 @@ def status() -> None:
         console.print(f"[warning]Last problem  {escape(s.last_error)}[/warning]")
     if s.files_waiting and s.files_waiting.missing:
         _files_owed_missing(s.files_waiting)
+    if s.files_missing:
+        console.print(
+            f"Missing     {s.files_missing} file(s) the server hasn't got either "
+            "(`civex files missing`)"
+        )
+    if s.files_ignored:
+        console.print(
+            f"Ignored     {s.files_ignored} missing file(s) "
+            "(`civex files missing --unignore all` warns again)"
+        )
 
 
 @app.command("connect")
@@ -992,27 +1022,74 @@ def clone(
     path: Path = typer.Argument(
         None, help="Where to put the copy (default: a new folder here)."
     ),
-    invite: str = typer.Option(
-        ...,
+    invite: str | None = typer.Option(
+        None,
         "--invite",
         envvar="CIVEX_SYNC_INVITE",
-        help="The invite the authority's admin gave.",
+        help="The invite the authority's admin gave. Leave out to sign in: a code "
+        "is shown to approve, and the copy starts once it is.",
     ),
 ) -> None:
-    """Make a new project that is a copy of an authority's, and keep it in step."""
+    """Make a new project that is a copy of an authority's, and keep it in step.
+    Without an invite, this computer signs in as a device: it shows a code (and
+    the page to enter it at, when the server has one), waits for approval, then
+    copies."""
     from civex.cli.init import _init_working
 
     target = (
         path or Path(url.rstrip("/").rsplit("/", 1)[-1] or "civex-project")
     ).resolve()
     target.mkdir(parents=True, exist_ok=True)
-    _init_working(target, use_sqlite=True)
+    resuming = (target / "_civex").exists()  # an earlier attempt stopped part way
+    if not resuming:
+        _init_working(target, use_sqlite=True)
     os.chdir(target)
     c = _ctx()
     try:
+        if resuming:
+            # Only pick up a copy that holds nothing of its own and isn't
+            # following another authority: never connect live data to a stranger.
+            followed = c.sync_svc.status().remote
+            if (followed and followed.rstrip("/") != url.strip().rstrip("/")) or (
+                not followed and c.schema_svc.list_all()
+            ):
+                raise _fail(
+                    ValueError(
+                        f"{target} is already a civex project: clone into a new folder"
+                    )
+                )
         _connect_showing_progress(c, url, invite)
     except (SyncError, CivexError) as e:
         raise _fail(e)
     finally:
         c.close()
     console.print(f"[success]Cloned into {target}.[/success]")
+
+
+auth_app = typer.Typer(help="This computer's sign-in to the project's authority.")
+
+
+@auth_app.command("status")
+def auth_status() -> None:
+    """Show the authority this project follows, this device's name and id,
+    whether it has joined, and the last sync error."""
+    c = _ctx()
+    try:
+        who = c.sync_svc.identity()
+    finally:
+        c.close()
+    if not who.remote:
+        console.print("Not following an authority.")
+        return
+    console.print(f"Authority   {escape(who.remote)}")
+    console.print(f"Device      {escape(who.device_name or 'unknown')}")
+    console.print(f"Device id   {who.device_id or 'none yet'}")
+    console.print(f"Joined      {'yes' if who.joined else 'no'}")
+    if who.last_error:
+        console.print(
+            f"[warning]Last sync error  {escape(who.last_error)}"
+            + (f" ({who.last_error_at})" if who.last_error_at else "")
+            + "[/warning]"
+        )
+    else:
+        console.print("Last sync error  none")

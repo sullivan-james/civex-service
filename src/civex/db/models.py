@@ -37,6 +37,7 @@ from sqlalchemy import (
     UniqueConstraint,
     delete,
     event,
+    func,
     inspect,
     insert,
     select,
@@ -1098,6 +1099,23 @@ class SyncMeta(Base):
     feed_floor: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default="0"
     )
+    # Device: the collections (ids) the authority last said this device may
+    # read. A collection newly in the list is one this device has been given
+    # since and does not hold yet: it asks for it (`snapshot` with `dataset`).
+    # NULL until the first sync that learns it (nothing is asked for then).
+    readable: Mapped[list[str] | None] = mapped_column(_JSON, nullable=True)
+    # Authority: entries numbered up to this were stored before they were
+    # stamped with where the authority really had the record (they carry the
+    # collection a device *claimed*), so a device limited to some collections is
+    # sent one only while the record is still somewhere it may read. New
+    # databases start at 0; an upgrade sets it to the head at that moment.
+    placed_from: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0"
+    )
+    # Device: how far fetching the history from before joining has looked, which
+    # can be past the last entry stored (a device that may not read everything is
+    # not sent what it may not see). NULL when not fetching.
+    history_scan: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     # Device: the number it was copied at. Its own history starts there; what
     # came before is the authority's to show.
     history_from: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -1126,18 +1144,43 @@ class ServerFile(Base):
     sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
 
 
+class IgnoredMissingFile(Base):
+    """A file records cite that this project never stored and nothing can
+    supply, which a person chose to stop being told about (`civex files
+    missing --ignore`). The references stay. Forgotten when the file turns up
+    here, and by `--unignore`."""
+
+    __tablename__ = "ignored_missing_files"
+
+    sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    ignored_at: Mapped[datetime] = mapped_column(
+        _UTCDateTime(), nullable=False, default=_now
+    )
+
+
 class ServerLack(Base):
     """Device: a file the authority said it hasn't got, when last asked (it
     answered that it lacks it, or a download found nothing there). With no copy
     here either, nothing can send it: the file is missing, not merely waiting.
     A file never asked about is in neither table (not known to be missing).
-    Removed when the authority confirms the file; cleared with `server_files`."""
+    Removed when the authority confirms the file, or the feed shows a record
+    citing it change; cleared with `server_files`."""
 
     __tablename__ = "server_lacks"
 
     sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
     asked_at: Mapped[datetime] = mapped_column(
         _UTCDateTime(), nullable=False, default=_now
+    )
+    # How many times in a row it said so, and when it may be asked again (the
+    # wait doubles each time: 10 minutes, then 20, up to a day), so a file
+    # nobody has is not requested over and over, across restarts.
+    misses: Mapped[int] = mapped_column(nullable=False, default=1, server_default="1")
+    retry_at: Mapped[datetime] = mapped_column(
+        _UTCDateTime(),
+        nullable=False,
+        default=_now,
+        server_default=func.current_timestamp(),
     )
 
 

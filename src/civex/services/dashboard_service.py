@@ -55,7 +55,7 @@ class DashboardService:
         kind and collection its records are of (a card whose kind or
         collection is gone stays, with the `problem`, until someone removes
         it). Kinds and collections are read once whatever the page holds."""
-        self._permissions.require(permissions.READ)
+        self._permissions.require_somewhere(permissions.READ)
         stored = self._repo.get()
         cards = (
             dashboard.parse_cards(stored.cards)
@@ -83,7 +83,7 @@ class DashboardService:
             if schema is None or schema.deleted_at is not None:
                 problem = "That kind of record is gone"
             elif scope.collection and collection is None:
-                problem = "That collection is gone"
+                problem = self._no_collection()
             shown.append(
                 DashboardCardDTO(
                     card,
@@ -94,6 +94,14 @@ class DashboardService:
                 )
             )
         return DashboardPageDTO(cards=shown, edited=stored is not None)
+
+    def _no_collection(self) -> str:
+        """Why a card's collection can't be shown. To someone who can't see
+        every collection, a gone one and a hidden one read the same, so a card
+        never tells them a collection exists."""
+        if self._permissions.read_scope().unrestricted:
+            return "That collection is gone"
+        return "That collection is not available to you"
 
     def query_for(self, card: Card, collection: str | None = None) -> RecordQuery:
         """The records a chart card counts, as the query a list would run:
@@ -112,7 +120,7 @@ class DashboardService:
                 uuid.UUID(scope.collection), with_count=False
             )
             if found is None:
-                raise NotFoundError("That collection is gone")
+                raise NotFoundError(self._no_collection())
             dataset = found.name
         return RecordQuery(
             dataset=dataset,
@@ -139,7 +147,7 @@ class DashboardService:
         checked against its kind; one already on the page as it is may name a
         kind or field gone since, so saving never forces a person to tidy up
         first."""
-        self._permissions.require_somewhere(permissions.WRITE_RECORDS)
+        self._permissions.require_somewhere(permissions.VIEWS)
         parsed = dashboard.parse_cards(cards)
         before = self._repo.get()
         known = {c.id: c for c in self.cards()}

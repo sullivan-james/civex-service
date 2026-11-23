@@ -7,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from civex.context import AppContext, context_factory
 from civex.domain.exceptions import NotFoundError
 from civex.server.background import run_pending_jobs
-from civex.server.deps import get_ctx
+from civex.server.deps import get_ctx, reads_whole_project
 from civex.domain.run_filters import RUN_FIELDS
 from civex.server.models import (
     AutomationStatusResponse,
@@ -21,7 +21,9 @@ from civex.server.models import (
     WorkflowJobResponse,
 )
 
-router = APIRouter(prefix="/jobs", tags=["jobs"])
+# A run's input, output and errors hold the records it was about, whatever
+# collection they are in: only for someone who can see everything.
+router = APIRouter(prefix="/jobs", tags=["jobs"], dependencies=[reads_whole_project()])
 automation_router = APIRouter(prefix="/automation", tags=["jobs"])
 
 

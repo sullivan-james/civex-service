@@ -48,10 +48,106 @@ from the next tag forward.
   refused changes wait and print `civex sync resolve --all --take retry --kind
   rejected`.
 
+### Added
+
+- **Finer permissions for hosts (C3a).** `civex.domain.permissions` gains
+  `ADD_FILES`/`DELETE_FILES` (`MANAGE_FILES` stays as an alias for both), `NOTES`,
+  `VIEWS` and `MANAGE_DEVICES`; every action, `READ` included, can be limited to
+  collections (`Permissions.of(..., read_collections=...)`, `read_scope()`). A
+  collection the caller cannot read is absent everywhere (lists, counts, search,
+  summaries, dashboards, exports, history, notes, files) and a direct request for
+  it is a 404, enforced once at the session (`civex.db.read_scope`). Saving a
+  record that cites or lets go of a file takes `add_files`/`delete_files`;
+  `/remote/authority*` takes `manage_devices`. Hosts that say nothing about
+  `notes`/`views` keep them following `write_records`. New
+  `Project.push_accepted` host callback, called once after a device's push is
+  committed. See `docs/guides/hosting.md`.
+
+- **Sync respects what a device's person may read (C3b, sync protocol 5).** The
+  authority sends a device only the collections its person may read: the feed, the
+  copy a joining device reads, the counts and the files. A record moved out of
+  sight reaches the device as its removal, one moved into sight as its creation, in
+  full. Pushes into, or pointing at, a collection the device may not read are
+  refused (not taken). When access is widened the device catches up by itself
+  (`hello.readable`, `snapshot?dataset=`, `sync_meta.readable`, a migration);
+  when it is narrowed the authority stops sending, and what the device already
+  holds cannot be taken back. The feed reports `through`, so an unseen run of
+  changes does not hold a device in place, and one request looks at no more than a
+  bounded number of entries. A device whose person may not read everything must be on
+  protocol 5 (older ones are told to update); a record moved while its collection was
+  out of sight is read when the collection is given. See `docs/guides/sync.md` and
+  `docs/guides/hosting.md`.
+- **`civex files missing`** lists files records cite that this project never
+  stored and nothing can supply (no copy here, none on the server), by
+  collection and field. `--ignore <hash|all>` stops the warnings (the records keep
+  citing them; reversible with `--unignore`, and forgotten by itself when the file
+  turns up). `--remove <hash|all> [--dry-run]` clears them from the records as
+  ordinary edits (history, sync), one event in Activity; a record whose required
+  field would be left empty is left as it is and named. Never touches a file that
+  exists here or that the server holds. Also `GET/POST /api/remote/files/missing`
+  (`/ignore`, `/unignore`, `/remove`), an Ignore action on the app's missing-files
+  notice, and an "Ignored" line in `civex sync status`.
+- Settings features a host can switch off, because a host owns all settings:
+  `settings` (the whole Settings area), `settings_appearance`,
+  `settings_retention`, `settings_map`, `settings_advanced`, `settings_devices`
+  and `settings_members`. A local project keeps all of them. A section feature refuses
+  only the routes that edit that section's stored settings (never the operational
+  `/remote/authority*` or `/retention/*` routes a host drives); `settings` off
+  turns every section off and refuses editing the identity; `GET /api/status/features`
+  lists them all.
+- A page whose feature is off is blocked, not just hidden from the navigation:
+  the terminal, plugins, workflows, runs, AI, database, storage, updates, logs
+  and each settings section show "Not available here". The top-bar sync button
+  and `/sync/review` appear only for a project that follows a remote, which a
+  hosted authority does not.
+- **Device sign-in from the CLI.** When the authority sends a `verify_url`, `civex
+  sync connect` shows "Open <url> and enter the code XXXX-XXXX" instead of only
+  `civex sync device approve`; authorities without a page keep the old hint.
+- **`civex clone <url>` needs no `--invite`.** Without one it signs in as a
+  device (shows the code, waits for approval, then copies).
+- **`civex auth status`** shows the authority, this device's name and id, whether
+  it has joined, and the last sync error.
+
+### Fixed
+
+- A project holding file references nobody has the bytes of no longer shows
+  "Downloading files 0 of N" forever. A file the server said it hasn't got is
+  remembered in the project (not in worker memory), asked for again only after a
+  wait that doubles from 10 minutes up to a day, and at once when a change to a
+  record citing it arrives. It is counted as "N files are missing everywhere"
+  (`files_missing` in `/api/remote`, `civex sync status`, Settings, pointing to
+  `civex files missing`), not as downloading, and `--ignore` hides it from both
+  counts. No wire change.
+
 ### Breaking
 
 - Migration `a3c7e1d9f5b4` adds `code`, `retries` and `retried_at` to
-  `sync_conflicts` (nullable / defaulted; applied automatically).
+  `sync_conflicts`, `c8d2f4a6b1e7` adds `ignored_missing_files`, and `e7a1c5d9b3f2` adds
+  `misses` and `retry_at` to `server_lacks` (applied
+  automatically).
+
+### Changes
+
+- A host can draw civex's chrome itself. The boot object (`window.__CIVEX__`,
+  `render_app_page(boot=...)`) accepts `chrome: "embedded"` (no top bar, footer,
+  left rail or Settings item), `theme` (CSS custom properties set on `:root`)
+  and `brand` (`name`, `logo_url`). A new `app.header` extension slot draws the
+  host's header and tabs at the top of every page, and each route change is
+  told to the host as a `civex:navigate` event on `window` (also
+  `window.__CIVEX__.navigate.on(fn)` for extensions). Without these the app
+  looks as before. See `docs/guides/hosting.md`.
+
+### For hosts
+
+- **Converting `records` to hash partitions is public.**
+  `civex.db.migrate.convert_records_partitions(engine, partitions=8)` lays an
+  existing PostgreSQL `records` table out as hash partitions, and
+  `records_partitioning(engine)` reports the layout (`RecordsPartitioning`), so
+  a host no longer imports `civex.db.partitioning`.
+- **The dial-out routes are all gated on `remote_dial`.** `/remote`,
+  `/remote/files*` and `/remote/conflicts*` now answer 501 on a host without it,
+  like `/remote/connect` and `/remote/sync`; the app's status poll stops asking
+  there.
 
 ## v2.1.0 — big collections stay fast, hosting hooks, partitioned PostgreSQL (2026-11-22)
 

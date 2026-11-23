@@ -567,6 +567,10 @@ def build_context(
         except BaseException:
             session.close()
             raise
+    from civex.db import read_scope
+
+    # A collection this caller may not read is not there for any query below.
+    read_scope.install(session, project.permissions.read_scope)
     schema_repo = LocalSchemaRepository(session)
     dataset_repo = LocalDatasetRepository(session)
     record_repo = LocalRecordRepository(
@@ -621,6 +625,20 @@ def build_context(
         permissions=may,
     )
     file_svc = FileService(file_store, volumes, permissions=may)
+    if not may.read_scope().unrestricted:
+        file_svc.readable = LocalFileReferenceRepository(session).is_readable
+        record_svc.readable = file_svc.readable
+
+        def _may_cite(sha: str) -> bool:
+            # Every question is asked whatever the answers, so the time taken
+            # says nothing about which kind of hash this is.
+            readable = file_svc.readable(sha)
+            here = file_svc.exists(sha)
+            used = bool(LocalFileReferenceRepository(session).referenced_subset([sha]))
+            return readable and (here or used)
+
+        record_svc.may_cite = _may_cite
+        record_svc.as_caller = lambda: read_scope.scoped(session)
     store_svc: StoreService | None = None
     if isinstance(file_store, VolumeAwareFileObjectStore):
         store_svc = StoreService(config, file_store, project.config_store)
@@ -730,6 +748,12 @@ def build_context(
         record_svc,
         ProjectRules(schema_svc, record_repo),
         authenticator=device_keys,
+        # The authority settles a push against the whole project, then asks the
+        # policy about each thing: a hidden collection must not look empty to it.
+        unscoped=lambda: read_scope.unscoped(session),
+        readable=(None if may.read_scope().unrestricted else file_svc.readable),
+        sees=(None if may.read_scope().unrestricted else may.read_scope().sees),
+        scope=may.read_scope,
         # The same answer a person at a browser gets, asked of each change a
         # device pushes (the local user's refuses nothing).
         policy=may,

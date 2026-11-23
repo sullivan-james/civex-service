@@ -9,10 +9,12 @@ from pydantic import BaseModel, Field
 
 from civex.context import AppContext
 from civex.domain.dtos import BucketCheck, BucketStatus
-from civex.server.deps import get_ctx
+from civex.server.deps import get_ctx, reads_whole_project
 from civex.services.bucket_service import settings_of
 
-router = APIRouter(prefix="/store/bucket", tags=["store"])
+router = APIRouter(
+    prefix="/store/bucket", tags=["store"], dependencies=[reads_whole_project()]
+)
 
 
 class BucketSettingsRequest(BaseModel):

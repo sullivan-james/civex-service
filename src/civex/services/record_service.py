@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 import numbers
 import re
 import uuid
@@ -10,9 +10,11 @@ from pathlib import Path
 from typing import Any, Callable, Generator, Iterable, Iterator
 from zoneinfo import ZoneInfo
 
+from civex.domain.bundle import plain_data
 from civex.domain.charts import Chart
 from civex.domain.cursor import decode_cursor, encode_cursor
 from civex.domain import permissions
+from civex.domain.file_refs import collect_sha256_refs
 from civex.domain import notes as note_rules
 from civex.domain.permissions import EVERYTHING, Permissions
 from civex.domain.file_refs import without_file_locations
@@ -26,6 +28,8 @@ from civex.domain.dtos import (
     FieldValueDTO,
     FileRef,
     BulkEditSkipDTO,
+    MissingFileGroupDTO,
+    MissingFilesRemovalDTO,
     RecordBulkEditPlanDTO,
     RecordBulkEditResultDTO,
     RecordDTO,
@@ -412,6 +416,19 @@ BULK_EDIT_PAGE = 500
 MAX_REPORTED = 200
 
 
+def _cites(value: Any, shas: set[str]) -> bool:
+    return isinstance(value, dict) and value.get("sha256") in shas
+
+
+def _cited_among(value: Any, shas: set[str]) -> set[str]:
+    """Which of `shas` a file or file-list value cites."""
+    if isinstance(value, dict):
+        return {value["sha256"]} if _cites(value, shas) else set()
+    if isinstance(value, list):
+        return {v["sha256"] for v in value if _cites(v, shas)}
+    return set()
+
+
 # Field types a save keeps a catalog for (which record holds which file, which
 # record links to which): a change to one is saved by itself, so the catalogs
 # are kept as any save keeps them.
@@ -720,6 +737,41 @@ class RecordService:
         )
         self._job_svc = job_svc
         self._audit = audit_repo
+        # Whether the caller may be given this content (set by `context.py` for
+        # one who cannot read every collection; always, for one who can): a save
+        # may cite only a file it could download, or it would hand them one.
+        self.readable: Callable[[str], bool] = lambda _sha: True
+        # Whether a save may cite this file: it must be one the caller could
+        # download (so a hash only hidden records hold is refused) and one that
+        # is here (so an unknown hash is refused in the same words). Set by
+        # `context.py` for one who cannot read every collection.
+        self.may_cite: Callable[[str], bool] = lambda _sha: True
+        # Runs a block as the caller sees the project, even inside work that
+        # otherwise sees all of it (set by `context.py` for one who cannot read
+        # every collection): what a pushed record may point at or sit under is
+        # checked as the caller would find it, so a hidden record is as absent
+        # as one that never was, in the same words.
+        self.as_caller: Callable[[], AbstractContextManager[None]] = nullcontext
+
+    def _check_file_rights(
+        self, dataset_id: uuid.UUID, before: dict[str, Any], after: dict[str, Any]
+    ) -> None:
+        """A save that cites a file the record did not hold takes `ADD_FILES`
+        in its collection, and one that lets go of a file it held takes
+        `DELETE_FILES` (`domain.permissions`): the same two rights whoever
+        saves, a person or a device."""
+        held = collect_sha256_refs(before)
+        wanted = collect_sha256_refs(after)
+        if wanted - held:
+            self._permissions.require(permissions.ADD_FILES, dataset_id)
+            # Citing a file makes it the record's own, so readable by whoever
+            # reads the record: a hash only collections the caller cannot read
+            # use may not be cited (the same answer for any file).
+            for sha in sorted(wanted - held):
+                if not self.may_cite(sha):
+                    raise ValidationError(permissions.FILE_UNAVAILABLE)
+        if held - wanted:
+            self._permissions.require(permissions.DELETE_FILES, dataset_id)
 
     def _require_each(self, action: str, records: Iterable[Any]) -> None:
         """`action` in every collection these records are in, before any of
@@ -1974,7 +2026,8 @@ class RecordService:
         named = self._ids_to_names(data, shape)
         before_named = self._ids_to_names(before, shape) if before is not None else None
         self._validate_data(_changed_values(named, before_named), shape)
-        self._check_references(named, shape, dataset, unchanged=before_named)
+        with self.as_caller():
+            self._check_references(named, shape, dataset, unchanged=before_named)
         self._check_unique(
             shape, dataset.id, parent_id, data, exclude_id=record_id, unchanged=before
         )
@@ -2077,6 +2130,7 @@ class RecordService:
             self.validate(data, shape.fields)
 
         self._validate_data(data, shape)
+        self._check_file_rights(dataset.id, {}, data)
         self._check_references(data, shape, dataset)
         id_data = self._names_to_ids(data, shape)
         self._check_unique(shape, dataset.id, resolved_parent_id, id_data)
@@ -2272,6 +2326,7 @@ class RecordService:
         # the record already holds may break a rule tightened since, and must
         # not stop an edit to another field (the data check finds it).
         self._validate_data(_changed_values(data, old_data), shape)
+        self._check_file_rights(raw.dataset_id, old_data, data)
         if dataset:
             self._check_references(data, shape, dataset, unchanged=old_data)
         id_data = self._names_to_ids(data, shape)
@@ -2631,7 +2686,7 @@ class RecordService:
         neither, the kind's most recently changed record. A formula that can't
         be saved comes back as `problem`, one that can't be worked out for that
         record as `error`: neither raises."""
-        self._permissions.require(permissions.READ)
+        self._permissions.require_somewhere(permissions.READ)
         schema = self._schema_svc.get(schema_name)
         rules: dict[str, Any] = {"expression": expression}
         if result:
@@ -2690,7 +2745,7 @@ class RecordService:
         above holds it then). Records with no value are left out; at most
         `limit`, oldest first, and `total` says how many have one. A fixed
         number of statements however many records."""
-        self._permissions.require(permissions.READ)
+        self._permissions.require_somewhere(permissions.READ)
         if not 1 <= limit <= POINTS_MAX_LIMIT:
             raise ValidationError(f"The limit must be between 1 and {POINTS_MAX_LIMIT}")
         if not query.schema:
@@ -2880,7 +2935,7 @@ class RecordService:
         measure names one of its fields, or (`schema`) a field of a kind above
         it, like a filter condition. In SQL, one statement however many
         records; a link field's groups are named in one more lookup."""
-        self._permissions.require(permissions.READ)
+        self._permissions.require_somewhere(permissions.READ)
         request.check()
         if not query.schema:
             raise ValidationError(
@@ -4414,6 +4469,117 @@ class RecordService:
         if not chosen:
             yield so_far()
 
+    def remove_files(
+        self,
+        shas: set[str],
+        record_ids: list[str],
+        *,
+        dry_run: bool = False,
+    ) -> Generator[MissingFilesRemovalDTO, None, None]:
+        """Take these files out of the records citing them: a file field that
+        held one is cleared, a list loses the entries. Each record is saved as
+        an ordinary edit of those fields (`patch`: checks, history, triggers,
+        sync), the lot as one batch in Activity that `revert_batch` undoes whole.
+        A record whose change would leave a required field empty is left as it
+        is and named. `dry_run` only works out the same report. Chunks of
+        `BULK_EDIT_PAGE` records; the caller commits after each yield, as for
+        `bulk_edit_chunks`."""
+        shapes = self._schema_svc.resolver()
+        result = MissingFilesRemovalDTO()
+        groups: dict[tuple[str | None, str, str], MissingFileGroupDTO] = {}
+        group_files: dict[tuple[str | None, str, str], set[str]] = {}
+        datasets: dict[uuid.UUID, DatasetDTO | None] = {}
+        chosen = [uuid.UUID(r) for r in record_ids]
+        batch = (
+            self._audit.batch("edit", "remove missing files")
+            if self._audit is not None and not dry_run and len(chosen) > 1
+            else nullcontext()
+        )
+        with batch:
+            for start in range(0, len(chosen), BULK_EDIT_PAGE):
+                page = chosen[start : start + BULK_EDIT_PAGE]
+                records_on_page = self._records.list_by_ids(page)
+                self._require_each(permissions.DELETE_FILES, records_on_page)
+                for raw in records_on_page:
+                    if raw.deleted_at is not None:
+                        continue
+                    shape = shapes(raw.schema_id)
+                    if shape is None:
+                        continue
+                    if raw.dataset_id not in datasets:
+                        datasets[raw.dataset_id] = self._datasets.get_by_id(
+                            raw.dataset_id, include_deleted=True, with_count=False
+                        )
+                    dataset = datasets[raw.dataset_id]
+                    changes: dict[str, Any] = {}
+                    cited: dict[str, set[str]] = {}
+                    blocked: str | None = None
+                    for name, value in self._ids_to_names(raw.data, shape).items():
+                        gone = _cited_among(value, shas)
+                        if not gone:
+                            continue
+                        left = (
+                            None
+                            if isinstance(value, dict)
+                            else [v for v in value if not _cites(v, shas)]
+                        )
+                        spec = shape.by_name.get(name)
+                        if spec is not None and spec.required and not left:
+                            blocked = (
+                                f"'{spec.label or name}' is required and would be "
+                                "left empty"
+                            )
+                            break
+                        changes[name] = (
+                            left
+                            if left is None
+                            else [plain_data({"v": x})["v"] for x in left]
+                        )
+                        cited[name] = gone
+                    if blocked:
+                        result.skipped_count += 1
+                        if len(result.skipped) < MAX_REPORTED:
+                            result.skipped.append(
+                                BulkEditSkipDTO(
+                                    record_id=raw.id,
+                                    name=self._with_names(raw, shapes).natural_name,
+                                    reason=blocked,
+                                )
+                            )
+                        continue
+                    if not changes:
+                        continue
+                    if not dry_run:
+                        try:
+                            self.patch(str(raw.id), changes)
+                        except ValidationError as e:
+                            result.skipped_count += 1
+                            if len(result.skipped) < MAX_REPORTED:
+                                result.skipped.append(
+                                    BulkEditSkipDTO(raw.id, None, str(e))
+                                )
+                            continue
+                    result.changed += 1
+                    for name, gone in cited.items():
+                        key = (
+                            dataset.name if dataset else None,
+                            shape.schema.name,
+                            name,
+                        )
+                        group = groups.setdefault(
+                            key, MissingFileGroupDTO(key[0], key[1], key[2])
+                        )
+                        group.records += 1
+                        group_files.setdefault(key, set()).update(gone)
+                result.groups = sorted(
+                    (
+                        dataclasses.replace(g, files=len(group_files[k]))
+                        for k, g in groups.items()
+                    ),
+                    key=lambda g: (-g.records, g.schema, g.field),
+                )
+                yield result
+
     def _save_checked(
         self,
         raw: RecordDTO,
@@ -4747,7 +4913,7 @@ class RecordService:
         follows the parent rather than being refused (the state the authority
         settles on then differs from what was sent, and is sent back)."""
         parent_id = state.get("parent_record_id")
-        if not parent_id or state.get("deleted_at"):
+        if not parent_id:
             return state
         try:
             parent = self._records.get_by_id(
@@ -5415,6 +5581,16 @@ class RecordService:
         """Block a delete of target_ids if anything outside the batch still
         references it, unless force=True -- in which case the referencing
         fields are cleared (ON DELETE SET NULL) and audit-logged instead."""
+        field_map = self._reference_field_map()
+        if field_map and self._records.hidden_referrers(
+            list(target_ids), [uuid.UUID(f) for f in field_map]
+        ):
+            # Something the caller cannot see still points at it, and a
+            # delete (forced or not) must neither leave that dangling nor
+            # reach into what is hidden: refused, without saying what.
+            raise ValidationError(
+                "Cannot delete: still referenced by records you cannot see."
+            )
         referrers = self._find_referrers(target_ids, exclude_ids=target_ids)
         if not referrers:
             return

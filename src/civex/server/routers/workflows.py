@@ -22,7 +22,7 @@ from civex.domain.exceptions import (
     WorkflowValidationError,
 )
 from civex.server.background import run_pending_jobs
-from civex.server.deps import get_ctx
+from civex.server.deps import get_ctx, reads_whole_project
 from civex.server.models import (
     RunManyRequest,
     RunManyResponse,
@@ -204,7 +204,11 @@ async def _form_inputs(
     return {"__input__": resolved} if resolved else None
 
 
-@router.post("/try", response_model=WorkflowTrialResponse)
+@router.post(
+    "/try",
+    response_model=WorkflowTrialResponse,
+    dependencies=[reads_whole_project()],
+)
 async def try_workflow_on_record(request: Request, ctx: AppContext = Depends(get_ctx)):
     """Try a workflow (saved or not: the YAML is sent) on one record without
     keeping anything: it runs as a real run would, inside a transaction that is
@@ -244,7 +248,11 @@ async def try_workflow_on_record(request: Request, ctx: AppContext = Depends(get
     return WorkflowTrialResponse.model_validate(result.to_dict())
 
 
-@router.post("/try-many", response_model=WorkflowTrialManyResponse)
+@router.post(
+    "/try-many",
+    response_model=WorkflowTrialManyResponse,
+    dependencies=[reads_whole_project()],
+)
 async def try_workflow_on_records(request: Request, ctx: AppContext = Depends(get_ctx)):
     """Try a workflow on several records at once, keeping nothing: each is
     tried as `POST /workflows/try` would, one after the other, and all of it is
@@ -326,7 +334,12 @@ async def try_workflow_on_records(request: Request, ctx: AppContext = Depends(ge
     return WorkflowTrialManyResponse(trials=trials, sampled=sampled)
 
 
-@router.post("/{name}/run-many", response_model=RunManyResponse, status_code=202)
+@router.post(
+    "/{name}/run-many",
+    response_model=RunManyResponse,
+    status_code=202,
+    dependencies=[reads_whole_project()],
+)
 def run_workflow_on_many(
     name: str,
     body: RunManyRequest,
@@ -374,7 +387,12 @@ def run_workflow_on_many(
     )
 
 
-@router.post("/{name}/run", response_model=WorkflowJobResponse, status_code=202)
+@router.post(
+    "/{name}/run",
+    response_model=WorkflowJobResponse,
+    status_code=202,
+    dependencies=[reads_whole_project()],
+)
 async def run_workflow(
     name: str,
     background_tasks: BackgroundTasks,

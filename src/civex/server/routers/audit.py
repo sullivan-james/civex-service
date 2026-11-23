@@ -10,7 +10,7 @@ from civex.context import AppContext
 from civex.domain.audit_filters import AUDIT_FIELDS
 from civex.domain.dtos import BatchRevertDTO
 from civex.domain.exceptions import ValidationError
-from civex.server.deps import get_ctx
+from civex.server.deps import get_ctx, reads_whole_project
 from civex.server.models import (
     BatchRevertRequest,
     BatchRevertResponse,
@@ -318,7 +318,11 @@ def _storage(ctx: AppContext) -> HistoryStorageResponse:
     )
 
 
-@router.get("/audit/storage", response_model=HistoryStorageResponse)
+@router.get(
+    "/audit/storage",
+    response_model=HistoryStorageResponse,
+    dependencies=[reads_whole_project()],
+)
 def history_storage(ctx: AppContext = Depends(get_ctx)):
     """How history is stored: edits still to convert to what-changed form, how
     far the background conversion has got, and the room a reclaim would give
@@ -326,7 +330,11 @@ def history_storage(ctx: AppContext = Depends(get_ctx)):
     return _storage(ctx)
 
 
-@router.post("/audit/storage/reclaim", response_model=HistoryStorageResponse)
+@router.post(
+    "/audit/storage/reclaim",
+    response_model=HistoryStorageResponse,
+    dependencies=[reads_whole_project()],
+)
 def reclaim_history_storage(ctx: AppContext = Depends(get_ctx)):
     """Give unused room in the database file back to the disk (SQLite VACUUM).
     Refused while history is being converted. It needs about the file's size in

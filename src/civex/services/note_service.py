@@ -86,7 +86,7 @@ class NoteService:
     def open_notes(self, query: RecordQuery) -> OpenNotesDTO:
         """How many threads are not yet resolved, and on how many records,
         among the records `query` lists. One query whatever the size."""
-        self._permissions.require(permissions.READ)
+        self._permissions.require_somewhere(permissions.READ)
         notes, records = self._records.count_open_notes(self._resolve(query))
         return OpenNotesDTO(notes=notes, records=records)
 
@@ -95,7 +95,7 @@ class NoteService:
     def add(self, record_id: str, body: str) -> NoteDTO:
         """Leave a note on a live record, as this person."""
         record = self._record(record_id)
-        self._permissions.require(permissions.WRITE_RECORDS, record.dataset_id)
+        self._permissions.require(permissions.NOTES, record.dataset_id)
         note = self._repo.create(record.id, note_rules.check_body(body), self._actor)
         self._log("create", None, note)
         return note
@@ -176,7 +176,7 @@ class NoteService:
         if note.deleted_at is None:
             return note
         record = self._record(str(note.record_id))
-        self._permissions.require(permissions.WRITE_RECORDS, record.dataset_id)
+        self._permissions.require(permissions.NOTES, record.dataset_id)
         if note.thread_id is not None:
             thread = self._repo.get(note.thread_id)
             if thread is None or thread.deleted_at is not None:
@@ -240,7 +240,7 @@ class NoteService:
 
     def _writable(self, note_id: str) -> tuple[NoteDTO, NoteDTO, RecordDTO]:
         note, thread, record = self._live(note_id)
-        self._permissions.require(permissions.WRITE_RECORDS, record.dataset_id)
+        self._permissions.require(permissions.NOTES, record.dataset_id)
         return note, thread, record
 
     def _one_action(self) -> Any:

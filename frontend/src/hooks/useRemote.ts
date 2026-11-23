@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useHasFeature } from './useFeatures'
 import {
   remoteApi,
   type Authority,
@@ -14,9 +15,12 @@ const KEY = ['remote']
 /** Where the project stands with its authority. Polls quickly while a sync is
  * running or one is waiting to go, slowly otherwise. */
 export function useRemoteStatus() {
+  // A host without `remote_dial` answers 501 here: don't ask.
+  const dials = useHasFeature()('remote_dial')
   return useQuery({
     queryKey: KEY,
     queryFn: remoteApi.status,
+    enabled: dials,
     refetchInterval: (q) => {
       const s = q.state.data
       // Copying, or files moving, shows a bar: read often enough to move.
@@ -135,6 +139,15 @@ export function useDisconnectRemote() {
 export function useSendFilesNow() {
   const refresh = useRefreshing()
   return useMutation({ mutationFn: remoteApi.sendFilesNow, onSuccess: refresh })
+}
+
+/** Stop warning about files records cite that nothing can supply. */
+export function useIgnoreMissingFiles() {
+  const refresh = useRefreshing()
+  return useMutation({
+    mutationFn: remoteApi.ignoreMissingFiles,
+    onSuccess: refresh,
+  })
 }
 
 export function useSyncNow() {

@@ -1,3 +1,4 @@
+import { NotAvailable } from '../FeatureGate'
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { settingsApi } from '../../api/settings'
@@ -348,12 +349,14 @@ export default function SyncSection() {
   const has = useHasFeature()
   // A hosted project is the authority its devices follow, and people sign in
   // by name: only the devices are left to manage here.
-  if (has('accounts'))
+  if (has('accounts')) {
+    if (!has('settings_devices')) return <NotAvailable />
     return (
       <div className="max-w-2xl">
         <SyncServing />
       </div>
     )
+  }
   if (!data) return <Skeleton className="h-9 w-80" />
   return (
     <div className="space-y-5">

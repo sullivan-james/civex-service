@@ -206,7 +206,7 @@ class ExportDefinitionService:
         method: str = "link",
         volume: str | None = None,
     ) -> ExportDefinitionDTO:
-        self._permissions.require_somewhere(permissions.WRITE_RECORDS)
+        self._permissions.require_somewhere(permissions.VIEWS)
         schema = self._schemas.get(schema_name)
         name = validate_free_name(name, "export name")
         if self._repo.get_by_name(schema.id, name):
@@ -270,7 +270,7 @@ class ExportDefinitionService:
         """Change any part of a definition; what isn't given is left as it was.
         The result is checked as a whole, since parts depend on each other (the
         fields on the kind, the filter on the kind)."""
-        self._permissions.require_somewhere(permissions.WRITE_RECORDS)
+        self._permissions.require_somewhere(permissions.VIEWS)
         schema = self._schemas.get(schema_name)
         current = self.get(schema_name, name)
         if new_name:
@@ -318,7 +318,7 @@ class ExportDefinitionService:
         )
 
     def delete(self, schema_name: str, name: str) -> None:
-        self._permissions.require_somewhere(permissions.WRITE_RECORDS)
+        self._permissions.require_somewhere(permissions.VIEWS)
         self._repo.delete(self.get(schema_name, name).id)
 
     # -- where it is offered ------------------------------------------------------

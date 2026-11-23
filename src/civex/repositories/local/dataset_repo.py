@@ -29,6 +29,15 @@ class LocalDatasetRepository:
         row = q.first()
         return _to_dto(self._s, row, with_count) if row else None
 
+    def name_taken(self, name: str) -> bool:
+        from civex.db.read_scope import unscoped
+
+        with unscoped(self._s):
+            return (
+                self._s.query(Dataset.id).filter(Dataset.name == name).first()
+                is not None
+            )
+
     def get_by_id(
         self,
         id: uuid.UUID,

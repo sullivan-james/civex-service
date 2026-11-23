@@ -5,9 +5,13 @@ export type Action =
   | 'read'
   | 'write_records'
   | 'change_structure'
-  | 'manage_files'
+  | 'add_files'
+  | 'delete_files'
   | 'delete'
+  | 'notes'
+  | 'views'
   | 'manage_members'
+  | 'manage_devices'
 
 export const PROJECT = 'project'
 
@@ -18,9 +22,13 @@ export const ACTIONS: Record<Action, string> = {
   write_records:
     'add, change and restore records, and save filters and exports',
   change_structure: 'change kinds of record, their fields and collections',
-  manage_files: 'add files',
+  add_files: 'add files',
+  delete_files: 'delete files',
   delete: 'delete records, collections and kinds of record',
+  notes: 'write, change and delete notes on records',
+  views: 'save and change filters, exports and dashboards shared by everyone',
   manage_members: 'decide who may do what',
+  manage_devices: 'invite, approve and revoke the devices that sync',
 }
 
 export type Allowed = Readonly<Record<string, readonly string[]>>

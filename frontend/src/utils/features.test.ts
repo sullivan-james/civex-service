@@ -16,4 +16,16 @@ describe('offered', () => {
   it('always applies to an item that names no feature', () => {
     expect(offered(new Set(), {})).toBe(true)
   })
+
+  it('counts every settings section as off when the settings umbrella is', () => {
+    const noUmbrella = new Set(['settings_map', 'settings_devices', 'terminal'])
+    expect(offered(noUmbrella, { feature: 'settings_map' })).toBe(false)
+    expect(
+      offered(noUmbrella, { feature: ['accounts', 'settings_members'] }),
+    ).toBe(false)
+    expect(offered(noUmbrella, { feature: 'terminal' })).toBe(true)
+    const withUmbrella = new Set(['settings', 'settings_map'])
+    expect(offered(withUmbrella, { feature: 'settings_map' })).toBe(true)
+    expect(offered(withUmbrella, { feature: 'settings_retention' })).toBe(false)
+  })
 })

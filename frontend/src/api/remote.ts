@@ -13,6 +13,9 @@ export interface RemoteStatus {
   download_files: 'all' | 'opened'
   /** Files the records here cite that aren't on this computer yet. */
   files_to_fetch: number
+  /** Files records here cite that nothing can supply: not on a drive here, and
+   * the server said it hasn't got them either. Not downloading. */
+  files_missing?: number
   /** Files records here cite that the server hasn't said it holds yet. */
   files_to_send: number
   /** Why those haven't gone; null when there are none. */
@@ -187,6 +190,10 @@ export interface FilesWaiting {
   /** On no drive here, and the server said it hasn't got them either:
    * nothing here can send them (not counted in `files_to_send`). */
   missing: number
+  /** Of `missing`, those this project never stored. */
+  never_stored?: number
+  /** Missing files a person chose to stop being told about. */
+  ignored?: number
 }
 
 export interface SyncResult {
@@ -429,6 +436,9 @@ export const remoteApi = {
     ),
   disconnect: () => api.post<RemoteStatus>('/remote/disconnect', {}),
   syncNow: () => api.post<{ requested: boolean }>('/remote/sync', {}),
+  /** Stop warning about every missing file (the records keep citing them). */
+  ignoreMissingFiles: () =>
+    api.post<{ count: number }>('/remote/files/missing/ignore', {}),
   /** Upload the files the authority lacks now: files go apart from syncing. */
   sendFilesNow: () =>
     api.post<{ requested: boolean }>('/remote/files/send', {}),

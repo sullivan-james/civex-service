@@ -9,6 +9,10 @@ import type { ComponentType } from 'react'
  * something that must be drawn inside a project page. Keep the list short; a
  * new name is a promise to every host. */
 export const SLOTS = {
+  /** At the top of every page, above the page's own chrome (or in place of
+   * it when the boot says `chrome: "embedded"`): the host's header and tabs.
+   * Props: `{ path }`, the app's current path (see `utils/navigation`). */
+  'app.header': 'At the top of every page',
   /** Beside a workflow's own actions (its page header). Props: `{ workflow }`,
    * the workflow's name. */
   'workflow.actions': 'Beside a workflow’s actions',

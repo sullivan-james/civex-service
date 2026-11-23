@@ -9,11 +9,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from civex.context import AppContext
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.transfers import TransferRecord, TransferSpec
-from civex.server.deps import get_ctx
+from civex.server.deps import get_ctx, reads_whole_project
 from civex.server.models import TransferPlanResponse, TransferRequest, TransferResponse
 from civex.services.transfer_jobs import jobs
 
-router = APIRouter(prefix="/store/transfers", tags=["store"])
+router = APIRouter(
+    prefix="/store/transfers", tags=["store"], dependencies=[reads_whole_project()]
+)
 
 
 def _spec(body: TransferRequest) -> TransferSpec:

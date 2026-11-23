@@ -177,3 +177,12 @@ def test_connecting_without_an_invite_asks_to_join_and_waits(client, monkeypatch
         "expires_at": 2_000_000_000,
     }
     assert begun == [("https://hub.example", started)]
+
+
+def test_a_project_with_no_missing_files_lists_none(client: TestClient) -> None:
+    body = client.get("/api/remote/files/missing").json()
+    assert body == {"shas": [], "ignored": [], "groups": [], "server_checked": True}
+    ignored = client.post("/api/remote/files/missing/ignore", json={})
+    assert ignored.status_code == 200 and ignored.json() == {"count": 0}
+    removed = client.post("/api/remote/files/missing/remove", json={"dry_run": True})
+    assert removed.status_code == 200 and removed.json()["changed"] == 0

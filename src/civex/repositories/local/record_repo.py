@@ -31,6 +31,7 @@ from sqlalchemy.sql.expression import ClauseElement
 from sqlalchemy.orm import Session, aliased
 
 from civex.db.field_values import field_value
+from civex.db import read_scope
 from civex.db.models import (
     Dataset,
     Record,
@@ -258,6 +259,12 @@ def _chunks(ids: list[uuid.UUID]):
         yield ids[start : start + _CHUNK]
 
 
+# The most a caller limited to some collections is counted to on PostgreSQL
+# (`estimate_count`): a count is an exact scan, and the table's statistics
+# would count what they may not see.
+RESTRICTED_COUNT_CAP = 100_000
+
+
 class LocalRecordRepository:
     def __init__(self, session: Session, is_postgres: bool = False) -> None:
         self._s = session
@@ -372,6 +379,24 @@ class LocalRecordRepository:
             for r in self._s.query(Record).filter(Record.id.in_(chunk)).all()
         ]
 
+    def hidden_referrers(
+        self, target_ids: list[uuid.UUID], field_ids: list[uuid.UUID]
+    ) -> int:
+        """How many records the caller cannot see hold a reference to these
+        targets (0 for one who sees everything): what a delete must still
+        respect, though it may not say what they are."""
+        if not read_scope.restricted(self._s):
+            return 0
+        seen = {r for r, _, _ in self.referrers_of(target_ids, field_ids)}
+        with read_scope.unscoped(self._s):
+            every = {r for r, _, _ in self.referrers_of(target_ids, field_ids)}
+        return len(every - seen)
+
+    def dataset_of(self, id: uuid.UUID) -> uuid.UUID | None:
+        """The collection a record is in (deleted ones too), without loading it
+        into the session; None when there is no such record."""
+        return self._s.query(Record.dataset_id).filter(Record.id == id).scalar()
+
     def collections_of(self, ids: list[uuid.UUID]) -> set[uuid.UUID]:
         """The collections these records are in: one query per chunk of ids,
         no rows hydrated (what a bulk change asks permission for up front)."""
@@ -455,6 +480,21 @@ class LocalRecordRepository:
         fresh as the last ANALYZE. Elsewhere the count is exact."""
         if not self._pg:
             return self.count(query), False
+        if read_scope.restricted(self._s):
+            # The planner's figures are of the whole table, hidden collections
+            # included, so they may not be used. An exact count of a big
+            # project would scan it, so it stops at RESTRICTED_COUNT_CAP: more
+            # than that is reported as the cap, flagged as an estimate.
+            capped = (
+                _base_query(self._s, query, self._pg)
+                .with_entities(Record.id)
+                .order_by(None)
+                .limit(RESTRICTED_COUNT_CAP + 1)
+                .count()
+            )
+            if capped > RESTRICTED_COUNT_CAP:
+                return RESTRICTED_COUNT_CAP, True
+            return capped, False
         if _is_unfiltered(query):
             # Summed over the leaf partitions: autovacuum never analyzes the
             # parent of a partitioned table, so its own reltuples is stale or
