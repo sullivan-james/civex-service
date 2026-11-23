@@ -25,6 +25,15 @@ from the next tag forward.
 
 ### v2.2.1
 
+- **Faster pushes to an authority.** A push of 100 changes ran about 17
+  statements per change (20 for edits), all under the feed's lock; it now runs
+  about 10 (13 for edits): what the push asks one change at a time (was it sent
+  before, the record it names, the feed's row) is read once for the whole push,
+  and the feed's counter comes back from the statement that raises it. Asking
+  which of 1000 files the authority lacks (`missing_files`) was 1000 statements
+  and is now 4. Same answers, order and audit; no change to the wire. Measured
+  by `benchmarks/bench_push.py` (PostgreSQL: 1.37 s to 0.85 s for 100 new
+  records, 535 ms to 37 ms for 1000 hashes).
 - **Sending a large project's files shows one total from the start.** The
   total of the "files sent" bar used to grow, because each background pass
   only counted the files it had already asked the server about, and the

@@ -27,7 +27,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
-from sqlalchemy.orm.attributes import flag_modified
+from sqlalchemy.orm.attributes import flag_modified, set_committed_value
 
 from civex.db.models import (
     IgnoredMissingFile,
@@ -143,6 +143,11 @@ def lack_wait(misses: int) -> timedelta:
 class LocalSyncRepository:
     def __init__(self, session: Session) -> None:
         self._s = session
+        # Ops known for the length of one push (`ops_known`), else None.
+        self._ops: dict[uuid.UUID, OpResult | None] | None = None
+        # Records known not to be there, for the length of one push.
+        self._absent: set[uuid.UUID] | None = None
+        self._held: list[Record] = []
 
     def rollback(self) -> None:
         """Drop what the session holds that was not committed."""
@@ -163,9 +168,11 @@ class LocalSyncRepository:
             # Even when the failed flush has already ended it: until it is rolled
             # back the session refuses further work.
             nested.rollback()
+            self.forget_held()  # bulk writes it undid aren't seen by held rows
             raise ValidationError(_brief(e)) from e
         except BaseException:
             nested.rollback()
+            self.forget_held()
             raise
 
     # ------------------------------------------------------------------
@@ -817,15 +824,27 @@ class LocalSyncRepository:
     def next_hub_seq(self) -> int:
         """The next number, taken atomically: the counter is incremented in the
         database, never read and written back, so two writers can't hand out the
-        same one."""
-        self._meta_row()
-        self._s.execute(
+        same one. The new number comes back from the same statement (where the
+        database can say so), and the held row is told it, so taking one costs
+        one statement and expires nothing else the session holds."""
+        row = self._meta_row()
+        statement = (
             update(SyncMeta)
             .where(SyncMeta.id == 1)
             .values(head_seq=SyncMeta.head_seq + 1)
         )
+        if self._returning():
+            new = self._s.execute(statement.returning(SyncMeta.head_seq)).scalar_one()
+            set_committed_value(row, "head_seq", new)
+            return int(new)
+        self._s.execute(statement)
         self._s.expire_all()
         return self._meta_row().head_seq
+
+    def _returning(self) -> bool:
+        """Whether the database answers an UPDATE with the row (PostgreSQL, and
+        SQLite from 3.35)."""
+        return bool(self._s.get_bind().dialect.update_returning)
 
     def head_seq(self) -> int:
         return self._meta_row().head_seq
@@ -834,10 +853,18 @@ class LocalSyncRepository:
         """Hold the feed's counter until this transaction ends, so whoever
         takes it next waits: a row lock on PostgreSQL, the write lock on
         SQLite (a write that changes nothing still takes it)."""
-        self._meta_row()
-        self._s.execute(
+        row = self._meta_row()
+        statement = (
             update(SyncMeta).where(SyncMeta.id == 1).values(head_seq=SyncMeta.head_seq)
         )
+        if self._returning():
+            # The counter as it is once the lock is ours (another push may have
+            # moved it while this one waited), so what is held is current.
+            held = self._s.execute(statement.returning(SyncMeta.head_seq)).scalar_one()
+            set_committed_value(row, "head_seq", held)
+        else:
+            self._s.execute(statement)
+            self._s.expire(row)
 
     def record_outcome(self, error: str | None) -> None:
         row = self._meta_row()
@@ -1011,10 +1038,64 @@ class LocalSyncRepository:
     # What an authority has been sent
     # ------------------------------------------------------------------
 
-    def get_op(self, op_id: uuid.UUID) -> OpResult | None:
-        row = self._s.get(SyncOp, op_id)
-        if row is None:
-            return None
+    @contextmanager
+    def push_scope(self, entries: Iterable[SyncEntry]) -> Iterator[None]:
+        """For the length of one push, with the feed's lock held (so nothing
+        else writes these): what the push will ask of the database one thing
+        at a time is read once, and kept current by the writes that follow.
+
+        - which changes were sent before (`get_op`, `save_op`, `drop_op`);
+        - the feed's own row, held (the session keeps rows only while something
+          refers to them) and read afresh once the lock is ours;
+        - the records the changes name, in one query, locked (`FOR UPDATE`
+          where the database has it, so an edit made on this instance itself
+          can't slip in between reading a record and writing it back); those
+          not there are known to be absent, so `snapshot` and `apply_snapshot`
+          don't look for each again."""
+        batch = list(entries)
+        wanted = list(dict.fromkeys(e.id for e in batch))
+        known: dict[uuid.UUID, OpResult | None] = {i: None for i in wanted}
+        for at in range(0, len(wanted), 500):
+            for row in self._s.scalars(
+                select(SyncOp).where(SyncOp.op_id.in_(wanted[at : at + 500]))
+            ):
+                known[row.op_id] = self._op_result(row)
+        self._ops = known
+        pinned = self._meta_row()
+        self._s.refresh(pinned)
+        record_ids = list(
+            dict.fromkeys(e.entity_id for e in batch if e.entity_type == "record")
+        )
+        held: list[Record] = []
+        absent = set(record_ids)
+        for at in range(0, len(record_ids), 500):
+            for record in self._s.scalars(
+                select(Record)
+                .where(Record.id.in_(record_ids[at : at + 500]))
+                .with_for_update(of=Record)
+            ):
+                held.append(record)
+                absent.discard(record.id)
+        self._absent = absent
+        self._held = held
+        try:
+            yield
+        finally:
+            self._ops = None
+            self._absent = None
+            self._held = []
+            del pinned, held
+
+    def forget_held(self) -> None:
+        """The records a push read at its start are read again when next needed:
+        called after a change that can reach other records than the one it
+        names (a delete or a move takes children with it, in bulk statements the
+        session doesn't see)."""
+        for record in self._held:
+            self._s.expire(record)
+
+    @staticmethod
+    def _op_result(row: SyncOp) -> OpResult:
         return OpResult(
             op_id=row.op_id,
             status=row.status,
@@ -1022,6 +1103,14 @@ class LocalSyncRepository:
             conflicts=list(row.conflicts or []),
             hub_seq=row.hub_seq,
         )
+
+    def get_op(self, op_id: uuid.UUID) -> OpResult | None:
+        if self._ops is not None and op_id in self._ops:
+            return self._ops[op_id]
+        row = self._s.get(SyncOp, op_id)
+        if row is None:
+            return None
+        return self._op_result(row)
 
     def save_op(
         self,
@@ -1044,6 +1133,8 @@ class LocalSyncRepository:
             )
         )
         self._s.flush()
+        if self._ops is not None:
+            self._ops[entry.id] = result
 
     def drop_op(self, op_id: uuid.UUID) -> None:
         """Forget an op that is to be tried again (it was deferred)."""
@@ -1051,6 +1142,8 @@ class LocalSyncRepository:
         if row is not None:
             self._s.delete(row)
             self._s.flush()
+        if self._ops is not None and op_id in self._ops:
+            self._ops[op_id] = None
 
     # ------------------------------------------------------------------
     # Conflicts
@@ -1291,6 +1384,8 @@ class LocalSyncRepository:
 
     def snapshot(self, kind: str, id: uuid.UUID) -> dict[str, Any] | None:
         """One thing as it is now, in the shape a history entry stores."""
+        if kind == "record" and self._absent is not None and id in self._absent:
+            return None
         row = self._s.get(_MODELS[kind], id)
         if row is None:
             return None
@@ -1480,10 +1575,18 @@ class LocalSyncRepository:
             for name, value in snap.items()
             if name in columns
         }
-        row = self._s.get(model, values["id"])
+        row = None
+        if not (
+            kind == "record"
+            and self._absent is not None
+            and values["id"] in self._absent
+        ):
+            row = self._s.get(model, values["id"])
         if row is None:
             row = model(**values)
             self._s.add(row)
+            if self._absent is not None:
+                self._absent.discard(values["id"])
         else:
             for name, value in values.items():
                 setattr(row, name, value)

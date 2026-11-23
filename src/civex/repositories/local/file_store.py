@@ -578,6 +578,31 @@ class VolumeAwareFileObjectStore:
     def exists(self, sha256: str) -> bool:
         return self._find_object(sha256) is not None
 
+    def exists_many(self, shas: Iterable[str]) -> set[str]:
+        """Which of these files are held: what `exists` answers for each, from
+        one inventory lookup for the lot (a few queries) instead of one each.
+        A file the inventory knows nothing of is looked for on the drives, as
+        `exists` does."""
+        wanted = list(dict.fromkeys(shas))
+        if self._session is None:
+            return {sha for sha in wanted if self.exists(sha)}
+        copies = self.copies(wanted)
+        reachable: dict[str, bool] = {}
+        held: set[str] = set()
+        for sha in wanted:
+            rows = copies.get(sha)
+            if not rows:
+                if self._find_unrecorded(sha) is not None:
+                    held.add(sha)
+                continue
+            for name, _size in rows:
+                if name not in reachable:
+                    reachable[name] = self.volume_status(name).reachable
+                if reachable[name] and self._object_path(sha, name).exists():
+                    held.add(sha)
+                    break
+        return held
+
     # -- straight to storage: not from a drive -------------------------------
     #
     # A drive on this machine can only be written through this process, so

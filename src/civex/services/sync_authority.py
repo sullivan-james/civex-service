@@ -303,10 +303,12 @@ class SyncAuthorityService:
         """Those not here, a file the device may not read counted as not here:
         it is asked for like any other, and nothing says one is held."""
         readable = self._readable
+        wanted = list(dict.fromkeys(shas))
+        held = self._files.exists_many(wanted)  # one lookup, not one each
         return [
             s
-            for s in dict.fromkeys(shas)
-            if not self._files.exists(s) or (readable is not None and not readable(s))
+            for s in wanted
+            if s not in held or (readable is not None and not readable(s))
         ]
 
     # ------------------------------------------------------------------
@@ -331,15 +333,24 @@ class SyncAuthorityService:
         self._repo.lock_feed()
         self._head()  # number this instance's own changes first
         results: list[OpResult] = []
-        for action in _actions(_at_most(entries, PUSH_MAX)):
-            settled = (
-                [self._settle(who, action[0])]
-                if len(action) == 1
-                else self._settle_action(who, action)
-            )
-            results += settled
-            if any(r.status == DEFERRED for r in settled):
-                break
+        taken = _at_most(entries, PUSH_MAX)
+        # What the push will ask about one change at a time (was it sent
+        # before; the record it names) is read once, now the feed is locked.
+        with self._repo.push_scope(taken):
+            for action in _actions(taken):
+                settled = (
+                    [self._settle(who, action[0])]
+                    if len(action) == 1
+                    else self._settle_action(who, action)
+                )
+                results += settled
+                if len(action) > 1 or not _plain_record_write(action[0]):
+                    # What it reached beyond the one thing it names (children
+                    # deleted, a collection's records) is written in bulk, past
+                    # the records this push holds: they are read again.
+                    self._repo.forget_held()
+                if any(r.status == DEFERRED for r in settled):
+                    break
         self._log_push(who, entries, results)
         return PushResult(results, self._repo.head_seq())
 
@@ -833,10 +844,15 @@ class SyncAuthorityService:
         else:
             raise ValidationError(f"Unknown action '{entry.action}'")
 
+        if cascade is not None or not _plain_record_write(entry):
+            # A delete, restore or move reaches other records in bulk statements
+            # the session doesn't see: what this push holds is read again.
+            self._repo.forget_held()
         self._seed(who.device_id)
         seq = self._write_entries(who, entry, head, final, conflicts, incoming)
         if cascade is not None:
             self._write_cascade(entry, cascade)
+            self._repo.forget_held()
         status = self._status(entry, final, conflicts, incoming)
         if conflicts and any(c["kind"] == "edit_vs_delete" for c in conflicts):
             message = next(
@@ -1110,6 +1126,11 @@ def _kept_from_delete(results: list[OpResult], action: list[SyncEntry]):
         yield entry.action == "delete" and all(
             c.get("kind") == "edit_vs_delete" for c in result.conflicts
         )
+
+
+def _plain_record_write(entry: SyncEntry) -> bool:
+    """A record made or edited: it reaches no other record by itself."""
+    return entry.entity_type == "record" and entry.action in ("create", "update")
 
 
 def _scope(entry: SyncEntry) -> dict[str, uuid.UUID]:

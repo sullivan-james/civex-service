@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import AsyncIterable
 
@@ -120,6 +120,10 @@ class FileService:
 
     def exists(self, sha256: str) -> bool:
         return self._store.exists(sha256)
+
+    def exists_many(self, shas: Iterable[str]) -> set[str]:
+        """Which of these are held, asked together."""
+        return self._store.exists_many(shas)
 
     def size_of(self, sha256: str) -> int | None:
         return self._store.size_of(sha256)

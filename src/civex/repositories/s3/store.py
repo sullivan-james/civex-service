@@ -352,6 +352,14 @@ class S3ObjectStore:
             return sha256 in self.copies([sha256])
         return self._head(sha256) is not None
 
+    def exists_many(self, shas: Iterable[str]) -> set[str]:
+        """Which of these are held: from the inventory in one lookup when there
+        is one, else each asked of the bucket."""
+        wanted = list(dict.fromkeys(shas))
+        if self._session is not None:
+            return set(self.copies(wanted))
+        return {sha for sha in wanted if self._head(sha) is not None}
+
     def size_of(self, sha256: str) -> int | None:
         rows = self.copies([sha256]).get(sha256)
         if rows:
