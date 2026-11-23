@@ -51,6 +51,9 @@ from the next tag forward.
 
 ### Added
 
+- **An unfinished first upload shows.** `/api/remote` and `civex sync status` report
+  `seeding` (changes still to go), the app's sync button says "finishing first
+  upload", and its progress appears in `progress`.
 - **Finer permissions for hosts (C3a).** `civex.domain.permissions` gains
   `ADD_FILES`/`DELETE_FILES` (`MANAGE_FILES` stays as an alias for both), `NOTES`,
   `VIEWS` and `MANAGE_DEVICES`; every action, `READ` included, can be limited to
@@ -144,6 +147,17 @@ from the next tag forward.
 
 ### Fixed
 
+- **An interrupted first upload is finished by the next sync.** A project seeding an
+  empty authority that was stopped part way (restart, dropped connection) left its
+  remaining changes marked `seeding`, sent by nothing, with `pending: 0` and no error.
+  Any sync (background, `Sync now`, `civex sync`) now finishes it first, whatever the
+  cursor, sending only what the first upload set aside (it resends from the start, as
+  the authority answers what it already holds); projects stranded this way heal on
+  upgrade. A failure while connecting is now recorded in `last_error`.
+- **Sending files could never start on a large project.** The pass's time budget
+  included asking the authority which of tens of thousands of files it lacked, so it was
+  gone before the first upload, every pass. Files are now asked about and uploaded page
+  by page, and a pass always sends at least one.
 - **Sync's file download works on PostgreSQL.** The step that picks a collection
   for each missing file failed with `function min(uuid) does not exist`; it now
   works on both databases.
