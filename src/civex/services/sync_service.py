@@ -408,7 +408,11 @@ class SyncService:
             project_id=str(meta.project_id),
             paused=self._config.sync.paused,
             pending=self._repo.count_pending() if self.configured else 0,
-            seeding=self._repo.count_seeding() if self.configured else 0,
+            seeding=(
+                (self._repo.count_seeding() or int(self._repo.seed_open()))
+                if self.configured
+                else 0
+            ),
             open_conflicts=self._repo.count_conflicts("open"),
             cursor=meta.cursor,
             last_synced_at=meta.last_synced_at,
@@ -1221,9 +1225,8 @@ class SyncService:
             notice=retiring_notice(hello.protocol_retiring, hello.protocol_version),
         )
         if hello.head_seq < meta.cursor:
-            # Not an error (a server restored from a backup is caught up again
-            # by the next pull), but "sent 0" would hide that it is not the
-            # server this copy followed.
+            # Not an error, but "sent 0" would hide that it is not the server
+            # this copy followed (a pull only asks for what follows the cursor).
             where = (
                 f"The server is at change {hello.head_seq} but this copy had "
                 f"followed it to {meta.cursor}: it may be a different server, or "
@@ -1248,12 +1251,20 @@ class SyncService:
                 # the authority already holds it answers from its record),
                 # except what it already numbered a change of. The cursor
                 # stays: the pull below brings in whatever others did.
+                restarted = hello.empty
+                if restarted:
+                    # An empty server holds none of what was numbered before
+                    # (reset, or restored from before the upload): all goes
+                    # again, and it is followed from the start.
+                    self._repo.forget_numbers()
+                    self._repo.set_cursor(0)
+                    self._commit()
                 self._seed(
                     transport,
                     progress,
                     hello.protocol_version,
-                    advance=False,
-                    skip=self._repo.already_sent_entities(),
+                    advance=restarted,
+                    skip=None if restarted else self._repo.already_sent_entities(),
                 )
                 meta = self._repo.meta()
             else:
@@ -2233,6 +2244,7 @@ class SyncService:
         here while joining is a change of this device's own and is sent like any
         other. The history from before is not read here: the copy is usable
         without it, and `fetch_history` brings it after."""
+        self._repo.finish_seed()  # a copy has no first upload to finish
         # What this project recorded before it joined is about nothing the copy
         # holds (a joining project is empty), so there is nothing to send. Until
         # the copy is whole the cursor says so (JOINING): syncing is refused and

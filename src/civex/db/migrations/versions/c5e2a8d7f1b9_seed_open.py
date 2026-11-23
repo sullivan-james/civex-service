@@ -39,4 +39,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("sync_meta", "seed_open")
+    with op.batch_alter_table("sync_meta") as batch:
+        batch.drop_column("seed_open")
