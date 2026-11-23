@@ -8,12 +8,12 @@ import type {
 } from '../types/ai'
 import { projectKey } from '../utils/host'
 
-const SESSIONS_KEY = projectKey('civex-ai-sessions')
+const sessionsKey = () => projectKey('civex-ai-sessions')
 const MAX_SESSIONS = 15
 
 function loadSessions(): StoredSession[] {
   try {
-    return JSON.parse(localStorage.getItem(SESSIONS_KEY) ?? '[]')
+    return JSON.parse(localStorage.getItem(sessionsKey()) ?? '[]')
   } catch {
     return []
   }
@@ -21,7 +21,7 @@ function loadSessions(): StoredSession[] {
 
 function saveSessions(sessions: StoredSession[]): void {
   try {
-    localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions))
+    localStorage.setItem(sessionsKey(), JSON.stringify(sessions))
   } catch {
     /* quota exceeded */
   }

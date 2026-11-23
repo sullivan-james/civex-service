@@ -1,7 +1,7 @@
-import { apiUrl, loginRedirect } from '../utils/host'
+import { apiUrl, loginRedirect, hostFetch } from '../utils/host'
 
 /** `/api`, under the path the app is served at (`utils/host`). */
-const BASE = apiUrl('')
+const base = () => apiUrl('')
 
 /** Some endpoints (e.g. PUT /workflows/{stem}, CIVEX-109) send structured
  * data as `detail` rather than a plain string. `.detail` carries that raw
@@ -34,7 +34,7 @@ const JSON_HEADERS = { 'Content-Type': 'application/json' }
  * `undefined`, it is the default: a body the server can't tell is JSON is
  * refused as a validation error, so this must never be lost. */
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await hostFetch(`${base()}${path}`, {
     ...init,
     headers: init?.headers ?? JSON_HEADERS,
   })

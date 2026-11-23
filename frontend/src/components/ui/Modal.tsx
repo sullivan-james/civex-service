@@ -1,3 +1,4 @@
+import { focusedElement } from '../../utils/host'
 import {
   createContext,
   useContext,
@@ -49,7 +50,7 @@ export function Modal({
   useLayoutEffect(() => {
     const dialog = dialogRef.current
     if (!dialog) return
-    const trigger = document.activeElement
+    const trigger = focusedElement()
     if (!dialog.open) dialog.showModal()
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'

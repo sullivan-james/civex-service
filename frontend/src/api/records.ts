@@ -1,5 +1,5 @@
 import { api, ApiError } from './client'
-import { apiUrl } from '../utils/host'
+import { apiUrl, hostFetch } from '../utils/host'
 import { UploadConnectionError, type UploadInfo } from './files'
 import { filenameOf, progressHeaders } from './fileAccess'
 import type { Field } from './schemas'
@@ -599,7 +599,7 @@ export const recordsApi = {
 
   /** The same summary as a table file (a last row of totals). */
   summaryFile: async (body: SummaryRequest, format: string) => {
-    const res = await fetch(
+    const res = await hostFetch(
       apiUrl(`/records/summary?format=${encodeURIComponent(format)}`),
       {
         method: 'POST',

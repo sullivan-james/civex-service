@@ -10,8 +10,8 @@ import { savedKind, type SavedKind } from './savedKinds'
 import { projectKey } from './host'
 
 // Per project: a host serving several keeps each one's apart (`utils/host`).
-export const PINS_KEY = projectKey('civex.pins')
-export const RECENTS_KEY = projectKey('civex.recents')
+export const pinsKey = () => projectKey('civex.pins')
+export const recentsKey = () => projectKey('civex.recents')
 export const MAX_RECENTS = 12
 
 export type PinKind = 'view' | 'collection' | 'record' | 'place' | 'export'
@@ -79,7 +79,7 @@ function write(storage: ReadableStorage, key: string, list: NavTarget[]) {
 
 export function readPins(storage: ReadableStorage): NavTarget[] {
   try {
-    return parseTargets(storage.getItem(PINS_KEY))
+    return parseTargets(storage.getItem(pinsKey()))
   } catch {
     return []
   }
@@ -95,13 +95,13 @@ export function togglePin(
   const next = pins.some((p) => p.key === target.key)
     ? pins.filter((p) => p.key !== target.key)
     : [...pins, target]
-  write(storage, PINS_KEY, next)
+  write(storage, pinsKey(), next)
   return next
 }
 
 export function readRecents(storage: ReadableStorage): NavTarget[] {
   try {
-    return parseTargets(storage.getItem(RECENTS_KEY))
+    return parseTargets(storage.getItem(recentsKey()))
   } catch {
     return []
   }
@@ -117,6 +117,6 @@ export function pushRecent(
     target,
     ...readRecents(storage).filter((r) => r.key !== target.key),
   ].slice(0, MAX_RECENTS)
-  write(storage, RECENTS_KEY, next)
+  write(storage, recentsKey(), next)
   return next
 }

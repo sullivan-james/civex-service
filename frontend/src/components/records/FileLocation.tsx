@@ -7,7 +7,7 @@ import { PlaceStatus, VolumeStatus } from '../files/Where'
 import { Button, Chip, TriggerPopover } from '../ui'
 import { AlertTriangle, HardDrive, Upload } from '../ui/icons'
 import { FileInfoPanel } from './FileInfoPanel'
-import { apiUrl } from '../../utils/host'
+import { apiUrl, hostFetch } from '../../utils/host'
 
 type FileLike = Pick<
   FileRef,
@@ -104,7 +104,7 @@ function DownloadLink({
       // Only the server's answer is wanted: a project whose files are in a
       // bucket answers with a redirect to it, which is as good as the bytes
       // (the browser follows it when the download starts, below).
-      const res = await fetch(href, {
+      const res = await hostFetch(href, {
         signal: abort.signal,
         redirect: 'manual',
       })

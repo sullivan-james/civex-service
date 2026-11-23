@@ -1,5 +1,7 @@
 import { useEffect, useRef, type RefObject } from 'react'
 
+import { focusedElement } from '../utils/host'
+
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
@@ -80,7 +82,7 @@ export function useDialogA11y({
     if (!open || !root || !maybeDialog) return
     const dialog = maybeDialog
 
-    triggerRef.current = document.activeElement
+    triggerRef.current = focusedElement()
     const focusable = getFocusable(dialog)
     ;(focusable[0] ?? dialog).focus()
 
@@ -101,10 +103,10 @@ export function useDialogA11y({
       }
       const first = items[0]
       const last = items[items.length - 1]
-      if (e.shiftKey && document.activeElement === first) {
+      if (e.shiftKey && focusedElement() === first) {
         e.preventDefault()
         last.focus()
-      } else if (!e.shiftKey && document.activeElement === last) {
+      } else if (!e.shiftKey && focusedElement() === last) {
         e.preventDefault()
         first.focus()
       }
