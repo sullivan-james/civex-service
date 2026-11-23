@@ -148,6 +148,7 @@ class LocalSyncRepository:
         # Records known not to be there, for the length of one push.
         self._absent: set[uuid.UUID] | None = None
         self._held: list[Record] = []
+        self._meta_held: SyncMeta | None = None
 
     def rollback(self) -> None:
         """Drop what the session holds that was not committed."""
@@ -1060,7 +1061,6 @@ class LocalSyncRepository:
                 select(SyncOp).where(SyncOp.op_id.in_(wanted[at : at + 500]))
             ):
                 known[row.op_id] = self._op_result(row)
-        self._ops = known
         pinned = self._meta_row()
         self._s.refresh(pinned)
         record_ids = list(
@@ -1076,23 +1076,33 @@ class LocalSyncRepository:
             ):
                 held.append(record)
                 absent.discard(record.id)
-        self._absent = absent
-        self._held = held
+        # Only now that everything was read: nothing is left set if it failed.
+        self._ops, self._absent, self._held, self._meta_held = (
+            known,
+            absent,
+            held,
+            pinned,
+        )
         try:
             yield
         finally:
-            self._ops = None
-            self._absent = None
+            self._ops = self._absent = self._meta_held = None
             self._held = []
-            del pinned, held
 
     def forget_held(self) -> None:
-        """The records a push read at its start are read again when next needed:
-        called after a change that can reach other records than the one it
-        names (a delete or a move takes children with it, in bulk statements the
-        session doesn't see)."""
+        """What a push read at its start is read again when next needed: the
+        records it held, the feed's row, and which records were absent. Called
+        after a change that can reach other records than the one it names (a
+        delete or a move takes children with it, in bulk statements the session
+        doesn't see) and after a savepoint was rolled back (which undoes
+        counters and bulk writes the session didn't track)."""
         for record in self._held:
-            self._s.expire(record)
+            if record in self._s:  # not one the session has let go of
+                self._s.expire(record)
+        if self._meta_held is not None and self._meta_held in self._s:
+            self._s.expire(self._meta_held)
+        if self._absent:
+            self._absent = set()  # look for them again
 
     @staticmethod
     def _op_result(row: SyncOp) -> OpResult:

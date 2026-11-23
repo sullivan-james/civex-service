@@ -51,6 +51,9 @@ class SyncApplier:
             self._repo.restore(kind, entity_id)
         elif current and not current.get("deleted_at") and state.get("deleted_at"):
             self.apply_delete(kind, entity_id, _stamp(state["deleted_at"]))
+        if current and bool(current.get("deleted_at")) != bool(state.get("deleted_at")):
+            # A delete or restore takes what is beneath it in bulk statements.
+            self._repo.forget_held()
         self._repo.apply_snapshot(kind, state)
 
     def apply_delete(self, kind: str, entity_id: uuid.UUID, stamp: datetime) -> None:
