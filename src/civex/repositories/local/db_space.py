@@ -136,11 +136,19 @@ class LocalDbSpace:
                             )
                         except OperationalError as e:
                             # Busy: this one is left for next time, the rest go on.
-                            if "lock" not in str(e).lower():
+                            # Lock timeout or deadlock only: a full disk or
+                            # a lost connection is the caller's to hear about.
+                            code = getattr(e.orig, "sqlstate", None) or getattr(
+                                e.orig, "pgcode", None
+                            )
+                            if code not in ("55P03", "40P01"):
                                 raise
                             skipped.append(t.name)
                 finally:
-                    conn.exec_driver_sql("RESET lock_timeout")
+                    try:
+                        conn.exec_driver_sql("RESET lock_timeout")
+                    except SQLAlchemyError:
+                        pass  # a lost connection: its own error is the one to see
             return skipped
         if dialect != "sqlite":
             return []
