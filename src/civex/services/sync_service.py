@@ -1123,11 +1123,25 @@ class SyncService:
         # would only bring back what of it had gone, and the rest would stay
         # `seeding`, sent by nothing. It is safe to run again (see `_seed`).
         if self._repo.count_seeding():
-            log.info(
-                "sync with %s: finishing the first upload", self._config.sync.remote
-            )
-            self._seed(transport, progress, hello.protocol_version)
-            meta = self._repo.meta()
+            if hello.seeded_by == str(user_state.device_id_for(meta.project_id)):
+                log.info(
+                    "sync with %s: finishing the first upload",
+                    self._config.sync.remote,
+                )
+                # Only what the first upload set aside goes again, and the
+                # cursor stays: the pull below brings in whatever others did.
+                self._seed(
+                    transport,
+                    progress,
+                    hello.protocol_version,
+                    only=self._repo.seeding_entities(),
+                )
+                meta = self._repo.meta()
+            else:
+                # Not this device's upload to finish (the authority was seeded
+                # by another): its changes wait to be sent like any other.
+                self._repo.unseed()
+                self._commit()
         if meta.cursor < hello.feed_floor:
             self._copy_again(transport, hello, report)
         self._catch_up_readable(transport, hello)
@@ -2351,6 +2365,7 @@ class SyncService:
         transport: SyncTransport,
         progress: ProgressFn | None = None,
         protocol: int = PROTOCOL_MAX,
+        only: set[tuple[str, str]] | None = None,
     ) -> None:
         """Give an empty authority everything this project holds. Each thing is
         sent as a create with an id made from the project and the thing, so an
@@ -2401,6 +2416,8 @@ class SyncService:
         # Analytics page to take, say).
         for kind in kinds_for(protocol):
             for snap in self._seed_snapshots(kind):
+                if only is not None and (kind, str(snap["id"])) not in only:
+                    continue  # a resumed upload: only what it set aside
                 now = datetime.now(timezone.utc)
                 batch.append(
                     SyncEntry(
@@ -2429,7 +2446,7 @@ class SyncService:
         self._repo.finish_seed()
         # Only a first seed moves the cursor to the head: a resumed one may
         # follow a pull, and other devices may have written since.
-        if self._repo.meta().cursor == 0:
+        if only is None and self._repo.meta().cursor == 0:
             self._repo.set_cursor(head)
         self._commit()
 

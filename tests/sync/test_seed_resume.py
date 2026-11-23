@@ -126,3 +126,25 @@ def test_changes_made_after_the_interruption_arrive_once(
     assert authority.sync_repo.snapshot("record", added.id)["data"][str(site.id)] == (
         "new"
     )
+
+
+def test_a_resume_leaves_other_devices_work_alone(project, authority, monkeypatch):
+    """What a second device did meanwhile is pulled (not skipped by moving the
+    cursor on), and the resumed upload sends only its own things, so nothing of
+    the other device's is sent back as if made here."""
+    laptop = _interrupted_laptop(project, authority, monkeypatch, pushes=5)
+    phone = device(project, authority, "phone")
+    connect(phone)
+    theirs = phone.record_svc.add("study", "encounter", {"site": "p", "depth": 9.0})
+    phone.commit()
+    phone.sync_svc.sync()
+
+    laptop.sync_svc.sync()
+    phone.record_svc.update(str(theirs.id), {"site": "p2", "depth": 9.0})
+    phone.commit()
+    phone.sync_svc.sync()
+    laptop.sync_svc.sync()
+
+    assert str(theirs.id) in _records(laptop)
+    assert laptop.sync_svc.status().open_conflicts == 0
+    assert laptop.sync_svc.status().seeding == 0

@@ -26,6 +26,12 @@ const base: RemoteStatus = {
 }
 
 describe('syncButtonState', () => {
+  it('shows an interrupted first upload as something to finish', () => {
+    const s = syncButtonState({ ...base, seeding: 12 }, false, NOW)
+    expect(s.label).toContain('first upload')
+    expect(s.tone).toBe('needed')
+  })
+
   it('says synced, and when, when there is nothing to send', () => {
     const s = syncButtonState(base, false, NOW)
     expect(s).toMatchObject({ label: 'Synced 3 min ago', tone: 'ok' })

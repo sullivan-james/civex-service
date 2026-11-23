@@ -1591,6 +1591,26 @@ class LocalSyncRepository:
             or 0
         )
 
+    def seeding_entities(self) -> set[tuple[str, str]]:
+        """The things a first upload set aside changes for (kind, id)."""
+        rows = (
+            self._s.query(AuditLog.entity_type, AuditLog.entity_id)
+            .filter(AuditLog.sync_state == "seeding")
+            .distinct()
+        )
+        return {(t, str(i)) for t, i in rows}
+
+    def unseed(self) -> None:
+        """Changes set aside by a first upload that is not this project's to
+        finish go back to waiting to be sent like any other."""
+        self._s.execute(
+            update(AuditLog)
+            .where(AuditLog.sync_state == "seeding")
+            .values(sync_state="pending")
+            .execution_options(synchronize_session=False)
+        )
+        self._s.expire_all()
+
     def dirty_entities(self) -> set[tuple[str, uuid.UUID]]:
         """Things with a change here still waiting to be sent: what a pull must
         not overwrite."""

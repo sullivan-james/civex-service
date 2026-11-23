@@ -247,13 +247,14 @@ class SyncWorker:
             if sending:
                 self._on_files(None)
             return
-        if everything:
-            self._last_file_check = now
         if report.stopped:  # more to send: carry on at once, on the same bar
             run.close_pass()
             self._send_run = run
             self._files_wake.set()
             return
+        # (A run that began as a full check and ended on its continuation counts.)
+        if everything or self._send_run is not None:
+            self._last_file_check = now
         self._send_run = None
         if sending:  # no bar left where uploading ended
             self._on_files(None)
