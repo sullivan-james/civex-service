@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import AsyncIterable
@@ -133,6 +134,44 @@ class FileService:
         if self._volumes is None:
             raise FileNotFoundError(f"Object {sha256} is not on a drive here")
         return self._volumes.object_path(sha256)
+
+    @contextlib.contextmanager
+    def batched(self) -> Iterator[None]:
+        """Many files stored in this block are recorded together (where the
+        store can: `flush` before committing)."""
+        batch = getattr(self._store, "batched_registration", None)
+        if batch is None:
+            yield
+        else:
+            with batch():
+                yield
+
+    def flush(self) -> None:
+        flush = getattr(self._store, "flush_registrations", None)
+        if flush is not None:
+            flush()
+
+    # -- a big file in parts (`file_parts`) -----------------------------------
+
+    @property
+    def takes_parts(self) -> bool:
+        return bool(getattr(self._store, "supports_parts", False))
+
+    def begin_parts(
+        self, sha256: str, size: int, part_size: int
+    ) -> tuple[int, list[int]]:
+        self._may_add(None)
+        return self._store.begin_parts(sha256, size, part_size)
+
+    async def put_part(
+        self, sha256: str, number: int, chunks: AsyncIterable[bytes]
+    ) -> None:
+        self._may_add(None)
+        await self._store.put_part(sha256, number, chunks)
+
+    def finish_parts(self, sha256: str, size: int, filename: str) -> FileRef:
+        self._may_add(None)
+        return self._store.finish_parts(sha256, size, filename)
 
     # -- straight to and from storage (`direct_files`) ------------------------
 

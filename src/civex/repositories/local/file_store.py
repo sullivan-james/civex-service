@@ -72,6 +72,7 @@ from civex.domain.transfers import (
 from civex.domain.exceptions import (
     AllVolumesFull,
     GCAlreadyRunningError,
+    ValidationError,
     VolumeUnavailableError,
 )
 
@@ -166,6 +167,9 @@ def _read_marker(root: Path) -> str | None:
 
 
 class VolumeAwareFileObjectStore:
+    supports_parts = True
+    _deferred: list[tuple[str, str, int]] | None = None
+
     def __init__(
         self,
         store_config: StoreConfig,
@@ -304,6 +308,135 @@ class VolumeAwareFileObjectStore:
             original_filename,
             collection_id,
         )
+
+    # -- a big file in parts (`file_parts`) -------------------------------------
+    #
+    # A file too big for one request goes in numbered parts, several at a time.
+    # They are written at their place in one scratch file (`<sha>.upload/data`,
+    # made at its full size at the start); a part that arrived whole leaves a
+    # marker (`<n>.done`), so after an interruption `begin_parts` says which
+    # parts are held and only the rest are sent. `finish_parts` reads the file
+    # once to check the hash, then renames it into place like any other write.
+
+    def _upload_dir(self, sha256: str) -> tuple[str, Path] | None:
+        for name, vc in self._cfg.volumes.items():
+            d = self._resolve_path(vc) / _SCRATCH_DIRNAME / f"{sha256}.upload"
+            if d.is_dir():
+                return name, d
+        return None
+
+    @staticmethod
+    def _part_meta(d: Path) -> dict[str, int]:
+        try:
+            meta = json.loads((d / "meta.json").read_text())
+            return {"size": int(meta["size"]), "part_size": int(meta["part_size"])}
+        except (OSError, ValueError, KeyError) as e:
+            raise ValidationError("That upload was not begun here") from e
+
+    @staticmethod
+    def _parts_done(d: Path) -> list[int]:
+        return sorted(
+            int(f.name[:-5]) for f in d.glob("*.done") if f.name[:-5].isdigit()
+        )
+
+    def begin_parts(
+        self,
+        sha256: str,
+        size: int,
+        part_size: int,
+        collection_id: str | None = None,
+    ) -> tuple[int, list[int]]:
+        """Begin (or pick up) receiving `sha256`'s `size` bytes in parts of
+        `part_size`: the part size in force and the numbers of the parts
+        already held. An upload begun for another size starts again."""
+        found = self._upload_dir(sha256)
+        if found is not None:
+            meta: dict[str, int] = {}
+            if (found[1] / "meta.json").exists():
+                meta = self._part_meta(found[1])
+            if meta.get("size") == size:
+                return meta["part_size"], self._parts_done(found[1])
+            shutil.rmtree(found[1], ignore_errors=True)
+        reasons: list[str] = []
+        for vol_name in self._write_candidates(collection_id):
+            can, reason = self._can_write(vol_name, size)
+            if not can:
+                reasons.append(f"{vol_name}: {reason}")
+                continue
+            try:
+                d = self._scratch_path(vol_name).parent / f"{sha256}.upload"
+                d.mkdir(exist_ok=True)
+                with (d / "data").open("wb") as f:
+                    f.truncate(size)
+                (d / "meta.json").write_text(
+                    json.dumps({"size": size, "part_size": part_size})
+                )
+            except (OSError, VolumeUnavailableError) as e:
+                reasons.append(f"{vol_name}: {e}")
+                continue
+            return part_size, []
+        raise self._all_volumes_full(size, reasons, collection_id)
+
+    async def put_part(
+        self, sha256: str, number: int, chunks: AsyncIterable[bytes]
+    ) -> None:
+        """Write part `number` (from 1) where it belongs. The bytes must be
+        exactly the part's length; a part sent again replaces the one held."""
+        found = self._upload_dir(sha256)
+        if found is None:
+            raise ValidationError("That upload was not begun here")
+        d = found[1]
+        meta = self._part_meta(d)
+        size, part_size = meta["size"], meta["part_size"]
+        count = max(1, -(-size // part_size))
+        if not 1 <= number <= count:
+            raise ValidationError(f"There is no part {number} (1 to {count})")
+        offset = (number - 1) * part_size
+        want = min(part_size, size - offset)
+        (d / f"{number}.done").unlink(missing_ok=True)
+        got = 0
+        try:
+            with (d / "data").open("r+b") as f:
+                f.seek(offset)
+                async for chunk in chunks:
+                    got += len(chunk)
+                    if got > want:
+                        break
+                    f.write(chunk)
+        except OSError as e:
+            raise self._write_error(found[0], e, got, streamed=True) from e
+        if got != want:
+            raise ValidationError(f"Part {number} is {got} bytes, not {want}")
+        (d / f"{number}.done").touch()
+
+    def finish_parts(
+        self,
+        sha256: str,
+        size: int,
+        original_filename: str,
+        collection_id: str | None = None,
+    ) -> FileRef:
+        """Check every part is held and the whole hashes to `sha256` (one
+        read), then store it. A whole that does not hash to it is dropped."""
+        found = self._upload_dir(sha256)
+        if found is None:
+            raise ValidationError("That upload was not begun here")
+        vol_name, d = found
+        meta = self._part_meta(d)
+        if meta["size"] != size:
+            raise ValidationError(f"The upload is for {meta['size']} bytes, not {size}")
+        count = max(1, -(-size // meta["part_size"]))
+        missing = sorted(set(range(1, count + 1)) - set(self._parts_done(d)))
+        if missing:
+            raise ValidationError(f"Parts missing: {missing[:10]}")
+        if _hash_file(d / "data") != sha256:
+            shutil.rmtree(d, ignore_errors=True)
+            raise ValidationError("The content does not match that hash")
+        ref = self._finalize(
+            vol_name, d / "data", sha256, size, original_filename, collection_id
+        )
+        shutil.rmtree(d, ignore_errors=True)
+        return ref
 
     def put_chunks(
         self,
@@ -888,6 +1021,14 @@ class VolumeAwareFileObjectStore:
                         count += 1
                         if not dry_run:
                             f.unlink()
+                except OSError:
+                    continue
+            for d in scratch_dir.glob("*.upload"):  # a big file's parts
+                try:
+                    if (d / "data").stat().st_mtime < cutoff:
+                        count += 1
+                        if not dry_run:
+                            shutil.rmtree(d, ignore_errors=True)
                 except OSError:
                     continue
         return count
@@ -1575,7 +1716,32 @@ class VolumeAwareFileObjectStore:
         self._used_cache.pop(volume, None)
         if self._session is None:
             return
+        if self._deferred is not None:
+            self._deferred.append((sha256, volume, size))
+            return
         self._upsert_inventory([(sha256, volume, size)])
+
+    @contextlib.contextmanager
+    def batched_registration(self) -> Iterator[None]:
+        """Within this block, stored files are recorded in the inventory
+        together, at `flush_registrations` and on leaving (one statement for
+        many files, which is most of what a small file costs to store). The
+        bytes are on disk at once; the caller flushes before it commits. A
+        blob on disk the inventory does not know is found by the clean-up
+        (`reconcile_inventory`)."""
+        self._deferred = []
+        try:
+            yield
+        finally:
+            try:
+                self.flush_registrations()
+            finally:
+                self._deferred = None
+
+    def flush_registrations(self) -> None:
+        if self._deferred:
+            rows, self._deferred = self._deferred, []
+            self._upsert_inventory(rows)
 
     def _unregister(self, sha256: str, volume: str | None = None) -> None:
         """Forget the copy on `volume`, or every copy. Records that pointed at
