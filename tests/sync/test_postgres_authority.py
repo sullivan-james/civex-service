@@ -29,6 +29,18 @@ pytestmark = pytest.mark.skipif(not _SERVER, reason="CIVEX_TEST_POSTGRES_URL not
 
 @pytest.fixture()
 def pg_authority(tmp_path):
+    yield from _pg_authority(tmp_path)
+
+
+@pytest.fixture()
+def pg_single(tmp_path):
+    """A second PostgreSQL authority, settling every change on its own."""
+    for ctx in _pg_authority(tmp_path / "single"):
+        ctx.authority_svc._bulk = False
+        yield ctx
+
+
+def _pg_authority(tmp_path):
     name = f"civex_{uuid.uuid4().hex[:12]}"
     admin = create_engine(_SERVER, isolation_level="AUTOCOMMIT")
     with admin.connect() as conn:
@@ -48,6 +60,29 @@ def pg_authority(tmp_path):
     with admin.connect() as conn:
         conn.execute(text(f'DROP DATABASE "{name}" WITH (FORCE)'))
     admin.dispose()
+
+
+def test_a_batch_written_in_bulk_is_what_one_at_a_time_writes(
+    project, pg_authority, pg_single
+):
+    from .test_bulk_push import mixed, rows, send
+
+    b, first, batch = mixed(project)
+    for authority in (pg_authority, pg_single):
+        send(authority, b.structure + first)
+    answers = [send(a, batch) for a in (pg_authority, pg_single)]
+    assert answers[0] == answers[1]
+    assert [r[1] for r in answers[0][0]] == [
+        "applied",
+        "applied",
+        "applied",
+        "conflict",
+        "applied",
+        "rejected",
+        "conflict",
+    ]
+    assert rows(pg_authority) == rows(pg_single)
+    assert rows(pg_authority)["file_references"]
 
 
 def test_history_on_postgresql_is_numbered_in_write_order_and_stored_as_deltas(

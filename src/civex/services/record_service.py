@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
-from contextlib import AbstractContextManager, nullcontext
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 import numbers
 import re
 import uuid
@@ -705,6 +705,21 @@ class RecordPage:
     next_cursor: str | None
 
 
+class IncomingCache:
+    """What a run of `RecordService.check_incoming` has read: schemas (resolved
+    once each) and collections."""
+
+    def __init__(self, resolver: Callable[[], Callable[[uuid.UUID], Any]]) -> None:
+        self._resolver = resolver
+        self.shapes = resolver()
+        self.datasets: dict[uuid.UUID, Any] = {}
+
+    def clear(self) -> None:
+        """Forget what was read (a schema or a collection may have changed)."""
+        self.shapes = self._resolver()
+        self.datasets.clear()
+
+
 class RecordService:
     def __init__(
         self,
@@ -719,6 +734,7 @@ class RecordService:
         # What the caller may do, asked per collection before a record is
         # made, changed, restored or deleted (`domain.permissions`).
         self._permissions = permissions
+        self._incoming_cache: IncomingCache | None = None
         self._schema_svc = schema_svc
         self._datasets = dataset_repo
         self._records = record_repo
@@ -1940,6 +1956,34 @@ class RecordService:
                 f"expected '{expected.name if expected else schema.parent_id}'"
             )
 
+    def shape_of(self, state: dict[str, Any]) -> Any:
+        """The resolved schema a record state names (None when there is none),
+        as `check_incoming` finds it."""
+        schema_id = uuid.UUID(str(state["schema_id"]))
+        cache = self._incoming_cache
+        return (cache.shapes if cache else self._schema_svc.resolver())(schema_id)
+
+    @staticmethod
+    def cites_records(state: dict[str, Any], shape: Any) -> bool:
+        """Whether a record state holds a value that refers to another record."""
+        data = state.get("data") or {}
+        return isinstance(data, dict) and any(
+            rf.field.dtype in ("reference", "reference_list")
+            and data.get(str(rf.field.id)) is not None
+            for rf in shape.fields
+        )
+
+    @contextmanager
+    def incoming_cache(self) -> Iterator[IncomingCache]:
+        """For a run of `check_incoming` calls that change neither schemas nor
+        collections: each schema and collection is read once for the run."""
+        cache = IncomingCache(self._schema_svc.resolver)
+        previous, self._incoming_cache = self._incoming_cache, cache
+        try:
+            yield cache
+        finally:
+            self._incoming_cache = previous
+
     def check_incoming(
         self, state: dict[str, Any], head: dict[str, Any] | None
     ) -> None:
@@ -1973,12 +2017,18 @@ class RecordService:
         data = state.get("data") or {}
         if not isinstance(data, dict):
             raise ValidationError("The record's values are not an object")
-        shape = self._schema_svc.resolver()(schema_id)
+        cache = self._incoming_cache
+        shape = (cache.shapes if cache else self._schema_svc.resolver())(schema_id)
         if shape is None:
             raise ValidationError("The record's schema does not exist here")
-        dataset = self._datasets.get_by_id(
-            dataset_id, include_deleted=True, with_count=False
-        )
+        if cache is not None and dataset_id in cache.datasets:
+            dataset = cache.datasets[dataset_id]
+        else:
+            dataset = self._datasets.get_by_id(
+                dataset_id, include_deleted=True, with_count=False
+            )
+            if cache is not None:
+                cache.datasets[dataset_id] = dataset
         if dataset is None or dataset.deleted_at is not None:
             raise ValidationError("The record's collection does not exist here")
         # A record can't be live inside something deleted: an edit that meets
