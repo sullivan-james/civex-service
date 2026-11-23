@@ -142,7 +142,9 @@ def test_changing_a_hidden_record_is_answered_as_changing_an_absent_one(world):
                 entity_type="record",
                 entity_id=uuid.UUID(rid),
                 old_data=old,
-                new_data=None if action == "delete" else {**old, "data": dict(old["data"])},
+                new_data=None
+                if action == "delete"
+                else {**old, "data": dict(old["data"])},
                 timestamp="2026-01-02T00:00:00+00:00",
             )
             got.append(_answer(limited.authority_svc.push(who, [entry])))
@@ -217,9 +219,9 @@ def test_an_unrelated_edit_to_a_child_whose_parent_is_out_of_sight_is_taken(worl
     # a visible child that sits under a record the device cannot see now
     child = _create(authority, open_, {"site": "child"})
     child.new_data["parent_record_id"] = str(seen.id)
-    assert statuses(authority.authority_svc.push(principal(authority, "full"), [child])) == [
-        "applied"
-    ]
+    assert statuses(
+        authority.authority_svc.push(principal(authority, "full"), [child])
+    ) == ["applied"]
     authority.commit()
     head = authority.authority_svc._applier.head("record", child.entity_id)
     assert head["parent_record_id"] == str(seen.id)

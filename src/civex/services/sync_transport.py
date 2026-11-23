@@ -11,6 +11,7 @@ retrying them would only hammer a server that has said no.
 from __future__ import annotations
 
 import json
+import threading
 import socket
 import time
 import urllib.error
@@ -58,6 +59,9 @@ class HttpSyncTransport:
         self._credentials = credentials
         self._timeout = timeout
         self._session: SessionGrant | None = None
+        # Uploads run on several threads: signing in, and dropping a session the
+        # server refused, are one at a time.
+        self._session_lock = threading.RLock()
         # What the authority said it offers (`Hello.capabilities`), once asked.
         self._capabilities: frozenset[str] | None = None
 
@@ -292,8 +296,13 @@ class HttpSyncTransport:
         expire. The authority's answer must carry its signature over this very
         request, so a server that isn't the one this device joined is refused
         before anything is sent to it."""
-        if self._session and self._session.expires_at - 60 > time.time():
-            return self._session.token
+        with self._session_lock:
+            return self._token_locked()
+
+    def _token_locked(self) -> str:
+        session = self._session
+        if session and session.expires_at - 60 > time.time():
+            return session.token
         creds = self._credentials
         if not creds.authority_key:
             raise SyncError(
@@ -326,9 +335,12 @@ class HttpSyncTransport:
         try:
             return call()
         except SyncError as e:
-            if e.status != 401 or self._session is None:
+            if e.status != 401:
                 raise
-            self._session = None
+            # Dropped under the lock: with several uploads at once, a second
+            # drop costs one more sign-in, never a failed call.
+            with self._session_lock:
+                self._session = None
             return call()
 
     # -- plumbing --------------------------------------------------------

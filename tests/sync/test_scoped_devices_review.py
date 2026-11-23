@@ -114,7 +114,9 @@ def test_a_device_reaches_the_head_across_capped_pages(
     authority.commit()
     study.sync(study.limited)
     assert study.limited.sync_repo.meta().cursor == authority.sync_repo.head_seq()
-    assert any("the one it may see" in str(r) for r in snapshots(study.limited)["record"])
+    assert any(
+        "the one it may see" in str(r) for r in snapshots(study.limited)["record"]
+    )
     assert SECRET not in text_of(study.limited)
 
 
@@ -202,9 +204,9 @@ def test_a_device_that_holds_everything_it_may_read_asks_for_nothing(study: Stud
     limited = study.limited
     limited.sync_repo._meta_row().readable = None
     limited.commit()
-    calls_before = len(limited._holder["inner"].calls) if hasattr(
-        limited, "_holder"
-    ) else 0
+    calls_before = (
+        len(limited._holder["inner"].calls) if hasattr(limited, "_holder") else 0
+    )
     study.sync(limited)
     assert limited.sync_repo.readable() == {str(study.open.id)}
     assert SECRET not in text_of(limited)
@@ -216,7 +218,9 @@ def test_a_device_that_holds_everything_it_may_read_asks_for_nothing(study: Stud
 
 def _pointing_at(study: Study, target: str):
     authority = study.authority
-    if not any(f.name == "friend" for f in authority.schema_svc.get("encounter").fields):
+    if not any(
+        f.name == "friend" for f in authority.schema_svc.get("encounter").fields
+    ):
         authority.schema_svc.add_field(
             "encounter", "friend", "reference", restrictions={"schema": "encounter"}
         )

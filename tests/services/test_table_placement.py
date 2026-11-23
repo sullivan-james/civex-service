@@ -25,7 +25,9 @@ def tree(ctx: AppContext, make_schema, make_collection, make_record):
     selection holding a contour file."""
     make_schema("encounter", fields=[("name", "string"), ("site", "string")])
     make_schema(
-        "recording", fields=[("rname", "string"), ("depth", "float")], parent="encounter"
+        "recording",
+        fields=[("rname", "string"), ("depth", "float")],
+        parent="encounter",
     )
     make_schema(
         "selection",
@@ -515,7 +517,9 @@ def test_planning_tables_in_each_folder_costs_the_same_however_many_folders(
     enc, _ = tree
     specs = [
         TableSpec("csv", ["sname"], kind="selection", where="recording"),
-        TableSpec("csv", ["sname"], kind="selection", where="selection", shape="fields"),
+        TableSpec(
+            "csv", ["sname"], kind="selection", where="selection", shape="fields"
+        ),
     ]
 
     def add(n: int, tag: str) -> None:
@@ -550,7 +554,9 @@ def test_writing_tables_in_each_folder_costs_the_same_however_many_folders(
 ) -> None:
     enc, _ = tree
     specs = [
-        TableSpec("csv", ["sname", "rname", "site"], kind="selection", where="recording"),
+        TableSpec(
+            "csv", ["sname", "rname", "site"], kind="selection", where="recording"
+        ),
         TableSpec(
             "csv",
             ["sname", "rname", "depth"],
@@ -578,7 +584,9 @@ def test_writing_tables_in_each_folder_costs_the_same_however_many_folders(
         plan = ctx.file_access_svc.plan(sel)
         out = tmp_path / name
         out.mkdir()
-        return _statements(ctx, lambda: ctx.file_access_svc.write_tables(sel, plan, out))
+        return _statements(
+            ctx, lambda: ctx.file_access_svc.write_tables(sel, plan, out)
+        )
 
     add(2, "x")
     few = write("few")

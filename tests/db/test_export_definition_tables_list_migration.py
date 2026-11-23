@@ -24,7 +24,7 @@ def _config() -> Config:
 def _add(conn, schema_id: str, name: str, table: dict | None) -> None:
     conn.execute(
         text(
-            'INSERT INTO export_definitions (id, schema_id, name, fields, files_layout, '
+            "INSERT INTO export_definitions (id, schema_id, name, fields, files_layout, "
             'include_files, "table", created_at) '
             "VALUES (:id, :s, :n, '[]', 'tree', 1, :t, '2024-01-01')"
         ),

@@ -259,5 +259,10 @@ def test_sending_over_several_passes_is_one_bar():
     r.files_tick()
     r.files_tick(1)
     bars = [(p.done, p.total, p.bytes_done, p.bytes_total) for p in seen if p]
-    assert bars == [(0, 3, 0, 300), (2, 3, 200, 300), (2, 3, 200, 300), (3, 3, 300, 300)]
+    assert bars == [
+        (0, 3, 0, 300),
+        (2, 3, 200, 300),
+        (2, 3, 200, 300),
+        (3, 3, 300, 300),
+    ]
     assert seen[-1] is None  # all sent: the bar goes

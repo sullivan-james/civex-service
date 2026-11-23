@@ -147,9 +147,7 @@ def _random_snapshot(rng: random.Random, kind: str) -> dict[str, Any]:
     return snap
 
 
-def _random_edit(
-    rng: random.Random, old: dict[str, Any], kind: str
-) -> dict[str, Any]:
+def _random_edit(rng: random.Random, old: dict[str, Any], kind: str) -> dict[str, Any]:
     new = {**old}
     if "data" in new and isinstance(new["data"], dict):
         new["data"] = dict(new["data"])

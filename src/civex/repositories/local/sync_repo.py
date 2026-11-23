@@ -1931,7 +1931,6 @@ class LocalSyncRepository:
             self._s.query(AuditLog.id).filter(AuditLog.sync_state == "seeding").first()
         )
         if started is None:
-            self._s.execute(delete(SeedAck))
             self._s.execute(
                 update(AuditLog)
                 .where(
@@ -1943,6 +1942,10 @@ class LocalSyncRepository:
                 .execution_options(synchronize_session=False)
             )
             self._s.expire_all()
+
+    def forget_seed_acks(self) -> None:
+        """Drop what a first upload remembers of the authority's answers."""
+        self._s.execute(delete(SeedAck))
 
     def seed_acked(self) -> set[str]:
         """Ids of the first-upload changes the authority has answered."""

@@ -51,15 +51,21 @@ LISTING_KEEP_SECONDS = 3.0
 LISTING_KEEP_MAX = 16
 _listings: dict[str, tuple[float, dict]] = {}
 _listings_lock = threading.Lock()
+_generation = (
+    0  # moves on at every forgetting: an answer worked out before it is not kept
+)
 
 
 def forget_listings() -> None:
+    global _generation
     with _listings_lock:
+        _generation += 1
         _listings.clear()
 
 
 def _forget_on_change(request: Request) -> None:
-    if not request.url.path.endswith("/file-access/files"):
+    # Reading calls (polling a transfer's progress, listing definitions) leave it.
+    if request.method != "GET" and not request.url.path.endswith("/file-access/files"):
         forget_listings()
 
 
@@ -398,11 +404,14 @@ def list_files(body: FileListRequest, ctx: AppContext = Depends(get_ctx)):
     now = time.monotonic()
     with _listings_lock:
         kept = _listings.get(key)
+        generation = _generation
     if kept is not None and now < kept[0]:
         return kept[1]
     answer = _list_files(body, ctx)
     if time.monotonic() - now >= LISTING_SLOW_SECONDS:
         with _listings_lock:
+            if generation != _generation:
+                return answer
             if len(_listings) >= LISTING_KEEP_MAX:
                 _listings.pop(next(iter(_listings)))
             _listings[key] = (time.monotonic() + LISTING_KEEP_SECONDS, answer)

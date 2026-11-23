@@ -629,9 +629,7 @@ def test_files_on_several_drives_are_linked_where_they_can_be_and_copied_where_n
     ctx: AppContext, study: Study, archive: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     study.selection(study.rec_a, "near", b"small")
-    study.selection(
-        study.rec_a, "far", b"the bigger one", on=str(study.collection.id)
-    )
+    study.selection(study.rec_a, "far", b"the bigger one", on=str(study.collection.id))
     selection = _sel(schema="selection", within=str(study.e7.id))
     _apart(monkeypatch, archive)
 

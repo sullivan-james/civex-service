@@ -1806,6 +1806,7 @@ class SyncService:
         arrived: list[str] = []
         flying: list[tuple[str, Future[bool]]] = []
         failed = threading.Event()
+        unreadable: list[tuple[str, str]] = []
         group_began: list[float] = []
 
         def run(f: BinaryIO, sha: str, size: int) -> bool:
@@ -1846,21 +1847,27 @@ class SyncService:
                 arrived.clear()
             if group_began:
                 spent += time.monotonic() - group_began.pop()
+            if error is None:
+                # Settled after the group's files, so the point to go on from
+                # never passes a file that did not arrive.
+                for sha, why in unreadable:
+                    settle(sha, why)
+            unreadable.clear()
             if error is not None and not quiet:
                 raise error
 
         def add(sha: str, size: int) -> None:
-            nonlocal tried
+            nonlocal tried, inflight
             tried += 1
             if not group_began:
                 group_began.append(time.monotonic())
             try:
                 f = self._files.open(sha)
             except VolumeUnavailableError as e:
-                settle(sha, str(e))
+                unreadable.append((sha, str(e)))
                 return
             except FileNotFoundError:
-                settle(sha, "its copy here couldn't be read")
+                unreadable.append((sha, "its copy here couldn't be read"))
                 return
             if pool is not None:
                 flying.append((sha, pool.submit(run, f, sha, size)))
@@ -1869,6 +1876,7 @@ class SyncService:
                     transport.upload_file(sha, _Counting(f, went), size)
                 finally:
                     f.close()
+                    inflight = 0  # counted as settled when it is confirmed
                 arrived.append(sha)
             if (
                 len(arrived) + len(flying) >= SMALL_FILE_GROUP
@@ -1940,7 +1948,12 @@ class SyncService:
                 )
         finally:
             try:
-                drain(quiet=True)  # what arrived is kept, even on the way out
+                try:
+                    drain(quiet=True)  # what arrived is kept, even on the way out
+                except Exception:
+                    log.warning(
+                        "could not record the files that arrived", exc_info=True
+                    )
             finally:
                 if pool is not None:
                     pool.shutdown(wait=True)
@@ -2670,6 +2683,11 @@ class SyncService:
         # not sent again (the ids are the same every run, so what is left goes
         # as it would have).
         acked = self._repo.seed_acked()
+        if acked and transport.hello().empty:
+            # The authority holds nothing now (reset, or restored from before):
+            # what it once answered is no longer there.
+            self._repo.forget_seed_acks()
+            acked = set()
         resumed = bool(acked)
 
         def answered(kind: str) -> Callable[[str], bool]:

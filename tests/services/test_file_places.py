@@ -254,7 +254,9 @@ def test_a_records_list_of_what_it_contains_can_take_its_own_files_too(
 
 
 def test_moving_onto_a_drive_that_has_the_content_copies_nothing(
-    ctx, study, archive  # noqa: F811
+    ctx,
+    study,
+    archive,  # noqa: F811
 ):
     """De-duplication: s2's records point at a copy on the archive, and the
     project drive already holds the same content (s1's). Moving s2 there copies
