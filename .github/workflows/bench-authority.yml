@@ -4,6 +4,14 @@ name: bench-authority
 # repository behind it (benchmarks/bench_bulk_push.py), before and after this
 # branch: the base's source is run with this branch's benchmark. Run by hand.
 on:
+  # Runs on its own PR (and any PR touching the authority or the benchmark),
+  # since a dispatch-only workflow can't run until it is on the default branch.
+  pull_request:
+    paths:
+      - .github/workflows/bench-authority.yml
+      - benchmarks/bench_bulk_push.py
+      - src/civex/services/sync_authority.py
+      - src/civex/repositories/local/sync_repo.py
   workflow_dispatch:
     inputs:
       base:
@@ -15,6 +23,11 @@ on:
       batches:
         description: Pushes of 250 records
         default: "8"
+
+env:
+  BENCH_BASE: ${{ inputs.base || github.base_ref }}
+  BENCH_PREFILL: ${{ inputs.prefill || '200000' }}
+  BENCH_BATCHES: ${{ inputs.batches || '8' }}
 
 jobs:
   bench:
@@ -50,23 +63,23 @@ jobs:
       - name: The base's source
         run: |
           mkdir /tmp/base
-          git archive "origin/${{ inputs.base }}" src | tar -x -C /tmp/base
+          git archive "origin/${BENCH_BASE}" src | tar -x -C /tmp/base
 
       - name: Before (the base)
         run: |
           PYTHONPATH=/tmp/base/src:$PWD/benchmarks uv run python benchmarks/bench_bulk_push.py \
-            --prefill "${{ inputs.prefill }}" --batches "${{ inputs.batches }}" | tee /tmp/before.txt
+            --prefill "${BENCH_PREFILL}" --batches "${BENCH_BATCHES}" | tee /tmp/before.txt
 
       - name: After (this branch)
         run: |
           PYTHONPATH=$PWD/src:$PWD/benchmarks uv run python benchmarks/bench_bulk_push.py \
-            --prefill "${{ inputs.prefill }}" --batches "${{ inputs.batches }}" | tee /tmp/after.txt
+            --prefill "${BENCH_PREFILL}" --batches "${BENCH_BATCHES}" | tee /tmp/after.txt
 
       - name: Summary
         run: |
           {
-            echo "## Authority push, ${{ inputs.prefill }} records held, ${{ inputs.batches }} x 250 pushed"
-            echo "Base: ${{ inputs.base }}"
+            echo "## Authority push, ${BENCH_PREFILL} records held, ${BENCH_BATCHES} x 250 pushed"
+            echo "Base: ${BENCH_BASE}"
             echo '### Before'; echo '```'; cat /tmp/before.txt; echo '```'
             echo '### After'; echo '```'; cat /tmp/after.txt; echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
