@@ -10,6 +10,9 @@
 export function scopeCss(css: string): { scoped: string; properties: string } {
   const properties: string[] = []
   const withoutProperties = css.replace(/@property[^{]*\{[^}]*\}/g, (rule) => {
+    // Only Tailwind's `--tw-*` names may be registered on the host page;
+    // any other registration stays here (inert in a shadow root).
+    if (!/^@property\s+--tw-/.test(rule)) return rule
     properties.push(rule)
     return ''
   })
