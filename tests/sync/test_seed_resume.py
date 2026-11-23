@@ -3,6 +3,8 @@ any kind, whatever a pull did to the cursor meanwhile, and is shown meanwhile.""
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 import civex.services.sync_service as sync_service
@@ -97,3 +99,30 @@ def test_connecting_again_resumes_too(project, authority, monkeypatch):
     assert connect(laptop) == "seeded"
     assert laptop.sync_svc.status().seeding == 0
     assert _records(authority) == _records(laptop)
+
+
+def test_changes_made_after_the_interruption_arrive_once(
+    project, authority, monkeypatch
+):
+    laptop = _interrupted_laptop(project, authority, monkeypatch)
+    first = sorted(_records(laptop))[0]
+    laptop.record_svc.update(first, {"site": "edited", "depth": 2.0})
+    added = laptop.record_svc.add("study", "encounter", {"site": "new", "depth": 3.0})
+    laptop.commit()
+    assert laptop.sync_svc.status().pending > 0
+
+    laptop.sync_svc.sync()
+    laptop.sync_svc.sync()
+
+    status = laptop.sync_svc.status()
+    assert (status.seeding, status.pending, status.open_conflicts) == (0, 0, 0)
+    assert _records(authority) == _records(laptop)
+    site = next(
+        f for f in authority.schema_svc.get("encounter").fields if f.name == "site"
+    )
+    assert authority.sync_repo.snapshot("record", uuid.UUID(first))["data"][
+        str(site.id)
+    ] == ("edited")
+    assert authority.sync_repo.snapshot("record", added.id)["data"][str(site.id)] == (
+        "new"
+    )
