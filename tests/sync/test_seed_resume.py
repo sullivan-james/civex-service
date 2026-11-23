@@ -148,3 +148,23 @@ def test_a_resume_leaves_other_devices_work_alone(project, authority, monkeypatc
     assert str(theirs.id) in _records(laptop)
     assert laptop.sync_svc.status().open_conflicts == 0
     assert laptop.sync_svc.status().seeding == 0
+
+
+def test_a_release_made_over_an_unfinished_seed_arrives_with_every_record(
+    project, authority, monkeypatch
+):
+    """The field case: a release is made while the first upload is stranded; it
+    goes as an ordinary change, and the resumed seed brings the records it
+    counts, and its bundle file is uploaded."""
+    laptop = _interrupted_laptop(project, authority, monkeypatch)
+    laptop.release_svc.create("v1", "A release")
+    laptop.commit()
+
+    laptop.sync_svc.sync()
+    laptop.sync_svc.send_files()
+
+    assert laptop.sync_svc.status().seeding == 0
+    assert _records(authority) == _records(laptop)
+    made = authority.release_svc.get("v1")
+    assert made is not None
+    assert authority.file_svc.exists(made.bundle_sha256)

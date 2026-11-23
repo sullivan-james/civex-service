@@ -232,12 +232,33 @@ class LocalSyncRepository:
         holds. The catalog is kept up to date as records are written, so
         what a device still owes its authority is worked out from it each time
         rather than remembered."""
-        sha = self._referenced()
-        query = select(sha).where(sha > after)
+        return list(self._s.scalars(self._referenced_page(after, limit, unconfirmed)))
+
+    def _referenced_page(self, after: str, limit: int, unconfirmed: bool):  # type: ignore[no-untyped-def]
+        """`limit` hashes after `after`, in order. The bound is applied to the
+        index on `sha256` before anything is grouped, so a page reads only its
+        own stretch of the index (an ordered scan that stops at the limit),
+        not every reference each time: with tens of thousands of files, a
+        `DISTINCT` over all of them per page was minutes of work and tens of
+        megabytes of shared memory for PostgreSQL's parallel workers."""
+        sha = FileReference.sha256
+        # An EXISTS per candidate row, not a join: the planner can then walk
+        # the index in order and stop at the limit.
+        live_owner = (
+            select(Record.id)
+            .where(Record.id == FileReference.record_id, Record.deleted_at.is_(None))
+            .exists()
+        )
+        query = select(sha).where(
+            sha > after,
+            (FileReference.record_id.is_not(None) & live_owner)
+            | FileReference.release_id.is_not(None),
+        )
         if unconfirmed:
-            query = query.where(sha.not_in(select(ServerFile.sha256)))
-        rows = self._s.execute(query.order_by(sha).limit(limit))
-        return [s for (s,) in rows]
+            query = query.where(
+                ~select(ServerFile.sha256).where(ServerFile.sha256 == sha).exists()
+            )
+        return query.group_by(sha).order_by(sha).limit(limit)
 
     def _referenced(self):  # type: ignore[no-untyped-def]
         """The column of every file this project needs the authority to hold:
@@ -266,15 +287,7 @@ class LocalSyncRepository:
         """Up to `limit` files live records cite that the authority hasn't said
         it holds, each with the volumes holding a copy here (none: not on this
         computer), for saying why they haven't gone."""
-        sha = self._referenced()
-        shas = list(
-            self._s.scalars(
-                select(sha)
-                .where(sha.not_in(select(ServerFile.sha256)))
-                .order_by(sha)
-                .limit(limit)
-            )
-        )
+        shas = list(self._s.scalars(self._referenced_page("", limit, True)))
         where: dict[str, list[str]] = {s: [] for s in shas}
         for at in range(0, len(shas), 500):
             for s, volume in self._s.execute(

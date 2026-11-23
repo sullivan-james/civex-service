@@ -158,6 +158,11 @@ from the next tag forward.
   included asking the authority which of tens of thousands of files it lacked, so it was
   gone before the first upload, every pass. Files are now asked about and uploaded page
   by page, and a pass always sends at least one.
+- **Asking which files a project cites no longer scans them all per page.** On
+  PostgreSQL the page query ran a `DISTINCT` over every file reference joined to records
+  for each 1,000 files, slow (about 70 s for 77,000 files) and enough to exhaust the
+  database container's shared memory ("could not resize shared memory segment"). A page
+  now reads only its own stretch of the `sha256` index and stops at the limit.
 - **Sync's file download works on PostgreSQL.** The step that picks a collection
   for each missing file failed with `function min(uuid) does not exist`; it now
   works on both databases.
