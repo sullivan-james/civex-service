@@ -1596,6 +1596,40 @@ class LocalSyncRepository:
             or 0
         )
 
+    def record_sync_rows(self, record_id: uuid.UUID) -> dict[str, Any]:
+        """What this record's changes have come to, from one grouped read of
+        its audit entries (the `entity_id` index) and one of the files it cites:
+        per sync state, how many entries, the highest authority number and the
+        latest time; and how many files it cites, and how many of those the
+        authority hasn't said it holds."""
+        rows = self._s.execute(
+            select(
+                AuditLog.sync_state,
+                func.count(),
+                func.max(AuditLog.hub_seq),
+                func.max(AuditLog.timestamp),
+            )
+            .where(AuditLog.entity_id == record_id)
+            .group_by(AuditLog.sync_state)
+        ).all()
+        states = {s: (n, seq, at) for s, n, seq, at in rows}
+        cited = select(FileReference.sha256).where(FileReference.record_id == record_id)
+        files = int(
+            self._s.execute(
+                select(func.count(cited.distinct().subquery().c.sha256))
+            ).scalar_one()
+        )
+        waiting = int(
+            self._s.execute(
+                select(func.count()).select_from(
+                    cited.where(FileReference.sha256.not_in(select(ServerFile.sha256)))
+                    .distinct()
+                    .subquery()
+                )
+            ).scalar_one()
+        )
+        return {"states": states, "files": files, "files_waiting": waiting}
+
     def count_seeding(self) -> int:
         """Changes a first upload set aside and has not finished sending."""
         return (

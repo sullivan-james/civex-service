@@ -54,6 +54,12 @@ from the next tag forward.
 
 ### Added
 
+- **A record shows where it stands with the authority.** `GET /api/records/{id}/sync`
+  answers `synced` (authority number and when), `pending` (changes not yet sent),
+  `first_upload`, `refused` (with the authority's reason), `conflict`, `not_connected` or
+  `held_here`, plus how many of its files are not sent: one grouped read of the record's
+  own audit entries. The record page shows it (with a link to review a refusal or
+  conflict) and `civex record show` prints the same line.
 - **An unfinished first upload shows.** `/api/remote` and `civex sync status` report
   `seeding` (changes still to go), the app's sync button says "finishing first
   upload", and its progress appears in `progress`.

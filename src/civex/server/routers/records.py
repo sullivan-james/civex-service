@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
@@ -19,6 +20,7 @@ from civex.server.background import run_pending_jobs
 from civex.server.deps import get_ctx, get_read_ctx
 from civex.server.downloads import new_temp_path, serve, temp_paths
 from civex.server.models import (
+    RecordSyncResponse,
     BulkEditPlanResponse,
     BulkEditRequest,
     BulkEditResponse,
@@ -425,6 +427,16 @@ def get_record(record_id: str, ctx: AppContext = Depends(get_read_ctx)):
     response.ancestors = [_ref(a) for a in ancestors]
     response.deleted_above = [_ref(a) for a in above]
     return response
+
+
+@router.get("/records/{record_id}/sync", response_model=RecordSyncResponse)
+def get_record_sync(record_id: str, ctx: AppContext = Depends(get_read_ctx)):
+    """Where this record stands with the authority this project follows."""
+    try:
+        record = ctx.record_svc.get(record_id)
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    return RecordSyncResponse(**asdict(ctx.sync_svc.record_sync(record.id)))
 
 
 @router.post("/records/{record_id}/restore-above", response_model=list[RecordResponse])

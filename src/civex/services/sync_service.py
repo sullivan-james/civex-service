@@ -199,6 +199,27 @@ class FileFetchReport:
 
 
 @dataclass
+class RecordSyncState:
+    """Where one record stands with the authority (`SyncService.record_sync`).
+    `state`: `not_connected` (no authority), `held_here` (this project is the
+    authority), `synced`, `pending` (changes not yet sent), `first_upload`
+    (set aside by a first upload that has not finished), `refused` (the
+    authority would not take a change) or `conflict` (a value both sides
+    changed, for a person to settle)."""
+
+    state: str
+    remote: str | None = None
+    pending: int = 0
+    seeding: int = 0
+    hub_seq: int | None = None
+    synced_at: str | None = None
+    message: str | None = None  # the authority's reason, for `refused`
+    conflict_id: str | None = None
+    files: int = 0
+    files_waiting: int = 0
+
+
+@dataclass
 class SyncStatus:
     configured: bool
     remote: str | None
@@ -378,6 +399,42 @@ class SyncService:
             ),
             files_waiting=waiting,
         )
+
+    def record_sync(self, record_id: uuid.UUID) -> RecordSyncState:
+        """One record's standing with the authority, cheaply: a grouped read
+        of its own audit entries, the files it cites, and its open conflicts."""
+        if self._config.sync.serve:
+            return RecordSyncState("held_here")
+        if not self.configured:
+            return RecordSyncState("not_connected")
+        rows = self._repo.record_sync_rows(record_id)
+        states = rows["states"]
+        pending = states.get("pending", (0, None, None))[0]
+        seeding = states.get("seeding", (0, None, None))[0]
+        _, seq, at = states.get("synced", (0, None, None))
+        out = RecordSyncState(
+            "synced",
+            remote=self._config.sync.remote,
+            pending=pending,
+            seeding=seeding,
+            hub_seq=seq,
+            synced_at=at.isoformat() if hasattr(at, "isoformat") else at,
+            files=rows["files"],
+            files_waiting=rows["files_waiting"],
+        )
+        open_ = self._repo.find_open_conflicts(entity_id=record_id)
+        refused = next((c for c in open_ if c.kind == "rejected"), None)
+        clash = next((c for c in open_ if c.kind != "rejected"), None)
+        if clash:
+            out.state, out.conflict_id = "conflict", str(clash.id)
+        elif refused:
+            out.state, out.conflict_id = "refused", str(refused.id)
+            out.message = refused.message
+        elif pending:
+            out.state = "pending"
+        elif seeding:
+            out.state = "first_upload"
+        return out
 
     def history_position(self) -> tuple[int | None, int]:
         """Where this copy is in the authority's numbered history, and how many
