@@ -108,6 +108,16 @@ from the next tag forward.
   device (shows the code, waits for approval, then copies).
 - **`civex auth status`** shows the authority, this device's name and id, whether
   it has joined, and the last sync error.
+- **Upgrades say so.** Upgrading a project's database can take minutes on a
+  large one. The desktop app now shows a page ("step X of Y", what each step
+  does, elapsed time) before opening the project, instead of timing out after
+  30 s; `civex serve` migrates before it starts listening and prints each step;
+  the CLI prints "Upgrading this project's database (step X of Y)" to stderr
+  when there is something to do (and stays quiet otherwise). SQLite projects
+  take a file lock (`<database>.migrate-lock`), so a second civex process waits
+  instead of migrating the same file at once. For hosts, `civex.db.migrate`
+  gains `ensure_schema_current(..., progress=)`, `pending_migrations(engine)`
+  and `reporting_progress`.
 
 ### Changes
 
@@ -171,21 +181,6 @@ from the next tag forward.
   (`files_missing` in `/api/remote`, `civex sync status`, Settings, pointing to
   `civex files missing`), not as downloading, and `--ignore` hides it from both
   counts. No wire change.
-
-## v2.1.1 — sync and upgrade robustness (2026-11-23)
-
-### Added
-
-- **Upgrades say so.** Upgrading a project's database can take minutes on a
-  large one. The desktop app now shows a page ("step X of Y", what each step
-  does, elapsed time) before opening the project, instead of timing out after
-  30 s; `civex serve` migrates before it starts listening and prints each step;
-  the CLI prints "Upgrading this project's database (step X of Y)" to stderr
-  when there is something to do (and stays quiet otherwise). SQLite projects
-  take a file lock (`<database>.migrate-lock`), so a second civex process waits
-  instead of migrating the same file at once. For hosts, `civex.db.migrate`
-  gains `ensure_schema_current(..., progress=)`, `pending_migrations(engine)`
-  and `reporting_progress`.
 
 ## v2.1.0 — big collections stay fast, hosting hooks, partitioned PostgreSQL (2026-11-22)
 
