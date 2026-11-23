@@ -107,6 +107,15 @@ from the next tag forward.
 
 #### Changes
 
+- **A first upload that was interrupted always resumes.** A project whose
+  history was all settled with another server set no changes aside for the
+  upload, so nothing marked it unfinished: after the connect failed (or either
+  side restarted) the next sync sent nothing and the new server kept only the
+  part that had gone. `sync_meta.seed_open` (automatic migration) now records
+  that an upload began and is cleared when it finishes; the next sync or
+  connect finishes it, using the seed acks to skip what was answered. A sync
+  also says so (`notice`) when the server is behind where this copy had followed
+  it, instead of quietly sending nothing.
 - **A first upload to a hub is much faster.**
   - A first upload (seed) that is interrupted or reconnects **resumes after what
     the authority already answered** instead of sending the whole project from

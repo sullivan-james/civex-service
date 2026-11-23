@@ -1985,6 +1985,7 @@ class LocalSyncRepository:
         # And which files it said it holds or lacks: the new one is asked afresh.
         self._s.execute(delete(ServerFile))
         self._s.execute(delete(SeedAck))
+        self._meta_row().seed_open = False
         self._s.execute(delete(ServerLack))
         self._s.expire_all()
 
@@ -2068,11 +2069,16 @@ class LocalSyncRepository:
         wanted = [uuid.UUID(i) for i in ids]
         return {str(i) for (i,) in self._s.query(model.id).filter(model.id.in_(wanted))}
 
+    def seed_open(self) -> bool:
+        """A first upload was begun and has not finished (whatever it set aside)."""
+        return bool(self._meta_row().seed_open)
+
     def begin_seed(self) -> None:
         """Set aside the changes a seed covers: those not yet sent when the
         first attempt began. A seed run again after an interruption keeps the
         first attempt's set (any left are still `seeding`), so a change made in
         between is still sent on its own."""
+        self._meta_row().seed_open = True
         started = (
             self._s.query(AuditLog.id).filter(AuditLog.sync_state == "seeding").first()
         )
@@ -2118,6 +2124,7 @@ class LocalSyncRepository:
 
     def finish_seed(self) -> None:
         """The seed went in: what it covered counts as sent."""
+        self._meta_row().seed_open = False
         self._s.execute(delete(SeedAck))
         self._s.execute(
             update(AuditLog)

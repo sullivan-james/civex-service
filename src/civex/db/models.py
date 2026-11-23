@@ -1177,6 +1177,13 @@ class SyncMeta(Base):
     placed_from: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default="0"
     )
+    # Device: a first upload (seed) was begun and has not finished. Kept apart
+    # from the changes it sets aside (`audit_log.sync_state = 'seeding'`): a
+    # project whose history was all settled with another authority sets none
+    # aside, yet its records still have to go to this one.
+    seed_open: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
     # Device: how far fetching the history from before joining has looked, which
     # can be past the last entry stored (a device that may not read everything is
     # not sent what it may not see). NULL when not fetching.

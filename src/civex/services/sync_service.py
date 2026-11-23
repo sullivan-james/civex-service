@@ -875,7 +875,9 @@ class SyncService:
             # (A pull that moved the cursor on does not hide it: entries
             # still `seeding` mean the first upload is not done.)
             unfinished = hello.seeded_by == mine and (
-                meta.cursor == 0 or self._repo.count_seeding() > 0
+                meta.cursor == 0
+                or self._repo.count_seeding() > 0
+                or self._repo.seed_open()
             )
             if meta.cursor == JOINING or (local_empty and not hello.empty):
                 mode = "joined"
@@ -1218,12 +1220,26 @@ class SyncService:
             server_version=hello.server_version,
             notice=retiring_notice(hello.protocol_retiring, hello.protocol_version),
         )
+        if hello.head_seq < meta.cursor:
+            # Not an error (a server restored from a backup is caught up again
+            # by the next pull), but "sent 0" would hide that it is not the
+            # server this copy followed.
+            where = (
+                f"The server is at change {hello.head_seq} but this copy had "
+                f"followed it to {meta.cursor}: it may be a different server, or "
+                "one restored from a backup."
+            )
+            log.warning("sync with %s: %s", self._config.sync.remote, where)
+            report.notice = " ".join(filter(None, [report.notice, where]))
         # A first upload that never finished (the process stopped, or the
         # connection dropped) goes first, whatever the cursor says: a pull
         # would only bring back what of it had gone, and the rest would stay
         # `seeding`, sent by nothing. It is safe to run again (see `_seed`).
-        if self._repo.count_seeding():
-            if hello.seeded_by == str(user_state.device_id_for(meta.project_id)):
+        # (`seed_open` says so even when the seed set nothing aside: a history
+        # all settled with another authority has nothing to set aside.)
+        if self._repo.count_seeding() or self._repo.seed_open():
+            mine = str(user_state.device_id_for(meta.project_id))
+            if hello.seeded_by == mine or (hello.seeded_by is None and hello.empty):
                 log.info(
                     "sync with %s: finishing the first upload",
                     self._config.sync.remote,
