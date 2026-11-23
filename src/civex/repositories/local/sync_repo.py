@@ -342,6 +342,11 @@ class LocalSyncRepository:
                 if row is None:
                     row = ServerLack(sha256=sha, misses=0)
                     self._s.add(row)
+                elif not backoff and row.misses > 0:
+                    # Already noted and nothing to change: not rewritten (a
+                    # pass over tens of thousands of files would otherwise
+                    # update every row, every time, and bloat the table).
+                    continue
                 row.asked_at = now
                 if backoff or row.misses == 0:
                     row.misses += 1
