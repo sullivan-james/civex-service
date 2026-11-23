@@ -10,7 +10,11 @@ const jobs = vi.fn(() => ({ jobs: { data: [] } }))
 
 vi.mock('../hooks/useFeatures', () => ({ useFeatures: () => features }))
 vi.mock('../hooks/useCollections', () => ({
-  useCollections: () => ({ data: collections }),
+  useCollections: () => ({
+    data: collections,
+    isPending: false,
+    isSuccess: true,
+  }),
 }))
 vi.mock('../hooks/useWorkflows', () => ({ useJobsPaged: () => jobs() }))
 vi.mock('../components/home/HomeShortcuts', () => ({
