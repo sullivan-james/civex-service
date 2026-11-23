@@ -70,7 +70,7 @@ from civex.domain.sync import (
 from civex.repositories.protocols import ObjectStore, SyncRepository
 from civex.services.cascades import States, changed_records, record_states
 from civex.services.project_rules import ProjectRules
-from civex.services.record_service import RecordService
+from civex.services.record_service import IncomingCache, RecordService
 from civex.services.sync_applier import SyncApplier, stamp_of
 
 FEED_MAX = 500
@@ -331,11 +331,12 @@ class SyncAuthorityService:
         taken = _at_most(entries, PUSH_MAX)
         # What the push will ask about one change at a time (was it sent
         # before; the record it names) is read once, now the feed is locked.
-        with self._repo.push_scope(taken), self._records.incoming_cache() as cache:
+        cache = self._records.incoming_cache()
+        with self._repo.push_scope(taken):
             run: list[_Fast] = []
             for action in _actions(taken):
                 fast = (
-                    self._fast(who, action[0], run)
+                    self._fast(who, action[0], run, cache)
                     if self._bulk and len(action) == 1
                     else None
                 )
@@ -365,7 +366,13 @@ class SyncAuthorityService:
         self._log_push(who, entries, results)
         return PushResult(results, self._repo.head_seq())
 
-    def _fast(self, who: Principal, entry: SyncEntry, run: list[_Fast]) -> _Fast | None:
+    def _fast(
+        self,
+        who: Principal,
+        entry: SyncEntry,
+        run: list[_Fast],
+        cache: IncomingCache,
+    ) -> _Fast | None:
         """A record made new, which goes in with the rest of its run in bulk
         (`_flush_run`): None unless it is certain to be taken as it is, with
         nothing but its own rows written, and nothing to read that an earlier
@@ -400,12 +407,12 @@ class SyncAuthorityService:
                 )
             if final.get("parent_record_id") or final.get("deleted_at"):
                 return None
-            shape = self._records.shape_of(final)
+            shape = self._records.shape_of(final, cache)
             if shape is None or shape.schema.unique_keys:
                 return None  # what it must be unique among includes the run
             if self._records.cites_records(final, shape):
                 return None  # what it points at may be in the run
-            self._records.check_incoming(final, None)
+            self._records.check_incoming(final, None, cache)
         except (ValidationError, ValueError, TypeError, KeyError, AttributeError):
             return None
         return _Fast(entry, final)
