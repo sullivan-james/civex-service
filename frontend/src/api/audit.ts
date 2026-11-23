@@ -149,6 +149,8 @@ export interface HistoryStorage {
     { name: string; size_bytes: number; free_bytes: number }[] | null
   /** False where the host doesn't offer a reclaim. */
   can_reclaim?: boolean
+  /** After a reclaim: tables left for later because they were busy. */
+  reclaim_skipped?: string[]
 }
 
 export const auditApi = {

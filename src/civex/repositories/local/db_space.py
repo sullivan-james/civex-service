@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from sqlalchemy.engine import Engine
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from civex.domain import features
 from civex.domain.exceptions import FeatureUnavailableError
@@ -74,7 +74,7 @@ class LocalDbSpace:
         with self._engine.connect() as conn:
             rows = conn.exec_driver_sql(_TABLES_SQL).all()
             conn.rollback()
-        return [TableSpace(r[0], int(r[2]), int(r[3]), r[1]) for r in rows]
+        return [TableSpace(r[0], int(r[2] or 0), int(r[3] or 0), r[1]) for r in rows]
 
     @staticmethod
     def _worth(t: TableSpace) -> bool:
@@ -107,11 +107,12 @@ class LocalDbSpace:
             free = conn.exec_driver_sql("PRAGMA freelist_count").scalar() or 0
         return DbSpace(size_bytes=page * pages, free_bytes=page * free)
 
-    def reclaim(self) -> None:
+    def reclaim(self) -> list[str]:
         """Rewrite the file (SQLite) or the tables worth it (PostgreSQL) without
         their empty space. SQLite needs about the file's size in free disk and
         holds the database; PostgreSQL rewrites one table at a time, each locked
-        (reads too) while it runs, and needs about that table's size."""
+        (reads too) while it runs, and needs about that table's size. Returns
+        the tables skipped because another session held a lock (PostgreSQL)."""
         dialect = self._engine.dialect.name
         if dialect == "postgresql":
             if not self._may_vacuum_full:
@@ -124,19 +125,27 @@ class LocalDbSpace:
             with self._engine.connect().execution_options(
                 isolation_level="AUTOCOMMIT"
             ) as conn:
+                skipped: list[str] = []
                 try:
                     # Waiting for the lock queues every reader behind it: give up.
                     conn.exec_driver_sql("SET lock_timeout = '5s'")
                     for t in sorted(todo, key=lambda t: -t.free_bytes):
-                        conn.exec_driver_sql(
-                            f"VACUUM (FULL) {quote(t.schema)}.{quote(t.name)}"
-                        )
+                        try:
+                            conn.exec_driver_sql(
+                                f"VACUUM (FULL) {quote(t.schema)}.{quote(t.name)}"
+                            )
+                        except OperationalError as e:
+                            # Busy: this one is left for next time, the rest go on.
+                            if "lock" not in str(e).lower():
+                                raise
+                            skipped.append(t.name)
                 finally:
                     conn.exec_driver_sql("RESET lock_timeout")
-            return
+            return skipped
         if dialect != "sqlite":
-            return
+            return []
         with self._engine.connect().execution_options(
             isolation_level="AUTOCOMMIT"
         ) as conn:
             conn.exec_driver_sql("VACUUM")
+        return []

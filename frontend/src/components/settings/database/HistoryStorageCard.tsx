@@ -74,6 +74,12 @@ export function HistoryStorageCard() {
             )}
           </div>
         )}
+        {(reclaim.data?.reclaim_skipped?.length ?? 0) > 0 && (
+          <p role="status" className="text-xs text-warning">
+            Busy, so left for later: {reclaim.data?.reclaim_skipped?.join(', ')}
+            . Try again when nothing else is using the project.
+          </p>
+        )}
         {reclaim.error && (
           <p role="alert" className="text-xs text-danger">
             {errorMessage(reclaim.error)}

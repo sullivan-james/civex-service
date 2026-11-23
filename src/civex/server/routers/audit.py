@@ -10,7 +10,8 @@ from civex.context import AppContext
 from civex.domain.audit_filters import AUDIT_FIELDS
 from civex.domain.dtos import BatchRevertDTO
 from civex.domain.exceptions import ValidationError
-from civex.server.deps import get_ctx, reads_whole_project
+from civex.domain.permissions import MANAGE_MEMBERS
+from civex.server.deps import allows, get_ctx, reads_whole_project
 from civex.server.models import (
     BatchRevertRequest,
     BatchRevertResponse,
@@ -319,9 +320,16 @@ class HistoryStorageResponse(BaseModel):
     can_reclaim: bool = Field(
         default=True, description="False where the host doesn't offer a reclaim."
     )
+    reclaim_skipped: list[str] = Field(
+        default_factory=list,
+        description="After a reclaim: tables left for later because another "
+        "session held a lock on them.",
+    )
 
 
-def _storage(ctx: AppContext) -> HistoryStorageResponse:
+def _storage(
+    ctx: AppContext, skipped: list[str] | None = None
+) -> HistoryStorageResponse:
     from civex.services.history_jobs import history_jobs
 
     space = ctx.compaction_svc.space()
@@ -341,6 +349,7 @@ def _storage(ctx: AppContext) -> HistoryStorageResponse:
         if space and space.estimate
         else None,
         can_reclaim=space.can_reclaim if space else True,
+        reclaim_skipped=skipped or [],
     )
 
 
@@ -359,7 +368,7 @@ def history_storage(ctx: AppContext = Depends(get_ctx)):
 @router.post(
     "/audit/storage/reclaim",
     response_model=HistoryStorageResponse,
-    dependencies=[reads_whole_project()],
+    dependencies=[reads_whole_project(), allows(MANAGE_MEMBERS)],
 )
 def reclaim_history_storage(ctx: AppContext = Depends(get_ctx)):
     """Give unused room back to the disk: SQLite's VACUUM, or PostgreSQL's
@@ -372,8 +381,8 @@ def reclaim_history_storage(ctx: AppContext = Depends(get_ctx)):
             409, detail="History is still being converted; reclaim once it is done"
         )
     ctx.commit()  # nothing of this request may be open while the file is rewritten
-    ctx.compaction_svc.reclaim()
-    return _storage(ctx)
+    skipped = ctx.compaction_svc.reclaim()
+    return _storage(ctx, skipped)
 
 
 @router.get("/audit/{audit_id}", response_model=AuditLogResponse)

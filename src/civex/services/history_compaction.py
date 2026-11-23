@@ -47,10 +47,11 @@ class HistoryCompactionService:
         (None for a database civex can't measure)."""
         return self._space.space()
 
-    def reclaim(self) -> None:
+    def reclaim(self) -> list[str]:
         """Give the free room back (SQLite's VACUUM, PostgreSQL's VACUUM FULL of
-        the emptiest tables). Never automatic: it needs free disk and locks."""
-        self._space.reclaim()
+        the emptiest tables). Never automatic: it needs free disk and locks.
+        Returns the tables left for later because they were busy."""
+        return self._space.reclaim()
 
     def remaining(self) -> int:
         return self._audit.count_whole_edits()

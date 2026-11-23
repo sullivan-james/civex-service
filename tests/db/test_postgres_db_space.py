@@ -162,3 +162,21 @@ def test_table_without_stats_is_not_guessed_at(engine) -> None:
         c.execute(text("VACUUM fresh"))  # sets reltuples, writes no pg_stats
     space = LocalDbSpace(engine).space()
     assert space is not None and space.tables == [] and space.free_bytes == 0
+
+
+def test_a_busy_table_is_skipped_and_reported_not_fatal(engine) -> None:
+    _bloat(engine, "bloated")
+    _bloat(engine, "bloated2")
+    svc = LocalDbSpace(engine)
+    before, held = _size(engine, "bloated"), _size(engine, "bloated2")
+    holder = engine.connect()
+    try:
+        holder.execute(text("BEGIN"))
+        holder.execute(text("LOCK TABLE bloated IN ACCESS SHARE MODE"))
+        skipped = svc.reclaim()  # waits its 5 s for the lock, then moves on
+    finally:
+        holder.rollback()
+        holder.close()
+    assert skipped == ["bloated"]
+    assert _size(engine, "bloated") == before  # left as it was
+    assert _size(engine, "bloated2") < held / 4  # the others went on
