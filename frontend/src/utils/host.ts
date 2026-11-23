@@ -21,7 +21,9 @@ export interface Boot {
    * item. Anything else, or nothing, is civex's own chrome. */
   chrome?: 'full' | 'embedded'
   /** CSS custom properties to set on `:root`, by name (`--color-accent`):
-   * the host's colours for the app (see `index.css` for the tokens). */
+   * the host's colours for the app (see `index.css` for the tokens).
+   * `--content-max` and `--content-pad` set the page content's width and
+   * side padding (default `1600px`, `1.5rem`), to line it up with a host's. */
   theme?: Record<string, string>
   /** What to call the app and where its logo is, in place of "civex". */
   brand?: { name?: string; logo_url?: string }
