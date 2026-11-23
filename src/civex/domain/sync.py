@@ -768,6 +768,9 @@ class SyncProgress:
     bytes_done: int = 0
     rate: float = 0.0
     bytes_total: int | None = None
+    # Sending files: how many couldn't be read here (a drive not plugged in).
+    # Not counted in `done`, nor their bytes in `bytes_done`.
+    owed: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -778,6 +781,7 @@ class SyncProgress:
             "bytes_done": self.bytes_done,
             "bytes_total": self.bytes_total,
             "rate": self.rate,
+            "owed": self.owed,
         }
 
 

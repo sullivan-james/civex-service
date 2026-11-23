@@ -35,7 +35,8 @@ from the next tag forward.
   reads "x of N files · a of b GB" from the first moment and holds steady.
   A pass asks only about the slice of files it is about to send, time spent
   asking no longer counts against the upload budget, and a file the server
-  already holds counts as done. An `everything` pass still checks every file,
+  already holds counts as done; one that can't be read here is shown apart
+  ("N not readable here"), never as sent. An `everything` pass still checks every file,
   so one the server has lost is found and sent. Resumable and idempotent as
   before.
 

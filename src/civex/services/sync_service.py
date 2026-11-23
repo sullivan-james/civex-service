@@ -1621,6 +1621,7 @@ class SyncService:
         seconds: float | None = None,
         progress: ProgressFn | None = None,
         after: str = "",
+        should_stop: Callable[[], bool] | None = None,
     ) -> FileSendReport:
         """Make the authority hold every file a live record here cites and this
         computer can read. Apart from syncing: the records citing them went
@@ -1631,7 +1632,8 @@ class SyncService:
         found. Without `everything`, only files the authority hasn't yet said
         it holds are asked about (no request at all when there are none); with
         it, every file is asked about again, in case one it held has gone.
-        `seconds` stops a background pass between files; a file that can't be
+        `seconds` stops a background pass between files, and `should_stop`
+        (a pause, a shutdown) is asked between slices; a file that can't be
         read is counted in `owed` and left for next time. Raises `SyncError`
         when the authority can't be reached. Takes no sync lock: uploading
         changes no record, and the same file sent twice is stored once."""
@@ -1645,7 +1647,14 @@ class SyncService:
         if not first:
             return report
         self._send_files(
-            self._transport(), first, report, progress, seconds, after, everything
+            self._transport(),
+            first,
+            report,
+            progress,
+            seconds,
+            after,
+            everything,
+            should_stop,
         )
         self._commit()
         if report.owed:
@@ -1685,6 +1694,7 @@ class SyncService:
         seconds: float | None = None,
         after: str = "",
         everything: bool = False,
+        should_stop: Callable[[], bool] | None = None,
     ) -> None:
         """The one way files go to the authority: starting from `page` (the
         first slice of hashes after `after`), the authority is asked which of
@@ -1693,7 +1703,8 @@ class SyncService:
         is read and asked about, so it is only ever asked about the slice about
         to go (not about every file still owed, on every pass). `progress` is
         told how far along it is: files and bytes settled (sent, found on the
-        server already, or unreadable here) of everything still to settle,
+        server already) of everything still to settle (a file that can't be read
+        here is counted apart, as `owed`, never as sent),
         counted from the inventory in one query before the first file, so the
         total is known from the start and does not grow as slices are asked
         about. Stops between files once `seconds` of uploading are spent;
@@ -1702,9 +1713,11 @@ class SyncService:
         # Of what is still unconfirmed after `after`: the files, and their bytes
         # where this computer holds a copy (the size the bar goes by).
         total_files, total_bytes = (
-            self._repo.unconfirmed_totals(after) if progress else (0, 0)
+            self._repo.unconfirmed_totals(after, self._files.volume_names())
+            if progress
+            else (0, 0)
         )
-        done = settled_bytes = inflight = sent_bytes = tried = 0
+        done = settled_bytes = inflight = sent_bytes = tried = unread = 0
         spent = 0.0  # time uploading: the clock `seconds` is measured on
         said = 0.0
 
@@ -1716,7 +1729,7 @@ class SyncService:
             # Asking isn't charged to the upload budget, but a pass that has
             # only asked (nothing to send) still yields now and then.
             return (tried > 0 and spent >= seconds) or (
-                time.monotonic() - started >= max(seconds * 6, 60.0)
+                time.monotonic() - started >= max(seconds * 2, 1.0)
             )
 
         def say(force: bool = False) -> None:
@@ -1724,13 +1737,16 @@ class SyncService:
             now = time.monotonic()
             if progress and total_files and (force or now - said >= 0.25):
                 said = now
-                total_files = max(total_files, done)
+                # Grows only when a file is cited after the total was counted
+                # (a record edited mid-run): it is then really more to send.
+                total_files = max(total_files, done + unread)
                 total_bytes = max(total_bytes, settled_bytes + inflight)
                 progress(
                     SyncProgress(
                         SENDING,
                         done,
                         total_files,
+                        owed=unread,
                         bytes_done=settled_bytes + inflight,
                         bytes_total=total_bytes,
                         rate=rate.add(now, sent_bytes),
@@ -1745,7 +1761,7 @@ class SyncService:
 
         say(force=True)
         while page:
-            if over():
+            if over() or (should_stop is not None and should_stop()):
                 report.stopped = True
                 return
             # Which of these the authority hasn't confirmed yet: the ones the
@@ -1792,8 +1808,14 @@ class SyncService:
                     if sha not in report.owed:
                         report.owed.append(sha)
                     log.debug("file %s not sent: %s", sha[:12], why)
-                done += 1
-                settled_bytes += sizes.get(sha, inflight)
+                if why is None:
+                    done += 1
+                    settled_bytes += sizes.get(sha, inflight)
+                else:
+                    unread += 1  # not sent: counted apart, no bytes claimed
+                    # Its bytes can never be sent from here: the byte total is
+                    # of what can be read (known once it was tried).
+                    total_bytes = max(settled_bytes, total_bytes - sizes.get(sha, 0))
                 inflight = 0
                 report.resume_after = sha  # settled: the next pass starts after
                 say(force=True)

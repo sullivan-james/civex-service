@@ -180,6 +180,8 @@ export interface SyncProgress {
   bytes_done?: number
   bytes_total?: number | null
   rate?: number
+  /** Sending: files that could not be read here (not counted in `done`). */
+  owed?: number
 }
 
 /** Why files not on the server haven't gone. */

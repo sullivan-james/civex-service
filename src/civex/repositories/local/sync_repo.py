@@ -241,6 +241,17 @@ class LocalSyncRepository:
         not every reference each time: with tens of thousands of files, a
         `DISTINCT` over all of them per page was minutes of work and tens of
         megabytes of shared memory for PostgreSQL's parallel workers."""
+        return (
+            self._referenced_unordered(after, unconfirmed)
+            .group_by(FileReference.sha256)
+            .order_by(FileReference.sha256)
+            .limit(limit)
+        )
+
+    def _referenced_unordered(self, after: str, unconfirmed: bool):  # type: ignore[no-untyped-def]
+        """The references after `after` (optionally only those the authority
+        hasn't confirmed), one row each, ungrouped: for a page (grouped,
+        ordered and limited) or an aggregate (grouped, nothing else)."""
         sha = FileReference.sha256
         # An EXISTS per candidate row, not a join: the planner can then walk
         # the index in order and stop at the limit.
@@ -258,7 +269,7 @@ class LocalSyncRepository:
             query = query.where(
                 ~select(ServerFile.sha256).where(ServerFile.sha256 == sha).exists()
             )
-        return query.group_by(sha).order_by(sha).limit(limit)
+        return query
 
     def _referenced(self):  # type: ignore[no-untyped-def]
         """The column of every file this project needs the authority to hold:
@@ -279,20 +290,29 @@ class LocalSyncRepository:
         page = self._referenced_page("", 2**31, True).subquery()
         return int(self._s.execute(select(func.count()).select_from(page)).scalar_one())
 
-    def unconfirmed_totals(self, after: str = "") -> tuple[int, int]:
+    def unconfirmed_totals(
+        self, after: str = "", volumes: Iterable[str] | None = None
+    ) -> tuple[int, int]:
         """(files, bytes) of what live records cite (and releases keep) after
         `after` that the authority hasn't said it holds: one aggregate over the
         references and the inventory, never a list. Bytes are of the copy this
-        computer holds (a file with none counts as a file, and no bytes)."""
-        pending = self._referenced_page(after, 2**31, True).subquery()
+        computer holds on the `volumes` named (all, when None; a copy on a
+        volume no longer configured isn't one), a file with none counting as a
+        file with no bytes. No ORDER BY or LIMIT: it is a count and a sum."""
+        pending = (
+            self._referenced_unordered(after, True)
+            .group_by(FileReference.sha256)
+            .subquery()
+        )
+        on = StoredObject.sha256 == pending.c.sha256
+        if volumes is not None:
+            on = on & StoredObject.volume.in_(list(volumes))
         sized = (
             select(
                 pending.c.sha256,
                 func.max(StoredObject.size).label("size"),
             )
-            .select_from(
-                pending.outerjoin(StoredObject, StoredObject.sha256 == pending.c.sha256)
-            )
+            .select_from(pending.outerjoin(StoredObject, on))
             .group_by(pending.c.sha256)
             .subquery()
         )

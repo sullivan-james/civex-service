@@ -268,11 +268,12 @@ def send(
             def told(p) -> None:  # noqa: ANN001 — SyncProgress
                 rate = f", {format_bytes(int(p.rate))}/s" if p.rate else ""
                 of = f" of {format_bytes(p.bytes_total)}" if p.bytes_total else ""
+                unread = f", {p.owed} not readable here" if p.owed else ""
                 bar.update(
                     task,
                     total=p.total,
                     completed=p.done,
-                    sent=f"{format_bytes(p.bytes_done or 0)}{of}{rate}",
+                    sent=f"{format_bytes(p.bytes_done or 0)}{of}{rate}{unread}",
                 )
 
             try:
