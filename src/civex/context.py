@@ -759,7 +759,8 @@ def build_context(
         policy=may,
         notes=note_svc,
         capabilities=CAPABILITIES
-        + ((DIRECT_FILES,) if features.DIRECT_FILES in project.features else ()),
+        + ((DIRECT_FILES,) if features.DIRECT_FILES in project.features else ())
+        + (("file_parts",) if file_svc.takes_parts else ()),
     )
     sync_svc = SyncService(
         config,

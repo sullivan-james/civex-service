@@ -807,6 +807,36 @@ class ObjectStore(Protocol):
         what it writes. `progress` is told how many files have been read."""
         ...
 
+    # -- a big file in parts through civex (`file_parts`) --------------------
+    # Only a store on drives here takes them (`supports_parts`); a bucket takes
+    # them straight (`upload_target`).
+    supports_parts: bool
+
+    def begin_parts(
+        self,
+        sha256: str,
+        size: int,
+        part_size: int,
+        collection_id: str | None = None,
+    ) -> tuple[int, list[int]]:
+        """Begin or pick up receiving a file in parts: the part size in force
+        and the numbers of the parts already held (so an interrupted upload
+        sends only the rest)."""
+        ...
+
+    async def put_part(
+        self, sha256: str, number: int, chunks: AsyncIterable[bytes]
+    ) -> None: ...
+    def finish_parts(
+        self,
+        sha256: str,
+        size: int,
+        original_filename: str,
+        collection_id: str | None = None,
+    ) -> FileRef:
+        """Check the parts and the hash of the whole (one read), then store."""
+        ...
+
     # -- straight to storage (`direct_files`) --------------------------------
     def upload_target(self, sha256: str, size: int) -> DirectUpload | None:
         """Where an uploader may PUT `size` bytes that hash to `sha256` without

@@ -37,7 +37,26 @@ SCOPED_PROTOCOL = 5
 PROTOCOL_RETIRING: int | None = None
 # Optional features, by name, that a peer can look for in `Hello`. Adding one is
 # not a protocol change; an older peer just doesn't have it.
-CAPABILITIES: tuple[str, ...] = ("library", "device_login")
+CAPABILITIES: tuple[str, ...] = ("library", "device_login", "file_packs")
+# Many small files in one request (`POST /files/pack`): each is checked and
+# stored, and the answer says which went in. Offered by every authority that
+# serves; one without it is sent the files one request each.
+FILE_PACKS = "file_packs"
+# A big file in numbered parts, several at a time, resumable: `POST
+# /files/{sha}/parts` (answers which parts are held), `PUT /files/{sha}/parts/{n}`
+# and `POST /files/{sha}/parts/complete`. Offered when the authority's files are
+# on drives (a bucket takes parts straight, `direct_files`).
+FILE_PARTS = "file_parts"
+# The limits a pack and a part keep to, on both sides: a file in a pack is
+# smaller than PACK_FILE_MAX, a pack holds at most PACK_MAX_FILES files and
+# PACK_MAX_BYTES bytes; a part is FILE_PART_BYTES unless the file is so big that
+# MAX_FILE_PARTS parts would not cover it.
+PACK_FILE_MAX = 64 * 1024 * 1024
+PACK_MAX_FILES = 1000
+PACK_MAX_BYTES = 256 * 1024 * 1024
+FILE_PART_BYTES = 16 * 1024 * 1024
+FILE_PART_MIN = 1024 * 1024
+MAX_FILE_PARTS = 10_000
 # A device may ask to join without an invite: it shows a short code, a person
 # approves it on the authority (`POST /device-login`, polled at
 # `GET /device-login/{device_code}`).

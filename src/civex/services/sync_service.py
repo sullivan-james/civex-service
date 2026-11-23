@@ -108,6 +108,17 @@ LARGE_FILE_BYTES = 8 * 1024 * 1024
 # files, or this many seconds, whichever comes first.
 SMALL_FILE_GROUP = 50
 SMALL_FILE_GROUP_SECONDS = 2.0
+# Where the authority takes packs (`file_packs`), small files go many to a
+# request: a pack is closed at this many bytes or files, whichever comes
+# first, and this many are on their way at once. (Each open file is a handle,
+# so the files held at once are at most PACKS_IN_FLIGHT + 1 packs' worth.)
+PACK_BYTES = 32 * 1024 * 1024
+PACK_FILES = 100
+PACKS_IN_FLIGHT = 4
+# The slice asked about at a time when sending in packs: a slice is settled
+# before the next is read, so a bigger one means fewer pauses for the packs
+# still on their way (the authority answers up to 5000 per request).
+PACKED_CHECK_PAGE = 4000
 FEED_PAGE = 200
 SNAPSHOT_PAGE = 200
 
@@ -1749,8 +1760,10 @@ class SyncService:
                 return False
             # Asking isn't charged to the upload budget, but a pass that has
             # only asked (nothing to send) still yields now and then.
-            return (tried > 0 and spent >= seconds) or (
-                time.monotonic() - started >= max(seconds * 2, 1.0)
+            now = time.monotonic()
+            charged = spent + (now - group_began[0] if group_began else 0.0)
+            return (tried > 0 and charged >= seconds) or (
+                now - started >= max(seconds * 2, 1.0)
             )
 
         def say(force: bool = False) -> None:
@@ -1816,56 +1829,122 @@ class SyncService:
             say(force=True)
 
         # Small files go through `add`: opened here (the store's session is not
-        # for other threads), sent by the pool where the transport allows it,
-        # and confirmed and committed together at `drain`. Large ones never do.
+        # for other threads), sent by the pool where the transport allows it
+        # (many to a request where it takes packs), and confirmed and committed
+        # together as they arrive. Large ones never do.
         threads = max(1, int(getattr(transport, "upload_threads", 1)))
         pool = ThreadPoolExecutor(threads) if threads > 1 else None
+        accepts = getattr(transport, "accepts_packs", None)
+        packing = pool is not None and callable(accepts) and bool(accepts())
         arrived: list[str] = []
-        flying: list[tuple[str, Future[bool]]] = []
+        # What is on its way: the hashes sent together, and the answer to come
+        # (per hash: None when stored, else why not; a hash missing from it was
+        # not answered and is simply left for the next pass).
+        flying: list[tuple[list[str], Future[dict[str, str | None]]]] = []
+        pack: list[tuple[str, BinaryIO, int]] = []
+        pack_bytes = 0
         failed = threading.Event()
         unreadable: list[tuple[str, str]] = []
         group_began: list[float] = []
 
-        def run(f: BinaryIO, sha: str, size: int) -> bool:
+        def run(f: BinaryIO, sha: str, size: int) -> dict[str, str | None]:
             try:
                 if failed.is_set():
-                    return False  # a file before it failed: nothing more goes
+                    return {}  # a file before it failed: nothing more goes
                 transport.upload_file(sha, _Counting(f, went_in_pool), size)  # type: ignore[arg-type]
-                return True
+                return {sha: None}
             except BaseException:
                 failed.set()
                 raise
             finally:
                 f.close()
 
+        def run_pack(items: list[tuple[str, BinaryIO, int]]) -> dict[str, str | None]:
+            try:
+                if failed.is_set():
+                    return {}
+                counted = [
+                    (sha, _Counting(f, went_in_pool), size) for sha, f, size in items
+                ]
+                return transport.upload_pack(counted)  # type: ignore[attr-defined,arg-type]
+            except BaseException:
+                failed.set()
+                raise
+            finally:
+                for _, f, _ in items:
+                    f.close()
+
+        def keep(shas: list[str], answer: dict[str, str | None]) -> None:
+            for sha in shas:
+                if sha not in answer:
+                    continue
+                if answer[sha] is None:
+                    arrived.append(sha)
+                else:
+                    unreadable.append((sha, f"the server refused it: {answer[sha]}"))
+
+        def record() -> None:
+            """What arrived is confirmed and committed together."""
+            if not arrived:
+                return
+            self._repo.confirm_on_server(arrived)
+            self._commit()
+            report.sent += len(arrived)
+            for sha in arrived:
+                log.debug("sent file %s", sha[:12])
+                settle(sha, None)
+            arrived.clear()
+
+        def send_pack() -> None:
+            nonlocal pack_bytes
+            items = list(pack)
+            pack.clear()
+            pack_bytes = 0
+            while pool is not None and len(flying) >= PACKS_IN_FLIGHT:
+                reap()
+            assert pool is not None
+            flying.append(([s for s, _, _ in items], pool.submit(run_pack, items)))
+
+        def reap() -> None:
+            """Wait for the oldest pack on its way and keep what arrived (so
+            settling goes in the order sent). If it failed, everything on its
+            way is waited for and the failure is raised."""
+            shas, fut = flying[0]
+            wait([fut])
+            if fut.exception() is not None:
+                drain()  # raises it, after keeping what arrived
+            flying.pop(0)
+            keep(shas, fut.result())
+            record()
+
         def drain(quiet: bool = False) -> None:
             """Wait for the small files in flight, then keep every one that
             arrived (confirmed and committed together), whatever happened to
             the others. The first failure is raised once that is done."""
-            nonlocal spent, inflight
+            nonlocal spent, pack_bytes, inflight
             error: BaseException | None = None
+            if pack:
+                if quiet:
+                    for _, f, _ in pack:
+                        f.close()
+                    pack.clear()
+                    pack_bytes = 0
+                else:
+                    send_pack()
             if flying:
                 pending_uploads = {f for _, f in flying}
                 while pending_uploads:
                     _done, pending_uploads = wait(pending_uploads, timeout=0.25)
                     say()  # bytes move while the small files go
-            for sha, fut in flying:
+            for shas, fut in flying:
                 try:
-                    if fut.result():
-                        arrived.append(sha)
+                    keep(shas, fut.result())
                 except BaseException as e:
                     error = error or e
             flying.clear()
             failed.clear()
             inflight = 0  # the group is settled (or failed): nothing in flight
-            if arrived:
-                self._repo.confirm_on_server(arrived)
-                self._commit()
-                report.sent += len(arrived)
-                for sha in arrived:
-                    log.debug("sent file %s", sha[:12])
-                    settle(sha, None)
-                arrived.clear()
+            record()
             if group_began:
                 spent += time.monotonic() - group_began.pop()
             if error is None:
@@ -1878,7 +1957,7 @@ class SyncService:
                 raise error
 
         def add(sha: str, size: int) -> None:
-            nonlocal tried, inflight
+            nonlocal tried, inflight, pack_bytes
             tried += 1
             if not group_began:
                 group_began.append(time.monotonic())
@@ -1890,8 +1969,14 @@ class SyncService:
             except FileNotFoundError:
                 unreadable.append((sha, "its copy here couldn't be read"))
                 return
+            if packing:
+                pack.append((sha, f, size))
+                pack_bytes += size
+                if pack_bytes >= PACK_BYTES or len(pack) >= PACK_FILES:
+                    send_pack()
+                return
             if pool is not None:
-                flying.append((sha, pool.submit(run, f, sha, size)))
+                flying.append(([sha], pool.submit(run, f, sha, size)))
             else:
                 try:
                     transport.upload_file(sha, _Counting(f, went), size)
@@ -1965,7 +2050,9 @@ class SyncService:
                 drain()
                 report.resume_after = page[-1]
                 page = self._repo.referenced_shas(
-                    page[-1], FILE_CHECK_PAGE, unconfirmed=not everything
+                    page[-1],
+                    PACKED_CHECK_PAGE if packing else FILE_CHECK_PAGE,
+                    unconfirmed=not everything,
                 )
         finally:
             try:

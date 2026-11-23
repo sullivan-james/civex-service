@@ -12,12 +12,13 @@ from __future__ import annotations
 
 import json
 import threading
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 import socket
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from typing import Any
 
@@ -25,6 +26,9 @@ from civex import keys
 from civex.domain.dtos import DirectUpload
 from civex.domain.sync import (
     DIRECT_FILES,
+    FILE_PACKS,
+    FILE_PART_BYTES,
+    FILE_PARTS,
     DeviceCredentials,
     FeedPage,
     Hello,
@@ -44,6 +48,10 @@ from civex.domain.sync import (
 from civex.tls import certificate_problem, ssl_context
 
 _CHUNK = 1024 * 1024
+# A file above this many bytes goes in parts, this many at a time (each part is
+# held in memory while it is sent, so at most PART_THREADS x the part size is).
+PARTS_MIN_BYTES = 2 * FILE_PART_BYTES
+PART_THREADS = 4
 API = "/api/sync/v1"
 
 
@@ -157,9 +165,44 @@ class HttpSyncTransport:
         body = self._json("POST", "/files/missing", {"sha256": shas})
         return list(body["missing"])
 
+    def accepts_packs(self) -> bool:
+        """Whether the authority takes many small files in one request."""
+        return self._offers(FILE_PACKS)
+
+    def upload_pack(
+        self, items: list[tuple[str, UploadSource, int]]
+    ) -> dict[str, str | None]:
+        """Send small files in one request, each read from its start and
+        streamed (nothing but the chunk in hand is held). Answers, per file,
+        None when the authority stored it, else why not; a file the answer
+        does not mention is not in the dict. Raises `SyncError` when the
+        request itself fails: then nothing is known to have arrived."""
+        body = _PackBody(items)
+
+        def send() -> dict[str, Any]:
+            body.rewind()
+            request = self._signed_in("POST", "/files/pack", data=body)
+            request.add_header("Content-Length", str(body.length))
+            request.add_header("Content-Type", "application/octet-stream")
+            with self._open(request) as response:
+                return json.loads(response.read().decode("utf-8"))
+
+        answer = self._again_if_expired(send)
+        return {
+            r["sha256"]: None if r.get("stored") else (r.get("error") or "refused")
+            for r in answer.get("results", [])
+        }
+
     def upload_file(self, sha256: str, source: UploadSource, size: int) -> None:
         start = source.tell()
+        big = size > PARTS_MIN_BYTES
         if self._offers(DIRECT_FILES) and self._upload_direct(sha256, source, size):
+            return
+        if (
+            big
+            and self._offers(FILE_PARTS)
+            and self._upload_parts(sha256, source, size)
+        ):
             return
 
         def send():
@@ -171,10 +214,43 @@ class HttpSyncTransport:
 
         self._again_if_expired(send)
 
+    def _upload_parts(self, sha256: str, source: UploadSource, size: int) -> bool:
+        """Send a big file to the authority in parts, several at a time
+        (capability `file_parts`). The authority says which parts it already
+        holds from an upload that was interrupted, and those are not sent
+        again. False when it wants the file streamed whole after all."""
+        try:
+            begun = self._json(
+                "POST",
+                f"/files/{sha256}/parts",
+                {"size": size, "part_size": FILE_PART_BYTES},
+            )
+        except SyncError as e:
+            if e.status == 501:
+                return False
+            raise
+        part_size = int(begun["part_size"])
+        held = set(begun.get("received", []))
+
+        def put(number: int, data: bytes) -> None:
+            def send() -> None:
+                request = self._signed_in(
+                    "PUT", f"/files/{sha256}/parts/{number}", data=data
+                )
+                request.add_header("Content-Length", str(len(data)))
+                request.add_header("Content-Type", "application/octet-stream")
+                self._open(request).close()
+
+            self._again_if_expired(send)
+
+        _in_parts(source, size, part_size, held, put)
+        self._json("POST", f"/files/{sha256}/parts/complete", {"size": size})
+        return True
+
     def _upload_direct(self, sha256: str, source: UploadSource, size: int) -> bool:
         """Send the file straight to the authority's storage: ask where, PUT
-        the bytes there (whole, or a part at a time), then say it is done.
-        True when the authority has the file (it had it, or it went in);
+        the bytes there (whole, or in parts several at a time), then say it is
+        done. True when the authority has the file (it had it, or it went in);
         False when it wants the bytes streamed to it after all."""
         try:
             answer = self._json("POST", f"/files/{sha256}/upload", {"size": size})
@@ -190,10 +266,14 @@ class HttpSyncTransport:
         if target.url is not None:
             self._put_to_storage(target.url, target.headers, source, size)
         else:
-            for part in target.parts:
-                data = source.read(target.part_size)
-                etag = self._put_to_storage(part.url, {}, data, len(data))
-                parts.append({"number": part.number, "etag": etag})
+            urls = {p.number: p.url for p in target.parts}
+            etags: dict[int, str] = {}
+
+            def put(number: int, data: bytes) -> None:
+                etags[number] = self._put_to_storage(urls[number], {}, data, len(data))
+
+            _in_parts(source, size, target.part_size, set(), put)
+            parts = [{"number": n, "etag": etags[n]} for n in sorted(etags)]
         self._json(
             "POST",
             f"/files/{sha256}/complete",
@@ -423,6 +503,96 @@ class HttpSyncTransport:
             ) from e
         except (urllib.error.URLError, socket.timeout, ConnectionError, OSError) as e:
             raise SyncError(f"Could not reach storage: {_reason(e)}") from e
+
+
+class _PackBody:
+    """A pack's request body, read as it is sent: for each file a line
+    `<sha256> <size>` and the file's bytes (a megabyte at a time). It can be
+    rewound, to send again."""
+
+    def __init__(self, items: list[tuple[str, UploadSource, int]]) -> None:
+        self._items = items
+        self.length = sum(len(f"{sha} {size}\n") + size for sha, _, size in items)
+        self.rewind()
+
+    def rewind(self) -> None:
+        for _, source, _ in self._items:
+            source.seek(0)
+        self._frames = self._generate()
+        self._buf = b""
+        self._pos = 0
+
+    def _generate(self) -> Iterator[bytes]:
+        for sha, source, size in self._items:
+            yield f"{sha} {size}\n".encode("ascii")
+            left = size
+            while left:
+                chunk = source.read(min(left, _CHUNK))
+                if not chunk:
+                    raise ValueError("a file being sent was cut short")
+                left -= len(chunk)
+                yield chunk
+
+    def read(self, n: int = -1) -> bytes:
+        while n < 0 or len(self._buf) - self._pos < n:
+            chunk = next(self._frames, None)
+            if chunk is None:
+                break
+            self._buf = self._buf[self._pos :] + chunk
+            self._pos = 0
+        end = len(self._buf) if n < 0 else self._pos + n
+        out = self._buf[self._pos : end]
+        self._pos += len(out)
+        return out
+
+
+def _in_parts(
+    source: UploadSource,
+    size: int,
+    part_size: int,
+    held: set[int],
+    put: Callable[[int, bytes], None],
+) -> None:
+    """Read `source` a part at a time and `put` each (but those in `held`),
+    PART_THREADS at once. One thread reads, in order, so the file is read once;
+    it waits for a free slot before reading the next part, so memory holds at
+    most PART_THREADS parts. The first failure stops reading, lets the parts in
+    flight finish (they stay with the authority, for the next try), and is
+    raised."""
+    count = max(1, -(-size // part_size)) if size else 0
+    slots = threading.BoundedSemaphore(PART_THREADS)
+    flying: set[Future[None]] = set()
+    failure: list[BaseException] = []
+
+    def send(number: int, data: bytes) -> None:
+        try:
+            put(number, data)
+        except BaseException as e:
+            failure.append(e)
+            raise
+        finally:
+            slots.release()
+
+    with ThreadPoolExecutor(PART_THREADS) as pool:
+        for number in range(1, count + 1):
+            length = min(part_size, size - (number - 1) * part_size)
+            if number in held:
+                source.seek(length, 1)  # held already: counted, not sent
+                continue
+            slots.acquire()
+            if failure:
+                slots.release()
+                break
+            data = source.read(length)
+            if len(data) != length:
+                slots.release()
+                raise ValueError("a file being sent was cut short")
+            flying.add(pool.submit(send, number, data))
+            del data
+            flying -= {f for f in flying if f.done()}
+        wait(flying)
+    if failure:
+        raise failure[0]
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
