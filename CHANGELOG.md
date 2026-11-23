@@ -23,30 +23,31 @@ from the next tag forward.
 
 ## Unreleased
 
-### Fixed
+## v2.2.0 — hidden collections and filtered sync, hosted chrome, CLI sign-in (2026-11-23)
 
-- **A busy database is no longer reported as a broken one.** A SQLite
-  "database is locked" during sync was shown as "this computer's database isn't
-  in the shape civex expects ... failed (will not retry until fixed)". It is now
-  a transient "another civex process is using this project" failure: the sync
-  waits up to 10 s for another sync on the project (`civex sync` says so and
-  skips when it is still running), and retries a lock error a few times (1, 3 and
-  6 s) before giving up, to be tried again by the background worker. A truly bad
-  schema is reported as before.
-- **Files that can't be sent no longer log one INFO line each, every sync.** One
-  summary line per pass (count, a few ids); each file is at DEBUG. Files this
-  project never stored (records cite them, no drive ever held them) are named in
-  the summary with the collections whose records cite them, and listed in
-  `civex sync status` and after `civex sync`.
-- **Changes the authority refused for permission are sent again by themselves.**
-  The refusal now carries `code: "permission"` (in the `conflicts` item of the
-  push result; older devices ignore it, and an older authority sends none, so
-  nothing is sent again by itself from it). A permission refusal is sent again 15
-  minutes after it, then after 1 h, 4 h, 16 h, then daily, so a change that is
-  still forbidden is not asked every sync. Other refusals (a value that breaks a
-  rule) are left for a person. The sync report and `civex sync` say how many
-  refused changes wait and print `civex sync resolve --all --take retry --kind
-  rejected`.
+### Breaking
+
+- **Sync protocol 5.** A device whose person may not read every collection must
+  be on protocol 5: on protocol 4 the authority answers 426 ("update civex on this
+  device"). Update such devices (and the authority first). A device whose person
+  reads everything still works on any supported protocol (3 to 5).
+- **Migrations (applied automatically, all small and additive):** `a3c7e1d9f5b4`
+  adds `code`, `retries` and `retried_at` to `sync_conflicts`; `c8d2f4a6b1e7`
+  adds `ignored_missing_files`; `e7a1c5d9b3f2` adds `misses` and `retry_at` to
+  `server_lacks`; `d9e3a5c7f1b4` adds `sync_meta.readable` (what a device was
+  told it may read).
+- **New feature flags hosts must know about:** `settings`, `settings_appearance`,
+  `settings_retention`, `settings_map`, `settings_advanced`, `settings_devices`
+  and `settings_members` (all on locally; a host that lists its features must
+  add the ones it wants). `/remote`, `/remote/files*` and `/remote/conflicts*`
+  are now gated on `remote_dial` and answer 501 on a host without it. New
+  permission actions: `add_files`, `delete_files`, `notes`, `views`,
+  `manage_devices`.
+- **Documented limits.** Taking access away cannot claw back what a device
+  already copied: it stays on that computer. A grant made after a device finished
+  downloading history does not backfill earlier Activity history for that
+  collection: the device gets the records, but Activity shows only later changes.
+
 
 ### Added
 
@@ -108,24 +109,6 @@ from the next tag forward.
 - **`civex auth status`** shows the authority, this device's name and id, whether
   it has joined, and the last sync error.
 
-### Fixed
-
-- A project holding file references nobody has the bytes of no longer shows
-  "Downloading files 0 of N" forever. A file the server said it hasn't got is
-  remembered in the project (not in worker memory), asked for again only after a
-  wait that doubles from 10 minutes up to a day, and at once when a change to a
-  record citing it arrives. It is counted as "N files are missing everywhere"
-  (`files_missing` in `/api/remote`, `civex sync status`, Settings, pointing to
-  `civex files missing`), not as downloading, and `--ignore` hides it from both
-  counts. No wire change.
-
-### Breaking
-
-- Migration `a3c7e1d9f5b4` adds `code`, `retries` and `retried_at` to
-  `sync_conflicts`, `c8d2f4a6b1e7` adds `ignored_missing_files`, and `e7a1c5d9b3f2` adds
-  `misses` and `retry_at` to `server_lacks` (applied
-  automatically).
-
 ### Changes
 
 - A host can draw civex's chrome itself. The boot object (`window.__CIVEX__`,
@@ -148,6 +131,46 @@ from the next tag forward.
   `/remote/files*` and `/remote/conflicts*` now answer 501 on a host without it,
   like `/remote/connect` and `/remote/sync`; the app's status poll stops asking
   there.
+
+### Fixed
+
+- **Sync's file download works on PostgreSQL.** The step that picks a collection
+  for each missing file failed with `function min(uuid) does not exist`; it now
+  works on both databases.
+- **Undoing a bulk edit is more exact.** Records dropped between plan and save
+  are reported as left, not counted as undone; the entries of a batch are undone
+  in write order; a record changed by an earlier restore or delete in the same
+  undo is read again before a later entry for it is judged.
+- **A busy database is no longer reported as a broken one.** A SQLite
+  "database is locked" during sync was shown as "this computer's database isn't
+  in the shape civex expects ... failed (will not retry until fixed)". It is now
+  a transient "another civex process is using this project" failure: the sync
+  waits up to 10 s for another sync on the project (`civex sync` says so and
+  skips when it is still running), and retries a lock error a few times (1, 3 and
+  6 s) before giving up, to be tried again by the background worker. A truly bad
+  schema is reported as before.
+- **Files that can't be sent no longer log one INFO line each, every sync.** One
+  summary line per pass (count, a few ids); each file is at DEBUG. Files this
+  project never stored (records cite them, no drive ever held them) are named in
+  the summary with the collections whose records cite them, and listed in
+  `civex sync status` and after `civex sync`.
+- **Changes the authority refused for permission are sent again by themselves.**
+  The refusal now carries `code: "permission"` (in the `conflicts` item of the
+  push result; older devices ignore it, and an older authority sends none, so
+  nothing is sent again by itself from it). A permission refusal is sent again 15
+  minutes after it, then after 1 h, 4 h, 16 h, then daily, so a change that is
+  still forbidden is not asked every sync. Other refusals (a value that breaks a
+  rule) are left for a person. The sync report and `civex sync` say how many
+  refused changes wait and print `civex sync resolve --all --take retry --kind
+  rejected`.
+- A project holding file references nobody has the bytes of no longer shows
+  "Downloading files 0 of N" forever. A file the server said it hasn't got is
+  remembered in the project (not in worker memory), asked for again only after a
+  wait that doubles from 10 minutes up to a day, and at once when a change to a
+  record citing it arrives. It is counted as "N files are missing everywhere"
+  (`files_missing` in `/api/remote`, `civex sync status`, Settings, pointing to
+  `civex files missing`), not as downloading, and `--ignore` hides it from both
+  counts. No wire change.
 
 ## v2.1.0 — big collections stay fast, hosting hooks, partitioned PostgreSQL (2026-11-22)
 
