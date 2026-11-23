@@ -1582,6 +1582,15 @@ class LocalSyncRepository:
             or 0
         )
 
+    def count_seeding(self) -> int:
+        """Changes a first upload set aside and has not finished sending."""
+        return (
+            self._s.query(func.count(AuditLog.id))
+            .filter(AuditLog.sync_state == "seeding")
+            .scalar()
+            or 0
+        )
+
     def dirty_entities(self) -> set[tuple[str, uuid.UUID]]:
         """Things with a change here still waiting to be sent: what a pull must
         not overwrite."""

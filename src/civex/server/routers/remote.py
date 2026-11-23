@@ -47,6 +47,10 @@ class RemoteStatusResponse(BaseModel):
     )
     serving: bool = Field(description="This project is itself an authority.")
     pending: int = Field(description="Changes made here that have not been sent.")
+    seeding: int = Field(
+        description="Changes of a first upload that was interrupted and is still "
+        "to be finished (it resumes on the next sync); 0 when none."
+    )
     open_conflicts: int = Field(description="Values that did not go in as made.")
     last_synced_at: str | None
     last_error: str | None = Field(
@@ -422,6 +426,7 @@ def _status(ctx: AppContext) -> RemoteStatusResponse:
         interval_seconds=s.interval_seconds,
         serving=s.serving,
         pending=s.pending,
+        seeding=s.seeding,
         open_conflicts=s.open_conflicts,
         last_synced_at=s.last_synced_at,
         last_error=s.last_error,

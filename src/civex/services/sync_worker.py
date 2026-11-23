@@ -221,7 +221,12 @@ class SyncWorker:
         the progress published adds what earlier passes of the same run sent,
         so one bar runs from the first file to the last."""
         now = self._clock()
-        everything = everything or now - self._last_file_check >= FILE_CHECK_EVERY
+        # A run carrying on after a pass that ran out of time asks only about
+        # what is still unconfirmed (the pages it settled are kept), not again
+        # about every file.
+        everything = everything or (
+            self._send_run is None and now - self._last_file_check >= FILE_CHECK_EVERY
+        )
         sending = False
         run = self._send_run or _SendRun()
 
@@ -355,7 +360,19 @@ class SyncWorker:
         self._last_attempt = now
         log.info("background sync: %s", "requested" if asked else "due")
         try:
-            report = ctx.sync_svc.sync()
+            told = False
+
+            def say(p: SyncProgress) -> None:
+                nonlocal told
+                told = True
+                self._on_progress(p)
+
+            try:
+                ctx.sync_svc.on_progress = say
+                report = ctx.sync_svc.sync()
+            finally:
+                if told:  # no first-upload bar left behind
+                    self._on_progress(None)
             self.last_report = report
         except SyncBusy:
             return None

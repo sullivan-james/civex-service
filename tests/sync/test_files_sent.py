@@ -146,3 +146,28 @@ def test_files_waiting_say_why_they_havent_gone(pair):
 
     laptop.sync_repo.confirm_on_server([ref.sha256])
     assert laptop.sync_svc.status().files_waiting is None  # nothing waiting
+
+
+def test_a_slow_check_does_not_use_up_the_pass_before_a_file_goes(pair, monkeypatch):
+    """Asking which files the server lacks can outlast the time a pass has;
+    the pass still uploads a file, and the next one carries on after the pages
+    already settled instead of asking about everything again."""
+    import civex.services.sync_service as sync_service
+
+    laptop, _, record = pair
+    _with_file(laptop, record, b"the scan")
+    laptop.sync_svc.sync()
+    transport = laptop.sync_svc._transport()
+    real = transport.missing_files
+    asked = []
+
+    def slow(shas):
+        asked.append(list(shas))
+        sync_service.time.sleep(0.05)
+        return real(shas)
+
+    monkeypatch.setattr(transport, "missing_files", slow)
+    monkeypatch.setattr(laptop.sync_svc, "_transport", lambda: transport)
+    report = laptop.sync_svc.send_files(seconds=0.0)
+    assert report.sent == 1
+    assert laptop.sync_svc.status().files_to_send == 0
