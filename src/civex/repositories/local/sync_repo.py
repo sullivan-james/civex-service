@@ -1627,18 +1627,6 @@ class LocalSyncRepository:
         )
         return {(t, str(i)) for t, i in rows} - self.seeding_entities()
 
-    def unseed(self) -> None:
-        """Changes set aside by a first upload that is not this project copy's
-        to finish go back to waiting to be sent like any other, so the authority
-        judges them (a clash is kept for review; nothing is dropped)."""
-        self._s.execute(
-            update(AuditLog)
-            .where(AuditLog.sync_state == "seeding")
-            .values(sync_state="pending")
-            .execution_options(synchronize_session=False)
-        )
-        self._s.expire_all()
-
     def dirty_entities(self) -> set[tuple[str, uuid.UUID]]:
         """Things with a change here still waiting to be sent: what a pull must
         not overwrite."""

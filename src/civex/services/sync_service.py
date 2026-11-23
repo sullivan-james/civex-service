@@ -884,7 +884,7 @@ class SyncService:
                     # After a pull, not what the authority already has.
                     skip = (
                         self._repo.already_sent_entities()
-                        if self._repo.meta().cursor != 0
+                        if self._repo.meta().cursor != 0 and not hello.empty
                         else None
                     )
                     extra: dict[str, Any] = {"skip": skip} if skip else {}
@@ -1159,17 +1159,25 @@ class SyncService:
             else:
                 # Not this copy's upload to finish (another began or finished
                 # it: its ids would be answered with the other's results, and
-                # these changes would be marked sent without being seen). They
-                # go as ordinary changes, so the authority judges them and a
-                # clash is kept for review. (A device id lost on this computer
-                # lands here too: a clash is recoverable, a silent loss is not.)
+                # these changes would be marked sent without being seen). This
+                # copy's own are sent under ids of its own, so the authority
+                # judges them like any other change and a clash is kept for
+                # review. (A device id lost on this computer lands here too: a
+                # clash is recoverable, a silent loss is not.)
                 log.info(
                     "sync with %s: the first upload was not begun by this copy; "
                     "its changes are sent as ordinary ones",
                     self._config.sync.remote,
                 )
-                self._repo.unseed()
-                self._commit()
+                self._seed(
+                    transport,
+                    progress,
+                    hello.protocol_version,
+                    advance=False,
+                    skip=self._repo.already_sent_entities(),
+                    salt=str(user_state.device_id_for(meta.project_id)),
+                )
+                meta = self._repo.meta()
         if meta.cursor < hello.feed_floor:
             self._copy_again(transport, hello, report)
         self._catch_up_readable(transport, hello)
@@ -2398,6 +2406,7 @@ class SyncService:
         protocol: int = PROTOCOL_MAX,
         skip: set[tuple[str, str]] | None = None,
         advance: bool = True,
+        salt: str | None = None,
     ) -> None:
         """Give an empty authority everything this project holds. Each thing is
         sent as a create with an id made from the project and the thing, so an
@@ -2453,7 +2462,12 @@ class SyncService:
                 now = datetime.now(timezone.utc)
                 batch.append(
                     SyncEntry(
-                        id=uuid.uuid5(meta.project_id, f"seed:{kind}:{snap['id']}"),
+                        id=uuid.uuid5(
+                            meta.project_id,
+                            f"seed:{salt}:{kind}:{snap['id']}"
+                            if salt
+                            else f"seed:{kind}:{snap['id']}",
+                        ),
                         action="create",
                         entity_type=kind,
                         entity_id=uuid.UUID(snap["id"]),

@@ -17,13 +17,22 @@ def _records(ctx) -> set[str]:
     return {str(r.id) for r in ctx.sync_repo._s.query(Record).all()}
 
 
-def _interrupted_laptop(project, authority, monkeypatch, pushes=2):
+def _interrupted_laptop(project, authority, monkeypatch, pushes=2, presynced=False):
     monkeypatch.setattr(sync_service, "PUSH_BATCH", 1)
     laptop = device(project, authority, "laptop")
     build_study(laptop)
     for i in range(5):
         laptop.record_svc.add("study", "encounter", {"site": f"s{i}", "depth": 1.0})
     laptop.commit()
+    if presynced:  # history this copy holds that was settled with another authority
+        from sqlalchemy import text
+
+        laptop.sync_repo._s.execute(
+            text(
+                "UPDATE audit_log SET sync_state = 'synced' WHERE entity_type = 'record'"
+            )
+        )
+        laptop.commit()
     original = sync_service.SyncService._seed
     broke = []
 
@@ -256,4 +265,37 @@ def test_connecting_again_after_a_pull_sends_only_what_was_set_aside(
     laptop.sync_svc.sync()
     assert laptop.sync_svc.status().open_conflicts == 0
     assert laptop.sync_svc.status().seeding == 0
+    assert _records(authority) == _records(laptop)
+
+
+def test_another_copys_upload_does_not_strand_things_with_nothing_set_aside(
+    project, authority, monkeypatch
+):
+    laptop = _interrupted_laptop(project, authority, monkeypatch, presynced=True)
+    check = sync_service.SyncService._check_protocol
+
+    def as_if_another_began_it(self, hello):
+        hello.seeded_by = str(uuid.uuid4())
+        return check(self, hello)
+
+    monkeypatch.setattr(
+        sync_service.SyncService, "_check_protocol", as_if_another_began_it
+    )
+    laptop.sync_svc.sync()
+    assert laptop.sync_svc.status().seeding == 0
+    assert _records(authority) == _records(laptop)
+
+
+def test_a_resume_after_its_own_seed_came_back_in_the_feed(
+    project, authority, monkeypatch
+):
+    """The field case: the first entries came back by a pull, the rest are
+    still set aside; the resume sends them again with the same ids, and nothing
+    clashes."""
+    laptop = _interrupted_laptop(project, authority, monkeypatch)
+    laptop.sync_svc.pull()
+    assert laptop.sync_repo.meta().cursor > 0
+    laptop.sync_svc.sync()
+    s = laptop.sync_svc.status()
+    assert (s.seeding, s.pending, s.open_conflicts) == (0, 0, 0)
     assert _records(authority) == _records(laptop)
