@@ -299,3 +299,24 @@ def test_a_resume_after_its_own_seed_came_back_in_the_feed(
     s = laptop.sync_svc.status()
     assert (s.seeding, s.pending, s.open_conflicts) == (0, 0, 0)
     assert _records(authority) == _records(laptop)
+
+
+def test_a_pull_does_not_overwrite_a_thing_still_set_aside_by_the_first_upload(
+    project, authority, monkeypatch
+):
+    laptop = _interrupted_laptop(project, authority, monkeypatch, pushes=7)
+    on_authority = _records(authority)
+    assert on_authority and laptop.sync_repo.count_seeding() > 0
+    phone = device(project, authority, "phone")
+    connect(phone)
+    rid = sorted(on_authority)[0]
+    seeding = {i for _, i in laptop.sync_repo.seeding_entities()}
+    assert rid in seeding
+    mine = laptop.record_svc.get(rid).data
+    phone.record_svc.update(rid, {"site": "theirs", "depth": 99.0})
+    phone.commit()
+    phone.sync_svc.sync()
+
+    laptop.sync_svc.pull()
+
+    assert laptop.record_svc.get(rid).data == mine  # held, not overwritten

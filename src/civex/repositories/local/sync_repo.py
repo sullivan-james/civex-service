@@ -1628,11 +1628,14 @@ class LocalSyncRepository:
         return {(t, str(i)) for t, i in rows} - self.seeding_entities()
 
     def dirty_entities(self) -> set[tuple[str, uuid.UUID]]:
-        """Things with a change here still waiting to be sent: what a pull must
-        not overwrite."""
+        """Things with a change here still waiting to be sent (set aside by an
+        unfinished first upload too): what a pull must not overwrite."""
         rows = (
             self._s.query(AuditLog.entity_type, AuditLog.entity_id)
-            .filter(AuditLog.sync_state == "pending", AuditLog.hub_seq.is_(None))
+            .filter(
+                AuditLog.sync_state.in_(("pending", "seeding")),
+                AuditLog.hub_seq.is_(None),
+            )
             .distinct()
         )
         return {(t, i) for t, i in rows}
