@@ -146,7 +146,6 @@ nav:
           - civex plugin: reference/cli/plugin.md
           - civex policy: reference/cli/policy.md
           - civex record: reference/cli/record.md
-          - civex release: reference/cli/release.md
           - civex retention: reference/cli/retention.md
           - civex schema: reference/cli/schema.md
           - civex store: reference/cli/store.md
