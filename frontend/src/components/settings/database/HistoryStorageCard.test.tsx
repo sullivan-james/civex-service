@@ -55,6 +55,46 @@ describe('HistoryStorageCard', () => {
     await waitFor(() => expect(reclaimed).toBe(1))
   })
 
+  it('on PostgreSQL shows an estimate and names the tables it will lock', async () => {
+    renderCard({
+      whole_entries: 0,
+      converting: false,
+      done: null,
+      total: null,
+      size_bytes: 900 * MB,
+      free_bytes: 280 * MB,
+      estimate: true,
+      can_reclaim: true,
+      reclaim_tables: [
+        { name: 'audit_log', size_bytes: 576 * MB, free_bytes: 260 * MB },
+      ],
+    })
+    expect(
+      await screen.findByText(/≈\s*280.0MB no longer used/),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('History is stored compactly.')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Reclaim space' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('audit_log is rewritten')
+    expect(dialog).toHaveTextContent('locked')
+  })
+
+  it('hides the reclaim where the host does not offer it', async () => {
+    renderCard({
+      whole_entries: 0,
+      converting: false,
+      size_bytes: 900 * MB,
+      free_bytes: 280 * MB,
+      estimate: true,
+      can_reclaim: false,
+      reclaim_tables: [
+        { name: 'audit_log', size_bytes: 576 * MB, free_bytes: 260 * MB },
+      ],
+    })
+    expect(await screen.findByText(/no longer used/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Reclaim space' })).toBeNull()
+  })
+
   it('says older history is being converted, and holds the reclaim meanwhile', async () => {
     renderCard({
       whole_entries: 500,

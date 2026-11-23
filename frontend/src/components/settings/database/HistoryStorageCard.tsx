@@ -16,7 +16,13 @@ export function HistoryStorageCard() {
   const [confirm, setConfirm] = useState(false)
   if (!data) return null
   const free = data.free_bytes ?? 0
-  const worthIt = free > 1024 * 1024 // a megabyte or more
+  const tables = data.reclaim_tables ?? null // PostgreSQL: rewritten one by one
+  const worthIt =
+    data.can_reclaim !== false &&
+    (tables ? tables.length > 0 : free > 1024 * 1024)
+  const approx = data.estimate ? '≈ ' : ''
+  const tableFree = (tables ?? []).reduce((n, t) => n + t.free_bytes, 0)
+  const tableSize = (tables ?? []).reduce((n, t) => n + t.size_bytes, 0)
 
   return (
     <Card title="History storage">
@@ -40,16 +46,20 @@ export function HistoryStorageCard() {
             more compactly next time the server starts.
           </p>
         ) : (
-          <p className="text-fg-muted">History is stored compactly.</p>
+          <p className="text-fg-muted">
+            All history is stored as what changed.
+          </p>
         )}
         {data.size_bytes != null && (
           <div className="flex flex-wrap items-center gap-3">
             <span>
-              Database file: {formatBytes(data.size_bytes)}
+              {tables || data.estimate ? 'Database' : 'Database file'}:{' '}
+              {formatBytes(data.size_bytes)}
               {free > 0 && (
                 <span className="text-fg-muted">
                   {' '}
-                  ({formatBytes(free)} no longer used)
+                  ({approx}
+                  {formatBytes(free)} no longer used)
                 </span>
               )}
             </span>
@@ -73,7 +83,11 @@ export function HistoryStorageCard() {
       {confirm && (
         <ConfirmDialog
           title="Give unused room back to the disk?"
-          body={`The database file is rewritten without the ${formatBytes(free)} it no longer uses. It needs about ${formatBytes(data.size_bytes ?? 0)} of free disk while it runs, and the project waits for it to finish.`}
+          body={
+            tables
+              ? `${tables.map((t) => t.name).join(', ')} ${tables.length === 1 ? 'is' : 'are'} rewritten one at a time without about ${formatBytes(tableFree)} they no longer use. Each is locked, reads included, while it is rewritten (very roughly a minute per gigabyte), so the project waits, and it needs about ${formatBytes(Math.max(...tables.map((t) => t.size_bytes)))} of free disk (${formatBytes(tableSize)} in all).`
+              : `The database file is rewritten without the ${formatBytes(free)} it no longer uses. It needs about ${formatBytes(data.size_bytes ?? 0)} of free disk while it runs, and the project waits for it to finish.`
+          }
           confirmLabel="Reclaim space"
           isPending={reclaim.isPending}
           onConfirm={() =>

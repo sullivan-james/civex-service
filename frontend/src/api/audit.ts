@@ -139,14 +139,21 @@ export interface HistoryStorage {
   converting: boolean
   done: number | null
   total: number | null
-  /** SQLite only; null where the database manages its own space. */
+  /** The database file (SQLite) or the project's tables (PostgreSQL). */
   size_bytes: number | null
   free_bytes: number | null
+  /** free_bytes is estimated from the catalogs (PostgreSQL). */
+  estimate?: boolean
+  /** PostgreSQL: the tables a reclaim rewrites; null on SQLite. */
+  reclaim_tables?:
+    { name: string; size_bytes: number; free_bytes: number }[] | null
+  /** False where the host doesn't offer a reclaim. */
+  can_reclaim?: boolean
 }
 
 export const auditApi = {
   storage: () => api.get<HistoryStorage>('/audit/storage'),
-  /** Give unused room back to the disk (SQLite VACUUM). */
+  /** Give unused room back to the disk (SQLite VACUUM, PostgreSQL VACUUM FULL). */
   reclaimStorage: () => api.post<HistoryStorage>('/audit/storage/reclaim', {}),
 
   /** The fields a history filter may test, with their types and operators. */

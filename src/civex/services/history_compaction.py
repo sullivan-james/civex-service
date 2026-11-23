@@ -44,12 +44,12 @@ class HistoryCompactionService:
 
     def space(self) -> DbSpace | None:
         """The database file and the room inside it a reclaim would give back
-        (None where the database manages its own space)."""
+        (None for a database civex can't measure)."""
         return self._space.space()
 
     def reclaim(self) -> None:
-        """Give the free room back (SQLite's VACUUM). Never automatic: it needs
-        about the file's size in free disk while it runs."""
+        """Give the free room back (SQLite's VACUUM, PostgreSQL's VACUUM FULL of
+        the emptiest tables). Never automatic: it needs free disk and locks."""
         self._space.reclaim()
 
     def remaining(self) -> int:

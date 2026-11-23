@@ -172,6 +172,11 @@ from the next tag forward.
   for each 1,000 files, slow (about 70 s for 77,000 files) and enough to exhaust the
   database container's shared memory ("could not resize shared memory segment"). A page
   now reads only its own stretch of the `sha256` index and stops at the limit.
+- **Settings → History storage tells the truth on PostgreSQL.** It said "stored
+  compactly" and showed no size, though tables never shrink there on their own.
+  It now shows the project's size and an estimated unused part, and Reclaim
+  space runs VACUUM FULL on the mostly-empty tables (off for hosts without
+  `db_admin`).
 - **Sync's file download works on PostgreSQL.** The step that picks a collection
   for each missing file failed with `function min(uuid) does not exist`; it now
   works on both databases.
