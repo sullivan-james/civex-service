@@ -626,7 +626,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                   visually hidden input, say), so it lengthens this area, never
                   the window, which must not scroll. */}
               <main className="relative flex-1 min-h-0 overflow-y-auto">
-                <div className="max-w-[1600px] mx-auto px-6 py-6">
+                <div className="max-w-[var(--content-max,1600px)] mx-auto px-[var(--content-pad,1.5rem)] py-6">
                   {children}
                 </div>
               </main>
@@ -643,7 +643,9 @@ export default function Layout({ children }: { children: ReactNode }) {
           </Group>
         ) : (
           <main className="relative flex-1 min-w-0 overflow-y-auto">
-            <div className="max-w-[1600px] mx-auto px-6 py-6">{children}</div>
+            <div className="max-w-[var(--content-max,1600px)] mx-auto px-[var(--content-pad,1.5rem)] py-6">
+              {children}
+            </div>
           </main>
         )}
       </div>
