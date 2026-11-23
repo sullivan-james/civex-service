@@ -23,6 +23,22 @@ from the next tag forward.
 
 ## Unreleased
 
+### v2.2.1
+
+- **Sending a large project's files shows one total from the start.** The
+  total of the "files sent" bar used to grow, because each background pass
+  only counted the files it had already asked the server about, and the
+  server was asked about every file still owed, again, on every 20 s pass
+  (tens of thousands of `files/missing` calls on a big first upload, all
+  charged against the upload time). The total (files, and their bytes) is now
+  one aggregate query over the references and the file inventory, so the bar
+  reads "x of N files · a of b GB" from the first moment and holds steady.
+  A pass asks only about the slice of files it is about to send, time spent
+  asking no longer counts against the upload budget, and a file the server
+  already holds counts as done. An `everything` pass still checks every file,
+  so one the server has lost is found and sent. Resumable and idempotent as
+  before.
+
 ## v2.2.0 — hidden collections and filtered sync, hosted chrome, CLI sign-in (2026-11-23)
 
 ### Breaking

@@ -1639,15 +1639,14 @@ class SyncService:
         if not self.fetches_files:
             return report
         self._forget_found()
-        shas: list[str] = []
-        while page := self._repo.referenced_shas(
+        first = self._repo.referenced_shas(
             after, FILE_CHECK_PAGE, unconfirmed=not everything
-        ):
-            shas.extend(page)
-            after = page[-1]
-        if not shas:
+        )
+        if not first:
             return report
-        self._send_files(self._transport(), shas, report, progress, seconds)
+        self._send_files(
+            self._transport(), first, report, progress, seconds, after, everything
+        )
         self._commit()
         if report.owed:
             self._log_owed(report)
@@ -1680,84 +1679,110 @@ class SyncService:
     def _send_files(
         self,
         transport: SyncTransport,
-        shas: list[str],
+        page: list[str],
         report: FileSendReport,
         progress: ProgressFn | None = None,
         seconds: float | None = None,
+        after: str = "",
+        everything: bool = False,
     ) -> None:
-        """The one way files go to the authority: it is asked which of `shas`
-        it lacks, the rest are noted as on the server, and each it lacks that
-        can be read here is uploaded and noted, with `progress` told how far
-        along it is (files, and bytes as they go). Stops between files once
-        `seconds` are spent."""
-        started = time.monotonic()
-        # The clock covers asking and uploading together, but is only ever
-        # acted on once a file has been tried: asking about a great many files
-        # (tens of thousands take over a minute) must not use up a pass before
-        # it uploads anything, or every pass would ask again and never send.
-        # What each page's answer found is kept as it comes (`server_files`),
-        # so a next pass starts after the pages already settled.
+        """The one way files go to the authority: starting from `page` (the
+        first slice of hashes after `after`), the authority is asked which of
+        a slice it lacks, the rest are noted as on the server, and each it
+        lacks that can be read here is uploaded and noted, then the next slice
+        is read and asked about, so it is only ever asked about the slice about
+        to go (not about every file still owed, on every pass). `progress` is
+        told how far along it is: files and bytes settled (sent, found on the
+        server already, or unreadable here) of everything still to settle,
+        counted from the inventory in one query before the first file, so the
+        total is known from the start and does not grow as slices are asked
+        about. Stops between files once `seconds` of uploading are spent;
+        asking is not charged to it."""
         rate = RateWindow()
-        done = sent_bytes = found = total_bytes = tried = 0
+        # Of what is still unconfirmed after `after`: the files, and their bytes
+        # where this computer holds a copy (the size the bar goes by).
+        total_files, total_bytes = (
+            self._repo.unconfirmed_totals(after) if progress else (0, 0)
+        )
+        done = settled_bytes = inflight = sent_bytes = tried = 0
+        spent = 0.0  # time uploading: the clock `seconds` is measured on
         said = 0.0
 
+        started = time.monotonic()
+
         def over() -> bool:
-            return (
-                seconds is not None
-                and tried > 0
-                and time.monotonic() - started >= seconds
+            if seconds is None:
+                return False
+            # Asking isn't charged to the upload budget, but a pass that has
+            # only asked (nothing to send) still yields now and then.
+            return (tried > 0 and spent >= seconds) or (
+                time.monotonic() - started >= max(seconds * 6, 60.0)
             )
 
         def say(force: bool = False) -> None:
-            nonlocal said
+            nonlocal said, total_files, total_bytes
             now = time.monotonic()
-            if progress and found and (force or now - said >= 0.25):
+            if progress and total_files and (force or now - said >= 0.25):
                 said = now
+                total_files = max(total_files, done)
+                total_bytes = max(total_bytes, settled_bytes + inflight)
                 progress(
                     SyncProgress(
                         SENDING,
                         done,
-                        found,
-                        bytes_done=sent_bytes,
+                        total_files,
+                        bytes_done=settled_bytes + inflight,
                         bytes_total=total_bytes,
                         rate=rate.add(now, sent_bytes),
                     )
                 )
 
         def went(n: int) -> None:
-            nonlocal sent_bytes
+            nonlocal sent_bytes, inflight
             sent_bytes += n
+            inflight += n
             say()
 
-        for at in range(0, len(shas), FILE_CHECK_PAGE):
+        say(force=True)
+        while page:
             if over():
                 report.stopped = True
                 return
-            page = shas[at : at + FILE_CHECK_PAGE]
+            # Which of these the authority hasn't confirmed yet: the ones the
+            # total counted. (A confirmed file found lost on an `everything`
+            # pass is new work, so the total grows by it.)
+            pending = self._repo.unconfirmed_of(set(page)) if progress else set()
             missing = set(transport.missing_files(page))
             self._repo.confirm_on_server(set(page) - missing)
             self._repo.note_server_lacks(missing, backoff=False)
             lacking = [sha for sha in page if sha in missing]
             if not lacking:
                 self._commit()
-                report.resume_after = page[-1]
-                continue
-            # How much is to go, from the inventory (one lookup); a file it
-            # doesn't know the size of is counted when it is read.
-            sizes = {
-                sha: rows[0][1]
-                for sha, rows in self._files.copies(lacking).items()
-                if rows
-            }
-            total_bytes += sum(sizes.get(sha, 0) for sha in lacking)
-            found += len(lacking)
-            say(force=True)
+            sizes: dict[str, int] = {}
+            if progress:
+                skipped = pending - missing
+                sizes = {
+                    sha: max(size for _v, size in rows)
+                    for sha, rows in self._files.copies(
+                        list(skipped | set(lacking))
+                    ).items()
+                    if rows
+                }
+                done += len(skipped)
+                settled_bytes += sum(sizes.get(sha, 0) for sha in skipped)
+                lost = [sha for sha in lacking if sha not in pending]
+                total_files += len(lost)
+                total_bytes += sum(sizes.get(sha, 0) for sha in lost)
+                say(force=True)
             for sha in lacking:
                 if over():
                     report.stopped = True
                     return
                 tried += 1
+                inflight = 0
+                began = time.monotonic()
                 why = self._upload(transport, sha, went)
+                spent += time.monotonic() - began
                 if why is None:
                     self._repo.confirm_on_server([sha])
                     self._commit()  # each file's arrival is kept, whatever follows
@@ -1768,9 +1793,14 @@ class SyncService:
                         report.owed.append(sha)
                     log.debug("file %s not sent: %s", sha[:12], why)
                 done += 1
+                settled_bytes += sizes.get(sha, inflight)
+                inflight = 0
                 report.resume_after = sha  # settled: the next pass starts after
                 say(force=True)
             report.resume_after = page[-1]
+            page = self._repo.referenced_shas(
+                page[-1], FILE_CHECK_PAGE, unconfirmed=not everything
+            )
 
     def _upload(
         self,

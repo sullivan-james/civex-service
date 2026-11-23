@@ -279,6 +279,28 @@ class LocalSyncRepository:
         page = self._referenced_page("", 2**31, True).subquery()
         return int(self._s.execute(select(func.count()).select_from(page)).scalar_one())
 
+    def unconfirmed_totals(self, after: str = "") -> tuple[int, int]:
+        """(files, bytes) of what live records cite (and releases keep) after
+        `after` that the authority hasn't said it holds: one aggregate over the
+        references and the inventory, never a list. Bytes are of the copy this
+        computer holds (a file with none counts as a file, and no bytes)."""
+        pending = self._referenced_page(after, 2**31, True).subquery()
+        sized = (
+            select(
+                pending.c.sha256,
+                func.max(StoredObject.size).label("size"),
+            )
+            .select_from(
+                pending.outerjoin(StoredObject, StoredObject.sha256 == pending.c.sha256)
+            )
+            .group_by(pending.c.sha256)
+            .subquery()
+        )
+        files, size = self._s.execute(
+            select(func.count(), func.coalesce(func.sum(sized.c.size), 0))
+        ).one()
+        return int(files), int(size)
+
     def unconfirmed_copies(self, limit: int) -> dict[str, list[str]]:
         """Up to `limit` files live records cite that the authority hasn't said
         it holds, each with the volumes holding a copy here (none: not on this
