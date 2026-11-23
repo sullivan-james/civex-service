@@ -71,7 +71,7 @@ function RecentActivity() {
 
 export default function HomePage() {
   const features = useFeatures()
-  const { data: collections } = useCollections()
+  const { data: collections, isPending, isSuccess } = useCollections()
   // Steps are for an empty project: once there is a collection, the shortcuts
   // above are the way back in. Steps that need a feature the server lacks
   // (workflows, say) are not offered.
@@ -79,7 +79,7 @@ export default function HomePage() {
   const started = (collections?.length ?? 0) > 0
 
   return (
-    <Page title={started ? 'Home' : 'Get started'}>
+    <Page title={isPending ? undefined : started ? 'Home' : 'Get started'}>
       <HomeShortcuts />
       <DesktopShortcut prompt />
 
@@ -101,8 +101,10 @@ export default function HomePage() {
         </ul>
       )}
 
-      {!started && (
-        <ol className="grid gap-3 sm:grid-cols-3">
+      {isSuccess && !started && (
+        <ol
+          className={`grid gap-3 ${steps.length === 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}
+        >
           {steps.map((s, i) => (
             <li key={s.title}>
               <Card
