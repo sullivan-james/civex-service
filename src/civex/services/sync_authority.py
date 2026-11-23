@@ -288,6 +288,8 @@ class SyncAuthorityService:
                 self._rules.check(_changed([entry]))
         except ValidationError as e:
             head = self._applier.head(entry.entity_type, entry.entity_id)
+            if isinstance(e, _Denied):
+                return self._refuse(who, entry, str(e), code=REFUSAL_PERMISSION)
             if (
                 head is not None
                 and (entry.entity_type != "record" or _moves(entry, head))
@@ -306,7 +308,9 @@ class SyncAuthorityService:
         self._repo.save_op(entry, result, who.device_id, who.name)
         return result
 
-    def _problem(self, who: Principal, entry: SyncEntry) -> tuple[str, str] | None:
+    def _problem(
+        self, who: Principal, entry: SyncEntry
+    ) -> tuple[str, str | None] | None:
         """Why a change can't be taken whatever is held, with the code of the
         refusal (`REFUSAL_INVALID` for its shape, `REFUSAL_PERMISSION` for what
         the caller may change: a person may be given that later)."""
@@ -320,6 +324,15 @@ class SyncAuthorityService:
             added, _ = file_changes(entry)
             if any(not self._readable(sha) for sha in sorted(added)):
                 return FILE_UNAVAILABLE, REFUSAL_PERMISSION
+        if (
+            entry.entity_type == "record"
+            and entry.action in ("update", "restore", "delete", "purge")
+            and self._unseen(entry)
+        ):
+            # Held here, where the device may not look: answered as the same
+            # change to a record that is not here at all, in the same words and
+            # with the same (absent) code.
+            return NOT_HERE, None
         if (
             self._policy
             and entry.entity_type == "dataset"
@@ -415,7 +428,12 @@ class SyncAuthorityService:
                 why or "Something it changes was changed on the server meanwhile",
             )
         except ValidationError as e:
-            return self._refuse_action(who, action, str(e))
+            return self._refuse_action(
+                who,
+                action,
+                str(e),
+                code=REFUSAL_PERMISSION if isinstance(e, _Denied) else None,
+            )
         except (ValueError, TypeError, KeyError, AttributeError) as e:
             return self._refuse_action(who, action, f"A value is not valid: {e}")
         for entry, result in zip(action, results):
@@ -554,6 +572,40 @@ class SyncAuthorityService:
         self._repo.save_op(entry, result, who.device_id, who.name)
         return result
 
+    def _check_parent(self, state: dict[str, Any]) -> None:
+        """The record a pushed record sits under must be there as the caller
+        finds it: one the caller cannot see is refused in the same words as one
+        that does not exist (never taken in, never an error at commit)."""
+        parent = state.get("parent_record_id")
+        if not parent:
+            return  # (a deleted record under a parent needs it just the same)
+        try:
+            wanted = uuid.UUID(str(parent))
+        except ValueError:
+            raise ValidationError(PARENT_GONE) from None
+        with self._records.as_caller():
+            found = self._records.records_repo.get_by_id(wanted, include_deleted=True)
+        if found is None:
+            raise ValidationError(PARENT_GONE)
+
+    def _check_placement(
+        self, who: Principal, entry: SyncEntry, placed: dict[str, Any]
+    ) -> None:
+        """A record sits in its parent's collection, so where it is settled can
+        differ from where the device said: that collection is judged as a write
+        and a read, as the one the device named was."""
+        if not self._policy:
+            return
+        settled = cast(Any, SimpleNamespace)(
+            entity_type="record",
+            action=entry.action,
+            new_data={"dataset_id": str(placed.get("dataset_id")), "data": None},
+            old_data=None,
+            delta=None,
+        )
+        if denied := self._policy.refuses(who, settled):
+            raise _Denied(denied)
+
     def _take(self, who: Principal, entry: SyncEntry) -> OpResult:
         """Merge the change into what is held, write it, and record it."""
         kind, eid = entry.entity_type, entry.entity_id
@@ -562,6 +614,16 @@ class SyncAuthorityService:
                 "A release is never deleted: it can be withdrawn, or yanked"
             )
         head = self._applier.head(kind, eid)
+        if (
+            kind == "record"
+            and head is None
+            and entry.action in ("delete", "purge", "restore")
+            and self._sees is not None
+        ):
+            # For a device limited to some collections, a record that is not
+            # here is refused as one that is held out of its sight is: the two
+            # are told apart by nothing in the answer.
+            raise ValidationError(NOT_HERE)
         cascade = self._cascade_before(entry, head)
         conflicts: list[dict[str, Any]] = []
         final: dict[str, Any] | None = None  # the state the thing ends in, if it exists
@@ -571,10 +633,7 @@ class SyncAuthorityService:
         if entry.action in ("create", "update", "restore"):
             if head is None:
                 if entry.action == "update" or entry.delta is not None:
-                    raise ValidationError(
-                        "It is not on the server (deleted for good there, or "
-                        "never taken)"
-                    )
+                    raise ValidationError(NOT_HERE)
                 incoming = entry.new_data or {}
                 final = dict(incoming)
             else:
@@ -616,7 +675,14 @@ class SyncAuthorityService:
                         )
                     )
             if kind == "record":
-                final = self._records.placed_with_parent(final)
+                if head is None or str(head.get("parent_record_id") or "") != str(
+                    final.get("parent_record_id") or ""
+                ):
+                    self._check_parent(final)
+                placed = self._records.placed_with_parent(final)
+                if placed is not final:
+                    self._check_placement(who, entry, placed)
+                final = placed
                 self._records.check_incoming(final, head)
             elif kind == "note" and self._notes is not None:
                 self._check_note(who, final)
@@ -838,13 +904,14 @@ class SyncAuthorityService:
         # this change and every device would apply it last.
         self._repo.sequence_local_entries()
         seq = self._repo.next_hub_seq()
+        stored = _as_placed(entry, head, final)
         sent = SyncEntry(
             id=entry.id,
             action=entry.action,
             entity_type=entry.entity_type,
             entity_id=entry.entity_id,
-            old_data=entry.old_data,
-            new_data=entry.new_data,
+            old_data=stored.old_data,
+            new_data=stored.new_data,
             timestamp=entry.timestamp,
             # Which device sent it is what the token says, never what was
             # claimed; who made it is `_author`.
@@ -853,7 +920,7 @@ class SyncAuthorityService:
             device_id=who.device_id,
             hlc=self._believable(entry.hlc),
             batch=entry.batch,
-            delta=entry.delta,
+            delta=stored.delta,
         )
         self._repo.insert_entry(sent, hub_seq=seq)
         if entry.action in ("create", "update", "restore", "delete") and (
@@ -888,6 +955,50 @@ class SyncAuthorityService:
         if stamp is None or not hlc.is_ahead(stamp, _now_ms()):
             return stamp
         return hlc.tick(self._repo.latest_hlc(), _now_ms())
+
+
+PARENT_GONE = "The record it sits under is not here."
+NOT_HERE = "It is not on the server (deleted for good there, or never taken)"
+
+
+class _Denied(ValidationError):
+    """A change refused for what the caller may do (not for its shape)."""
+
+
+def _as_placed(
+    entry: SyncEntry, head: dict[str, Any] | None, final: dict[str, Any] | None
+) -> SyncEntry:
+    """A record change as it is stored: naming the collections the authority
+    actually had the record in before and after it, not the ones the device
+    claimed (a stale or forged claim would otherwise be what everything that
+    reads the feed, a device limited to some collections included, judges the
+    change by)."""
+    if entry.entity_type != "record":
+        return entry
+    before = str(head["dataset_id"]) if head and head.get("dataset_id") else None
+    settled = final if final is not None else head
+    after = (
+        str(settled["dataset_id"]) if settled and settled.get("dataset_id") else None
+    )
+    if before is None and after is None:
+        return entry
+
+    def named(data: dict[str, Any] | None, where: str | None) -> dict[str, Any] | None:
+        if data is None or where is None:
+            return data
+        return {**data, "dataset_id": where}
+
+    delta = entry.delta
+    if delta is not None:
+        delta = {k: v for k, v in delta.items() if k != "dataset_id"}
+        if before is not None and after is not None and before != after:
+            delta["dataset_id"] = {"before": before, "after": after}
+    return dataclasses.replace(
+        entry,
+        old_data=named(entry.old_data, before or after),
+        new_data=named(entry.new_data, after or before),
+        delta=delta,
+    )
 
 
 class _NotWhole(Exception):

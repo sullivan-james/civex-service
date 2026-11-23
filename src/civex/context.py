@@ -628,6 +628,17 @@ def build_context(
     if not may.read_scope().unrestricted:
         file_svc.readable = LocalFileReferenceRepository(session).is_readable
         record_svc.readable = file_svc.readable
+
+        def _may_cite(sha: str) -> bool:
+            # Every question is asked whatever the answers, so the time taken
+            # says nothing about which kind of hash this is.
+            readable = file_svc.readable(sha)
+            here = file_svc.exists(sha)
+            used = bool(LocalFileReferenceRepository(session).referenced_subset([sha]))
+            return readable and (here or used)
+
+        record_svc.may_cite = _may_cite
+        record_svc.as_caller = lambda: read_scope.scoped(session)
     store_svc: StoreService | None = None
     if isinstance(file_store, VolumeAwareFileObjectStore):
         store_svc = StoreService(config, file_store, project.config_store)

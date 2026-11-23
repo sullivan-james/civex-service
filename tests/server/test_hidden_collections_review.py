@@ -69,9 +69,13 @@ def test_a_file_the_caller_uploaded_or_can_already_see_may_be_cited(world: World
     made = _cite(c, ref["sha256"])
     assert made.status_code == 201
     assert c.get(f"/api/files/{ref['sha256']}").status_code == 200
-    # an unknown hash is accepted exactly as before (the file may arrive later,
-    # as a device's does): it says nothing about what is hidden
-    assert _cite(c, NO_SUCH).status_code == 201
+    # an unknown hash is refused in the same words as a hidden one, so the
+    # answer says nothing about what the project holds (and citing a hash
+    # before its bytes arrive cannot make them readable later)
+    unknown = _cite(c, NO_SUCH)
+    hidden = _cite(c, world.sha)
+    assert unknown.status_code == hidden.status_code == 422
+    assert unknown.json() == hidden.json()
 
 
 def test_the_owner_may_cite_any_file(world: World):

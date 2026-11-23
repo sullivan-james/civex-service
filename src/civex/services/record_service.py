@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 import numbers
 import re
 import uuid
@@ -741,6 +741,17 @@ class RecordService:
         # one who cannot read every collection; always, for one who can): a save
         # may cite only a file it could download, or it would hand them one.
         self.readable: Callable[[str], bool] = lambda _sha: True
+        # Whether a save may cite this file: it must be one the caller could
+        # download (so a hash only hidden records hold is refused) and one that
+        # is here (so an unknown hash is refused in the same words). Set by
+        # `context.py` for one who cannot read every collection.
+        self.may_cite: Callable[[str], bool] = lambda _sha: True
+        # Runs a block as the caller sees the project, even inside work that
+        # otherwise sees all of it (set by `context.py` for one who cannot read
+        # every collection): what a pushed record may point at or sit under is
+        # checked as the caller would find it, so a hidden record is as absent
+        # as one that never was, in the same words.
+        self.as_caller: Callable[[], AbstractContextManager[None]] = nullcontext
 
     def _check_file_rights(
         self, dataset_id: uuid.UUID, before: dict[str, Any], after: dict[str, Any]
@@ -757,7 +768,7 @@ class RecordService:
             # reads the record: a hash only collections the caller cannot read
             # use may not be cited (the same answer for any file).
             for sha in sorted(wanted - held):
-                if not self.readable(sha):
+                if not self.may_cite(sha):
                     raise ValidationError(permissions.FILE_UNAVAILABLE)
         if held - wanted:
             self._permissions.require(permissions.DELETE_FILES, dataset_id)
@@ -4901,7 +4912,7 @@ class RecordService:
         follows the parent rather than being refused (the state the authority
         settles on then differs from what was sent, and is sent back)."""
         parent_id = state.get("parent_record_id")
-        if not parent_id or state.get("deleted_at"):
+        if not parent_id:
             return state
         try:
             parent = self._records.get_by_id(

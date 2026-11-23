@@ -177,13 +177,29 @@ not a check each route remembers. What it does *not* hide, by design:
   dangling and nothing hidden is touched.
 - Content with no use by any record (just uploaded, or left behind until clean-up)
   is not tied to a collection, so anyone who knows its hash can fetch it.
-- **Citing a file you cannot download.** A save (or a pushed change) that cites a
-  file the record did not hold must be able to download that file: a hash used
-  only by records the caller cannot read is refused ("That file is not available.",
-  422 or a rejected change), so citing a hash is never a way to read it. A hash
-  nothing uses yet (just uploaded, or not arrived from a device yet) is accepted as
-  before. For a device (once sync serves such callers), a file it may not read is
-  also answered as "missing" and offered an upload target, never "already here".
+- **Citing a file you cannot download.** A save through the API that cites a file
+  the record did not hold must cite one that is here and that the caller could
+  download. A hash used only by records the caller cannot read, and a hash that is
+  not here at all, are refused in the same words ("That file is not available.",
+  422), so citing is neither a way to read a file nor a way to learn whether the
+  project holds it. Upload first, then cite.
+  **Residual, for pushes:** a device sends its changes before its files, so a
+  pushed record may cite a hash not here yet; that is accepted, while a hash only
+  hidden records hold is rejected. Someone who already knows a hash (it is the hash
+  of the content) can therefore tell, from a device, whether the project holds that
+  content; and a hash cited before its bytes arrive becomes readable by the citer
+  once a hidden record's bytes land under it, which gives the BYTES to someone who
+  knew only the hash. Closing it needs the push path to refuse unknown hashes, which
+  devices (files go after their changes) cannot do yet.
+  For a device (once sync serves such callers), a file it may not read is also
+  answered as "missing" and offered an upload target, never "already here".
+- **A record's id.** Changing or deleting a record held in a collection the device
+  cannot read is answered as the same change to an id that is not here. A *create*
+  that names an id which exists in such a collection is refused, while a new id is
+  taken: ids are random, so this tells only someone who already has the id.
+- A record is settled in its parent's collection, so a pushed child's placement is
+  judged where it ends up (read and write), and a parent the device cannot see is
+  refused like one that does not exist.
 
 ### Scope strings are normalised
 
