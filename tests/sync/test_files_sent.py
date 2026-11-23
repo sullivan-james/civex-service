@@ -234,14 +234,15 @@ def test_files_that_cannot_be_read_here_do_not_keep_the_rest_from_going(
     laptop.commit()
     monkeypatch.setattr(sync_service, "FILE_CHECK_PAGE", 2)
     unreadable = sorted(r.sha256 for r in refs)[:5]
-    real = sync_service.SyncService._upload
+    store = object.__getattribute__(sync, "_svc")._files
+    real = store.open
 
-    def upload(self, transport, sha, on_bytes=None):
+    def opening(sha):
         if sha in unreadable:
-            return "it isn't on this computer"
-        return real(self, transport, sha, on_bytes)
+            raise FileNotFoundError(sha)
+        return real(sha)
 
-    monkeypatch.setattr(sync_service.SyncService, "_upload", upload)
+    monkeypatch.setattr(store, "open", opening)
     after = ""
     sent = 0
     for _ in range(40):
