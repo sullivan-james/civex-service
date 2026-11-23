@@ -567,7 +567,7 @@ class AuditLog(Base):
             sqlite_where=text("sync_state = 'seeding'"),
         ),
         # `max(hlc)`: the newest stamp, read whenever a change is stamped
-        # (migration b8d4f1a7c3e6).
+        # (migration d7a3c9e5f2b8).
         Index("ix_audit_log_hlc", "hlc"),
         # The edits still stored whole (written before deltas), for converting
         # them: empty once they all are (migration a4d9e2c7f310).
