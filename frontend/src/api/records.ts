@@ -11,6 +11,27 @@ import {
 } from './query'
 import type { FilterTreeWire } from '../utils/filterTree'
 
+/** Where one record stands with the authority this project follows. */
+export interface RecordSync {
+  state:
+    | 'not_connected'
+    | 'held_here'
+    | 'synced'
+    | 'pending'
+    | 'first_upload'
+    | 'refused'
+    | 'conflict'
+  remote: string | null
+  pending: number
+  seeding: number
+  hub_seq: number | null
+  synced_at: string | null
+  message: string | null
+  conflict_id: string | null
+  files: number
+  files_waiting: number
+}
+
 /** Which records: exactly `ids`, or every record the query (`collection`
  * with the list's selectors) shows. */
 export interface RecordSelectionBody {
@@ -438,6 +459,7 @@ export const recordsApi = {
     ),
 
   get: (id: string) => api.get<CivexRecord>(`/records/${id}`),
+  sync: (id: string) => api.get<RecordSync>(`/records/${id}/sync`),
 
   /** What references this record, counted per collection/schema/field. */
   referrers: (id: string) =>

@@ -26,9 +26,10 @@ states a given project is in.
 from __future__ import annotations
 
 import functools
+import sys
 import threading
 from contextlib import contextmanager
-from typing import Iterator
+from typing import Callable, Iterator
 import weakref
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,8 +50,11 @@ __all__ = [
     "convert_records_partitions",
     "ensure_audit_partitions",
     "ensure_schema_current",
+    "ProgressCallback",
     "missing_structure",
+    "pending_migrations",
     "records_partitioning",
+    "reporting_progress",
     "too_new_error",
 ]
 
@@ -64,6 +68,24 @@ _LEGACY_MARKER_TABLE = "schemas"
 _migrated_engines: weakref.WeakSet[Engine] = weakref.WeakSet()
 _migrate_lock = threading.Lock()
 
+# (step, total, description): called as each pending migration starts, step
+# counting from 1. Step 0 means "waiting for another process that is upgrading
+# this project" (total 0).
+ProgressCallback = Callable[[int, int, str], None]
+_default_progress: ProgressCallback | None = None
+
+
+@contextmanager
+def reporting_progress(progress: ProgressCallback | None) -> Iterator[None]:
+    """Report migrations that start inside the block to `progress`, for callers
+    (the CLI) that reach `ensure_schema_current` through other code."""
+    global _default_progress
+    previous, _default_progress = _default_progress, progress
+    try:
+        yield
+    finally:
+        _default_progress = previous
+
 
 def _alembic_config() -> Config:
     cfg = Config()
@@ -72,7 +94,10 @@ def _alembic_config() -> Config:
 
 
 def ensure_schema_current(
-    engine: Engine, layout: PartitionLayout | None = None
+    engine: Engine,
+    layout: PartitionLayout | None = None,
+    *,
+    progress: ProgressCallback | None = None,
 ) -> None:
     """Create or upgrade the schema at `engine` to the latest revision.
 
@@ -82,7 +107,13 @@ def ensure_schema_current(
     monthly `audit_log`) a database gets when it runs the migration that
     partitions them; default `PartitionLayout.from_env()`. It has no effect on
     a database that already ran that migration, or on SQLite.
+
+    `progress(step, total, description)`, if given, is called as each pending
+    migration starts (nothing is called when there is nothing to do), so a
+    caller can tell the user a long upgrade is under way. See
+    `pending_migrations` to ask first.
     """
+    progress = progress or _default_progress
     if engine in _migrated_engines:
         return
 
@@ -95,8 +126,8 @@ def ensure_schema_current(
         if engine in _migrated_engines:
             return
         with engine.connect() as connection:
-            with _cross_process_lock(connection):
-                _migrate_connection(connection, layout)
+            with _cross_process_lock(connection, progress):
+                _migrate_connection(connection, layout, progress)
         _migrated_engines.add(engine)
     # Months of `audit_log` partitions ahead of now: a no-op unless this is a
     # partitioned PostgreSQL database that has run out. Best effort.
@@ -106,16 +137,33 @@ def ensure_schema_current(
 
 
 @contextmanager
-def _cross_process_lock(connection: Connection) -> Iterator[None]:
+def _cross_process_lock(
+    connection: Connection, progress: ProgressCallback | None = None
+) -> Iterator[None]:
     """On PostgreSQL, one process at a time migrates a given schema: two
     workers opening a new or old repository together would otherwise both try
     to create `alembic_version` (or both convert `records`). The in-process
     lock above does not cover other processes."""
+    if connection.dialect.name == "sqlite":
+        with _sqlite_file_lock(connection, progress):
+            yield
+        return
     if connection.dialect.name != "postgresql":
         yield
         return
     key = "SELECT hashtextextended(current_database() || '/' || current_schema() || '/civex-migrate', 0)"
-    connection.execute(text(f"SELECT pg_advisory_lock({key.removeprefix('SELECT ')})"))
+    lock_key = key.removeprefix("SELECT ")
+    if (
+        progress is not None
+        and not connection.execute(
+            text(f"SELECT pg_try_advisory_lock({lock_key})")
+        ).scalar()
+    ):
+        connection.commit()
+        progress(0, 0, _WAITING)
+        connection.execute(text(f"SELECT pg_advisory_lock({lock_key})"))
+    elif progress is None:
+        connection.execute(text(f"SELECT pg_advisory_lock({lock_key})"))
     connection.commit()
     try:
         yield
@@ -125,6 +173,83 @@ def _cross_process_lock(connection: Connection) -> Iterator[None]:
             text(f"SELECT pg_advisory_unlock({key.removeprefix('SELECT ')})")
         )
         connection.commit()
+
+
+_WAITING = (
+    "Another civex process is upgrading this project; waiting for it to finish..."
+)
+
+
+@contextmanager
+def _sqlite_file_lock(
+    connection: Connection, progress: ProgressCallback | None
+) -> Iterator[None]:
+    """SQLite has no advisory lock, so two processes (two desktop windows, a
+    CLI beside a server) could migrate one file at once. Hold an OS file lock
+    on a sidecar file instead; it is released if the process dies. A database
+    that is in memory, or a folder we cannot write to, is not locked."""
+    database = connection.engine.url.database
+    if not database or database == ":memory:" or database.startswith("file:"):
+        yield
+        return
+    # Only an upgrade needs the lock; opening a current project leaves no file.
+    if not _pending(connection):
+        yield
+        return
+    try:
+        handle = open(database + ".migrate-lock", "a+b")
+    except OSError:
+        yield
+        return
+    try:
+        if not _try_lock(handle):
+            if progress is not None:
+                progress(0, 0, _WAITING)
+            _lock_blocking(handle)
+        try:
+            yield
+        finally:
+            _unlock(handle)
+    finally:
+        handle.close()
+
+
+if sys.platform == "win32":
+    import msvcrt
+
+    def _try_lock(handle) -> bool:
+        handle.seek(0)
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            return False
+        return True
+
+    def _lock_blocking(handle) -> None:
+        import time
+
+        while not _try_lock(handle):
+            time.sleep(0.2)
+
+    def _unlock(handle) -> None:
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+
+else:
+    import fcntl
+
+    def _try_lock(handle) -> bool:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return False
+        return True
+
+    def _lock_blocking(handle) -> None:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+
+    def _unlock(handle) -> None:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def missing_structure(engine: Engine) -> list[str]:
@@ -175,6 +300,34 @@ def _unknown_revisions(revisions: list[str]) -> list[str]:
         except (CommandError, KeyError):
             unknown.append(revision)
     return unknown
+
+
+def _pending(connection: Connection) -> list[tuple[str, str]]:
+    from alembic.runtime.migration import MigrationContext
+
+    if not inspect(connection).has_table("alembic_version"):
+        return []
+    current = list(MigrationContext.configure(connection).get_current_heads())
+    connection.rollback()
+    if not current or _unknown_revisions(current):
+        return []
+    script = _script_directory()
+    steps = script.iterate_revisions("head", tuple(current))
+    return [
+        (rev.revision, (rev.doc or rev.revision).strip().splitlines()[0].strip())
+        for rev in reversed(list(steps))
+        if rev.revision not in current
+    ]
+
+
+def pending_migrations(engine: Engine) -> list[tuple[str, str]]:
+    """The migrations `ensure_schema_current` would run on the database at
+    `engine`, oldest first, as (revision, one-line description). Cheap, and
+    changes nothing. Empty for a new database or one made before Alembic
+    (those are created or stamped, not upgraded, so are quick) and for a
+    database from a newer civex."""
+    with engine.connect() as connection:
+        return _pending(connection)
 
 
 @dataclass(frozen=True)
@@ -337,7 +490,9 @@ def _refuse_newer_database(connection: Connection) -> None:
 
 
 def _migrate_connection(
-    connection: Connection, layout: PartitionLayout | None = None
+    connection: Connection,
+    layout: PartitionLayout | None = None,
+    progress: ProgressCallback | None = None,
 ) -> None:
     cfg = _alembic_config()
     cfg.attributes["connection"] = connection
@@ -351,6 +506,19 @@ def _migrate_connection(
         command.stamp(cfg, "head")
     else:
         _refuse_newer_database(connection)
+        pending = _pending(connection)
+        if pending and progress is not None:
+            total = len(pending)
+            done = 0
+            progress(1, total, pending[0][1])
+
+            def on_applied(revision: str) -> None:
+                nonlocal done
+                done += 1
+                if done < total:
+                    progress(done + 1, total, pending[done][1])
+
+            cfg.attributes["on_applied"] = on_applied
         command.upgrade(cfg, "head")
     connection.commit()
 

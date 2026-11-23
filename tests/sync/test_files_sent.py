@@ -146,3 +146,108 @@ def test_files_waiting_say_why_they_havent_gone(pair):
 
     laptop.sync_repo.confirm_on_server([ref.sha256])
     assert laptop.sync_svc.status().files_waiting is None  # nothing waiting
+
+
+def test_each_pass_sends_a_file_and_the_next_asks_only_about_the_rest(
+    pair, monkeypatch
+):
+    import civex.services.sync_service as sync_service
+
+    laptop, _, record = pair
+    laptop.schema_svc.add_field("encounter", "scan", "file")
+    laptop.commit()
+    sync = laptop.sync_svc
+    laptop.sync_svc.sync()
+    refs = [laptop.file_svc.store_bytes(bytes([i]) * 50, f"f{i}.bin") for i in range(3)]
+    for i, ref in enumerate(refs):
+        laptop.record_svc.add(
+            "study", "encounter", {"site": str(i), "scan": ref.to_dict()}
+        )
+    laptop.commit()
+    monkeypatch.setattr(sync_service, "FILE_CHECK_PAGE", 1)
+    transport = sync._transport()
+    real = transport.missing_files
+    asked = []
+
+    def spy(shas):
+        asked.append(list(shas))
+        return real(shas)
+
+    monkeypatch.setattr(transport, "missing_files", spy)
+    monkeypatch.setattr(sync, "_transport", lambda: transport)
+    passes = []
+    for _ in range(5):
+        asked.clear()
+        report = sync.send_files(seconds=0.0)
+        passes.append((report.sent, report.stopped, len(asked)))
+        if not report.stopped:
+            break
+    assert all(sent >= 1 for sent, _, _ in passes[:-1])
+    assert sync.status().files_to_send == 0
+    assert sum(sent for sent, _, _ in passes) == 3
+    # Later passes ask about fewer files, not all of them again.
+    assert passes[-1][2] <= passes[0][2]
+
+
+def test_a_slow_check_does_not_use_up_the_pass_before_a_file_goes(pair, monkeypatch):
+    """Asking which files the server lacks can outlast the time a pass has;
+    the pass still uploads a file, and the next one carries on after the pages
+    already settled instead of asking about everything again."""
+    import civex.services.sync_service as sync_service
+
+    laptop, _, record = pair
+    _with_file(laptop, record, b"the scan")
+    laptop.sync_svc.sync()
+    transport = laptop.sync_svc._transport()
+    real = transport.missing_files
+    asked = []
+
+    def slow(shas):
+        asked.append(list(shas))
+        sync_service.time.sleep(0.05)
+        return real(shas)
+
+    monkeypatch.setattr(transport, "missing_files", slow)
+    monkeypatch.setattr(laptop.sync_svc, "_transport", lambda: transport)
+    report = laptop.sync_svc.send_files(seconds=0.0)
+    assert report.sent == 1
+    assert laptop.sync_svc.status().files_to_send == 0
+
+
+def test_files_that_cannot_be_read_here_do_not_keep_the_rest_from_going(
+    pair, monkeypatch
+):
+    """Hash order puts them first every pass; a pass that stops carries on
+    after where it got to, so the readable ones further along are reached."""
+    import civex.services.sync_service as sync_service
+
+    laptop, _, record = pair
+    laptop.schema_svc.add_field("encounter", "scan", "file")
+    laptop.commit()
+    sync = laptop.sync_svc
+    sync.sync()
+    refs = [laptop.file_svc.store_bytes(bytes([i]) * 40, f"f{i}.bin") for i in range(8)]
+    for i, ref in enumerate(refs):
+        laptop.record_svc.add(
+            "study", "encounter", {"site": str(i), "scan": ref.to_dict()}
+        )
+    laptop.commit()
+    monkeypatch.setattr(sync_service, "FILE_CHECK_PAGE", 2)
+    unreadable = sorted(r.sha256 for r in refs)[:5]
+    real = sync_service.SyncService._upload
+
+    def upload(self, transport, sha, on_bytes=None):
+        if sha in unreadable:
+            return "it isn't on this computer"
+        return real(self, transport, sha, on_bytes)
+
+    monkeypatch.setattr(sync_service.SyncService, "_upload", upload)
+    after = ""
+    sent = 0
+    for _ in range(40):
+        report = sync.send_files(seconds=0.0, after=after)
+        sent += report.sent
+        if not report.stopped:
+            break
+        after = report.resume_after
+    assert sent == 3

@@ -32,6 +32,11 @@ export function syncButtonState(
 ): SyncButtonState {
   if (s.running || starting) return { label: 'Syncing…', tone: 'busy' }
   if (s.last_error) return { label: 'Sync failed', tone: 'error' }
+  if ((s.seeding ?? 0) > 0)
+    return {
+      label: `Sync · finishing first upload (${s.seeding ?? 0})`,
+      tone: 'needed',
+    }
   if (s.pending > 0)
     return { label: `Sync · ${s.pending} to send`, tone: 'needed' }
   if (s.open_conflicts > 0)

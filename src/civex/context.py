@@ -867,7 +867,10 @@ def build_context(
         file_access_svc=file_access_svc,
         audit_svc=audit_repo,
         history_svc=history_svc,
-        compaction_svc=HistoryCompactionService(audit_repo, LocalDbSpace(engine)),
+        compaction_svc=HistoryCompactionService(
+            audit_repo,
+            LocalDbSpace(engine, may_vacuum_full=features.DB_ADMIN in project.features),
+        ),
         quality_svc=QualityService(record_svc, schema_svc, permissions=may),
         index_svc=index_svc,
         retention_svc=retention_svc,

@@ -22,6 +22,13 @@ config = context.config
 target_metadata = Base.metadata
 
 
+def _on_version_apply(ctx, step, heads, run_args, **kw) -> None:
+    # Lets civex.db.migrate report progress; absent when run from `alembic`.
+    callback = config.attributes.get("on_applied")
+    if callback is not None and step.is_upgrade:
+        callback(step.up_revision_id)
+
+
 def _configure_and_run(connection) -> None:
     is_sqlite = connection.dialect.name == "sqlite"
     if is_sqlite:
@@ -49,6 +56,7 @@ def _configure_and_run(connection) -> None:
         connection=connection,
         target_metadata=target_metadata,
         render_as_batch=is_sqlite,
+        on_version_apply=_on_version_apply,
     )
     with context.begin_transaction():
         context.run_migrations()

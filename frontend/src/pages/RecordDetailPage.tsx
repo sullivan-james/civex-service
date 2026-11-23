@@ -1,3 +1,4 @@
+import RecordSyncBadge from '../components/records/RecordSyncBadge'
 import { useEffect, useState } from 'react'
 import { Link, useParams, useNavigate } from 'react-router'
 import {
@@ -254,7 +255,9 @@ export default function RecordDetailPage() {
               {record.natural_name ?? (
                 <span className="font-mono">{record.id.slice(0, 8)}</span>
               )}
+              <RecordSyncBadge recordId={record.id} />
             </span>
+            <RecordSyncBadge recordId={record.id} />
           </span>
         }
         action={

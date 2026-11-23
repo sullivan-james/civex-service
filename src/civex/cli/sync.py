@@ -547,6 +547,11 @@ def status() -> None:
     console.print(f"Project     {s.project_id}")
     console.print(f"Paused      {'yes' if s.paused else 'no'}")
     console.print(f"Unsent      {s.pending}")
+    if s.seeding:
+        console.print(
+            f"[warning]First upload interrupted: {s.seeding} changes still to go; "
+            "the next sync finishes it[/warning]"
+        )
     console.print(f"Conflicts   {s.open_conflicts}")
     console.print(
         f"Files       keeps {'every file' if s.download_files == 'all' else 'files opened'}"

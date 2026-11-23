@@ -22,6 +22,7 @@ import time
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from civex.config import Config, PartitionLayout, save_config
 from civex.docker_manager import (
@@ -34,6 +35,10 @@ from civex.docker_manager import (
     wait_for_container_postgres,
 )
 from civex.domain.exceptions import ValidationError
+
+if TYPE_CHECKING:
+    from civex.db.migrate import ProgressCallback
+
 
 COMMON_PORTS = [5432, 5433]
 SOCKET_DIRS = ["/var/run/postgresql", "/run/postgresql", "/tmp"]
@@ -180,17 +185,21 @@ def structure_problems(url: str) -> list[str]:
         engine.dispose()
 
 
-def apply_migrations(url: str, layout: PartitionLayout | None = None) -> None:
+def apply_migrations(
+    url: str,
+    layout: PartitionLayout | None = None,
+    progress: "ProgressCallback | None" = None,
+) -> None:
     """Bring the database at `url` to the latest revision. `layout`: the
     PostgreSQL table layout a not-yet-partitioned database gets (see
-    `PartitionLayout.for_config`)."""
+    `PartitionLayout.for_config`); `progress`: see `ensure_schema_current`."""
     from sqlalchemy import create_engine
 
     from civex.db.migrate import ensure_schema_current
 
     engine = create_engine(url)
     try:
-        ensure_schema_current(engine, layout)
+        ensure_schema_current(engine, layout, progress=progress)
     finally:
         engine.dispose()
 

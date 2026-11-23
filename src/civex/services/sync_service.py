@@ -155,6 +155,10 @@ class FileSendReport:
     never_stored: list[str] = field(default_factory=list)
     never_stored_in: list[tuple[str, int]] = field(default_factory=list)
     stopped: bool = False  # ran out of `seconds` with more to send
+    # Where a stopped pass got to: the next one starts after it (`after`), so
+    # files that can't be sent from here (tried first, in hash order, every
+    # pass) don't keep it from reaching the ones that can.
+    resume_after: str = ""
 
 
 @dataclass
@@ -195,12 +199,36 @@ class FileFetchReport:
 
 
 @dataclass
+class RecordSyncState:
+    """Where one record stands with the authority (`SyncService.record_sync`).
+    `state`: `not_connected` (no authority), `held_here` (this project is the
+    authority), `synced`, `pending` (changes not yet sent), `first_upload`
+    (set aside by a first upload that has not finished), `refused` (the
+    authority would not take a change) or `conflict` (a value both sides
+    changed, for a person to settle)."""
+
+    state: str
+    remote: str | None = None
+    pending: int = 0
+    seeding: int = 0
+    hub_seq: int | None = None
+    synced_at: str | None = None
+    message: str | None = None  # the authority's reason, for `refused`
+    conflict_id: str | None = None
+    files: int = 0
+    files_waiting: int = 0
+
+
+@dataclass
 class SyncStatus:
     configured: bool
     remote: str | None
     project_id: str
     paused: bool
     pending: int  # changes made here that the authority has not been sent
+    # Changes of a first upload (seed) that was interrupted and has yet to be
+    # finished: counted apart from `pending` and sent on the next sync.
+    seeding: int
     open_conflicts: int
     cursor: int
     last_synced_at: str | None
@@ -353,6 +381,7 @@ class SyncService:
             project_id=str(meta.project_id),
             paused=self._config.sync.paused,
             pending=self._repo.count_pending() if self.configured else 0,
+            seeding=self._repo.count_seeding() if self.configured else 0,
             open_conflicts=self._repo.count_conflicts("open"),
             cursor=meta.cursor,
             last_synced_at=meta.last_synced_at,
@@ -370,6 +399,42 @@ class SyncService:
             ),
             files_waiting=waiting,
         )
+
+    def record_sync(self, record_id: uuid.UUID) -> RecordSyncState:
+        """One record's standing with the authority, cheaply: a grouped read
+        of its own audit entries, the files it cites, and its open conflicts."""
+        if self._config.sync.serve:
+            return RecordSyncState("held_here")
+        if not self.configured:
+            return RecordSyncState("not_connected")
+        rows = self._repo.record_sync_rows(record_id)
+        states = rows["states"]
+        pending = states.get("pending", (0, None, None))[0]
+        seeding = states.get("seeding", (0, None, None))[0]
+        _, seq, at = states.get("synced", (0, None, None))
+        out = RecordSyncState(
+            "synced",
+            remote=self._config.sync.remote,
+            pending=pending,
+            seeding=seeding,
+            hub_seq=seq,
+            synced_at=at.isoformat() if hasattr(at, "isoformat") else at,
+            files=rows["files"],
+            files_waiting=rows["files_waiting"],
+        )
+        open_ = self._repo.find_open_conflicts(entity_id=record_id)
+        refused = next((c for c in open_ if c.kind == "rejected"), None)
+        clash = next((c for c in open_ if c.kind != "rejected"), None)
+        if clash:
+            out.state, out.conflict_id = "conflict", str(clash.id)
+        elif refused:
+            out.state, out.conflict_id = "refused", str(refused.id)
+            out.message = refused.message
+        elif pending:
+            out.state = "pending"
+        elif seeding:
+            out.state = "first_upload"
+        return out
 
     def history_position(self) -> tuple[int | None, int]:
         """Where this copy is in the authority's numbered history, and how many
@@ -780,7 +845,11 @@ class SyncService:
             # Connected before. A first push that never finished leaves the
             # cursor at zero with this device named as the one that began it;
             # a copy that never finished leaves it at JOINING (or nothing here).
-            unfinished = hello.seeded_by == mine and meta.cursor == 0
+            # (A pull that moved the cursor on does not hide it: entries
+            # still `seeding` mean the first upload is not done.)
+            unfinished = hello.seeded_by == mine and (
+                meta.cursor == 0 or self._repo.count_seeding() > 0
+            )
             if meta.cursor == JOINING or (local_empty and not hello.empty):
                 mode = "joined"
             elif not local_empty and (hello.empty or unfinished):
@@ -864,20 +933,49 @@ class SyncService:
         self._config_store.save(self._config)
 
         with sync_lock(self._config.civex_dir):
-            transport = self._transport()
-            if mode == "joined":
-                self._join(transport, hello, progress)
-            elif mode == "seeded":
-                self._seed(transport, progress, hello.protocol_version)
-            else:
-                self._repo.set_cursor(
-                    hello.head_seq if mode == "empty" else self._repo.meta().cursor
-                )
-                self._repo.mark_all_synced() if mode == "empty" else None
-                self._commit()
+            try:
+                transport = self._transport()
+                if mode == "joined":
+                    self._join(transport, hello, progress)
+                elif mode == "seeded":
+                    # After a pull, not what the authority already has.
+                    skip = (
+                        self._repo.already_sent_entities()
+                        if self._repo.meta().cursor != 0 and not hello.empty
+                        else None
+                    )
+                    extra: dict[str, Any] = {"skip": skip} if skip else {}
+                    self._seed(
+                        transport,
+                        progress,
+                        hello.protocol_version,
+                        **extra,
+                    )
+                else:
+                    self._repo.set_cursor(
+                        hello.head_seq if mode == "empty" else self._repo.meta().cursor
+                    )
+                    self._repo.mark_all_synced() if mode == "empty" else None
+                    self._commit()
+            except Exception as raw:
+                # Say why it stopped (the next sync finishes a seed from where
+                # it got to), instead of leaving no trace.
+                self._record_failure(raw)
+                raise
             self._repo.record_outcome(None)
             self._commit()
         return mode
+
+    def _record_failure(self, raw: Exception) -> None:
+        try:
+            if is_lock_contention(raw):
+                self._repo.rollback()
+            else:
+                self._commit_quietly()
+            self._repo.record_outcome(str(plain_failure(raw)))
+            self._commit()
+        except Exception:  # noqa: BLE001 - the original error is what matters
+            self._repo.rollback()
 
     def disconnect(self) -> None:
         remote = self._config.sync.remote
@@ -988,12 +1086,17 @@ class SyncService:
     # Syncing
     # ------------------------------------------------------------------
 
-    def sync(self) -> SyncReport:
+    _sync_progress: ProgressFn | None = None
+    # Where a background run hears of a first upload being finished.
+    on_progress: ProgressFn | None = None
+
+    def sync(self, progress: ProgressFn | None = None) -> SyncReport:
         """Pull, push, pull: the project's data only. Files go separately and
         afterwards (`send_files`, `fetch_files`), so a large upload never holds
         up a change. Raises `SyncBusy` when another sync is running and
         `SyncError` when the authority can't be reached or refuses this device
         (`retryable` says whether trying later can help)."""
+        self._sync_progress = progress or self.on_progress
         with sync_lock(self._config.civex_dir, wait=LOCK_WAIT_SECONDS):
             log.info("sync with %s: starting", self._config.sync.remote)
             try:
@@ -1067,6 +1170,7 @@ class SyncService:
             pass
 
     def _sync(self) -> SyncReport:
+        progress = self._sync_progress
         if problem := self._one_role():
             raise SyncError(problem, retryable=False)
         transport = self._transport()
@@ -1087,6 +1191,50 @@ class SyncService:
             server_version=hello.server_version,
             notice=retiring_notice(hello.protocol_retiring, hello.protocol_version),
         )
+        # A first upload that never finished (the process stopped, or the
+        # connection dropped) goes first, whatever the cursor says: a pull
+        # would only bring back what of it had gone, and the rest would stay
+        # `seeding`, sent by nothing. It is safe to run again (see `_seed`).
+        if self._repo.count_seeding():
+            if hello.seeded_by == str(user_state.device_id_for(meta.project_id)):
+                log.info(
+                    "sync with %s: finishing the first upload",
+                    self._config.sync.remote,
+                )
+                # The whole project goes again, as a first upload does (what
+                # the authority already holds it answers from its record),
+                # except what it already numbered a change of. The cursor
+                # stays: the pull below brings in whatever others did.
+                self._seed(
+                    transport,
+                    progress,
+                    hello.protocol_version,
+                    advance=False,
+                    skip=self._repo.already_sent_entities(),
+                )
+                meta = self._repo.meta()
+            else:
+                # Not this copy's upload to finish (another began or finished
+                # it: its ids would be answered with the other's results, and
+                # these changes would be marked sent without being seen). This
+                # copy's own are sent under ids of its own, so the authority
+                # judges them like any other change and a clash is kept for
+                # review. (A device id lost on this computer lands here too: a
+                # clash is recoverable, a silent loss is not.)
+                log.info(
+                    "sync with %s: the first upload was not begun by this copy; "
+                    "its changes are sent as ordinary ones",
+                    self._config.sync.remote,
+                )
+                self._seed(
+                    transport,
+                    progress,
+                    hello.protocol_version,
+                    advance=False,
+                    skip=self._repo.already_sent_entities(),
+                    salt=str(user_state.device_id_for(meta.project_id)),
+                )
+                meta = self._repo.meta()
         if meta.cursor < hello.feed_floor:
             self._copy_again(transport, hello, report)
         self._catch_up_readable(transport, hello)
@@ -1472,6 +1620,7 @@ class SyncService:
         everything: bool = False,
         seconds: float | None = None,
         progress: ProgressFn | None = None,
+        after: str = "",
     ) -> FileSendReport:
         """Make the authority hold every file a live record here cites and this
         computer can read. Apart from syncing: the records citing them went
@@ -1491,7 +1640,6 @@ class SyncService:
             return report
         self._forget_found()
         shas: list[str] = []
-        after = ""
         while page := self._repo.referenced_shas(
             after, FILE_CHECK_PAGE, unconfirmed=not everything
         ):
@@ -1543,35 +1691,33 @@ class SyncService:
         along it is (files, and bytes as they go). Stops between files once
         `seconds` are spent."""
         started = time.monotonic()
-        lacking: list[str] = []
-        for at in range(0, len(shas), FILE_CHECK_PAGE):
-            page = shas[at : at + FILE_CHECK_PAGE]
-            missing = set(transport.missing_files(page))
-            self._repo.confirm_on_server(set(page) - missing)
-            self._repo.note_server_lacks(missing, backoff=False)
-            lacking.extend(sha for sha in page if sha in missing)
-        if not lacking:
-            return
-        # How much is to go, from the inventory (one lookup); a file it doesn't
-        # know the size of is counted when it is read.
-        sizes = {
-            sha: rows[0][1] for sha, rows in self._files.copies(lacking).items() if rows
-        }
-        total_bytes = sum(sizes.get(sha, 0) for sha in lacking)
+        # The clock covers asking and uploading together, but is only ever
+        # acted on once a file has been tried: asking about a great many files
+        # (tens of thousands take over a minute) must not use up a pass before
+        # it uploads anything, or every pass would ask again and never send.
+        # What each page's answer found is kept as it comes (`server_files`),
+        # so a next pass starts after the pages already settled.
         rate = RateWindow()
-        done = sent_bytes = 0
+        done = sent_bytes = found = total_bytes = tried = 0
         said = 0.0
+
+        def over() -> bool:
+            return (
+                seconds is not None
+                and tried > 0
+                and time.monotonic() - started >= seconds
+            )
 
         def say(force: bool = False) -> None:
             nonlocal said
             now = time.monotonic()
-            if progress and (force or now - said >= 0.25):
+            if progress and found and (force or now - said >= 0.25):
                 said = now
                 progress(
                     SyncProgress(
                         SENDING,
                         done,
-                        len(lacking),
+                        found,
                         bytes_done=sent_bytes,
                         bytes_total=total_bytes,
                         rate=rate.add(now, sent_bytes),
@@ -1583,23 +1729,48 @@ class SyncService:
             sent_bytes += n
             say()
 
-        say(force=True)
-        for sha in lacking:
-            if seconds is not None and time.monotonic() - started >= seconds:
+        for at in range(0, len(shas), FILE_CHECK_PAGE):
+            if over():
                 report.stopped = True
                 return
-            why = self._upload(transport, sha, went)
-            if why is None:
-                self._repo.confirm_on_server([sha])
-                self._commit()  # each file's arrival is kept, whatever follows
-                report.sent += 1
-                log.debug("sent file %s", sha[:12])
-            else:
-                if sha not in report.owed:
-                    report.owed.append(sha)
-                log.debug("file %s not sent: %s", sha[:12], why)
-            done += 1
+            page = shas[at : at + FILE_CHECK_PAGE]
+            missing = set(transport.missing_files(page))
+            self._repo.confirm_on_server(set(page) - missing)
+            self._repo.note_server_lacks(missing, backoff=False)
+            lacking = [sha for sha in page if sha in missing]
+            if not lacking:
+                self._commit()
+                report.resume_after = page[-1]
+                continue
+            # How much is to go, from the inventory (one lookup); a file it
+            # doesn't know the size of is counted when it is read.
+            sizes = {
+                sha: rows[0][1]
+                for sha, rows in self._files.copies(lacking).items()
+                if rows
+            }
+            total_bytes += sum(sizes.get(sha, 0) for sha in lacking)
+            found += len(lacking)
             say(force=True)
+            for sha in lacking:
+                if over():
+                    report.stopped = True
+                    return
+                tried += 1
+                why = self._upload(transport, sha, went)
+                if why is None:
+                    self._repo.confirm_on_server([sha])
+                    self._commit()  # each file's arrival is kept, whatever follows
+                    report.sent += 1
+                    log.debug("sent file %s", sha[:12])
+                else:
+                    if sha not in report.owed:
+                        report.owed.append(sha)
+                    log.debug("file %s not sent: %s", sha[:12], why)
+                done += 1
+                report.resume_after = sha  # settled: the next pass starts after
+                say(force=True)
+            report.resume_after = page[-1]
 
     def _upload(
         self,
@@ -2290,6 +2461,9 @@ class SyncService:
         transport: SyncTransport,
         progress: ProgressFn | None = None,
         protocol: int = PROTOCOL_MAX,
+        skip: set[tuple[str, str]] | None = None,
+        advance: bool = True,
+        salt: str | None = None,
     ) -> None:
         """Give an empty authority everything this project holds. Each thing is
         sent as a create with an id made from the project and the thing, so an
@@ -2340,10 +2514,17 @@ class SyncService:
         # Analytics page to take, say).
         for kind in kinds_for(protocol):
             for snap in self._seed_snapshots(kind):
+                if skip and (kind, str(snap["id"])) in skip:
+                    continue  # a resumed upload leaves other devices' things
                 now = datetime.now(timezone.utc)
                 batch.append(
                     SyncEntry(
-                        id=uuid.uuid5(meta.project_id, f"seed:{kind}:{snap['id']}"),
+                        id=uuid.uuid5(
+                            meta.project_id,
+                            f"seed:{salt}:{kind}:{snap['id']}"
+                            if salt
+                            else f"seed:{kind}:{snap['id']}",
+                        ),
                         action="create",
                         entity_type=kind,
                         entity_id=uuid.UUID(snap["id"]),
@@ -2366,7 +2547,10 @@ class SyncService:
                 report.rejected,
             )
         self._repo.finish_seed()
-        self._repo.set_cursor(head)
+        # Only a first seed (connect) moves the cursor to the head: a resumed one may
+        # follow a pull, and other devices may have written since.
+        if advance and self._repo.meta().cursor == 0 and not skip:
+            self._repo.set_cursor(head)
         self._commit()
 
     # ------------------------------------------------------------------

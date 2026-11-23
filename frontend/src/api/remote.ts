@@ -26,6 +26,7 @@ export interface RemoteStatus {
   serving: boolean
   /** Changes made here that have not been sent. */
   pending: number
+  seeding?: number
   open_conflicts: number
   last_synced_at: string | null
   last_error: string | null

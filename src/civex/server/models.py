@@ -1386,6 +1386,32 @@ class DeletedFieldValue(BaseModel):
     )
 
 
+class RecordSyncResponse(BaseModel):
+    state: str = Field(
+        description="not_connected, held_here, synced, pending, first_upload, "
+        "refused or conflict."
+    )
+    remote: str | None = Field(default=None, description="The authority's address.")
+    pending: int = Field(default=0, description="Changes not yet sent.")
+    seeding: int = Field(
+        default=0, description="Changes waiting on an unfinished first upload."
+    )
+    hub_seq: int | None = Field(
+        default=None, description="The authority's number for its latest change."
+    )
+    synced_at: str | None = Field(
+        default=None, description="When that change was made."
+    )
+    message: str | None = Field(default=None, description="Why a change was refused.")
+    conflict_id: str | None = Field(
+        default=None, description="The conflict or refusal to review."
+    )
+    files: int = Field(default=0, description="Files this record cites.")
+    files_waiting: int = Field(
+        default=0, description="Of those, files the authority hasn't got."
+    )
+
+
 class RecordResponse(BaseModel):
     id: str
     dataset_id: str

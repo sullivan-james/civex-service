@@ -102,6 +102,30 @@ def record_add(
         raise typer.Exit(1)
 
 
+def _sync_line(ctx, record_id) -> str | None:
+    """One line on where the record stands with its authority, or None when
+    there is nothing to say (no authority, or this project is one)."""
+    import uuid
+
+    s = ctx.sync_svc.record_sync(uuid.UUID(str(record_id)))
+    where = s.remote or "the authority"
+    files = (
+        f"; {s.files_waiting} of {s.files} files not sent" if s.files_waiting else ""
+    )
+    if s.state in ("not_connected", "held_here"):
+        return None
+    if s.state == "pending":
+        return f"waiting to send ({s.pending} changes){files}"
+    if s.state == "first_upload":
+        return f"first upload to {where} not finished{files}"
+    if s.state == "refused":
+        return f"refused by {where}: {s.message or 'see sync conflicts'}{files}"
+    if s.state == "conflict":
+        return f"in conflict with {where}: review it with `civex sync conflicts`{files}"
+    when = f" at {s.synced_at[:16].replace('T', ' ')}" if s.synced_at else ""
+    return f"synced with {where}{when}{files}"
+
+
 @app.command("show")
 def record_show(
     record_id: str = typer.Argument(..., help="Record ID or short prefix"),
@@ -120,6 +144,10 @@ def record_show(
     if record.parent_record_id:
         console.print(f"  Parent    {record.parent_record_id}")
     console.print(f"  Created   {record.created_at.strftime('%Y-%m-%d %H:%M UTC')}")
+
+    line = _sync_line(ctx, record.id)
+    if line:
+        console.print(f"  Sync      {line}")
 
     if record.data:
         table = Table("Field", "Value")

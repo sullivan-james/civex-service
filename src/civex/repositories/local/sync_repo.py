@@ -232,12 +232,33 @@ class LocalSyncRepository:
         holds. The catalog is kept up to date as records are written, so
         what a device still owes its authority is worked out from it each time
         rather than remembered."""
-        sha = self._referenced()
-        query = select(sha).where(sha > after)
+        return list(self._s.scalars(self._referenced_page(after, limit, unconfirmed)))
+
+    def _referenced_page(self, after: str, limit: int, unconfirmed: bool):  # type: ignore[no-untyped-def]
+        """`limit` hashes after `after`, in order. The bound is applied to the
+        index on `sha256` before anything is grouped, so a page reads only its
+        own stretch of the index (an ordered scan that stops at the limit),
+        not every reference each time: with tens of thousands of files, a
+        `DISTINCT` over all of them per page was minutes of work and tens of
+        megabytes of shared memory for PostgreSQL's parallel workers."""
+        sha = FileReference.sha256
+        # An EXISTS per candidate row, not a join: the planner can then walk
+        # the index in order and stop at the limit.
+        live_owner = (
+            select(Record.id)
+            .where(Record.id == FileReference.record_id, Record.deleted_at.is_(None))
+            .exists()
+        )
+        query = select(sha).where(
+            sha > after,
+            (FileReference.record_id.is_not(None) & live_owner)
+            | FileReference.release_id.is_not(None),
+        )
         if unconfirmed:
-            query = query.where(sha.not_in(select(ServerFile.sha256)))
-        rows = self._s.execute(query.order_by(sha).limit(limit))
-        return [s for (s,) in rows]
+            query = query.where(
+                ~select(ServerFile.sha256).where(ServerFile.sha256 == sha).exists()
+            )
+        return query.group_by(sha).order_by(sha).limit(limit)
 
     def _referenced(self):  # type: ignore[no-untyped-def]
         """The column of every file this project needs the authority to hold:
@@ -255,26 +276,14 @@ class LocalSyncRepository:
         """How many files live records cite (or releases keep) that the
         authority hasn't said it holds: not on the server yet, as far as this
         device knows."""
-        sha = self._referenced()
-        return int(
-            self._s.execute(
-                select(func.count()).where(sha.not_in(select(ServerFile.sha256)))
-            ).scalar_one()
-        )
+        page = self._referenced_page("", 2**31, True).subquery()
+        return int(self._s.execute(select(func.count()).select_from(page)).scalar_one())
 
     def unconfirmed_copies(self, limit: int) -> dict[str, list[str]]:
         """Up to `limit` files live records cite that the authority hasn't said
         it holds, each with the volumes holding a copy here (none: not on this
         computer), for saying why they haven't gone."""
-        sha = self._referenced()
-        shas = list(
-            self._s.scalars(
-                select(sha)
-                .where(sha.not_in(select(ServerFile.sha256)))
-                .order_by(sha)
-                .limit(limit)
-            )
-        )
+        shas = list(self._s.scalars(self._referenced_page("", limit, True)))
         where: dict[str, list[str]] = {s: [] for s in shas}
         for at in range(0, len(shas), 500):
             for s, volume in self._s.execute(
@@ -329,6 +338,11 @@ class LocalSyncRepository:
                 if row is None:
                     row = ServerLack(sha256=sha, misses=0)
                     self._s.add(row)
+                elif not backoff and row.misses > 0:
+                    # Already noted and nothing to change: not rewritten (a
+                    # pass over tens of thousands of files would otherwise
+                    # update every row, every time, and bloat the table).
+                    continue
                 row.asked_at = now
                 if backoff or row.misses == 0:
                     row.misses += 1
@@ -1582,12 +1596,80 @@ class LocalSyncRepository:
             or 0
         )
 
-    def dirty_entities(self) -> set[tuple[str, uuid.UUID]]:
-        """Things with a change here still waiting to be sent: what a pull must
-        not overwrite."""
+    def record_sync_rows(self, record_id: uuid.UUID) -> dict[str, Any]:
+        """What this record's changes have come to, from one grouped read of
+        its audit entries (the `entity_id` index) and one of the files it cites:
+        per sync state, how many entries, the highest authority number and the
+        latest time; and how many files it cites, and how many of those the
+        authority hasn't said it holds."""
+        rows = self._s.execute(
+            select(
+                AuditLog.sync_state,
+                func.count(),
+                func.max(AuditLog.hub_seq),
+                func.max(AuditLog.timestamp),
+            )
+            .where(AuditLog.entity_id == record_id)
+            .group_by(AuditLog.sync_state)
+        ).all()
+        states = {s: (n, seq, at) for s, n, seq, at in rows}
+        cited = select(FileReference.sha256).where(FileReference.record_id == record_id)
+        files = int(
+            self._s.execute(
+                select(func.count(cited.distinct().subquery().c.sha256))
+            ).scalar_one()
+        )
+        waiting = int(
+            self._s.execute(
+                select(func.count()).select_from(
+                    cited.where(FileReference.sha256.not_in(select(ServerFile.sha256)))
+                    .distinct()
+                    .subquery()
+                )
+            ).scalar_one()
+        )
+        return {"states": states, "files": files, "files_waiting": waiting}
+
+    def count_seeding(self) -> int:
+        """Changes a first upload set aside and has not finished sending."""
+        return (
+            self._s.query(func.count(AuditLog.id))
+            .filter(AuditLog.sync_state == "seeding")
+            .scalar()
+            or 0
+        )
+
+    def seeding_entities(self) -> set[tuple[str, str]]:
+        """The things a first upload set aside changes for (kind, id)."""
         rows = (
             self._s.query(AuditLog.entity_type, AuditLog.entity_id)
-            .filter(AuditLog.sync_state == "pending", AuditLog.hub_seq.is_(None))
+            .filter(AuditLog.sync_state == "seeding")
+            .distinct()
+        )
+        return {(t, str(i)) for t, i in rows}
+
+    def already_sent_entities(self) -> set[tuple[str, str]]:
+        """Things the authority already numbered a change of (whoever made
+        it: ones that came from the feed, with or without a device id, and
+        ones pushed normally) that have nothing set aside by a first upload: a
+        resumed upload leaves them alone, since resending them as creates
+        would clash with what the authority has."""
+        rows = (
+            self._s.query(AuditLog.entity_type, AuditLog.entity_id)
+            .filter(AuditLog.hub_seq.is_not(None))
+            .distinct()
+        )
+        return {(t, str(i)) for t, i in rows} - self.seeding_entities()
+
+    def dirty_entities(self) -> set[tuple[str, uuid.UUID]]:
+        """Things with a change here still waiting to be sent (set aside by an
+        unfinished first upload too): what a pull must not overwrite."""
+        rows = (
+            self._s.query(AuditLog.entity_type, AuditLog.entity_id)
+            .filter(
+                AuditLog.sync_state.in_(("pending", "seeding")),
+                AuditLog.hub_seq.is_(None),
+            )
             .distinct()
         )
         return {(t, i) for t, i in rows}

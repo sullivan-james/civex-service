@@ -558,6 +558,14 @@ class AuditLog(Base):
             postgresql_where=text("sync_state = 'pending'"),
             sqlite_where=text("sync_state = 'pending'"),
         ),
+        # Changes a first upload set aside and has not finished sending
+        # (migration f3b8d6a2c9e1): almost always none.
+        Index(
+            "ix_audit_log_seeding",
+            "timestamp",
+            postgresql_where=text("sync_state = 'seeding'"),
+            sqlite_where=text("sync_state = 'seeding'"),
+        ),
         # The edits still stored whole (written before deltas), for converting
         # them: empty once they all are (migration a4d9e2c7f310).
         Index(

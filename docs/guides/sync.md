@@ -283,8 +283,10 @@ with a **Sharing** column, and each workflow's **Sharing** tab has its versions.
 
 ## History
 
-Every device has the full history in Activity. A new device downloads it after
-joining, a little at a time. Edits are stored as what changed, so history stays
+A device whose person may read everything has the full history in Activity. A new
+device downloads it after joining, a little at a time. A device limited to some
+collections has the history of those only, and a collection it is given later is
+not backfilled: its earlier Activity history is not sent, only changes from then on. Edits are stored as what changed, so history stays
 small. Projects from civex 1.2.0 and earlier are converted in the background
 after opening (*Tidying history* in the status bar). Reclaim the space with
 Settings → Database → **History storage** or `civex history compact --vacuum`.

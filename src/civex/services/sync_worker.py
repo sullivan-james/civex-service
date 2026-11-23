@@ -69,6 +69,8 @@ class _SendRun:
     bytes: int = 0
     rate: RateWindow = field(default_factory=RateWindow)
     last: SyncProgress | None = None
+    after: str = ""  # where the last pass got to (hash order)
+    everything: bool = False  # the run began as a full check
 
     def carried(self, p: SyncProgress, now: float) -> SyncProgress:
         """A pass's progress as part of the run."""
@@ -221,9 +223,14 @@ class SyncWorker:
         the progress published adds what earlier passes of the same run sent,
         so one bar runs from the first file to the last."""
         now = self._clock()
-        everything = everything or now - self._last_file_check >= FILE_CHECK_EVERY
-        sending = False
+        # A run carrying on after a pass that ran out of time goes on as it
+        # began, from where that pass got to.
         run = self._send_run or _SendRun()
+        if self._send_run is None:
+            run.everything = now - self._last_file_check >= FILE_CHECK_EVERY
+        run.everything = run.everything or everything  # asked for: never dropped
+        everything = run.everything
+        sending = False
 
         def told(p: SyncProgress) -> None:
             nonlocal sending
@@ -232,8 +239,9 @@ class SyncWorker:
             self._on_files(run.carried(p, self._clock()))
 
         try:
+            more = {"after": run.after} if run.after else {}
             report = ctx.sync_svc.send_files(
-                everything=everything, seconds=FILES_SECONDS, progress=told
+                everything=everything, seconds=FILES_SECONDS, progress=told, **more
             )
         except SyncError as e:
             log.info("sending files failed (%s); it carries on later", e)
@@ -242,13 +250,15 @@ class SyncWorker:
             if sending:
                 self._on_files(None)
             return
-        if everything:
-            self._last_file_check = now
         if report.stopped:  # more to send: carry on at once, on the same bar
             run.close_pass()
+            run.after = getattr(report, "resume_after", "")
             self._send_run = run
             self._files_wake.set()
             return
+        # (A run that began as a full check and ended on its continuation counts.)
+        if run.everything:
+            self._last_file_check = now
         self._send_run = None
         if sending:  # no bar left where uploading ended
             self._on_files(None)
@@ -355,7 +365,19 @@ class SyncWorker:
         self._last_attempt = now
         log.info("background sync: %s", "requested" if asked else "due")
         try:
-            report = ctx.sync_svc.sync()
+            told = False
+
+            def say(p: SyncProgress) -> None:
+                nonlocal told
+                told = True
+                self._on_progress(p)
+
+            try:
+                ctx.sync_svc.on_progress = say
+                report = ctx.sync_svc.sync()
+            finally:
+                if told:  # no first-upload bar left behind
+                    self._on_progress(None)
             self.last_report = report
         except SyncBusy:
             return None

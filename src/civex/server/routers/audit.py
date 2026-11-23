@@ -10,7 +10,8 @@ from civex.context import AppContext
 from civex.domain.audit_filters import AUDIT_FIELDS
 from civex.domain.dtos import BatchRevertDTO
 from civex.domain.exceptions import ValidationError
-from civex.server.deps import get_ctx, reads_whole_project
+from civex.domain.permissions import MANAGE_MEMBERS
+from civex.server.deps import allows, get_ctx, reads_whole_project
 from civex.server.models import (
     BatchRevertRequest,
     BatchRevertResponse,
@@ -279,6 +280,12 @@ def _audit_id(audit_id: str) -> uuid.UUID:
 # -- how history is stored ------------------------------------------------------
 
 
+class ReclaimTable(BaseModel):
+    name: str
+    size_bytes: int
+    free_bytes: int
+
+
 class HistoryStorageResponse(BaseModel):
     whole_entries: int = Field(
         description="Edits still stored as two whole copies (written before "
@@ -293,17 +300,36 @@ class HistoryStorageResponse(BaseModel):
     )
     size_bytes: int | None = Field(
         default=None,
-        description="The database file's size (SQLite; null where the database "
-        "manages its own space).",
+        description="The database's size: the file (SQLite) or the project's "
+        "tables with their indexes (PostgreSQL).",
     )
     free_bytes: int | None = Field(
         default=None,
         description="Room inside the file no longer used: what reclaiming gives "
         "back. Reclaiming needs about `size_bytes` of free disk while it runs.",
     )
+    estimate: bool = Field(
+        default=False,
+        description="`free_bytes` is an estimate from the catalogs (PostgreSQL).",
+    )
+    reclaim_tables: list[ReclaimTable] | None = Field(
+        default=None,
+        description="PostgreSQL: the tables a reclaim would rewrite, each locked "
+        "while it runs. Null on SQLite, which rewrites the whole file.",
+    )
+    can_reclaim: bool = Field(
+        default=True, description="False where the host doesn't offer a reclaim."
+    )
+    reclaim_skipped: list[str] = Field(
+        default_factory=list,
+        description="After a reclaim: tables left for later because another "
+        "session held a lock on them.",
+    )
 
 
-def _storage(ctx: AppContext) -> HistoryStorageResponse:
+def _storage(
+    ctx: AppContext, skipped: list[str] | None = None
+) -> HistoryStorageResponse:
     from civex.services.history_jobs import history_jobs
 
     space = ctx.compaction_svc.space()
@@ -315,6 +341,15 @@ def _storage(ctx: AppContext) -> HistoryStorageResponse:
         total=progress.total if progress else None,
         size_bytes=space.size_bytes if space else None,
         free_bytes=space.free_bytes if space else None,
+        estimate=space.estimate if space else False,
+        reclaim_tables=[
+            ReclaimTable(name=t.name, size_bytes=t.size_bytes, free_bytes=t.free_bytes)
+            for t in space.tables
+        ]
+        if space and space.estimate
+        else None,
+        can_reclaim=space.can_reclaim if space else True,
+        reclaim_skipped=skipped or [],
     )
 
 
@@ -333,12 +368,12 @@ def history_storage(ctx: AppContext = Depends(get_ctx)):
 @router.post(
     "/audit/storage/reclaim",
     response_model=HistoryStorageResponse,
-    dependencies=[reads_whole_project()],
+    dependencies=[reads_whole_project(), allows(MANAGE_MEMBERS)],
 )
 def reclaim_history_storage(ctx: AppContext = Depends(get_ctx)):
-    """Give unused room in the database file back to the disk (SQLite VACUUM).
-    Refused while history is being converted. It needs about the file's size in
-    free disk while it runs, and the project waits for it."""
+    """Give unused room back to the disk: SQLite's VACUUM, or PostgreSQL's
+    VACUUM FULL of the tables that are mostly empty (a host without `DB_ADMIN`
+    refuses). Refused while history is being converted. The project waits."""
     from civex.services.history_jobs import history_jobs
 
     if history_jobs.running:
@@ -346,8 +381,8 @@ def reclaim_history_storage(ctx: AppContext = Depends(get_ctx)):
             409, detail="History is still being converted; reclaim once it is done"
         )
     ctx.commit()  # nothing of this request may be open while the file is rewritten
-    ctx.compaction_svc.reclaim()
-    return _storage(ctx)
+    skipped = ctx.compaction_svc.reclaim()
+    return _storage(ctx, skipped)
 
 
 @router.get("/audit/{audit_id}", response_model=AuditLogResponse)
