@@ -8,7 +8,7 @@ import pytest
 from civex.config import load_config, save_config
 from civex.domain import permissions as p
 from civex.domain.permissions import Permissions
-from tests.server.test_hidden_collections import (  # noqa: F401
+from .test_hidden_collections import (  # noqa: F401
     World,
     _client,
     outsider_perms,

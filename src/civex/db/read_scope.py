@@ -68,16 +68,14 @@ def _entry_visible(scope: ReadScope) -> ColumnElement[bool]:
     record_in = (
         select(records.c.dataset_id)
         .where(records.c.id == AuditLog.entity_id)
+        .correlate(AuditLog)
         .scalar_subquery()
     )
     note_in = (
         select(records.c.dataset_id)
-        .where(
-            records.c.id
-            == select(notes.c.record_id)
-            .where(notes.c.id == AuditLog.entity_id)
-            .scalar_subquery()
-        )
+        .select_from(notes.join(records, records.c.id == notes.c.record_id))
+        .where(notes.c.id == AuditLog.entity_id)
+        .correlate(AuditLog)
         .scalar_subquery()
     )
     dataset = _in_scope(AuditLog.entity_id, scope)

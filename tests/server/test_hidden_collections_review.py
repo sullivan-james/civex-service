@@ -9,7 +9,7 @@ from civex.config import load_config_at
 from civex.context import build_local_context
 from civex.domain import permissions as p
 from civex.domain.permissions import Permissions
-from tests.server.test_hidden_collections import (  # noqa: F401
+from .test_hidden_collections import (  # noqa: F401
     SECRET,
     World,
     _client,
@@ -233,3 +233,12 @@ def test_exports_and_counts_hold_only_what_is_visible(world: World):
     assert c.get("/api/schemas/sample/delete-impact").json()["record_count"] == 2
     counts = c.get("/api/analytics/records/counts").json()["items"]
     assert [i["count"] for i in counts] == [2]
+
+
+def test_note_history_follows_the_notes_record(world: World):
+    c = _client(world, outsider_perms(world, p.WRITE_RECORDS, p.NOTES))
+    body = c.get("/api/audit", params={"limit": 500}).text
+    assert "a plain note" in body
+    assert f"{SECRET} note" not in body
+    owner = _client(world, Permissions.everything())
+    assert f"{SECRET} note" in owner.get("/api/audit", params={"limit": 500}).text
