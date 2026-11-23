@@ -1,0 +1,72 @@
+name: bench-authority
+
+# The authority applying a pushed batch of records on PostgreSQL with a large
+# repository behind it (benchmarks/bench_bulk_push.py), before and after this
+# branch: the base's source is run with this branch's benchmark. Run by hand.
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Branch (or commit) to compare against
+        default: agent/upload-speed
+      prefill:
+        description: Records (and audit_log, sync_ops rows) already held
+        default: "200000"
+      batches:
+        description: Pushes of 250 records
+        default: "8"
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: civex
+          POSTGRES_PASSWORD: civex
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PG_URL: postgresql+psycopg2://civex:civex@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --extra server --extra workflows --extra dev
+
+      - name: The base's source
+        run: |
+          mkdir /tmp/base
+          git archive "origin/${{ inputs.base }}" src | tar -x -C /tmp/base
+
+      - name: Before (the base)
+        run: |
+          PYTHONPATH=/tmp/base/src:$PWD/benchmarks uv run python benchmarks/bench_bulk_push.py \
+            --prefill "${{ inputs.prefill }}" --batches "${{ inputs.batches }}" | tee /tmp/before.txt
+
+      - name: After (this branch)
+        run: |
+          PYTHONPATH=$PWD/src:$PWD/benchmarks uv run python benchmarks/bench_bulk_push.py \
+            --prefill "${{ inputs.prefill }}" --batches "${{ inputs.batches }}" | tee /tmp/after.txt
+
+      - name: Summary
+        run: |
+          {
+            echo "## Authority push, ${{ inputs.prefill }} records held, ${{ inputs.batches }} x 250 pushed"
+            echo "Base: ${{ inputs.base }}"
+            echo '### Before'; echo '```'; cat /tmp/before.txt; echo '```'
+            echo '### After'; echo '```'; cat /tmp/after.txt; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

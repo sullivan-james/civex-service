@@ -1105,7 +1105,7 @@ class LocalSyncRepository:
                 self._s.expire(record)
         if self._meta_held is not None and self._meta_held in self._s:
             self._s.expire(self._meta_held)
-        if self._absent:
+        if self._absent is not None:
             self._absent = set()  # look for them again
             self._stale = True
 
