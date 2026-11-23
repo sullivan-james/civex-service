@@ -116,9 +116,7 @@ def main() -> None:
             laptop.record_svc.add("study", "encounter", {"site": f"s{i}", "depth": 1.0})
         sizes = [args.small_kb * 1024] * args.small + [args.large_mb << 20] * args.large
         for i, size in enumerate(sizes):
-            ref = laptop.file_svc.store_bytes(
-                os.urandom(size), f"f{i}.bin"
-            )
+            ref = laptop.file_svc.store_bytes(os.urandom(size), f"f{i}.bin")
             laptop.record_svc.add(
                 "study", "encounter", {"site": f"f{i}", "scan": ref.to_dict()}
             )
