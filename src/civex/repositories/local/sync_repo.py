@@ -15,7 +15,10 @@ from typing import Any
 
 from sqlalchemy import (
     BigInteger,
+    String,
+    Uuid,
     and_,
+    cast,
     delete,
     func,
     or_,
@@ -473,7 +476,8 @@ class LocalSyncRepository:
         query = (
             select(
                 FileReference.sha256.label("sha"),
-                func.min(Record.dataset_id).label("cid"),
+                # PostgreSQL has no min(uuid): pick one as text, cast back.
+                cast(func.min(cast(Record.dataset_id, String)), Uuid).label("cid"),
             )
             .outerjoin(Record, Record.id == FileReference.record_id)
             .outerjoin(stored, stored.c.sha == FileReference.sha256)
