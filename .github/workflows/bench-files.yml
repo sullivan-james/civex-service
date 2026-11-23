@@ -8,6 +8,16 @@ name: File upload benchmark
 # run, not runs with each other. Manual only.
 
 on:
+  pull_request:
+    paths:
+      - ".github/workflows/bench-files.yml"
+      - "benchmarks/bench_bulk_files.py"
+      - "src/civex/services/sync_service.py"
+      - "src/civex/services/sync_transport.py"
+      - "src/civex/services/file_service.py"
+      - "src/civex/server/routers/sync_peer.py"
+      - "src/civex/repositories/local/file_store.py"
+      - "src/civex/repositories/s3/store.py"
   workflow_dispatch:
     inputs:
       before_ref:
@@ -64,7 +74,7 @@ jobs:
           echo "MOTO_SERVER=$RUNNER_TEMP/moto/bin/moto_server" >> "$GITHUB_ENV"
 
       - name: The old upload path
-        run: git worktree add "$RUNNER_TEMP/before" "origin/${{ inputs.before_ref }}"
+        run: git worktree add "$RUNNER_TEMP/before" "origin/${{ inputs.before_ref || github.base_ref }}"
 
       - name: Run
         run: |
@@ -80,11 +90,11 @@ jobs:
           for side in before after; do
             tree=$GITHUB_WORKSPACE
             [ "$side" = before ] && tree=$RUNNER_TEMP/before
-            bench "$side fs small" "$tree" --shape small --gb "${{ inputs.small_gb }}" --store fs
-            bench "$side fs huge" "$tree" --shape huge --big-count "${{ inputs.huge_count }}" --big-gb "${{ inputs.huge_gb }}" --store fs
+            bench "$side fs small" "$tree" --shape small --gb "${{ inputs.small_gb || '5' }}" --store fs
+            bench "$side fs huge" "$tree" --shape huge --big-count "${{ inputs.huge_count || '5' }}" --big-gb "${{ inputs.huge_gb || '1' }}" --store fs
             bench "$side fs huge, 25 MB/s per connection" "$tree" --shape huge --big-count 2 --big-gb 1 --store fs --per-conn-mb 25
-            bench "$side s3 small" "$tree" --shape small --gb "${{ inputs.s3_gb }}" --store s3
-            bench "$side s3 huge" "$tree" --shape huge --big-count 2 --big-gb "$(python3 -c 'print(${{ inputs.s3_gb }}/2)')" --store s3
+            bench "$side s3 small" "$tree" --shape small --gb "${{ inputs.s3_gb || '1' }}" --store s3
+            bench "$side s3 huge" "$tree" --shape huge --big-count 2 --big-gb "$(python3 -c 'print(${{ inputs.s3_gb || '1' }}/2)')" --store s3
           done
 
       - name: Summary
