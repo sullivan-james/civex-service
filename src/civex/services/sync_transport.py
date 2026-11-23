@@ -47,6 +47,10 @@ API = "/api/sync/v1"
 
 
 class HttpSyncTransport:
+    # How many small files the sender may upload at once over this transport
+    # (each is its own HTTP request; the session token is shared).
+    upload_threads = 4
+
     def __init__(
         self, base_url: str, credentials: DeviceCredentials, timeout: float = 30.0
     ) -> None:

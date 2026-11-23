@@ -1152,6 +1152,18 @@ class ServerFile(Base):
     sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
 
 
+class SeedAck(Base):
+    """Device: the id of a first-upload change the authority has answered.
+    A seed interrupted and run again leaves these out (the ids are made from
+    the project and the thing, so they are the same every time), instead of
+    sending everything from the start. Cleared when the seed finishes, when a
+    new one begins, and on following another authority."""
+
+    __tablename__ = "seed_acks"
+
+    entry_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+
+
 class IgnoredMissingFile(Base):
     """A file records cite that this project never stored and nothing can
     supply, which a person chose to stop being told about (`civex files

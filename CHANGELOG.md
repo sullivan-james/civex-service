@@ -70,6 +70,25 @@ from the next tag forward.
   installed. Over plain HTTPS it is the same as downloading the bundle and
   running `civex bundle import`.
 
+#### Changes
+
+- **A first upload to a hub is much faster.**
+  - A first upload (seed) that is interrupted or reconnects **resumes after what
+    the authority already answered** instead of sending the whole project from
+    the start: each answered batch is remembered (new table `seed_acks`, added
+    by an automatic migration; cleared when the seed finishes) and left out
+    next time.
+  - Records go in batches of 250 (was 100); the authority takes at most 500.
+  - Files: the slice's locations and sizes are looked up in one query; files up
+    to 8 MiB (`sync_service.LARGE_FILE_BYTES`) go four at a time over HTTP and
+    are confirmed and committed in groups (50 files or 2 s); a larger file is
+    always sent alone, one at a time, and confirmed and committed as soon as it
+    arrives. A failed upload still keeps the files of its group that arrived.
+  - The Files page's list (`POST /api/file-access/files`) keeps an answer that
+    took 0.3 s or more for 3 s, so the screen's refreshes while sync runs don't
+    each recompute every file; any other `/file-access` call drops it.
+  - `benchmarks/bench_first_upload.py` measures it on PostgreSQL.
+
 ### v2.2.1
 
 - **Faster pushes to an authority.** A push of 100 changes ran about 17

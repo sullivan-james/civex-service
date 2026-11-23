@@ -43,6 +43,7 @@ from civex.db.models import (
     Record,
     RecordReference,
     Schema,
+    SeedAck,
     ServerFile,
     ServerLack,
     SyncConflict,
@@ -1837,6 +1838,7 @@ class LocalSyncRepository:
         )
         # And which files it said it holds or lacks: the new one is asked afresh.
         self._s.execute(delete(ServerFile))
+        self._s.execute(delete(SeedAck))
         self._s.execute(delete(ServerLack))
         self._s.expire_all()
 
@@ -1929,6 +1931,7 @@ class LocalSyncRepository:
             self._s.query(AuditLog.id).filter(AuditLog.sync_state == "seeding").first()
         )
         if started is None:
+            self._s.execute(delete(SeedAck))
             self._s.execute(
                 update(AuditLog)
                 .where(
@@ -1941,8 +1944,25 @@ class LocalSyncRepository:
             )
             self._s.expire_all()
 
+    def seed_acked(self) -> set[str]:
+        """Ids of the first-upload changes the authority has answered."""
+        return {i for (i,) in self._s.query(SeedAck.entry_id)}
+
+    def note_seed_acked(self, entry_ids: list[uuid.UUID]) -> None:
+        """Remember these first-upload changes as answered (idempotent)."""
+        wanted = [str(i) for i in entry_ids]
+        known = {
+            i
+            for (i,) in self._s.query(SeedAck.entry_id).filter(
+                SeedAck.entry_id.in_(wanted)
+            )
+        }
+        self._s.add_all(SeedAck(entry_id=i) for i in wanted if i not in known)
+        self._s.flush()
+
     def finish_seed(self) -> None:
         """The seed went in: what it covered counts as sent."""
+        self._s.execute(delete(SeedAck))
         self._s.execute(
             update(AuditLog)
             .where(AuditLog.sync_state == "seeding")

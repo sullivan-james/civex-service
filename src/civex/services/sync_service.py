@@ -14,11 +14,13 @@ point leaves the project as it was or one step further, never between.
 from __future__ import annotations
 
 import logging
+import threading
 
 import time
 import urllib.parse
 import uuid
 from collections.abc import Callable, Iterator
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, BinaryIO, TypeVar
@@ -90,9 +92,22 @@ from civex.services.sync_applier import SyncApplier
 from civex.services.sync_lock import sync_lock, sync_running
 from civex.services import ssh_tunnel
 
-PUSH_BATCH = 100
+# Changes per push. The authority settles at most 500 in one request
+# (`sync_authority.PUSH_MAX`), so a batch never goes over that. Measured on
+# PostgreSQL the authority's cost per change grows with the batch, so this
+# sits between 100 and that limit.
+PUSH_BATCH = 250
 # How many referenced files are checked against the authority per request.
 FILE_CHECK_PAGE = 1000
+# A file above this many bytes is sent alone, one at a time, and confirmed and
+# committed as soon as it arrives: it never shares memory or bandwidth with
+# another upload, and its arrival is never lost to a later failure.
+LARGE_FILE_BYTES = 8 * 1024 * 1024
+# Smaller files go several at a time (where the transport allows it:
+# `upload_threads`), and are confirmed and committed in groups: after this many
+# files, or this many seconds, whichever comes first.
+SMALL_FILE_GROUP = 50
+SMALL_FILE_GROUP_SECONDS = 2.0
 FEED_PAGE = 200
 SNAPSHOT_PAGE = 200
 
@@ -1765,23 +1780,120 @@ class SyncService:
             inflight += n
             say()
 
-        say(force=True)
-        while page:
-            if over() or (should_stop is not None and should_stop()):
-                report.stopped = True
-                return
-            # Which of these the authority hasn't confirmed yet: the ones the
-            # total counted. (A confirmed file found lost on an `everything`
-            # pass is new work, so the total grows by it.)
-            pending = self._repo.unconfirmed_of(set(page)) if progress else set()
-            missing = set(transport.missing_files(page))
-            self._repo.confirm_on_server(set(page) - missing)
-            self._repo.note_server_lacks(missing, backoff=False)
-            lacking = [sha for sha in page if sha in missing]
-            if not lacking:
+        def settle(sha: str, why: str | None) -> None:
+            """A file is settled: sent (`why` None) or not (`why` says why)."""
+            nonlocal done, settled_bytes, unread, inflight, total_bytes
+            if why is None:
+                done += 1
+                settled_bytes += sizes.get(sha, inflight)
+            else:
+                if sha not in report.owed:
+                    report.owed.append(sha)
+                log.debug("file %s not sent: %s", sha[:12], why)
+                unread += 1  # not sent: counted apart, no bytes claimed
+                # Its bytes can never be sent from here: the byte total is
+                # of what can be read (known once it was tried).
+                total_bytes = max(settled_bytes, total_bytes - sizes.get(sha, 0))
+            inflight = 0
+            report.resume_after = sha  # settled: the next pass starts after
+            say(force=True)
+
+        # Small files go through `add`: opened here (the store's session is not
+        # for other threads), sent by the pool where the transport allows it,
+        # and confirmed and committed together at `drain`. Large ones never do.
+        threads = max(1, int(getattr(transport, "upload_threads", 1)))
+        pool = ThreadPoolExecutor(threads) if threads > 1 else None
+        arrived: list[str] = []
+        flying: list[tuple[str, Future[bool]]] = []
+        failed = threading.Event()
+        group_began: list[float] = []
+
+        def run(f: BinaryIO, sha: str, size: int) -> bool:
+            try:
+                if failed.is_set():
+                    return False  # a file before it failed: nothing more goes
+                transport.upload_file(sha, f, size)  # type: ignore[arg-type]
+                return True
+            except BaseException:
+                failed.set()
+                raise
+            finally:
+                f.close()
+
+        def drain(quiet: bool = False) -> None:
+            """Wait for the small files in flight, then keep every one that
+            arrived (confirmed and committed together), whatever happened to
+            the others. The first failure is raised once that is done."""
+            nonlocal spent
+            error: BaseException | None = None
+            if flying:
+                wait([f for _, f in flying])
+            for sha, fut in flying:
+                try:
+                    if fut.result():
+                        arrived.append(sha)
+                except BaseException as e:
+                    error = error or e
+            flying.clear()
+            failed.clear()
+            if arrived:
+                self._repo.confirm_on_server(arrived)
                 self._commit()
-            sizes: dict[str, int] = {}
-            if progress:
+                report.sent += len(arrived)
+                for sha in arrived:
+                    log.debug("sent file %s", sha[:12])
+                    settle(sha, None)
+                arrived.clear()
+            if group_began:
+                spent += time.monotonic() - group_began.pop()
+            if error is not None and not quiet:
+                raise error
+
+        def add(sha: str, size: int) -> None:
+            nonlocal tried
+            tried += 1
+            if not group_began:
+                group_began.append(time.monotonic())
+            try:
+                f = self._files.open(sha)
+            except VolumeUnavailableError as e:
+                settle(sha, str(e))
+                return
+            except FileNotFoundError:
+                settle(sha, "its copy here couldn't be read")
+                return
+            if pool is not None:
+                flying.append((sha, pool.submit(run, f, sha, size)))
+            else:
+                try:
+                    transport.upload_file(sha, _Counting(f, went), size)
+                finally:
+                    f.close()
+                arrived.append(sha)
+            if (
+                len(arrived) + len(flying) >= SMALL_FILE_GROUP
+                or time.monotonic() - group_began[0] >= SMALL_FILE_GROUP_SECONDS
+            ):
+                drain()
+
+        sizes: dict[str, int] = {}
+        say(force=True)
+        try:
+            while page:
+                if over() or (should_stop is not None and should_stop()):
+                    report.stopped = True
+                    return
+                # Which of these the authority hasn't confirmed yet: the ones the
+                # total counted. (A confirmed file found lost on an `everything`
+                # pass is new work, so the total grows by it.)
+                pending = self._repo.unconfirmed_of(set(page)) if progress else set()
+                missing = set(transport.missing_files(page))
+                self._repo.confirm_on_server(set(page) - missing)
+                self._repo.note_server_lacks(missing, backoff=False)
+                lacking = [sha for sha in page if sha in missing]
+                if not lacking:
+                    self._commit()
+                # Where each is and how big, for the whole slice in one go.
                 skipped = pending - missing
                 sizes = {
                     sha: max(size for _v, size in rows)
@@ -1790,56 +1902,62 @@ class SyncService:
                     ).items()
                     if rows
                 }
-                done += len(skipped)
-                settled_bytes += sum(sizes.get(sha, 0) for sha in skipped)
-                lost = [sha for sha in lacking if sha not in pending]
-                total_files += len(lost)
-                total_bytes += sum(sizes.get(sha, 0) for sha in lost)
-                say(force=True)
-            for sha in lacking:
-                if over():
-                    report.stopped = True
-                    return
-                tried += 1
-                inflight = 0
-                began = time.monotonic()
-                why = self._upload(transport, sha, went)
-                spent += time.monotonic() - began
-                if why is None:
-                    self._repo.confirm_on_server([sha])
-                    self._commit()  # each file's arrival is kept, whatever follows
-                    report.sent += 1
-                    log.debug("sent file %s", sha[:12])
-                else:
-                    if sha not in report.owed:
-                        report.owed.append(sha)
-                    log.debug("file %s not sent: %s", sha[:12], why)
-                if why is None:
-                    done += 1
-                    settled_bytes += sizes.get(sha, inflight)
-                else:
-                    unread += 1  # not sent: counted apart, no bytes claimed
-                    # Its bytes can never be sent from here: the byte total is
-                    # of what can be read (known once it was tried).
-                    total_bytes = max(settled_bytes, total_bytes - sizes.get(sha, 0))
-                inflight = 0
-                report.resume_after = sha  # settled: the next pass starts after
-                say(force=True)
-            report.resume_after = page[-1]
-            page = self._repo.referenced_shas(
-                page[-1], FILE_CHECK_PAGE, unconfirmed=not everything
-            )
+                if progress:
+                    done += len(skipped)
+                    settled_bytes += sum(sizes.get(sha, 0) for sha in skipped)
+                    lost = [sha for sha in lacking if sha not in pending]
+                    total_files += len(lost)
+                    total_bytes += sum(sizes.get(sha, 0) for sha in lost)
+                    say(force=True)
+                for sha in lacking:
+                    if over():
+                        drain()
+                        report.stopped = True
+                        return
+                    size = sizes.get(sha)
+                    if size is not None and size <= LARGE_FILE_BYTES:
+                        add(sha, size)
+                        continue
+                    # Large (or with no copy here, which says why): alone, after
+                    # everything before it is confirmed, and confirmed and
+                    # committed the moment it arrives.
+                    drain()
+                    tried += 1
+                    inflight = 0
+                    began = time.monotonic()
+                    why = self._upload(transport, sha, went, size)
+                    spent += time.monotonic() - began
+                    if why is None:
+                        self._repo.confirm_on_server([sha])
+                        self._commit()  # each file's arrival is kept, whatever follows
+                        report.sent += 1
+                        log.debug("sent file %s", sha[:12])
+                    settle(sha, why)
+                drain()
+                report.resume_after = page[-1]
+                page = self._repo.referenced_shas(
+                    page[-1], FILE_CHECK_PAGE, unconfirmed=not everything
+                )
+        finally:
+            try:
+                drain(quiet=True)  # what arrived is kept, even on the way out
+            finally:
+                if pool is not None:
+                    pool.shutdown(wait=True)
 
     def _upload(
         self,
         transport: SyncTransport,
         sha: str,
         on_bytes: Callable[[int], None] | None = None,
+        size: int | None = None,
     ) -> str | None:
         """Upload one file: None once it is sent, else why no copy here could
-        be read (a failure of the upload itself raises)."""
+        be read (a failure of the upload itself raises). `size` is the size
+        already looked up, if it was."""
         try:
-            size = self._files.size_of(sha)
+            if size is None:
+                size = self._files.size_of(sha)
             if size is None:
                 return "it isn't on this computer"
             with self._files.open(sha) as f:
@@ -2495,12 +2613,17 @@ class SyncService:
             present.add(item["id"])
             ready.extend(waiting.pop(item["id"], ()))
 
-    def _seed_snapshots(self, kind: str) -> Iterator[dict[str, Any]]:
+    def _seed_snapshots(
+        self, kind: str, leave: Callable[[str], bool] | None = None
+    ) -> Iterator[dict[str, Any]]:
         """What to send for `kind`, in an order the authority can accept: a
         record only after the one it sits under and the ones it refers to, since
-        the authority checks both and remembers a refusal for good."""
+        the authority checks both and remembers a refusal for good. Things
+        `leave` names (by id) are not read at all."""
         if kind == "record":
             order = self._repo.record_seed_order()
+            if leave:
+                order = [i for i in order if not leave(i)]
             for start in range(0, len(order), SNAPSHOT_PAGE):
                 yield from self._repo.record_snapshots(
                     order[start : start + SNAPSHOT_PAGE]
@@ -2543,6 +2666,21 @@ class SyncService:
         head = 0
         report = SyncReport()
         batch: list[SyncEntry] = []
+        # What the authority answered of this seed before it was interrupted:
+        # not sent again (the ids are the same every run, so what is left goes
+        # as it would have).
+        acked = self._repo.seed_acked()
+        resumed = bool(acked)
+
+        def answered(kind: str) -> Callable[[str], bool]:
+            return lambda thing: str(entry_id(kind, thing)) in acked
+
+        def entry_id(kind: str, thing: str) -> uuid.UUID:
+            return uuid.uuid5(
+                meta.project_id,
+                f"seed:{salt}:{kind}:{thing}" if salt else f"seed:{kind}:{thing}",
+            )
+
         total = self._repo.entity_count() or None
         sent = 0
 
@@ -2563,6 +2701,9 @@ class SyncService:
             # they made and can fix it and retry); it doesn't stop the rest.
             self._note(result.results, {e.id: e for e in batch}, report)
             sent += len(batch)
+            # Kept at once, so a restart goes on from here.
+            self._repo.note_seed_acked([e.id for e in batch])
+            self._commit()
             if progress:
                 kind = batch[-1].entity_type
                 progress(SyncProgress(FILLING, sent, total and max(total, sent), kind))
@@ -2571,18 +2712,15 @@ class SyncService:
         # Only the kinds the authority reads (one on an older protocol has no
         # Analytics page to take, say).
         for kind in kinds_for(protocol):
-            for snap in self._seed_snapshots(kind):
+            for snap in self._seed_snapshots(kind, answered(kind) if acked else None):
                 if skip and (kind, str(snap["id"])) in skip:
                     continue  # a resumed upload leaves other devices' things
+                if str(entry_id(kind, str(snap["id"]))) in acked:
+                    continue  # the authority has answered it already
                 now = datetime.now(timezone.utc)
                 batch.append(
                     SyncEntry(
-                        id=uuid.uuid5(
-                            meta.project_id,
-                            f"seed:{salt}:{kind}:{snap['id']}"
-                            if salt
-                            else f"seed:{kind}:{snap['id']}",
-                        ),
+                        id=entry_id(kind, str(snap["id"])),
                         action="create",
                         entity_type=kind,
                         entity_id=uuid.UUID(snap["id"]),
@@ -2604,6 +2742,9 @@ class SyncService:
                 "seeding the server: it refused %d thing(s); they are kept for review",
                 report.rejected,
             )
+        if resumed and not head and not skip:
+            # Everything had been answered before: the head is still needed.
+            head = transport.hello().head_seq
         self._repo.finish_seed()
         # Only a first seed (connect) moves the cursor to the head: a resumed one may
         # follow a pull, and other devices may have written since.
