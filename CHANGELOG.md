@@ -97,9 +97,10 @@ from the next tag forward.
 
 #### Changed (bulk file upload)
 
-- With `direct_files`, small files now go through the authority in packs (three
-  requests per 0.3 MB file to presign, PUT and complete would not fill a line);
-  only big files go straight to the bucket.
+- Where `direct_files` is on, small files are not packed: a pack streams bytes
+  through the authority, and direct is what keeps them off it. They go one
+  presigned upload each, four at a time, as before; only big files change
+  (multipart, in parallel).
 - The authority commits a streamed file (`PUT /files/{sha}`) before answering,
   so a write lock is not held while the next upload is read (on SQLite parallel
   uploads could stall until their timeout).

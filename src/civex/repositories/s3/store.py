@@ -695,8 +695,9 @@ class S3ObjectStore:
             raise ValidationError(
                 f"The upload is {found} bytes, not the {size} announced; it was removed"
             )
-        # One PUT was checked against the hash by S3 itself; parts were each
-        # checked, but the whole waits for a read-back (`verify`).
+        # One PUT was checked against the hash by S3 itself; a file in parts is
+        # not (the part URLs carry no checksum): the whole waits for a read-back
+        # (`verify`).
         self._register(sha256, size, verified=upload_id is None)
         return self._ref(sha256, original_filename, size)
 
