@@ -158,7 +158,7 @@ not a check each route remembers. What it does *not* hide, by design:
   and the job list and its analytics, importing a bundle, and deleting, restoring
   or purging a kind of record or setting its uniqueness rules (these reach the
   records of every collection, and skipping the hidden ones would then fail on
-  them and show that they exist). A push that deletes or restores a kind is
+  them and show that they exist). A push that deletes or restores a kind, or sets uniqueness rules, is
   refused the same way.
 - History lists an entry only when its subject is visible: entries of a release
   (its bundle and counts cover the whole project) and of any entry type civex does
@@ -182,8 +182,8 @@ not a check each route remembers. What it does *not* hide, by design:
   only by records the caller cannot read is refused ("That file is not available.",
   422 or a rejected change), so citing a hash is never a way to read it. A hash
   nothing uses yet (just uploaded, or not arrived from a device yet) is accepted as
-  before. For a device, a file it may not read is also answered as "missing" and
-  offered an upload target, never "already here".
+  before. For a device (once sync serves such callers), a file it may not read is
+  also answered as "missing" and offered an upload target, never "already here".
 
 ### Scope strings are normalised
 

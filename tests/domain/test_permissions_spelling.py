@@ -88,3 +88,42 @@ def test_spelling_is_settled_once_and_round_trips():
     )
     assert Permissions.from_dict(perms.to_dict()) == perms
     assert perms.to_dict()["actions"][p.READ] == [f"collection:{ID}"]
+
+
+def test_a_denial_of_an_alias_that_cannot_be_read_shuts_what_it_stands_for():
+    perms = Permissions(
+        {
+            p.ADD_FILES: frozenset({p.PROJECT}),
+            p.DELETE_FILES: frozenset({p.PROJECT}),
+            p.READ: frozenset({p.PROJECT}),
+        },
+        {p.MANAGE_FILES: frozenset({"collection:oops"})},
+    )
+    assert not perms.can(p.ADD_FILES, ID)
+    assert not perms.can(p.DELETE_FILES, ID)
+    assert not perms.can(p.MANAGE_FILES)
+    assert perms.can(p.READ, ID)
+
+
+def test_a_pushed_uniqueness_rule_is_for_someone_who_sees_everything():
+    from types import SimpleNamespace
+
+    def update(**fields):
+        return SimpleNamespace(
+            entity_type="schema",
+            action="update",
+            entity_id=uuid.uuid4(),
+            old_data={"unique_keys": []},
+            new_data=fields,
+            delta=None,
+        )
+
+    restricted = Permissions.of(
+        p.READ, p.CHANGE_STRUCTURE, read_collections=[OTHER]
+    )
+    whole = Permissions.everything()
+    rule = update(unique_keys=[["a"]])
+    assert restricted.refuses(None, rule)
+    assert whole.refuses(None, rule) is None
+    # a schema edit that leaves the rules alone is the caller's to make
+    assert restricted.refuses(None, update(label="x")) is None

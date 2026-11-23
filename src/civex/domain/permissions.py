@@ -213,10 +213,12 @@ class Permissions:
         object.__setattr__(self, "denied", denied)
 
     def __post_init__(self) -> None:
+        # An alias is spelled out first, so a denial of it that cannot be read
+        # shuts each real action it stands for, not only itself.
+        self._spell_aliases()
         self._normalise_scopes()
         # (continued below: the split of `MANAGE_FILES`, then the actions that
         # follow `WRITE_RECORDS` for a host that has not heard of them)
-        self._spell_aliases()
         self._follow_writing()
 
     def lacking(self, *actions: str) -> Permissions:
@@ -356,6 +358,16 @@ class Permissions:
             # rest and tell them they exist, as the data API refuses it.
             if not self.read_scope().unrestricted:
                 return "Only someone who can see everything may do that."
+        if (
+            kind == "schema"
+            and getattr(entry, "action", None) == "update"
+            and _changes_unique_keys(entry)
+            and not self.read_scope().unrestricted
+        ):
+            # A uniqueness rule is checked against the records of every
+            # collection, so what it says of them would reach a caller who
+            # cannot see some (the data API refuses it the same way).
+            return "Only someone who can see everything may do that."
         for ask, where in asks:
             allowed = (
                 self.can_somewhere(ask) if where is ANYWHERE else self.can(ask, where)
@@ -445,6 +457,15 @@ def entry_collections(entry: Any) -> tuple[Any, Any]:
     elif old.get("dataset_id") and new.get("dataset_id"):
         before, after = old["dataset_id"], new["dataset_id"]
     return before, after
+
+
+def _changes_unique_keys(entry: Any) -> bool:
+    delta = getattr(entry, "delta", None) or {}
+    if any(str(path).split(".", 1)[0] == "unique_keys" for path in delta):
+        return True
+    new = getattr(entry, "new_data", None) or {}
+    old = getattr(entry, "old_data", None) or {}
+    return "unique_keys" in new and new.get("unique_keys") != old.get("unique_keys")
 
 
 def file_changes(entry: Any) -> tuple[set[str], set[str]]:

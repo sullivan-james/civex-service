@@ -288,8 +288,10 @@ class SyncAuthorityService:
                 self._rules.check(_changed([entry]))
         except ValidationError as e:
             head = self._applier.head(entry.entity_type, entry.entity_id)
-            if head is not None and (
-                entry.entity_type != "record" or _moves(entry, head)
+            if (
+                head is not None
+                and (entry.entity_type != "record" or _moves(entry, head))
+                and not self._unseen(entry)
             ):
                 # A record a refused change would have moved is put back too:
                 # left where the device put it, it would sit under a parent
