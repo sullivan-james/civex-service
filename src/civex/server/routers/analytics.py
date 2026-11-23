@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from civex.context import AppContext
 from civex.domain.dtos import AnalyticsFilters
 from civex.domain.exceptions import NotFoundError
-from civex.server.deps import get_ctx, get_read_ctx
+from civex.server.deps import get_ctx, get_read_ctx, reads_whole_project
 from civex.server.models import (
     AiTokenUsageResponse,
     AuditEventCountsResponse,
@@ -122,7 +122,11 @@ def record_growth(
     )
 
 
-@router.get("/jobs/status", response_model=JobStatusCountsResponse)
+@router.get(
+    "/jobs/status",
+    response_model=JobStatusCountsResponse,
+    dependencies=[reads_whole_project()],
+)
 def job_status_counts(
     filters: AnalyticsFilters = Depends(analytics_filters),
     ctx: AppContext = Depends(get_ctx),
@@ -136,7 +140,11 @@ def job_status_counts(
     )
 
 
-@router.get("/jobs/duration", response_model=JobDurationStatsResponse)
+@router.get(
+    "/jobs/duration",
+    response_model=JobDurationStatsResponse,
+    dependencies=[reads_whole_project()],
+)
 def job_duration_stats(
     filters: AnalyticsFilters = Depends(analytics_filters),
     ctx: AppContext = Depends(get_ctx),
@@ -150,7 +158,11 @@ def job_duration_stats(
     return JobDurationStatsResponse.from_dto(stats)
 
 
-@router.get("/jobs/failures-by-plugin", response_model=PluginFailureCountsResponse)
+@router.get(
+    "/jobs/failures-by-plugin",
+    response_model=PluginFailureCountsResponse,
+    dependencies=[reads_whole_project()],
+)
 def plugin_failure_counts(
     filters: AnalyticsFilters = Depends(analytics_filters),
     ctx: AppContext = Depends(get_ctx),
@@ -165,7 +177,11 @@ def plugin_failure_counts(
     )
 
 
-@router.get("/jobs/by-trigger", response_model=TriggerBreakdownResponse)
+@router.get(
+    "/jobs/by-trigger",
+    response_model=TriggerBreakdownResponse,
+    dependencies=[reads_whole_project()],
+)
 def job_trigger_breakdown(
     filters: AnalyticsFilters = Depends(analytics_filters),
     ctx: AppContext = Depends(get_ctx),

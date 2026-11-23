@@ -315,6 +315,13 @@ def _serving(request: Request) -> int:
         # Indistinguishable from there being nothing here, so a server that
         # is not an authority reveals nothing.
         raise HTTPException(404, detail="Not found")
+    if not current_project(request).permissions.read_scope().unrestricted:
+        # The feed, the snapshots and the files are not yet limited to what a
+        # caller may read, so a caller who may not read everything gets none of
+        # it: nothing is sent that a person at a browser would not be shown.
+        raise HTTPException(
+            403, detail="Syncing needs permission to read the whole project."
+        )
     theirs = protocol_range(request.headers.get("x-civex-protocol"))
     protocol = agree(theirs) if theirs else None
     if protocol is None:
@@ -576,7 +583,8 @@ def upload_target(
     _a_sha(sha256)
     if DIRECT_FILES not in call.ctx.features:
         raise FeatureUnavailableError(DIRECT_FILES)
-    if call.ctx.file_svc.exists(sha256):
+    # (A file this device may not read is offered an upload like a missing one.)
+    if call.ctx.file_svc.exists(sha256) and call.ctx.file_svc.readable(sha256):
         return Response(status_code=204)
     target = call.ctx.file_svc.upload_target(sha256, body.size)
     if target is None:

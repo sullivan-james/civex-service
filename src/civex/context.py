@@ -627,6 +627,7 @@ def build_context(
     file_svc = FileService(file_store, volumes, permissions=may)
     if not may.read_scope().unrestricted:
         file_svc.readable = LocalFileReferenceRepository(session).is_readable
+        record_svc.readable = file_svc.readable
     store_svc: StoreService | None = None
     if isinstance(file_store, VolumeAwareFileObjectStore):
         store_svc = StoreService(config, file_store, project.config_store)
@@ -739,6 +740,8 @@ def build_context(
         # The authority settles a push against the whole project, then asks the
         # policy about each thing: a hidden collection must not look empty to it.
         unscoped=lambda: read_scope.unscoped(session),
+        readable=(None if may.read_scope().unrestricted else file_svc.readable),
+        sees=(None if may.read_scope().unrestricted else may.read_scope().sees),
         # The same answer a person at a browser gets, asked of each change a
         # device pushes (the local user's refuses nothing).
         policy=may,

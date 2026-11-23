@@ -152,16 +152,52 @@ not a check each route remembers. What it does *not* hide, by design:
   anything, so do not put secrets in kind or field names.
 - **A reference** from a record the caller can read to a record in a hidden *global*
   collection shows the raw id, with no label, and cannot be followed (404).
-- Routers about the project as a whole (storage, transfers, buckets, retention,
-  releases) answer 403 to a caller who cannot read every collection.
+- Routers and actions about the project as a whole answer 403 to a caller who
+  cannot read every collection: storage, transfers, buckets, retention, releases,
+  the database pages and index builds, the history-storage pages, workflow runs
+  and the job list and its analytics, importing a bundle, and deleting, restoring
+  or purging a kind of record or setting its uniqueness rules (these reach the
+  records of every collection, and skipping the hidden ones would then fail on
+  them and show that they exist). A push that deletes or restores a kind is
+  refused the same way.
+- History lists an entry only when its subject is visible: entries of a release
+  (its bundle and counts cover the whole project) and of any entry type civex does
+  not know are not shown to such a caller; kinds, fields, filters and dashboards
+  are.
+- A collection's name is unique across all collections, hidden and deleted ones
+  included. Creating or renaming onto a name one of them holds is refused with the
+  same 409 as any taken name.
+- Counting records for a caller limited to some collections is exact up to 100,000
+  and then reports 100,000, flagged as an estimate (`estimated: true`): the
+  planner's figure covers the hidden collections, and an exact count of a huge
+  project is a scan.
 - A record moved out of a hidden collection carries its earlier history with it.
 - Deleting a record that records in a hidden collection still refer to is refused
   ("referenced by records you cannot see"), forced or not, so nothing is left
   dangling and nothing hidden is touched.
 - Content with no use by any record (just uploaded, or left behind until clean-up)
   is not tied to a collection, so anyone who knows its hash can fetch it.
+- **Citing a file you cannot download.** A save (or a pushed change) that cites a
+  file the record did not hold must be able to download that file: a hash used
+  only by records the caller cannot read is refused ("That file is not available.",
+  422 or a rejected change), so citing a hash is never a way to read it. A hash
+  nothing uses yet (just uploaded, or not arrived from a device yet) is accepted as
+  before. For a device, a file it may not read is also answered as "missing" and
+  offered an upload target, never "already here".
+
+### Scope strings are normalised
+
+A collection scope (`collection:<uuid>`) may arrive in any spelling of the id
+(upper case, no hyphens): `Permissions` rewrites each to the one canonical form when
+it is built, so a rule never depends on how it was written. A grant that cannot be
+read grants nothing; a denial that cannot be read denies the action everywhere.
 
 ### Devices and pushes
+
+**Sync and a caller who cannot read everything.** Sync is not yet limited to what a
+device may read, so every `/sync/v1` route answers 403 to a request whose
+permissions do not let it read the whole project. (A later release filters the
+feed, snapshots and files by the device's scope and replaces this refusal.)
 
 `Project.permissions` is used for a device's sync requests too: your resolver sees
 the device's request and should return the permissions of the person the device
@@ -173,5 +209,6 @@ ordinary rejected-change path with `code: "permission"`.
 `Project.push_accepted` is called once after a push has been committed and took at
 least one change, with a `civex.domain.sync.PushAccepted` (device, actor, the
 ids of the changes taken, counts by status and by kind, and their feed numbers).
+A change a device sends again (answered as before, nothing done) is not counted.
 It replaces reading push responses in middleware; an exception in it is logged and
 never fails the push.

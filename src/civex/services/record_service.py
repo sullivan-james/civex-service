@@ -737,6 +737,10 @@ class RecordService:
         )
         self._job_svc = job_svc
         self._audit = audit_repo
+        # Whether the caller may be given this content (set by `context.py` for
+        # one who cannot read every collection; always, for one who can): a save
+        # may cite only a file it could download, or it would hand them one.
+        self.readable: Callable[[str], bool] = lambda _sha: True
 
     def _check_file_rights(
         self, dataset_id: uuid.UUID, before: dict[str, Any], after: dict[str, Any]
@@ -749,6 +753,12 @@ class RecordService:
         wanted = collect_sha256_refs(after)
         if wanted - held:
             self._permissions.require(permissions.ADD_FILES, dataset_id)
+            # Citing a file makes it the record's own, so readable by whoever
+            # reads the record: a hash only collections the caller cannot read
+            # use may not be cited (the same answer for any file).
+            for sha in sorted(wanted - held):
+                if not self.readable(sha):
+                    raise ValidationError(permissions.FILE_UNAVAILABLE)
         if held - wanted:
             self._permissions.require(permissions.DELETE_FILES, dataset_id)
 

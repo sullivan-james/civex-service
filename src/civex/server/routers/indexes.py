@@ -7,7 +7,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from civex.context import AppContext
-from civex.server.deps import get_ctx
+from civex.server.deps import get_ctx, reads_whole_project
 from civex.server.models import (
     FieldIndexReportResponse,
     FieldIndexResponse,
@@ -16,7 +16,7 @@ from civex.server.models import (
 )
 from civex.services.index_jobs import index_jobs, upkeep_running
 
-router = APIRouter(tags=["db"])
+router = APIRouter(tags=["db"], dependencies=[reads_whole_project()])
 
 
 def _report(ctx: AppContext) -> FieldIndexReportResponse:

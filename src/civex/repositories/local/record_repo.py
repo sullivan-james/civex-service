@@ -259,6 +259,12 @@ def _chunks(ids: list[uuid.UUID]):
         yield ids[start : start + _CHUNK]
 
 
+# The most a caller limited to some collections is counted to on PostgreSQL
+# (`estimate_count`): a count is an exact scan, and the table's statistics
+# would count what they may not see.
+RESTRICTED_COUNT_CAP = 100_000
+
+
 class LocalRecordRepository:
     def __init__(self, session: Session, is_postgres: bool = False) -> None:
         self._s = session
@@ -472,10 +478,23 @@ class LocalRecordRepository:
         neither scans a row, so they cost the same at 10 billion records as
         at 10. Deleted rows are counted by `reltuples`, and both are only as
         fresh as the last ANALYZE. Elsewhere the count is exact."""
-        if not self._pg or read_scope.restricted(self._s):
-            # (A restricted session counts exactly: the planner's figures are
-            # of the whole table, hidden collections included.)
+        if not self._pg:
             return self.count(query), False
+        if read_scope.restricted(self._s):
+            # The planner's figures are of the whole table, hidden collections
+            # included, so they may not be used. An exact count of a big
+            # project would scan it, so it stops at RESTRICTED_COUNT_CAP: more
+            # than that is reported as the cap, flagged as an estimate.
+            capped = (
+                _base_query(self._s, query, self._pg)
+                .with_entities(Record.id)
+                .order_by(None)
+                .limit(RESTRICTED_COUNT_CAP + 1)
+                .count()
+            )
+            if capped > RESTRICTED_COUNT_CAP:
+                return RESTRICTED_COUNT_CAP, True
+            return capped, False
         if _is_unfiltered(query):
             # Summed over the leaf partitions: autovacuum never analyzes the
             # parent of a partitioned table, so its own reltuples is stale or

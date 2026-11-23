@@ -510,6 +510,9 @@ class OpResult:
     # For `conflict`/`merged`: the values that did not go in.
     conflicts: list[dict[str, Any]] = field(default_factory=list)
     hub_seq: int | None = None
+    # Set on an answer given again to a change sent before (never on the wire):
+    # nothing was done this time, so it is not news to a host.
+    replayed: bool = field(default=False, compare=False, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -578,11 +581,13 @@ class PushAccepted:
         """The report of a push, or None when it took nothing (all refused,
         repeated or held back): nothing happened that a host would count."""
         kinds = {e.id: e.entity_type for e in entries}
-        taken = [r for r in result.results if r.status in (APPLIED, MERGED)]
+        # A change sent again is answered as before and done no more than once.
+        fresh = [r for r in result.results if not r.replayed]
+        taken = [r for r in fresh if r.status in (APPLIED, MERGED)]
         if not taken:
             return None
         counts: dict[str, int] = {}
-        for r in result.results:
+        for r in fresh:
             counts[r.status] = counts.get(r.status, 0) + 1
         changed: dict[str, int] = {}
         for r in taken:

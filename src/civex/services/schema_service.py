@@ -19,7 +19,12 @@ from civex.domain.dtos import (
     SchemaDeleteImpactDTO,
     SchemaDTO,
 )
-from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
+from civex.domain.exceptions import (
+    AlreadyExistsError,
+    NotAllowedError,
+    NotFoundError,
+    ValidationError,
+)
 from civex.domain import filename_extract, formulas
 from civex.domain import geo as geo_domain
 from civex.domain import partial_dates, templating, units
@@ -395,6 +400,14 @@ class SchemaService:
             )
         return self.get(name)
 
+    def _whole_project(self) -> None:
+        """A change that reaches the records of every collection (deleting or
+        restoring a kind, a uniqueness rule over all of them) is for someone who
+        can see them all: for anyone else it would skip the ones they cannot see
+        and then fail on them, which tells them those exist."""
+        if not self._permissions.read_scope().unrestricted:
+            raise NotAllowedError("This is only for someone who can see everything.")
+
     def get(self, name: str) -> SchemaDTO:
         dto = self._repo.get_by_name(name)
         if not dto:
@@ -541,6 +554,7 @@ class SchemaService:
         level). Refused when existing records already break a key being added,
         naming some of them: the policy would be violated from the start."""
         self._permissions.require(permissions.CHANGE_STRUCTURE)
+        self._whole_project()
         schema = self.get(name)
         own = {f.name: f for f in schema.fields}
         ids: list[list[str]] = []
@@ -1387,6 +1401,7 @@ class SchemaService:
         Schemas that inherit from this one are left untouched and keep
         resolving its fields; see docs/guides/deleting-and-restoring.md."""
         self._permissions.require(permissions.DELETE)
+        self._whole_project()
         schema = self.get(name)
         stamp = datetime.now(
             timezone.utc
@@ -1481,6 +1496,7 @@ class SchemaService:
         """Undo delete(): the schema and the records cascade-deleted with it
         become live again (see SchemaRepository.restore)."""
         self._permissions.require(permissions.CHANGE_STRUCTURE)
+        self._whole_project()
         schema = self._by_name_or_id(name)
         if schema is None:
             raise NotFoundError(f"Schema '{name}' not found")
@@ -1504,6 +1520,7 @@ class SchemaService:
         """Permanently remove a schema that's already in Recently Deleted —
         a separate, explicit action from delete(). Irreversible."""
         self._permissions.require(permissions.DELETE)
+        self._whole_project()
         schema = self._repo.get_by_name(name, include_deleted=True)
         if schema is None:
             raise NotFoundError(f"Schema '{name}' not found")

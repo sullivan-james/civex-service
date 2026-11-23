@@ -54,6 +54,10 @@ ACTIONS: dict[str, str] = {
 # doing so for each.
 ALIASES: dict[str, tuple[str, ...]] = {MANAGE_FILES: (ADD_FILES, DELETE_FILES)}
 
+# What is said when a save cites a file the caller could not download: the
+# same words whatever the reason, so the refusal tells nothing about the file.
+FILE_UNAVAILABLE = "That file is not available."
+
 # The scope that covers the whole project, every collection included.
 PROJECT = "project"
 # `action_for`'s answer for a thing shared by everyone that any writer may
@@ -69,6 +73,23 @@ def collection_scope(collection_id: Any) -> str:
         return f"collection:{uuid.UUID(str(collection_id))}"
     except ValueError:
         return f"collection:~{collection_id}"
+
+
+def _spelt(scope: Any) -> str | None:
+    """`scope` as `collection_scope` would write it, `PROJECT` as it is, None
+    when it is neither."""
+    scope = str(scope)
+    if scope == PROJECT:
+        return PROJECT
+    if not scope.startswith("collection:"):
+        return None
+    rest = scope[len("collection:") :]
+    if rest.startswith("~"):
+        return scope
+    try:
+        return f"collection:{uuid.UUID(rest)}"
+    except ValueError:
+        return None
 
 
 def _collections(scopes: Iterable[str]) -> frozenset[uuid.UUID]:
@@ -163,7 +184,36 @@ class Permissions:
                     spelled[real] = spelled.get(real, frozenset()) | frozenset(scopes)
             object.__setattr__(self, name, spelled)
 
+    def _normalise_scopes(self) -> None:
+        """Every collection scope in the one spelling `collection_scope` writes
+        (a host may send upper case or no hyphens), so the way a rule is spelt
+        never decides whether it applies. A grant that cannot be read grants
+        nothing; a denial that cannot be read denies the action everywhere: a
+        rule is never dropped to let more in."""
+        allowed: dict[str, frozenset[str]] = {}
+        denied: dict[str, frozenset[str]] = {}
+        shut: set[str] = set()
+        for action, scopes in self.allowed.items():
+            allowed[action] = frozenset(
+                n for s in scopes if (n := _spelt(s)) is not None
+            )
+        for action, scopes in self.denied.items():
+            kept: set[str] = set()
+            for s in scopes:
+                n = _spelt(s)
+                if n is None or n == PROJECT:
+                    shut.add(action)
+                else:
+                    kept.add(n)
+            if kept:
+                denied[action] = frozenset(kept)
+        for action in shut:
+            allowed[action] = frozenset()
+        object.__setattr__(self, "allowed", allowed)
+        object.__setattr__(self, "denied", denied)
+
     def __post_init__(self) -> None:
+        self._normalise_scopes()
         # (continued below: the split of `MANAGE_FILES`, then the actions that
         # follow `WRITE_RECORDS` for a host that has not heard of them)
         self._spell_aliases()
@@ -296,6 +346,16 @@ class Permissions:
                 asks.append((ADD_FILES, collection_id))
             if removed:
                 asks.append((DELETE_FILES, collection_id))
+        if kind == "schema" and getattr(entry, "action", None) in (
+            "delete",
+            "restore",
+            "purge",
+        ):
+            # Removing or bringing back a kind reaches the records of every
+            # collection: for someone who can see only some it would skip the
+            # rest and tell them they exist, as the data API refuses it.
+            if not self.read_scope().unrestricted:
+                return "Only someone who can see everything may do that."
         for ask, where in asks:
             allowed = (
                 self.can_somewhere(ask) if where is ANYWHERE else self.can(ask, where)

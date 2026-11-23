@@ -34,6 +34,7 @@ from civex.domain.audit_diff import (
     identity,
 )
 from civex.domain.exceptions import ValidationError
+from civex.domain.permissions import FILE_UNAVAILABLE, file_changes
 from civex.domain.merge import LIFECYCLE_KEYS, DERIVED_KEYS, merge
 from civex.domain.sync import (
     APPLIED,
@@ -97,8 +98,16 @@ class SyncAuthorityService:
         notes: Any = None,
         releases: Any = None,
         unscoped: Callable[[], AbstractContextManager[None]] | None = None,
+        readable: Callable[[str], bool] | None = None,
+        sees: Callable[[Any], bool] | None = None,
     ) -> None:
         self._repo = repo
+        # Whether the device may see a collection, None when it may see all.
+        self._sees = sees
+        # Whether a file may be given to this device, None when it may have
+        # every one: a file it may not read is neither cited by it nor said to
+        # be here (`missing_files`).
+        self._readable = readable
         # Lifts the host's limit on which collections a query can see, for the
         # work that settles a push or serves a device: those see the whole
         # project and ask `policy` about each thing, never the query layer.
@@ -198,7 +207,14 @@ class SyncAuthorityService:
     # ------------------------------------------------------------------
 
     def missing_files(self, shas: list[str]) -> list[str]:
-        return [s for s in dict.fromkeys(shas) if not self._files.exists(s)]
+        """Those not here, a file the device may not read counted as not here:
+        it is asked for like any other, and nothing says one is held."""
+        readable = self._readable
+        return [
+            s
+            for s in dict.fromkeys(shas)
+            if not self._files.exists(s) or (readable is not None and not readable(s))
+        ]
 
     # ------------------------------------------------------------------
     # Accepting changes
@@ -261,7 +277,8 @@ class SyncAuthorityService:
     def _settle(self, who: Principal, entry: SyncEntry) -> OpResult:
         prior = self._repo.get_op(entry.id)
         if prior is not None:
-            return prior  # sent before: the same answer, nothing done again
+            # sent before: the same answer, nothing done again
+            return dataclasses.replace(prior, replayed=True)
         self._covered = {(entry.entity_type, entry.entity_id)}
         if problem := self._problem(who, entry):
             return self._refuse(who, entry, problem[0], code=problem[1])
@@ -295,6 +312,12 @@ class SyncAuthorityService:
             return shape, REFUSAL_INVALID
         if self._policy and (denied := self._policy.refuses(who, entry)):
             return denied, REFUSAL_PERMISSION
+        if self._readable is not None and entry.entity_type == "record":
+            # Citing a file makes it the record's, readable by whoever reads
+            # the record: only one this device could download may be cited.
+            added, _ = file_changes(entry)
+            if any(not self._readable(sha) for sha in sorted(added)):
+                return FILE_UNAVAILABLE, REFUSAL_PERMISSION
         if (
             self._policy
             and entry.entity_type == "dataset"
@@ -367,7 +390,8 @@ class SyncAuthorityService:
           on the device for review."""
         priors = [self._repo.get_op(e.id) for e in action]
         if all(p is not None for p in priors):
-            return [p for p in priors if p is not None]  # sent before
+            # sent before
+            return [dataclasses.replace(p, replayed=True) for p in priors if p]
         self._covered = {(e.entity_type, e.entity_id) for e in action}
         for entry in action:
             if problem := self._problem(who, entry):
@@ -407,9 +431,29 @@ class SyncAuthorityService:
         return [
             self._put_back(who, entry, message)
             if self._applier.head(entry.entity_type, entry.entity_id) is not None
+            and not self._unseen(entry)
             else self._refuse(who, entry, message, code=code)
             for entry in action
         ]
+
+    def _unseen(self, entry: SyncEntry) -> bool:
+        """Whether the thing an entry is about is held here in a collection the
+        device may not see. It is answered as a thing that is not here at all
+        (refused, never put back), so that what a refusal does with an entry
+        does not tell the device which ids exist."""
+        if self._sees is None:
+            return False
+        kind = entry.entity_type
+        if kind == "dataset":
+            where: Any = entry.entity_id
+        elif kind == "record":
+            where = self._records.records_repo.dataset_of(entry.entity_id)
+        elif kind == "note":
+            on = self._repo.note_record_id(entry.entity_id)
+            where = self._records.records_repo.dataset_of(on) if on else None
+        else:
+            return False
+        return where is not None and not self._sees(where)
 
     def _put_back(self, who: Principal, entry: SyncEntry, why: str) -> OpResult:
         """Answer that a change was not taken, and send what is here instead,

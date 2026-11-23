@@ -28,11 +28,14 @@ class LocalFileReferenceRepository:
         cannot read is not theirs. A session limited to some collections
         (`db.read_scope`) sees only the uses in those, so the first answer is
         theirs and the second asks about every use."""
-        from civex.db.read_scope import unscoped
+        from civex.db.read_scope import scoped, unscoped
 
         query = select(FileReference.id).where(FileReference.sha256 == sha256).limit(1)
-        if self._s.execute(query).first() is not None:
-            return True
+        # The caller's own limit, whoever asks: the sync authority runs its
+        # push inside `unscoped` and must still ask what the device may see.
+        with scoped(self._s):
+            if self._s.execute(query).first() is not None:
+                return True
         with unscoped(self._s):
             return self._s.execute(query).first() is None
 
