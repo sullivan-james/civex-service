@@ -70,6 +70,40 @@ from the next tag forward.
   installed. Over plain HTTPS it is the same as downloading the bundle and
   running `civex bundle import`.
 
+#### Added (bulk file upload)
+
+- **Small files go many to a request.** Files under 8 MiB are sent in packs of
+  about 32 MiB or 100 files (`PACK_BYTES`, `PACK_FILES`), four packs at a time,
+  to `POST /sync/v1/files/pack` (capability `file_packs`, no protocol bump). The
+  authority reads the body as it arrives (never whole in memory), hashes and
+  stores each file, and answers per file, so one that fails (hash mismatch, a
+  full drive) keeps the rest: the sender confirms exactly what was answered
+  stored. A pack is one HTTP request. An authority without the capability is
+  sent one file per request as before. Over SQLite the authority commits before
+  each wait for bytes (one writer); elsewhere every 25 files; a pack records its
+  files in the inventory in one statement.
+- **Big files go in parallel parts.** A file over two parts (32 MiB) is read once
+  and sent in 16 MiB parts, four at a time, at most four parts in memory. In a
+  bucket (`direct_files`) those are S3 multipart parts (files over 32 MiB now go
+  multipart instead of one PUT; before, up to 5 GiB went as one stream). On an
+  authority with files on drives the same shape is `POST /files/{sha}/parts`,
+  `PUT /files/{sha}/parts/{n}`, `POST /files/{sha}/parts/complete` (capability
+  `file_parts`): parts are written in place, an interrupted upload is picked up
+  by asking which parts are held and sending only the rest, and the whole is
+  hashed once at the end. A big file is never packed or mixed with others.
+  A 429 or 402 on any of these still stops the pass and backs off.
+- `benchmarks/bench_bulk_files.py` times a many-small or few-huge upload to an
+  authority in its own process, files on a drive or in a bucket.
+
+#### Changed (bulk file upload)
+
+- With `direct_files`, small files now go through the authority in packs (three
+  requests per 0.3 MB file to presign, PUT and complete would not fill a line);
+  only big files go straight to the bucket.
+- The authority commits a streamed file (`PUT /files/{sha}`) before answering,
+  so a write lock is not held while the next upload is read (on SQLite parallel
+  uploads could stall until their timeout).
+
 #### Changes
 
 - **A first upload to a hub is much faster.**
