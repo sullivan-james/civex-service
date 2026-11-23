@@ -1,0 +1,3 @@
+# Dev builds (see CONTRIBUTING.md) that the weekly prune must never delete.
+# One commit sha (7+ hex characters) or dev-<sha12> tag per line.
+# Add civex-hub's pinned sha here before a hub release.
