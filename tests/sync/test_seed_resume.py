@@ -159,12 +159,12 @@ def test_a_resume_leaves_other_devices_work_alone(project, authority, monkeypatc
     assert laptop.sync_svc.status().seeding == 0
 
 
-def test_a_release_made_over_an_unfinished_seed_arrives_with_every_record(
+def test_a_release_made_over_an_unfinished_seed_stays_local_and_the_seed_finishes(
     project, authority, monkeypatch
 ):
-    """The field case: a release is made while the first upload is stranded; it
-    goes as an ordinary change, and the resumed seed brings the records it
-    counts, and its bundle file is uploaded."""
+    """Releases are never synced: one made while the first upload is stranded
+    is not sent (nor counted as unsent), and the resumed seed still brings
+    every record."""
     laptop = _interrupted_laptop(project, authority, monkeypatch)
     laptop.release_svc.create("v1", "A release")
     laptop.commit()
@@ -173,10 +173,10 @@ def test_a_release_made_over_an_unfinished_seed_arrives_with_every_record(
     laptop.sync_svc.send_files()
 
     assert laptop.sync_svc.status().seeding == 0
+    assert laptop.sync_svc.status().pending == 0
     assert _records(authority) == _records(laptop)
-    made = authority.release_svc.get("v1")
-    assert made is not None
-    assert authority.file_svc.exists(made.bundle_sha256)
+    assert laptop.release_svc.get("v1") is not None
+    assert authority.release_svc.list_all() == []
 
 
 def test_a_first_upload_another_copy_began_is_sent_as_ordinary_changes(

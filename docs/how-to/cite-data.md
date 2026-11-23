@@ -10,14 +10,7 @@ used, and a way to get that data back later.
    The files the records cite are kept where they are, not copied, so this is
    quick however much data there is.
 
-3. Copy the citation from the release's page (text or BibTeX), or, for a
-   release on your computer,
-
-    ```bash
-    civex release cite v1 -f bibtex >> references.bib
-    ```
-
-    It names the version and the content hash, so a reader can tell whether
+3. Copy the citation from the release's page (text or BibTeX). It names the version and the content hash, so a reader can tell whether
     the data they have is the data you used.
 
 4. If you deposit the data (Zenodo, a university repository), make a folder
@@ -26,8 +19,5 @@ used, and a way to get that data back later.
    `CITATION.cff`. Upload that and the release's bundle (**Download**) and,
    once you have a DOI, add it from **Edit details…** on the release's page.
 
-Later, `civex release verify v1` checks the release still holds exactly that
-data (`--deep` reads every file back too), and `civex release diff v1` compares it with the data now (records added, changed and removed). To work
-with the data as it was, clone the release into a new project
-(`civex clone <repo-url> --release v1`) or import its bundle
-(`civex bundle import release-v1.civex.zip`). See [Releases](../guides/releases.md).
+Later, to work with the data as it was, clone the release into a new project
+(`civex clone <repo-url> --release v1`). See [Releases](../guides/releases.md).

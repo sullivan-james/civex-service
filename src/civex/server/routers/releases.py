@@ -14,9 +14,10 @@ from __future__ import annotations
 import dataclasses
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from civex import fs_open
@@ -31,7 +32,7 @@ from civex.domain.file_access import (
 )
 from civex.domain.features import OPEN_FOLDER, SERVER_PATH_EXPORT
 from civex.server.deps import get_ctx, reads_whole_project, requires
-from civex.server.downloads import new_temp_dir, new_temp_path, serve, temp_paths
+from civex.server.downloads import new_temp_dir, serve, temp_paths
 from civex.server.models import RecordQueryRequest
 from civex.server.routers.file_access import (
     _from_this_machine,
@@ -698,7 +699,7 @@ def save_release(
 
 @router.get(
     "/releases/{name}/bundle",
-    response_class=FileResponse,
+    response_class=StreamingResponse,
     responses={200: {"content": {"application/zip": {}}}},
 )
 def download_release(name: str, ctx: AppContext = Depends(get_ctx)):
@@ -709,20 +710,19 @@ def download_release(name: str, ctx: AppContext = Depends(get_ctx)):
     size is bounded by disk, not memory. A file that can't be read is named in
     its `bundle.json`. 404 when the bundle can't be had (or the release was
     yanked)."""
-    release, here = ctx.release_svc.bundle_here(name)
-    if not here:
+    try:
+        bundle = ctx.release_svc.full_bundle(name)
+    except FileNotFoundError:
         raise HTTPException(
             404,
             detail="The bundle is not on this computer and the server couldn't send it",
         )
-    dest = new_temp_path(".civex.zip")
-    try:
-        ctx.release_svc.write_full_bundle(name, dest)
-    except BaseException:
-        dest.unlink(missing_ok=True)
-        raise
-    return serve(
-        dest,
-        "application/zip",
-        ctx.release_svc.file_name_for(release.name),
+    file_name = quote(ctx.release_svc.file_name_for(bundle.release.name))
+    return StreamingResponse(
+        iter(bundle),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="release.civex.zip"; '
+            f"filename*=UTF-8''{file_name}"
+        },
     )

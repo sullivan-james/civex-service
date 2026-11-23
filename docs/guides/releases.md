@@ -10,15 +10,12 @@ project has changed since.
     reachable by anyone else, so **a release is made, kept and shared by a host
     (a civex hub), and is never synced**. Only a host switches it on (the
     `releases` feature); the app on your computer has no Releases pages, and
-    `civex release` can no longer create, correct, withdraw or yank one. What a
-    bundle is to you (`civex bundle export`) is the free, local copy; a release
-    is the hub's layer over it: a permanent name, frozen content, a citation, a
-    public page and access control. A release already on your computer (made by
-    an earlier civex) stays readable: `civex release list`, `show`, `verify`,
-    `cite`, `diff`, and `civex release export NAME`, which writes it as one
-    bundle with its files so nothing is lost. Clean-up still keeps the files it
-    owns. To take a hub's release, `civex clone <repo-url> --release NAME` (see
-    below).
+    `civex release` only says so: there is no command to create, list, read or
+    export one here. A bundle (`civex bundle export`) is the free, local copy;
+    a release is the hub's layer over it: a permanent name, frozen content, a
+    citation, a public page and access control. To take a hub's release, use
+    `civex clone <repo-url> --release NAME` (see below). Releases an older civex
+    made on a computer are no longer shown there.
 
 A release has:
 
@@ -115,15 +112,10 @@ project…** (the records alone, as one file) and **Change storage drive…**
 (which drive civex itself keeps the release's files on; only the release's
 own copies move).
 
-```bash
-civex release export v1                       # a folder to open
-civex release export v1 --mode copy --volume archive
-civex release gather v1 --to archive
-```
 
 ## Checking a release
 
-**Verify** (on the release's page, or `civex release verify v1`) checks that:
+**Verify** (on the release's page) checks that:
 
 - the bundle's bytes still match the sha256 it is kept under;
 - every record's hash in `records.hashes` matches its record, hashed again;
@@ -133,24 +125,18 @@ civex release gather v1 --to archive
 
 It reads no file, so it is quick however large the release.
 
-**Read every file back** (`civex release verify v1 --deep`) also reads every
+**Read every file back** (the deep check) also reads every
 file against its hash, with its progress in the status bar. A copy whose
 bytes don't match is reported and removed, as a clean-up's check does.
 
 ## Citing it
 
 The release's page has its citation as plain text, BibTeX and `CITATION.cff`,
-each with a copy button. From the command line:
-
-```bash
-civex release cite v1                 # one paragraph
-civex release cite v1 -f bibtex
-civex release cite v1 -f cff > CITATION.cff
-```
+each with a copy button.
 
 ## What changed since
 
-**Changed since** (or `civex release diff v1`) compares the release with the
+**Changed since** compares the release with the
 data now, record by record: each record it holds is hashed again as it is
 now and compared with its hash in the release. For each collection it counts
 the records:
@@ -169,10 +155,6 @@ Each number opens the records it means; a changed record shows which fields
 differ, with the value in the release and the value now. A large release is
 compared in the background, with its progress in the status bar.
 
-```bash
-civex release diff v1
-civex release diff v1 --show removed
-```
 
 ## Correcting, withdrawing and yanking
 
@@ -207,15 +189,6 @@ it starts **read-only** (a copy to read and cite; `--writable` allows
 changes). A private repository needs the host's token (`--token`, or
 `CIVEX_TOKEN`). Workflows and plugins in the bundle are not installed.
 
-A release already on your computer comes back the same way:
-
-```bash
-civex release export v1 -o release-v1.civex.zip   # records and files, one file
-mkdir restored && cd restored && civex init
-civex bundle import ../release-v1.civex.zip
-```
-
-`civex release files v1` lays its files out as a folder instead, by record.
 
 ## On a project that syncs
 

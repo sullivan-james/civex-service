@@ -1072,25 +1072,31 @@ def _clone_release(
         except SyncError as e:
             raise _fail(e)
         made = not target.exists()
-        target.mkdir(parents=True, exist_ok=True)
-        _init_working(target, use_sqlite=True)
-        os.chdir(target)
-        c = _ctx()
+        origin = Path.cwd()
         try:
-            # Code from a stranger is not installed: the data is what a release is.
-            result = c.bundle_svc.import_bundle(bundle, install_code=False)
-            c.commit()
-        except (BundleError, CivexError) as e:
-            c.close()
-            os.chdir(scratch)
-            # Leave nothing half made: a retry into the same place must work.
+            target.mkdir(parents=True, exist_ok=True)
+            _init_working(target, use_sqlite=True)
+            os.chdir(target)
+            c = _ctx()
+            try:
+                # Code from a stranger is not installed: the data is what a
+                # release is.
+                result = c.bundle_svc.import_bundle(bundle, install_code=False)
+                c.commit()
+            finally:
+                c.close()
+        except BaseException as e:
+            os.chdir(origin)
+            # Leave nothing half made (whatever stopped it, an interrupt
+            # included): a retry into the same place must work.
             shutil.rmtree(target / "_civex", ignore_errors=True)
             if made:
                 shutil.rmtree(target, ignore_errors=True)
-            raise _fail(e)
-        finally:
-            c.close()
+            if isinstance(e, (BundleError, CivexError)):
+                raise _fail(e)
+            raise
     if not writable:
+        os.chdir(target)
         config = load_config()
         config.project.read_only = True
         save_config(config)

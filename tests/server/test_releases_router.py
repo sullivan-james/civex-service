@@ -205,3 +205,42 @@ def test_a_release_is_written_straight_into_a_folder(client: TestClient, tmp_pat
         ).status_code
         == 404
     )
+
+
+def test_the_bundle_lists_a_file_it_cannot_read_and_keeps_an_empty_one(
+    client: TestClient,
+):
+    from civex.config import load_config
+    from civex.context import build_local_context
+
+    client.post("/api/schemas", json={"name": "sample"})
+    client.post("/api/schemas/sample/fields", json={"name": "a", "type": "file"})
+    client.post("/api/schemas/sample/fields", json={"name": "b", "type": "file"})
+    gone = client.put(
+        "/api/files/stream?filename=g.bin",
+        content=b"gone",
+        headers={"content-length": "4"},
+    ).json()
+    empty = client.put(
+        "/api/files/stream?filename=e.bin",
+        content=b"",
+        headers={"content-length": "0"},
+    ).json()
+    client.post("/api/collections", json={"name": "c"})
+    client.post(
+        "/api/collections/c/records",
+        json={"schema_name": "sample", "data": {"a": gone, "b": empty}},
+    )
+    made = client.post("/api/releases", json={"name": "v1", "title": "T"})
+    assert made.status_code == 201
+    ctx = build_local_context(load_config())
+    ctx.file_svc.discard(gone["sha256"])
+    ctx.commit()
+    ctx.close()
+    answer = client.get("/api/releases/v1/bundle")
+    assert answer.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(answer.content)) as zf:
+        manifest = json.loads(zf.read("bundle.json"))
+        names = zf.namelist()
+    assert manifest["files"]["missing"] == [gone["sha256"]]
+    assert f"files/{empty['sha256']}" in names

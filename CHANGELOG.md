@@ -44,13 +44,12 @@ from the next tag forward.
     sends or fetches (they stay on the host that made them, so clean-up still
     keeps them). Update the authority first. Releases already held by an
     authority keep working there (REST); they are just not fed.
-  - **Desktop:** `civex release create`, `correct`, `withdraw` and `yank` are
-    removed (`civex release` says "Releases are published on a civex hub"), and
-    the app's release pages and the explorer's "Release these..." are hidden.
-    A release already on the computer stays read-only: `civex release list`,
-    `show`, `verify`, `cite`, `diff`, and `civex release export NAME`, which now
-    writes **one bundle with its files** (the old folder export is `civex
-    release files NAME`). Clean-up still keeps the files such a release owns.
+  - **Desktop:** the whole `civex release` command group is gone (it only
+    says "Releases are published on a civex hub"), as are the app's release pages
+    and the explorer's "Release these...". **Releases an older civex made on a
+    computer are no longer listed, verified, cited, compared or exported there**
+    (their rows and bundles are left in the project, untouched; nothing converts
+    them). Take a hub's release with `civex clone <repo-url> --release NAME`.
   - **A new `RELEASE` permission** replaces `change_structure` for making,
     correcting, withdrawing and yanking. A host that says nothing about it gets
     it wherever `change_structure` goes (roles behave as before); granting it
