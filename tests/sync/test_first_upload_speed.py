@@ -374,3 +374,22 @@ def test_a_401_during_parallel_uploads_signs_in_once_more_and_confirms_all(
         th.join()
     assert sorted(sent) == sorted(shas)  # every file went in the end
     assert signins["n"] == 1  # one sign-in again, shared by all four
+
+
+def test_a_seed_reads_the_newest_stamp_once_not_per_entry(
+    project, authority, monkeypatch
+):
+    monkeypatch.setattr(sync_service, "PUSH_BATCH", 5)
+    laptop = _laptop_with_records(project, authority, 30)
+    repo = type(laptop.sync_repo)
+    real = repo.latest_hlc
+    calls = {"n": 0}
+
+    def counting(self_):
+        calls["n"] += 1
+        return real(self_)
+
+    monkeypatch.setattr(repo, "latest_hlc", counting)
+    connect(laptop)
+    assert laptop.sync_repo.entity_count() > 30
+    assert calls["n"] <= 5  # not one per entry

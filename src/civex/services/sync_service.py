@@ -2752,6 +2752,8 @@ class SyncService:
                 progress(SyncProgress(FILLING, sent, total and max(total, sent), kind))
             batch = []
 
+        last_stamp = self._repo.latest_hlc()
+
         # Only the kinds the authority reads (one on an older protocol has no
         # Analytics page to take, say).
         for kind in kinds_for(protocol):
@@ -2761,6 +2763,9 @@ class SyncService:
                 if str(entry_id(kind, str(snap["id"]))) in acked:
                     continue  # the authority has answered it already
                 now = datetime.now(timezone.utc)
+                # Each stamp follows the last (a seed adds nothing to the log
+                # here, so the newest stamp is read once, not per entry).
+                last_stamp = stamp = hlc.tick(last_stamp, int(now.timestamp() * 1000))
                 batch.append(
                     SyncEntry(
                         id=entry_id(kind, str(snap["id"])),
@@ -2772,9 +2777,7 @@ class SyncService:
                         timestamp=now.isoformat(),
                         actor=actor,
                         device_id=device_id,
-                        hlc=hlc.tick(
-                            self._repo.latest_hlc(), int(now.timestamp() * 1000)
-                        ),
+                        hlc=stamp,
                     )
                 )
                 if len(batch) >= PUSH_BATCH:

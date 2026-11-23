@@ -25,6 +25,12 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # `max(audit_log.hlc)` is read whenever a change is stamped; without an
+    # index each read scans the whole log. On a partitioned `audit_log`
+    # PostgreSQL creates it on every partition.
+    indexes = {i["name"] for i in sa.inspect(op.get_bind()).get_indexes("audit_log")}
+    if "ix_audit_log_hlc" not in indexes:
+        op.create_index("ix_audit_log_hlc", "audit_log", ["hlc"])
     op.create_table(
         "seed_acks",
         sa.Column("entry_id", sa.String(length=36), primary_key=True),
@@ -34,3 +40,4 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("seed_acks")
+    op.drop_index("ix_audit_log_hlc", table_name="audit_log")
