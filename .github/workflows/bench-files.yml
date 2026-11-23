@@ -56,7 +56,7 @@ jobs:
 
       - name: Install
         run: |
-          uv sync --extra server --extra postgres --extra s3 --extra dev
+          uv sync --extra server --extra postgres --extra dev
           uv venv "$RUNNER_TEMP/moto"
           uv pip install --python "$RUNNER_TEMP/moto/bin/python" 'moto[server]'
           echo "MOTO_SERVER=$RUNNER_TEMP/moto/bin/moto_server" >> "$GITHUB_ENV"
