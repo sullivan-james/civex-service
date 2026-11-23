@@ -881,11 +881,9 @@ class SyncService:
                 if mode == "joined":
                     self._join(transport, hello, progress)
                 elif mode == "seeded":
-                    # After a pull, not what other devices made.
+                    # After a pull, not what the authority already has.
                     skip = (
-                        self._repo.foreign_entities(
-                            user_state.device_id_for(meta.project_id)
-                        )
+                        self._repo.already_sent_entities()
                         if self._repo.meta().cursor != 0
                         else None
                     )
@@ -1141,24 +1139,37 @@ class SyncService:
         # would only bring back what of it had gone, and the rest would stay
         # `seeding`, sent by nothing. It is safe to run again (see `_seed`).
         if self._repo.count_seeding():
-            log.info(
-                "sync with %s: finishing the first upload", self._config.sync.remote
-            )
-            # The whole project goes again, as a first upload does (what the
-            # authority already holds it answers from its record, whichever
-            # device id began it), except what other devices made and the
-            # authority sent here. The cursor stays: the pull below brings in
-            # whatever others did.
-            self._seed(
-                transport,
-                progress,
-                hello.protocol_version,
-                advance=False,
-                skip=self._repo.foreign_entities(
-                    user_state.device_id_for(meta.project_id)
-                ),
-            )
-            meta = self._repo.meta()
+            if hello.seeded_by == str(user_state.device_id_for(meta.project_id)):
+                log.info(
+                    "sync with %s: finishing the first upload",
+                    self._config.sync.remote,
+                )
+                # The whole project goes again, as a first upload does (what
+                # the authority already holds it answers from its record),
+                # except what it already numbered a change of. The cursor
+                # stays: the pull below brings in whatever others did.
+                self._seed(
+                    transport,
+                    progress,
+                    hello.protocol_version,
+                    advance=False,
+                    skip=self._repo.already_sent_entities(),
+                )
+                meta = self._repo.meta()
+            else:
+                # Not this copy's upload to finish (another began or finished
+                # it: its ids would be answered with the other's results, and
+                # these changes would be marked sent without being seen). They
+                # go as ordinary changes, so the authority judges them and a
+                # clash is kept for review. (A device id lost on this computer
+                # lands here too: a clash is recoverable, a silent loss is not.)
+                log.info(
+                    "sync with %s: the first upload was not begun by this copy; "
+                    "its changes are sent as ordinary ones",
+                    self._config.sync.remote,
+                )
+                self._repo.unseed()
+                self._commit()
         if meta.cursor < hello.feed_floor:
             self._copy_again(transport, hello, report)
         self._catch_up_readable(transport, hello)

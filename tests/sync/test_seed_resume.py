@@ -170,13 +170,16 @@ def test_a_release_made_over_an_unfinished_seed_arrives_with_every_record(
     assert authority.file_svc.exists(made.bundle_sha256)
 
 
-def test_a_resume_after_the_device_id_changed_is_still_a_seed(
+def test_a_first_upload_another_copy_began_is_sent_as_ordinary_changes(
     project, authority, monkeypatch
 ):
-    """The history is not flipped to raw pending changes because this
-    computer's device id is not the one that began the upload."""
+    """When the authority says another copy began the upload, this copy's
+    set-aside changes are not answered from that copy's results and marked
+    sent unseen: they go as ordinary changes and arrive."""
     laptop = _interrupted_laptop(project, authority, monkeypatch)
-    before = laptop.sync_svc.status().seeding
+    first = sorted(_records(laptop))[0]
+    laptop.record_svc.update(first, {"site": "mine", "depth": 7.0})
+    laptop.commit()
     check = sync_service.SyncService._check_protocol
 
     def as_if_another_began_it(self, hello):
@@ -188,8 +191,38 @@ def test_a_resume_after_the_device_id_changed_is_still_a_seed(
     )
     laptop.sync_svc.sync()
     s = laptop.sync_svc.status()
-    assert (s.seeding, s.pending, s.open_conflicts) == (0, 0, 0)
-    assert before > 0
+    assert (s.seeding, s.pending) == (0, 0)
+    assert _records(authority) == _records(laptop)
+    site = next(
+        f for f in authority.schema_svc.get("encounter").fields if f.name == "site"
+    )
+    held = authority.sync_repo.snapshot("record", uuid.UUID(first))
+    assert held["data"][str(site.id)] == "mine"
+
+
+def test_a_pulled_thing_of_unknown_origin_is_not_resent(
+    project, authority, monkeypatch
+):
+    from sqlalchemy import text
+
+    laptop = _interrupted_laptop(project, authority, monkeypatch, pushes=5)
+    phone = device(project, authority, "phone")
+    connect(phone)
+    theirs = phone.record_svc.add("study", "encounter", {"site": "p", "depth": 9.0})
+    phone.commit()
+    phone.sync_svc.sync()
+    laptop.sync_svc.pull()
+    laptop.sync_repo._s.execute(
+        text("UPDATE audit_log SET device_id = NULL WHERE hub_seq IS NOT NULL")
+    )
+    laptop.commit()
+    phone.record_svc.update(str(theirs.id), {"site": "p2", "depth": 9.0})
+    phone.commit()
+    phone.sync_svc.sync()
+
+    laptop.sync_svc.sync()
+    laptop.sync_svc.sync()
+    assert laptop.sync_svc.status().open_conflicts == 0
     assert _records(authority) == _records(laptop)
 
 

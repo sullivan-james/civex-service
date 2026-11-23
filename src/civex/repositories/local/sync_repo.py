@@ -1614,19 +1614,30 @@ class LocalSyncRepository:
         )
         return {(t, str(i)) for t, i in rows}
 
-    def foreign_entities(self, device_id: uuid.UUID) -> set[tuple[str, str]]:
-        """The things another device made that came here from the authority
-        (kind, id): a resumed first upload leaves them to it."""
+    def already_sent_entities(self) -> set[tuple[str, str]]:
+        """Things the authority already numbered a change of (whoever made
+        it: ones that came from the feed, with or without a device id, and
+        ones pushed normally) that have nothing set aside by a first upload: a
+        resumed upload leaves them alone, since resending them as creates
+        would clash with what the authority has."""
         rows = (
             self._s.query(AuditLog.entity_type, AuditLog.entity_id)
-            .filter(
-                AuditLog.hub_seq.is_not(None),
-                AuditLog.device_id.is_not(None),
-                AuditLog.device_id != device_id,
-            )
+            .filter(AuditLog.hub_seq.is_not(None))
             .distinct()
         )
-        return {(t, str(i)) for t, i in rows}
+        return {(t, str(i)) for t, i in rows} - self.seeding_entities()
+
+    def unseed(self) -> None:
+        """Changes set aside by a first upload that is not this project copy's
+        to finish go back to waiting to be sent like any other, so the authority
+        judges them (a clash is kept for review; nothing is dropped)."""
+        self._s.execute(
+            update(AuditLog)
+            .where(AuditLog.sync_state == "seeding")
+            .values(sync_state="pending")
+            .execution_options(synchronize_session=False)
+        )
+        self._s.expire_all()
 
     def dirty_entities(self) -> set[tuple[str, uuid.UUID]]:
         """Things with a change here still waiting to be sent: what a pull must
