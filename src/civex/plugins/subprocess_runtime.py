@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import contextlib
 import os
+import random
 import shutil
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 import weakref
 from collections import deque
 from functools import lru_cache
@@ -77,13 +79,30 @@ def _sdk_find_links_dir() -> Path | None:
     if sdk_source is None:
         return None
     wheel_dir = Path(tempfile.mkdtemp(prefix="civex-plugin-sdk-wheel-"))
-    subprocess.run(
-        [find_uv_binary(), "build", "--wheel", "-o", str(wheel_dir), str(sdk_source)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return wheel_dir
+    command = [
+        find_uv_binary(),
+        "build",
+        "--wheel",
+        "-o",
+        str(wheel_dir),
+        str(sdk_source),
+    ]
+    # Parallel test workers each build from the same source directory, and the
+    # build writes beside it (build/, *.egg-info), which collides on Windows
+    # (locked files). A retry after a short, varied pause clears that.
+    attempts = 4
+    for attempt in range(1, attempts + 1):
+        result = subprocess.run(command, capture_output=True, text=True)
+        if result.returncode == 0:
+            return wheel_dir
+        if attempt == attempts:
+            # Keep uv's own message: CalledProcessError's text omits it.
+            raise RuntimeError(
+                f"building the civex-plugin-sdk wheel failed "
+                f"(exit {result.returncode}): {result.stderr.strip()}"
+            )
+        time.sleep(random.uniform(0.5, 2.0) * attempt)
+    return wheel_dir  # unreachable
 
 
 def _local_sdk_version(wheel_dir: Path) -> str | None:

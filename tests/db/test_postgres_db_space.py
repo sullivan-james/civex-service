@@ -8,6 +8,7 @@ otherwise.
 from __future__ import annotations
 
 import os
+import uuid
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -26,18 +27,17 @@ pytestmark = [
     ),
 ]
 
-SCHEMA = "space_test"
-
 
 @pytest.fixture()
 def engine(monkeypatch):
     monkeypatch.setattr(db_space, "WORTH_BYTES", 2 * 1024 * 1024)
     monkeypatch.setattr(db_space, "MIN_BYTES", 256 * 1024)
+    # A schema of its own per test, so nothing else touching the shared
+    # scratch database can pull it out from under the test.
+    SCHEMA = f"space_{uuid.uuid4().hex[:12]}"
     eng = create_engine(_PG_URL)
     with eng.begin() as c:
-        c.execute(text(f"DROP SCHEMA IF EXISTS {SCHEMA} CASCADE"))
         c.execute(text(f"CREATE SCHEMA {SCHEMA}"))
-        c.execute(text(f"SET search_path TO {SCHEMA}"))
     # Every connection of this engine is scoped to the schema, as the hub does.
     scoped = create_engine(_PG_URL, connect_args={"options": f"-csearch_path={SCHEMA}"})
     yield scoped
