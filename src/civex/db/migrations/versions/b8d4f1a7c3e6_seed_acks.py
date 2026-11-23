@@ -2,7 +2,9 @@
 
 A first upload (seed) that is interrupted resumes where it stopped: each
 change it sent that the authority answered is remembered here, and the resumed
-upload leaves those out instead of sending the whole project again.
+upload leaves those out instead of sending the whole project again. Each is
+kept with the authority's position when it answered, so an authority found
+behind it (restored from a backup) is known to have lost them.
 
 Revision ID: b8d4f1a7c3e6
 Revises: f3b8d6a2c9e1
@@ -26,6 +28,7 @@ def upgrade() -> None:
     op.create_table(
         "seed_acks",
         sa.Column("entry_id", sa.String(length=36), primary_key=True),
+        sa.Column("head_seq", sa.Integer(), nullable=False, server_default="0"),
     )
 
 

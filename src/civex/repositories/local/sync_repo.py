@@ -1951,8 +1951,13 @@ class LocalSyncRepository:
         """Ids of the first-upload changes the authority has answered."""
         return {i for (i,) in self._s.query(SeedAck.entry_id)}
 
-    def note_seed_acked(self, entry_ids: list[uuid.UUID]) -> None:
-        """Remember these first-upload changes as answered (idempotent)."""
+    def seed_acked_head(self) -> int:
+        """The highest authority position any remembered answer came with."""
+        return self._s.query(func.max(SeedAck.head_seq)).scalar() or 0
+
+    def note_seed_acked(self, entry_ids: list[uuid.UUID], head_seq: int) -> None:
+        """Remember these first-upload changes as answered (idempotent), with
+        the authority's position (`head_seq`) when it answered."""
         wanted = [str(i) for i in entry_ids]
         known = {
             i
@@ -1960,7 +1965,9 @@ class LocalSyncRepository:
                 SeedAck.entry_id.in_(wanted)
             )
         }
-        self._s.add_all(SeedAck(entry_id=i) for i in wanted if i not in known)
+        self._s.add_all(
+            SeedAck(entry_id=i, head_seq=head_seq) for i in wanted if i not in known
+        )
         self._s.flush()
 
     def finish_seed(self) -> None:

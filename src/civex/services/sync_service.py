@@ -1774,11 +1774,22 @@ class SyncService:
                     )
                 )
 
+        bytes_lock = threading.Lock()
+
         def went(n: int) -> None:
             nonlocal sent_bytes, inflight
-            sent_bytes += n
-            inflight += n
+            with bytes_lock:
+                sent_bytes += n
+                inflight += n
             say()
+
+        def went_in_pool(n: int) -> None:
+            # From an upload thread: counted only. The progress line is said
+            # by the sending thread (`drain` while it waits).
+            nonlocal sent_bytes, inflight
+            with bytes_lock:
+                sent_bytes += n
+                inflight += n
 
         def settle(sha: str, why: str | None) -> None:
             """A file is settled: sent (`why` None) or not (`why` says why)."""
@@ -1786,6 +1797,11 @@ class SyncService:
             if why is None:
                 done += 1
                 settled_bytes += sizes.get(sha, inflight)
+                if sha in sizes:  # others in flight keep the bytes they sent
+                    with bytes_lock:
+                        inflight = max(0, inflight - sizes[sha])
+                else:
+                    inflight = 0
             else:
                 if sha not in report.owed:
                     report.owed.append(sha)
@@ -1794,7 +1810,8 @@ class SyncService:
                 # Its bytes can never be sent from here: the byte total is
                 # of what can be read (known once it was tried).
                 total_bytes = max(settled_bytes, total_bytes - sizes.get(sha, 0))
-            inflight = 0
+            if why is not None:
+                inflight = 0
             report.resume_after = sha  # settled: the next pass starts after
             say(force=True)
 
@@ -1813,7 +1830,7 @@ class SyncService:
             try:
                 if failed.is_set():
                     return False  # a file before it failed: nothing more goes
-                transport.upload_file(sha, f, size)  # type: ignore[arg-type]
+                transport.upload_file(sha, _Counting(f, went_in_pool), size)  # type: ignore[arg-type]
                 return True
             except BaseException:
                 failed.set()
@@ -1825,10 +1842,13 @@ class SyncService:
             """Wait for the small files in flight, then keep every one that
             arrived (confirmed and committed together), whatever happened to
             the others. The first failure is raised once that is done."""
-            nonlocal spent
+            nonlocal spent, inflight
             error: BaseException | None = None
             if flying:
-                wait([f for _, f in flying])
+                pending_uploads = {f for _, f in flying}
+                while pending_uploads:
+                    _done, pending_uploads = wait(pending_uploads, timeout=0.25)
+                    say()  # bytes move while the small files go
             for sha, fut in flying:
                 try:
                     if fut.result():
@@ -1837,6 +1857,7 @@ class SyncService:
                     error = error or e
             flying.clear()
             failed.clear()
+            inflight = 0  # the group is settled (or failed): nothing in flight
             if arrived:
                 self._repo.confirm_on_server(arrived)
                 self._commit()
@@ -2683,11 +2704,15 @@ class SyncService:
         # not sent again (the ids are the same every run, so what is left goes
         # as it would have).
         acked = self._repo.seed_acked()
-        if acked and transport.hello().empty:
-            # The authority holds nothing now (reset, or restored from before):
-            # what it once answered is no longer there.
-            self._repo.forget_seed_acks()
-            acked = set()
+        if acked:
+            hello = transport.hello()
+            if hello.empty or hello.head_seq < self._repo.seed_acked_head():
+                # The authority holds nothing now, or is behind where it was
+                # when it answered (reset, or restored from a backup taken
+                # mid-seed): what it once answered is no longer there.
+                self._repo.forget_seed_acks()
+                self._commit()
+                acked = set()
         resumed = bool(acked)
 
         def answered(kind: str) -> Callable[[str], bool]:
@@ -2720,7 +2745,7 @@ class SyncService:
             self._note(result.results, {e.id: e for e in batch}, report)
             sent += len(batch)
             # Kept at once, so a restart goes on from here.
-            self._repo.note_seed_acked([e.id for e in batch])
+            self._repo.note_seed_acked([e.id for e in batch], head)
             self._commit()
             if progress:
                 kind = batch[-1].entity_type

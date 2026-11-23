@@ -1156,12 +1156,16 @@ class SeedAck(Base):
     """Device: the id of a first-upload change the authority has answered.
     A seed interrupted and run again leaves these out (the ids are made from
     the project and the thing, so they are the same every time), instead of
-    sending everything from the start. Cleared when the seed finishes, when a
-    new one begins, and on following another authority."""
+    sending everything from the start. `head_seq` is the authority's position
+    when it answered: an authority found behind it (restored from a backup) or
+    empty no longer holds these, so they are dropped. Cleared when the seed
+    finishes, then, and on following another authority (`forget_numbers`). A new
+    seed does not clear them: that is how it resumes."""
 
     __tablename__ = "seed_acks"
 
     entry_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    head_seq: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 class IgnoredMissingFile(Base):

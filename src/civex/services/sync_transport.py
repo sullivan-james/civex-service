@@ -332,15 +332,18 @@ class HttpSyncTransport:
     def _again_if_expired(self, call):
         """Make an authenticated call, signing in again once if the server says
         the session is no longer good (it expired, or the server restarted)."""
+        used = self._session
         try:
             return call()
         except SyncError as e:
             if e.status != 401:
                 raise
-            # Dropped under the lock: with several uploads at once, a second
-            # drop costs one more sign-in, never a failed call.
+            # Dropped under the lock, and only the session that was refused:
+            # with several uploads refused at once, the first drops it, the
+            # others find a new one already made and use it (one sign-in).
             with self._session_lock:
-                self._session = None
+                if self._session is used:
+                    self._session = None
             return call()
 
     # -- plumbing --------------------------------------------------------

@@ -5,8 +5,10 @@ group kept even when a later one fails."""
 
 from __future__ import annotations
 
+import dataclasses
 import threading
 import time
+import urllib.request
 
 import pytest
 
@@ -228,3 +230,147 @@ def test_a_failure_with_one_thread_keeps_the_files_that_arrived(
         d.laptop.sync_svc.send_files()
     assert len(d.confirmed()) == 4
     assert d.laptop.sync_svc.status().files_to_send == 2
+
+
+def _interrupted_seed(project, authority, monkeypatch):
+    """A laptop whose first upload answered three pushes of five, then lost
+    the connection."""
+    monkeypatch.setattr(sync_service, "PUSH_BATCH", 5)
+    laptop = _laptop_with_records(project, authority, 30)
+    original = sync_service.SyncService._seed
+    calls = {"n": 0}
+
+    def seed_then_stop(self, transport, *rest, **kw):
+        real = transport.push
+
+        def push(entries):
+            calls["n"] += 1
+            if calls["n"] == 4:
+                raise SyncError("connection lost", retryable=True)
+            return real(entries)
+
+        transport.push = push
+        try:
+            return original(self, transport, *rest, **kw)
+        finally:
+            del transport.push
+
+    monkeypatch.setattr(sync_service.SyncService, "_seed", seed_then_stop)
+    with pytest.raises(SyncError):
+        connect(laptop)
+    monkeypatch.setattr(sync_service.SyncService, "_seed", original)
+    assert len(laptop.sync_repo.seed_acked()) == 15
+    return laptop
+
+
+def _seed_again(laptop, monkeypatch, **hello_changes):
+    """Run the seed again against an authority whose hello says otherwise;
+    returns how many entries were pushed."""
+    sent = _count_pushes(monkeypatch)
+    transport = laptop.sync_svc._transport()
+    real = transport.hello
+    transport.hello = lambda: dataclasses.replace(real(), **hello_changes)
+    laptop.sync_svc._seed(transport)
+    return sum(sent)
+
+
+def test_seed_acks_are_dropped_when_the_authority_is_empty(
+    project, authority, monkeypatch
+):
+    laptop = _interrupted_seed(project, authority, monkeypatch)
+    total = laptop.sync_repo.entity_count()
+    assert _seed_again(laptop, monkeypatch, empty=True) >= total
+
+
+def test_seed_acks_are_dropped_when_the_authority_went_backwards(
+    project, authority, monkeypatch
+):
+    # Restored from a backup taken mid-seed: not empty, still listing this
+    # device, but behind where it was when it answered.
+    laptop = _interrupted_seed(project, authority, monkeypatch)
+    total = laptop.sync_repo.entity_count()
+    head = laptop.sync_repo.seed_acked_head()
+    assert head > 0
+    sent = _seed_again(
+        laptop, monkeypatch, empty=False, head_seq=head - 1, seeded_by="x"
+    )
+    assert sent >= total
+
+
+def test_seed_acks_are_kept_when_the_authority_has_not_gone_back(
+    project, authority, monkeypatch
+):
+    laptop = _interrupted_seed(project, authority, monkeypatch)
+    total = laptop.sync_repo.entity_count()
+    assert _seed_again(laptop, monkeypatch) <= total - 15
+
+
+def test_following_another_authority_forgets_seed_acks(project, authority, monkeypatch):
+    laptop = _interrupted_seed(project, authority, monkeypatch)
+    laptop.sync_repo.forget_numbers()
+    assert laptop.sync_repo.seed_acked() == set()
+
+
+def test_a_401_during_parallel_uploads_signs_in_once_more_and_confirms_all(
+    monkeypatch,
+):
+    import io
+
+    from civex.services.sync_transport import HttpSyncTransport
+
+    t = HttpSyncTransport.__new__(HttpSyncTransport)
+    t._session_lock = threading.RLock()
+    t._session = object()
+    t._base = "http://x"
+    t._capabilities = frozenset()
+    signins = {"n": 0}
+    rejected: set[int] = set()
+    barrier = threading.Barrier(4)
+
+    def token():
+        with t._session_lock:
+            if t._session is None:
+                signins["n"] += 1
+                t._session = object()
+            return "tok"
+
+    t._token = token
+    t._offers = lambda _c: False
+    t._signed_in = lambda m, path, data=None: urllib.request.Request(
+        "http://x" + path, data=data, method=m
+    )
+    sent: list[str] = []
+    lock = threading.Lock()
+
+    class _Open:
+        def close(self):
+            pass
+
+    def opened(request):
+        sha = request.full_url.rsplit("/", 1)[1]
+        token()
+        with lock:
+            first = sha not in rejected
+            rejected.add(sha)
+        if first:
+            try:
+                barrier.wait(2)
+            except threading.BrokenBarrierError:
+                pass
+            raise SyncError("expired", retryable=False, status=401)
+        with lock:
+            sent.append(sha)
+        return _Open()
+
+    t._open = opened
+    shas = [f"{i:064x}" for i in range(4)]
+    threads = [
+        threading.Thread(target=t.upload_file, args=(sha, io.BytesIO(b"x"), 1))
+        for sha in shas
+    ]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    assert sorted(sent) == sorted(shas)  # every file went in the end
+    assert signins["n"] == 1  # one sign-in again, shared by all four
