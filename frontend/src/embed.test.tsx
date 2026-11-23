@@ -128,13 +128,29 @@ describe('routing', () => {
     start({ onNavigate: (p) => seen.push(p) }, '/jamie/q3/data/collections')
     await waitFor(() => expect(seen).toContain('/collections'))
 
-    act(() => unmount!.navigate('/schemas'))
+    window.history.pushState(null, '', '/jamie/q3/data/schemas')
+    act(() => window.dispatchEvent(new PopStateEvent('popstate')))
     await waitFor(() => expect(seen[seen.length - 1]).toBe('/schemas'))
-    expect(window.location.pathname).toBe('/jamie/q3/data/schemas')
 
     act(() => window.history.back())
     await waitFor(() => expect(seen[seen.length - 1]).toBe('/collections'))
     expect(window.location.pathname).toBe('/jamie/q3/data/collections')
+  })
+
+  it('navigate() does nothing at the current path and otherwise replaces', async () => {
+    const seen: string[] = []
+    start({ onNavigate: (p) => seen.push(p) }, '/jamie/q3/data/collections')
+    await waitFor(() => expect(seen).toContain('/collections'))
+    const length = window.history.length
+
+    act(() => unmount!.navigate('/collections'))
+    expect(window.history.length).toBe(length)
+    expect(seen).toEqual(['/collections'])
+
+    act(() => unmount!.navigate('/schemas'))
+    await waitFor(() => expect(seen[seen.length - 1]).toBe('/schemas'))
+    expect(window.location.pathname).toBe('/jamie/q3/data/schemas')
+    expect(window.history.length).toBe(length)
   })
 })
 
