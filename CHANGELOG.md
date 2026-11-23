@@ -35,7 +35,9 @@ from the next tag forward.
   adds `code`, `retries` and `retried_at` to `sync_conflicts`; `c8d2f4a6b1e7`
   adds `ignored_missing_files`; `e7a1c5d9b3f2` adds `misses` and `retry_at` to
   `server_lacks`; `d9e3a5c7f1b4` adds `sync_meta.readable` (what a device was
-  told it may read).
+  told it may read); `f3b8d6a2c9e1` adds a partial index on the changes a first
+  upload has set aside (empty in practice), so asking whether one is unfinished is a
+  lookup, not a scan of the audit log.
 - **New feature flags hosts must know about:** `settings`, `settings_appearance`,
   `settings_retention`, `settings_map`, `settings_advanced`, `settings_devices`
   and `settings_members` (all on locally; a host that lists its features must

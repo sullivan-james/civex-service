@@ -276,12 +276,8 @@ class LocalSyncRepository:
         """How many files live records cite (or releases keep) that the
         authority hasn't said it holds: not on the server yet, as far as this
         device knows."""
-        sha = self._referenced()
-        return int(
-            self._s.execute(
-                select(func.count()).where(sha.not_in(select(ServerFile.sha256)))
-            ).scalar_one()
-        )
+        page = self._referenced_page("", 2**31, True).subquery()
+        return int(self._s.execute(select(func.count()).select_from(page)).scalar_one())
 
     def unconfirmed_copies(self, limit: int) -> dict[str, list[str]]:
         """Up to `limit` files live records cite that the authority hasn't said
@@ -1617,17 +1613,6 @@ class LocalSyncRepository:
             .distinct()
         )
         return {(t, str(i)) for t, i in rows}
-
-    def unseed(self) -> None:
-        """Changes set aside by a first upload that is not this project's to
-        finish go back to waiting to be sent like any other."""
-        self._s.execute(
-            update(AuditLog)
-            .where(AuditLog.sync_state == "seeding")
-            .values(sync_state="pending")
-            .execution_options(synchronize_session=False)
-        )
-        self._s.expire_all()
 
     def dirty_entities(self) -> set[tuple[str, uuid.UUID]]:
         """Things with a change here still waiting to be sent: what a pull must

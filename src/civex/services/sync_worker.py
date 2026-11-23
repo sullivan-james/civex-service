@@ -69,6 +69,8 @@ class _SendRun:
     bytes: int = 0
     rate: RateWindow = field(default_factory=RateWindow)
     last: SyncProgress | None = None
+    after: str = ""  # where the last pass got to (hash order)
+    everything: bool = False  # the run began as a full check
 
     def carried(self, p: SyncProgress, now: float) -> SyncProgress:
         """A pass's progress as part of the run."""
@@ -221,14 +223,15 @@ class SyncWorker:
         the progress published adds what earlier passes of the same run sent,
         so one bar runs from the first file to the last."""
         now = self._clock()
-        # A run carrying on after a pass that ran out of time asks only about
-        # what is still unconfirmed (the pages it settled are kept), not again
-        # about every file.
-        everything = everything or (
-            self._send_run is None and now - self._last_file_check >= FILE_CHECK_EVERY
-        )
-        sending = False
+        # A run carrying on after a pass that ran out of time goes on as it
+        # began, from where that pass got to.
         run = self._send_run or _SendRun()
+        if self._send_run is None:
+            run.everything = (
+                everything or now - self._last_file_check >= FILE_CHECK_EVERY
+            )
+        everything = run.everything
+        sending = False
 
         def told(p: SyncProgress) -> None:
             nonlocal sending
@@ -237,8 +240,9 @@ class SyncWorker:
             self._on_files(run.carried(p, self._clock()))
 
         try:
+            more = {"after": run.after} if run.after else {}
             report = ctx.sync_svc.send_files(
-                everything=everything, seconds=FILES_SECONDS, progress=told
+                everything=everything, seconds=FILES_SECONDS, progress=told, **more
             )
         except SyncError as e:
             log.info("sending files failed (%s); it carries on later", e)
@@ -249,11 +253,12 @@ class SyncWorker:
             return
         if report.stopped:  # more to send: carry on at once, on the same bar
             run.close_pass()
+            run.after = getattr(report, "resume_after", "")
             self._send_run = run
             self._files_wake.set()
             return
         # (A run that began as a full check and ended on its continuation counts.)
-        if everything or self._send_run is not None:
+        if run.everything:
             self._last_file_check = now
         self._send_run = None
         if sending:  # no bar left where uploading ended

@@ -27,7 +27,7 @@ def _interrupted_laptop(project, authority, monkeypatch, pushes=2):
     original = sync_service.SyncService._seed
     broke = []
 
-    def seed_then_stop(self, transport, *rest):
+    def seed_then_stop(self, transport, *rest, **kw):
         real = transport.push
         calls = 0
 
@@ -41,7 +41,7 @@ def _interrupted_laptop(project, authority, monkeypatch, pushes=2):
 
         transport.push = push
         try:
-            return original(self, transport, *rest)
+            return original(self, transport, *rest, **kw)
         finally:
             del transport.push
 
@@ -168,3 +168,59 @@ def test_a_release_made_over_an_unfinished_seed_arrives_with_every_record(
     made = authority.release_svc.get("v1")
     assert made is not None
     assert authority.file_svc.exists(made.bundle_sha256)
+
+
+def test_a_resume_after_the_device_id_changed_is_still_a_seed(
+    project, authority, monkeypatch
+):
+    """The history is not flipped to raw pending changes because this
+    computer's device id is not the one that began the upload."""
+    laptop = _interrupted_laptop(project, authority, monkeypatch)
+    before = laptop.sync_svc.status().seeding
+    check = sync_service.SyncService._check_protocol
+
+    def as_if_another_began_it(self, hello):
+        hello.seeded_by = str(uuid.uuid4())
+        return check(self, hello)
+
+    monkeypatch.setattr(
+        sync_service.SyncService, "_check_protocol", as_if_another_began_it
+    )
+    laptop.sync_svc.sync()
+    s = laptop.sync_svc.status()
+    assert (s.seeding, s.pending, s.open_conflicts) == (0, 0, 0)
+    assert before > 0
+    assert _records(authority) == _records(laptop)
+
+
+def test_retention_keeps_what_a_first_upload_has_still_to_send(
+    project, authority, monkeypatch
+):
+    from datetime import datetime, timedelta, timezone
+
+    laptop = _interrupted_laptop(project, authority, monkeypatch)
+    seeding = laptop.sync_repo.count_seeding()
+    laptop.audit_svc.prune(datetime.now(timezone.utc) + timedelta(days=1), True)
+    laptop.commit()
+    assert laptop.sync_repo.count_seeding() == seeding
+
+
+def test_connecting_again_after_a_pull_sends_only_what_was_set_aside(
+    project, authority, monkeypatch
+):
+    laptop = _interrupted_laptop(project, authority, monkeypatch, pushes=5)
+    phone = device(project, authority, "phone")
+    connect(phone)
+    theirs = phone.record_svc.add("study", "encounter", {"site": "p", "depth": 9.0})
+    phone.commit()
+    phone.sync_svc.sync()
+    laptop.sync_svc.pull()
+    phone.record_svc.update(str(theirs.id), {"site": "p2", "depth": 9.0})
+    phone.commit()
+    phone.sync_svc.sync()
+
+    assert connect(laptop) == "seeded"
+    laptop.sync_svc.sync()
+    assert laptop.sync_svc.status().open_conflicts == 0
+    assert laptop.sync_svc.status().seeding == 0
+    assert _records(authority) == _records(laptop)

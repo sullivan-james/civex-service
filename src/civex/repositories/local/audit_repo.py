@@ -652,7 +652,7 @@ class LocalAuditRepository:
             not_(_now_is("deleted")),
         ]
         if protect_unsynced:
-            conditions.append(AuditLog.sync_state != "pending")
+            conditions.append(AuditLog.sync_state.not_in(("pending", "seeding")))
         return conditions
 
     def _prunable(self, before: datetime, protect_unsynced: bool) -> list:
