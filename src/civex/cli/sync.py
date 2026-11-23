@@ -7,6 +7,7 @@ from __future__ import annotations
 from datetime import datetime
 import json
 import os
+import shutil
 import uuid
 from pathlib import Path
 
@@ -1044,10 +1045,10 @@ def _clone_release(
     from civex.domain.bundle import BundleError
     from civex.services.release_fetch import fetch_release_bundle
 
-    target = (
-        path
-        or Path(f"{url.rstrip('/').rsplit('/', 1)[-1] or 'civex-project'}-{release}")
-    ).resolve()
+    parts = [p for p in url.rstrip("/").split("/") if p]
+    if parts and parts[-1] == "data" and len(parts) > 1:
+        parts.pop()  # a hub's address ends in /data: name the repository
+    target = (path or Path(f"{(parts or ['civex-project'])[-1]}-{release}")).resolve()
     if (target / "_civex").exists():
         raise _fail(
             ValueError(f"{target} is already a civex project: clone into a new folder")
@@ -1070,6 +1071,7 @@ def _clone_release(
                 fetch_release_bundle(url, release, bundle, token, advance)
         except SyncError as e:
             raise _fail(e)
+        made = not target.exists()
         target.mkdir(parents=True, exist_ok=True)
         _init_working(target, use_sqlite=True)
         os.chdir(target)
@@ -1079,6 +1081,12 @@ def _clone_release(
             result = c.bundle_svc.import_bundle(bundle, install_code=False)
             c.commit()
         except (BundleError, CivexError) as e:
+            c.close()
+            os.chdir(scratch)
+            # Leave nothing half made: a retry into the same place must work.
+            shutil.rmtree(target / "_civex", ignore_errors=True)
+            if made:
+                shutil.rmtree(target, ignore_errors=True)
             raise _fail(e)
         finally:
             c.close()

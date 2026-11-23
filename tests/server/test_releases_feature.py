@@ -50,7 +50,10 @@ def test_every_release_route_is_404_when_the_feature_is_off(
 ):
     kwargs = {} if body is None else {"json": body}
     answer = getattr(client, method)(path, **kwargs)
-    assert answer.status_code == 404, (path, answer.text)
+    # Not there: 404 (a built app's catch-all answers a POST 405, which is the
+    # same "no such route").
+    assert answer.status_code == (404 if method == "get" else answer.status_code)
+    assert answer.status_code in (404, 405), (path, answer.text)
     assert f.RELEASES not in client.get("/api/status/features").json()["features"]
 
 

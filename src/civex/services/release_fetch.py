@@ -10,6 +10,7 @@ written to disk in chunks, never held in memory.
 
 from __future__ import annotations
 
+import http.client
 import json
 import socket
 import urllib.error
@@ -23,6 +24,20 @@ from civex.domain.sync import SyncError
 from civex.tls import certificate_problem, ssl_context
 
 _CHUNK = 1024 * 1024
+
+
+class _SameHostOnly(urllib.request.HTTPRedirectHandler):
+    """Follows a redirect, but never takes the token to another host or from
+    https down to http."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
+        old, new = urllib.parse.urlsplit(req.full_url), urllib.parse.urlsplit(newurl)
+        if old.scheme == "https" and new.scheme != "https":
+            return None
+        follow = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if follow is not None and (old.hostname, old.port) != (new.hostname, new.port):
+            follow.remove_header("Authorization")
+        return follow
 
 
 def bundle_url(base: str, name: str) -> str:
@@ -65,10 +80,11 @@ def fetch_release_bundle(
     if token:
         headers["Authorization"] = f"Bearer {token}"
     request = urllib.request.Request(bundle_url(base, name), headers=headers)
+    opener = urllib.request.build_opener(
+        _SameHostOnly, urllib.request.HTTPSHandler(context=ssl_context())
+    )
     try:
-        response = urllib.request.urlopen(
-            request, timeout=timeout, context=ssl_context()
-        )
+        response = opener.open(request, timeout=timeout)
     except urllib.error.HTTPError as e:
         raise _refused(e, name) from e
     except (urllib.error.URLError, socket.timeout, ConnectionError, OSError) as e:
@@ -78,14 +94,21 @@ def fetch_release_bundle(
             f"Could not reach the server: {reason}", retryable=problem is None
         ) from e
     written = 0
-    with response, dest.open("wb") as out:
-        length = response.headers.get("Content-Length")
-        total = int(length) if length and length.isdigit() else None
-        while chunk := response.read(_CHUNK):
-            out.write(chunk)
-            written += len(chunk)
-            if progress:
-                progress(written, total)
+    length = response.headers.get("Content-Length")
+    total = int(length) if length and length.isdigit() else None
+    try:
+        with response, dest.open("wb") as out:
+            while chunk := response.read(_CHUNK):
+                out.write(chunk)
+                written += len(chunk)
+                if progress:
+                    progress(written, total)
+    except (http.client.HTTPException, socket.timeout, ConnectionError, OSError) as e:
+        raise SyncError(f"The download stopped: {e}", retryable=True) from e
+    if total is not None and written != total:
+        raise SyncError(
+            f"The download stopped early ({written} of {total} bytes)", retryable=True
+        )
     return written
 
 

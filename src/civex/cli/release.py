@@ -219,7 +219,12 @@ def export(
         target = output or Path(
             ctx.release_svc.file_name_for(ctx.release_svc.get(name).name)
         )
-        release = ctx.release_svc.write_full_bundle(name, target)
+        partial = target.with_name(target.name + ".part")
+        try:
+            release = ctx.release_svc.write_full_bundle(name, partial)
+            partial.replace(target)
+        finally:
+            partial.unlink(missing_ok=True)
     except FileNotFoundError:
         _fail(Exception("The bundle is not on this computer and couldn't be fetched"))
     except CivexError as e:
