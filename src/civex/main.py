@@ -119,6 +119,42 @@ def _refuse_unless_serving() -> None:
         raise typer.Exit(1)
 
 
+def _upgrade_database() -> None:
+    """Upgrade the project's database before the server binds, saying so in
+    the terminal as it goes: on a large project this takes minutes, and a
+    server started first would have no page to show for it. Quiet when there
+    is nothing to upgrade; a project or database that cannot be read is left
+    for the server to report."""
+    from civex.cli.utils import stderr_migration_progress
+    from civex.config import PartitionLayout, load_config
+    from civex.context import _get_engine
+    from civex.db.migrate import ensure_schema_current
+    from civex.domain.exceptions import ConfigError, DatabaseTooNewError
+    from sqlalchemy.exc import OperationalError
+
+    try:
+        db = load_config().db
+        engine = _get_engine(db.url)
+        ensure_schema_current(
+            engine, PartitionLayout.for_config(db), progress=stderr_migration_progress()
+        )
+    except (ConfigError, DatabaseTooNewError):
+        return
+    except OperationalError as exc:
+        import structlog
+
+        structlog.get_logger("civex.serve").warning(
+            "startup_migration_skipped", error=str(exc)
+        )
+    except Exception as exc:
+        typer.secho(
+            f"Upgrading this project's database failed: {exc}",
+            err=True,
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
+
+
 def _refuse_newer_database() -> None:
     """Stop `civex serve` before it starts when the project's database is from
     a newer civex, instead of serving a UI where every request fails. Quiet
@@ -241,7 +277,10 @@ def serve(
             typer.echo(f"Civex is already running at {url}; opening it.")
             open_url(url)
             raise typer.Exit(0)
+        _upgrade_database()
         open_when_ready(url)
+    else:
+        _upgrade_database()
 
     typer.echo(f"Starting civex server at http://{host}:{port}")
     typer.echo(f"API docs: http://{host}:{port}/docs")

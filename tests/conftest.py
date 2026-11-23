@@ -213,13 +213,13 @@ def _migrate_from_a_template(
             _template["db"] = sqlite3.connect(path, check_same_thread=False)
         return _template["db"]
 
-    def from_template(connection: Connection, layout=None) -> None:
+    def from_template(connection: Connection, layout=None, progress=None) -> None:
         if connection.dialect.name != "sqlite":
-            return migrate_for_real(connection, layout)
+            return migrate_for_real(connection, layout, progress)
         empty = not inspect(connection).get_table_names()
         connection.rollback()
         if not empty:
-            return migrate_for_real(connection, layout)
+            return migrate_for_real(connection, layout, progress)
         template().backup(connection.connection.dbapi_connection)
         # The one thing a migration makes at random: every project its own id.
         connection.exec_driver_sql(

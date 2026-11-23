@@ -378,6 +378,69 @@ def _error_page(detail: str) -> str:
     )
 
 
+def _upgrade_page(step: int, total: int, description: str, elapsed: float) -> str:
+    """The page shown while a project's database is upgraded (can take many
+    minutes on a large one). The clock runs in the page, so it keeps ticking
+    between steps."""
+    if step == 0:
+        headline = html.escape(description)
+    else:
+        headline = (
+            "Upgrading this project for the new version of civex "
+            f"&mdash; step {step} of {total}: {html.escape(description)}"
+        )
+    return (
+        "<body style='font-family:sans-serif;background:#f6f8fa;color:#24292f;"
+        "height:100vh;margin:0;display:flex;align-items:center;"
+        "justify-content:center'><div style='max-width:34rem;padding:2rem'>"
+        f"<h2 style='margin-top:0'>{headline}</h2>"
+        "<p>Large projects can take several minutes. Please keep civex open.</p>"
+        "<p style='font-size:20px'>Elapsed: <span id=t></span></p>"
+        "<p style='color:#57606a;font-size:13px'>This is safe: nothing is lost "
+        "if it takes a while, and your data is not changed until each step "
+        "completes.</p>"
+        f"<script>var s=Date.now()-{int(elapsed * 1000)};function f(){{"
+        "var n=Math.floor((Date.now()-s)/1000);"
+        "document.getElementById('t').textContent="
+        "Math.floor(n/60)+':'+String(n%60).padStart(2,'0')}"
+        "f();setInterval(f,1000)</script></div></body>"
+    )
+
+
+def _upgrade_before_serving(window, path: Path) -> str | None:
+    """Upgrade the project's database, if it needs it, with a progress page in
+    `window`. Returns the error text when the upgrade failed, else None. Done
+    here, before the server starts, so `_wait_for_server`'s 30 s allowance is
+    not spent on it; the server's own startup upgrade is then a no-op."""
+    try:
+        from civex.config import PartitionLayout, load_config
+        from civex.context import _get_engine
+        from civex.db.migrate import ensure_schema_current, pending_migrations
+
+        db = load_config().db
+        engine = _get_engine(db.url)
+        if not pending_migrations(engine):
+            return None
+    except Exception:
+        # No project, or a database that is down: the server reports that.
+        _log.debug("Checking for pending migrations failed", exc_info=True)
+        return None
+
+    started = time.monotonic()
+
+    def progress(step: int, total: int, description: str) -> None:
+        window.load_html(
+            _upgrade_page(step, total, description, time.monotonic() - started)
+        )
+
+    try:
+        ensure_schema_current(engine, PartitionLayout.for_config(db), progress=progress)
+    except Exception as exc:
+        _log.exception("Upgrading the project database failed")
+        return str(exc) or type(exc).__name__
+    return None
+
+
 def _launch_project(path: Path) -> dict:
     """Start the server for path and navigate the window to it (stopping the
     one for the project open now, if any)."""
@@ -392,6 +455,10 @@ def _launch_project(path: Path) -> dict:
             os.chdir(path)
             port = _free_port()
             url = f"http://127.0.0.1:{port}"
+            failure = _upgrade_before_serving(_window, path)
+            if failure is not None:
+                _window.load_html(_error_page(failure))
+                return
             errors: list[str] = []
             thread = _server.start(port, errors)
             if _wait_for_server(url, running=thread):

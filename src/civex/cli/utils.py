@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import sys
+import time
+from typing import TYPE_CHECKING, Callable
 
 import typer
 
@@ -114,13 +116,34 @@ def cli_load_config() -> Config:
     return config
 
 
+def stderr_migration_progress() -> Callable[[int, int, str], None]:
+    """A `civex.db.migrate` progress callback printing one line a step to
+    stderr (so it never mixes into a command's output), with elapsed time."""
+    started = time.monotonic()
+
+    def report(step: int, total: int, description: str) -> None:
+        elapsed = int(time.monotonic() - started)
+        if step == 0:
+            line = description
+        else:
+            line = (
+                f"Upgrading this project's database (step {step} of {total}): "
+                f"{description} [{elapsed // 60}:{elapsed % 60:02d}]"
+            )
+        print(line, file=sys.stderr, flush=True)
+
+    return report
+
+
 def get_ctx() -> AppContext:
     from civex.context import build_local_context
+    from civex.db.migrate import reporting_progress
     from civex.domain.exceptions import DatabaseTooNewError
 
     config = cli_load_config()
     try:
-        return build_local_context(config)
+        with reporting_progress(stderr_migration_progress()):
+            return build_local_context(config)
     except DatabaseTooNewError as e:
         print_database_too_new(e)
         raise typer.Exit(1)

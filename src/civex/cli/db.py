@@ -427,8 +427,12 @@ def migrate() -> None:
     try:
         from civex.config import PartitionLayout
 
+        from civex.cli.utils import stderr_migration_progress
+
         db_service.apply_migrations(
-            config.db.url, PartitionLayout.for_config(config.db)
+            config.db.url,
+            PartitionLayout.for_config(config.db),
+            progress=stderr_migration_progress(),
         )
     except DatabaseTooNewError as exc:
         console.print("[error]FAILED[/error]")
