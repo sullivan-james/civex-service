@@ -153,7 +153,7 @@ from the next tag forward.
   empty authority that was stopped part way (restart, dropped connection) left its
   remaining changes marked `seeding`, sent by nothing, with `pending: 0` and no error.
   Any sync (background, `Sync now`, `civex sync`) now finishes it first, whatever the
-  cursor, sending only what the first upload set aside (it resends from the start, as
+  cursor, sending the whole project again except what other devices made (it resends from the start, as
   the authority answers what it already holds); projects stranded this way heal on
   upgrade. A failure while connecting is now recorded in `last_error`.
 - **Sending files could never start on a large project.** The pass's time budget

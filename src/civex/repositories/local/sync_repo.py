@@ -1614,6 +1614,20 @@ class LocalSyncRepository:
         )
         return {(t, str(i)) for t, i in rows}
 
+    def foreign_entities(self, device_id: uuid.UUID) -> set[tuple[str, str]]:
+        """The things another device made that came here from the authority
+        (kind, id): a resumed first upload leaves them to it."""
+        rows = (
+            self._s.query(AuditLog.entity_type, AuditLog.entity_id)
+            .filter(
+                AuditLog.hub_seq.is_not(None),
+                AuditLog.device_id.is_not(None),
+                AuditLog.device_id != device_id,
+            )
+            .distinct()
+        )
+        return {(t, str(i)) for t, i in rows}
+
     def dirty_entities(self) -> set[tuple[str, uuid.UUID]]:
         """Things with a change here still waiting to be sent: what a pull must
         not overwrite."""

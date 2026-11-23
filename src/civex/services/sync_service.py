@@ -881,15 +881,20 @@ class SyncService:
                 if mode == "joined":
                     self._join(transport, hello, progress)
                 elif mode == "seeded":
-                    # After a pull, only what the first upload set aside: not
-                    # what other devices made.
-                    after_pull = (
-                        {"only": self._repo.seeding_entities()}
-                        if self._repo.meta().cursor != 0 and self._repo.count_seeding()
-                        else {}
+                    # After a pull, not what other devices made.
+                    skip = (
+                        self._repo.foreign_entities(
+                            user_state.device_id_for(meta.project_id)
+                        )
+                        if self._repo.meta().cursor != 0
+                        else None
                     )
+                    extra: dict[str, Any] = {"skip": skip} if skip else {}
                     self._seed(
-                        transport, progress, hello.protocol_version, **after_pull
+                        transport,
+                        progress,
+                        hello.protocol_version,
+                        **extra,
                     )
                 else:
                     self._repo.set_cursor(
@@ -1139,15 +1144,19 @@ class SyncService:
             log.info(
                 "sync with %s: finishing the first upload", self._config.sync.remote
             )
-            # Only what the first upload set aside goes again, and the cursor
-            # stays: the pull below brings in whatever others did. (Whichever
-            # device id began it: the ids sent come from the project's, so the
-            # authority answers what it already holds.)
+            # The whole project goes again, as a first upload does (what the
+            # authority already holds it answers from its record, whichever
+            # device id began it), except what other devices made and the
+            # authority sent here. The cursor stays: the pull below brings in
+            # whatever others did.
             self._seed(
                 transport,
                 progress,
                 hello.protocol_version,
-                only=self._repo.seeding_entities(),
+                advance=False,
+                skip=self._repo.foreign_entities(
+                    user_state.device_id_for(meta.project_id)
+                ),
             )
             meta = self._repo.meta()
         if meta.cursor < hello.feed_floor:
@@ -2376,7 +2385,8 @@ class SyncService:
         transport: SyncTransport,
         progress: ProgressFn | None = None,
         protocol: int = PROTOCOL_MAX,
-        only: set[tuple[str, str]] | None = None,
+        skip: set[tuple[str, str]] | None = None,
+        advance: bool = True,
     ) -> None:
         """Give an empty authority everything this project holds. Each thing is
         sent as a create with an id made from the project and the thing, so an
@@ -2398,7 +2408,7 @@ class SyncService:
         head = 0
         report = SyncReport()
         batch: list[SyncEntry] = []
-        total = (len(only) if only is not None else self._repo.entity_count()) or None
+        total = self._repo.entity_count() or None
         sent = 0
 
         def flush() -> None:
@@ -2427,8 +2437,8 @@ class SyncService:
         # Analytics page to take, say).
         for kind in kinds_for(protocol):
             for snap in self._seed_snapshots(kind):
-                if only is not None and (kind, str(snap["id"])) not in only:
-                    continue  # a resumed upload: only what it set aside
+                if skip and (kind, str(snap["id"])) in skip:
+                    continue  # a resumed upload leaves other devices' things
                 now = datetime.now(timezone.utc)
                 batch.append(
                     SyncEntry(
@@ -2455,9 +2465,9 @@ class SyncService:
                 report.rejected,
             )
         self._repo.finish_seed()
-        # Only a first seed moves the cursor to the head: a resumed one may
+        # Only a first seed (connect) moves the cursor to the head: a resumed one may
         # follow a pull, and other devices may have written since.
-        if only is None and self._repo.meta().cursor == 0:
+        if advance and self._repo.meta().cursor == 0 and not skip:
             self._repo.set_cursor(head)
         self._commit()
 

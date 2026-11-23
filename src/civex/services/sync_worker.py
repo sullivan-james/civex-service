@@ -227,9 +227,8 @@ class SyncWorker:
         # began, from where that pass got to.
         run = self._send_run or _SendRun()
         if self._send_run is None:
-            run.everything = (
-                everything or now - self._last_file_check >= FILE_CHECK_EVERY
-            )
+            run.everything = now - self._last_file_check >= FILE_CHECK_EVERY
+        run.everything = run.everything or everything  # asked for: never dropped
         everything = run.everything
         sending = False
 
