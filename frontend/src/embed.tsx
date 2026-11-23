@@ -65,13 +65,23 @@ function Bridge({
 }) {
   const navigate = useNavigate()
   const location = useLocation()
+  const path = location.pathname + location.search
+  const pathRef = useRef(path)
   useEffect(() => {
-    navigateRef.current = (path) => void navigate(path)
+    pathRef.current = path
+  }, [path])
+  useEffect(() => {
+    // The host mirrors its own address into civex: do nothing when already
+    // there, and replace (never push) so history gains no duplicates and
+    // Forward entries survive.
+    navigateRef.current = (target) => {
+      if (target === pathRef.current) return
+      void navigate(target, { replace: true })
+    }
     return () => {
       navigateRef.current = null
     }
   }, [navigate, navigateRef])
-  const path = location.pathname + location.search
   useEffect(() => {
     announceNavigation(path)
     onNavigate?.(path)

@@ -20,4 +20,13 @@ describe('scopeCss', () => {
     expect(scoped).toBe('.a{color:red}')
     expect(properties).toContain('@property --tw-shadow')
   })
+
+  it('registers only --tw-* properties on the page', () => {
+    const { scoped, properties } = scopeCss(
+      '@property --tw-x{syntax:"*";inherits:false}@property --brand{syntax:"<color>";inherits:true;initial-value:red}',
+    )
+    expect(properties).toContain('--tw-x')
+    expect(properties).not.toContain('--brand')
+    expect(scoped).toContain('@property --brand')
+  })
 })
