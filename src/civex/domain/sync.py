@@ -56,6 +56,7 @@ PACK_MAX_FILES = 1000
 PACK_MAX_BYTES = 256 * 1024 * 1024
 FILE_PART_BYTES = 16 * 1024 * 1024
 FILE_PART_MIN = 1024 * 1024
+FILE_PART_MAX = 64 * 1024 * 1024
 MAX_FILE_PARTS = 10_000
 # A device may ask to join without an invite: it shows a short code, a person
 # approves it on the authority (`POST /device-login`, polled at

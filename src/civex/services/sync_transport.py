@@ -28,7 +28,9 @@ from civex.domain.sync import (
     DIRECT_FILES,
     FILE_PACKS,
     FILE_PART_BYTES,
+    FILE_PART_MAX,
     FILE_PARTS,
+    MAX_FILE_PARTS,
     DeviceCredentials,
     FeedPage,
     Hello,
@@ -169,8 +171,10 @@ class HttpSyncTransport:
         return list(body["missing"])
 
     def accepts_packs(self) -> bool:
-        """Whether the authority takes many small files in one request."""
-        return self._offers(FILE_PACKS)
+        """Whether small files go to the authority many to a request. Not when
+        its files go straight to a bucket (`direct_files`): a pack streams the
+        bytes through the authority, and direct is what keeps them off it."""
+        return self._offers(FILE_PACKS) and not self._offers(DIRECT_FILES)
 
     def upload_pack(
         self, items: list[tuple[str, UploadSource, int]]
@@ -233,6 +237,10 @@ class HttpSyncTransport:
                 return False
             raise
         part_size = int(begun["part_size"])
+        if not 0 < part_size <= max(FILE_PART_MAX, -(-size // MAX_FILE_PARTS)):
+            raise SyncError(
+                f"The server asked for parts of {part_size} bytes", retryable=False
+            )
         held = set(begun.get("received", []))
 
         def put(number: int, data: bytes) -> None:
@@ -546,7 +554,7 @@ class _PackBody:
             while left:
                 chunk = source.read(min(left, _CHUNK))
                 if not chunk:
-                    raise ValueError("a file being sent was cut short")
+                    raise SyncError("A file being sent was cut short", retryable=True)
                 left -= len(chunk)
                 yield chunk
 
@@ -603,7 +611,7 @@ def _in_parts(
             data = source.read(length)
             if len(data) != length:
                 slots.release()
-                raise ValueError("a file being sent was cut short")
+                raise SyncError("A file being sent was cut short", retryable=True)
             flying.add(pool.submit(send, number, data))
             del data
             flying -= {f for f in flying if f.done()}

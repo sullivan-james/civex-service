@@ -47,6 +47,7 @@ from civex.domain.library import MAX_BUNDLE, MAX_BYTES, LibraryItemDTO
 from civex.domain.sync import (
     DIRECT_FILES,
     FILE_PART_BYTES,
+    FILE_PART_MAX,
     FILE_PART_MIN,
     FILE_PARTS,
     MAX_FILE_PARTS,
@@ -761,7 +762,11 @@ async def upload_pack(request: Request, call: Peer = Depends(peer)):
     pack = _PackStream(request.stream(), settle)
     results: list[SyncPackedFile] = []
     with files.batched():
-        await _store_pack(pack, call, results, stored)
+        try:
+            await _store_pack(pack, call, results, stored)
+        except VolumeUnavailableError as e:
+            settle(force=True)  # what was stored stays; the sender backs off
+            raise HTTPException(507, detail=str(e))
         settle(force=True)
     return SyncPackResponse(results=results)
 
@@ -786,8 +791,8 @@ async def _store_pack(
                 stored[0] += 1
                 if ref.sha256 != sha:
                     error = "The content does not match that hash"
-            except VolumeUnavailableError as e:
-                error = str(e)
+            except VolumeUnavailableError:
+                raise  # the drive, not the file: the whole pack is refused
         await pack.skip()  # whatever a refused file left unread
         results.append(SyncPackedFile(sha256=sha, stored=error is None, error=error))
 
@@ -805,6 +810,7 @@ def begin_parts(sha256: str, body: SyncPartsRequest, call: Peer = Depends(peer))
     _parts_ready(call)
     part_size = max(body.part_size or FILE_PART_BYTES, FILE_PART_MIN)
     part_size = max(part_size, -(-body.size // MAX_FILE_PARTS))
+    part_size = min(part_size, max(FILE_PART_MAX, -(-body.size // MAX_FILE_PARTS)))
     try:
         size, received = call.ctx.file_svc.begin_parts(sha256, body.size, part_size)
     except VolumeUnavailableError as e:

@@ -93,9 +93,12 @@ def test_files_go_between_a_device_and_the_bucket(project, server, bucket, monke
     key = f"projects/study/{small.sha256[:2]}/{small.sha256[2:]}"
     assert bucket.objects[("lab", key)][0] == b"a small scan"
     assert authority.file_svc.exists(small.sha256)
-    # A small file goes in a pack, streamed through the authority, whichever
-    # way its store is set; only big files (below) go straight to the bucket.
-    assert "upload_file" in bucket.calls
+    if direct:
+        # The authority only presigned and recorded: not one byte through it
+        # (no pack either: a pack would stream the bytes through the authority).
+        assert "put_object" not in bucket.calls and "upload_file" not in bucket.calls
+    else:
+        assert "upload_file" in bucket.calls  # streamed to it, then put by it
 
     big = bytes(range(256)) * 12 + b"!"  # 3073 bytes: four parts of 1024
     laptop.schema_svc.add_field("encounter", "raw", "file")

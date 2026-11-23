@@ -15,6 +15,7 @@ import pytest
 
 from civex.config import load_config, save_config
 from civex.domain import sync as sync_domain
+from civex.domain.dtos import FileRef
 from civex.domain.exceptions import VolumeUnavailableError
 from civex.services import sync_service, sync_transport
 from civex.services.file_service import FileService
@@ -115,8 +116,8 @@ def test_a_pack_that_partly_fails_keeps_what_arrived(project, server, monkeypatc
     async def store(self, chunks, filename, size_hint=None, collection_id=None):
         if filename == bad:
             async for _ in chunks:
-                pass  # the drive failed after the bytes came
-            raise VolumeUnavailableError("the drive is full")
+                pass
+            return FileRef(sha256="0" * 64, filename="x", size=1)  # not its hash
         return await real(self, chunks, filename, size_hint, collection_id)
 
     monkeypatch.setattr(FileService, "store_stream", store)
@@ -129,6 +130,20 @@ def test_a_pack_that_partly_fails_keeps_what_arrived(project, server, monkeypatc
     assert all(authority.file_svc.exists(s) for s in shas if s != bad)
     # Only the refused one is still to send.
     assert laptop.sync_svc.status().files_to_send == 1
+
+
+def test_a_full_drive_refuses_the_pack_and_the_sender_backs_off(
+    project, server, monkeypatch
+):
+    laptop, shas = _laptop(project, server, [2000 + i for i in range(5)])
+
+    async def full(self, chunks, filename, size_hint=None, collection_id=None):
+        raise VolumeUnavailableError("the drive is full")
+
+    monkeypatch.setattr(FileService, "store_stream", full)
+    with pytest.raises(sync_domain.SyncError) as e:
+        laptop.sync_svc.send_files()
+    assert e.value.retryable and e.value.status == 507
 
 
 def test_a_file_whose_bytes_do_not_match_is_refused_alone(project, server):

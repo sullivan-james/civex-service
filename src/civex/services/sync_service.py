@@ -1966,10 +1966,17 @@ class SyncService:
             except VolumeUnavailableError as e:
                 unreadable.append((sha, str(e)))
                 return
-            except FileNotFoundError:
+            except (FileNotFoundError, OSError):
+                # (Too many files open at once is an OSError too: that one
+                # waits for the next pass, as a file that can't be read does.)
                 unreadable.append((sha, "its copy here couldn't be read"))
                 return
             if packing:
+                if f.seek(0, 2) != size:  # shorter or longer than recorded
+                    f.close()
+                    unreadable.append((sha, "its copy here is not the size recorded"))
+                    return
+                f.seek(0)
                 pack.append((sha, f, size))
                 pack_bytes += size
                 if pack_bytes >= PACK_BYTES or len(pack) >= PACK_FILES:
