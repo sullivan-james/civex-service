@@ -63,6 +63,20 @@ from the next tag forward.
   `Project.push_accepted` host callback, called once after a device's push is
   committed. See `docs/guides/hosting.md`.
 
+- **Sync respects what a device's person may read (C3b, sync protocol 5).** The
+  authority sends a device only the collections its person may read: the feed, the
+  copy a joining device reads, the counts and the files. A record moved out of
+  sight reaches the device as its removal, one moved into sight as its creation, in
+  full. Pushes into, or pointing at, a collection the device may not read are
+  refused (not taken). When access is widened the device catches up by itself
+  (`hello.readable`, `snapshot?dataset=`, `sync_meta.readable`, a migration);
+  when it is narrowed the authority stops sending, and what the device already
+  holds cannot be taken back. The feed reports `through`, so an unseen run of
+  changes does not hold a device in place, and one request looks at no more than a
+  bounded number of entries. A device whose person may not read everything must be on
+  protocol 5 (older ones are told to update); a record moved while its collection was
+  out of sight is read when the collection is given. See `docs/guides/sync.md` and
+  `docs/guides/hosting.md`.
 - **`civex files missing`** lists files records cite that this project never
   stored and nothing can supply (no copy here, none on the server), by
   collection and field. `--ignore <hash|all>` stops the warnings (the records keep

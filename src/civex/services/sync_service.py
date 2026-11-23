@@ -1089,6 +1089,7 @@ class SyncService:
         )
         if meta.cursor < hello.feed_floor:
             self._copy_again(transport, hello, report)
+        self._catch_up_readable(transport, hello)
         report.pulled += self._pull(transport)
         report.pushed += self._push(transport, report)
         report.retried = self._resend_permission_refusals()
@@ -1177,6 +1178,21 @@ class SyncService:
                             if entry.entity_type == "record":
                                 touched.append(entry.entity_id)
                         cursor = entry.hub_seq
+                    # The server may have looked past changes it did not send
+                    # (ones this device may not see): the cursor goes where it
+                    # got to, or they would be read again at every sync.
+                    if page.through is not None and page.through > cursor:
+                        cursor = page.through
+                    # A collection that came in the feed is one this device
+                    # holds: it is not read again when the next hello lists it.
+                    born = {
+                        str(e.entity_id)
+                        for e in page.entries
+                        if e.entity_type == "dataset" and e.action == "create"
+                    }
+                    known = self._repo.readable() if born else None
+                    if known is not None:
+                        self._repo.set_readable(known | born)
                     self._repo.set_cursor(cursor)
                     # What this page settled may have freed a held change (a
                     # parent's move held while a child's change was unsent,
@@ -1726,6 +1742,9 @@ class SyncService:
         head = head or 0
         self._repo.set_cursor(head)
         self._repo.set_history_from(head or None)
+        self._repo.set_history_scan(None)
+        if hello.readable is not None:
+            self._repo.set_readable({c["id"] for c in hello.readable})
         self._commit()
         self._pull(transport)
 
@@ -1778,6 +1797,104 @@ class SyncService:
                 )
         return head or 0, held
 
+    def _catch_up_readable(self, transport: SyncTransport, hello: Hello) -> None:
+        """Take the collections this device has been given access to since it
+        last synced. The feed past the cursor carries only what changes from
+        now on, so what those collections already held is read as it is now,
+        and what this device held of them from before (it may have lost access
+        and been given it back) is made to match: what the authority no longer
+        has goes, except changes still waiting to be sent. What a device held of
+        a collection it *lost* access to is left as it is: nothing it holds can
+        be taken back, the authority only stops sending."""
+        if hello.readable is None:
+            return  # an authority that does not say (protocol 4): nothing to ask
+        made = {c["id"]: c["seq"] for c in hello.readable}
+        now = set(made)
+        had = self._repo.readable()
+        if had is None:
+            # First told (a device from before, or one that has just seeded):
+            # it holds the collections it has. One it was given while on an
+            # older protocol, which did not tell it, is one it does not have
+            # and is read now like any other it was given.
+            had = self._repo.existing_ids("dataset", now)
+            # (Kept before any is read, so one cut short is still to do.)
+            self._repo.set_readable(had)
+            self._commit()
+        cursor = self._repo.meta().cursor
+        for collection in sorted(now - had):
+            # One made after the cursor (the authority numbered it later than
+            # this device has read) arrives in the feed like anything new; only
+            # one that was already there is one this device was not allowed.
+            if made[collection] <= cursor:
+                self._copy_collection(
+                    transport, collection, hello.protocol_version, cursor
+                )
+                if self._repo.meta().history_from:
+                    # What this device was sent of the earlier history was
+                    # without that collection: it is read again from the start
+                    # (what is held is not stored twice).
+                    self._repo.set_history_scan(0)
+            had.add(collection)
+            self._repo.set_readable(had)
+            self._commit()
+        if now != had:
+            self._repo.set_readable(now)
+            self._commit()
+
+    def _copy_collection(
+        self, transport: SyncTransport, collection: str, protocol: int, cursor: int
+    ) -> None:
+        """One collection, its records and their notes, as the authority holds
+        them now (`snapshot` with `dataset`), and then the records that left it
+        since `cursor` for another collection this device may read: the feed
+        past the cursor will say they moved, and the device must hold them by
+        then or that, and every change after it, would be to a record it lacks."""
+        dirty = {(kind, str(i)) for kind, i in self._repo.dirty_entities()}
+        held: set[str] = set()
+        passes: list[tuple[str, int | None]] = [
+            ("dataset", None),
+            ("record", None),
+            ("note", None),
+            ("record", cursor),
+            ("note", cursor),
+        ]
+        for kind, left_after in passes:
+            if kind not in kinds_for(protocol):
+                continue
+            after: str | None = None
+            # Things under another of their kind that is on a later page wait
+            # for it across pages (as in `_copy_state`).
+            waiting: dict[str, list[dict[str, Any]]] = {}
+            while True:
+                page = transport.snapshot(
+                    kind, after, SNAPSHOT_PAGE, collection, left_after
+                )
+                above = {p for snap in page.items if (p := _sits_under(kind, snap))}
+                present = self._repo.existing_ids(kind, above)
+                for snap in page.items:
+                    if kind == "record" and left_after is None:
+                        held.add(snap["id"])
+                    if (kind, snap["id"]) not in dirty:
+                        self._join_one(kind, snap, present, waiting)
+                self._commit()
+                if not page.more:
+                    break
+                after = page.next
+            if waiting:
+                log.info(
+                    "catching up on a collection: %d %s(s) whose parent was "
+                    "removed meanwhile were left out",
+                    sum(len(v) for v in waiting.values()),
+                    kind,
+                )
+        # (What this device made while the pages were read is its own to send.)
+        dirty = {(kind, str(i)) for kind, i in self._repo.dirty_entities()}
+        gone = self._repo.record_ids_in(uuid.UUID(collection)) - held
+        for thing in sorted(gone):
+            if ("record", thing) not in dirty:
+                self._applier.apply_purge("record", uuid.UUID(thing))
+        self._commit()
+
     def _copy_again(
         self, transport: SyncTransport, hello: Hello, report: SyncReport
     ) -> None:
@@ -1805,6 +1922,8 @@ class SyncService:
                     self._applier.apply_purge(kind, uuid.UUID(thing))
             self._commit()
         self._repo.set_cursor(head)
+        if hello.readable is not None:
+            self._repo.set_readable({c["id"] for c in hello.readable})
         self._commit()
 
     def fetch_history(
@@ -1821,7 +1940,10 @@ class SyncService:
             return True
         with sync_lock(self._config.civex_dir):
             transport = self._transport()
-            after = self._repo.history_fetched_upto(upto)
+            # Where it got to, which a device that may not read everything can
+            # have taken past the last entry it holds (a hidden run).
+            scan = self._repo.history_scan()
+            after = scan if scan is not None else self._repo.history_fetched_upto(upto)
             read = 0
             while after < upto and (pages is None or read < pages):
                 page = transport.feed(after, FEED_PAGE)
@@ -1832,14 +1954,22 @@ class SyncService:
                     if not self._repo.has_entry(entry.id):
                         self._repo.insert_entry(entry, hub_seq=entry.hub_seq)
                     after = entry.hub_seq
+                # (A device that may not read everything is told how far the
+                # authority looked: past entries it was not sent too.)
+                if page.through is not None and page.through > after:
+                    after = min(page.through, upto)
+                self._repo.set_history_scan(after)
                 self._commit()
                 if progress:
                     progress(SyncProgress(HISTORY, min(after, upto), upto))
                 last = page.entries[-1].hub_seq if page.entries else None
+                if page.through is not None and page.more and after < upto:
+                    continue  # more to look through, nothing to conclude yet
                 if not page.more or last is None or last > upto:
                     after = upto  # nothing more up to it (some may be pruned)
             if after >= upto:
                 self._repo.set_history_from(None)
+                self._repo.set_history_scan(None)
                 self._commit()
                 return True
             return False

@@ -105,6 +105,13 @@ def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
 
+def _uuid_or_none(value: Any) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(str(value)) if value else None
+    except ValueError:
+        return None
+
+
 def _parse(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -186,6 +193,21 @@ class LocalSyncRepository:
 
     def set_history_from(self, seq: int | None) -> None:
         self._meta_row().history_from = seq
+        self._s.flush()
+
+    def placed_from(self) -> int:
+        """The feed number up to which entries were stored before they carried
+        where the authority really had the record (see `SyncMeta.placed_from`)."""
+        return int(self._meta_row().placed_from or 0)
+
+    def history_scan(self) -> int | None:
+        """Where fetching the earlier history carries on from, when it has
+        looked past what it holds (None: from the last entry held)."""
+        found = self._meta_row().history_scan
+        return None if found is None else int(found)
+
+    def set_history_scan(self, seq: int | None) -> None:
+        self._meta_row().history_scan = seq
         self._s.flush()
 
     def history_fetched_upto(self, upto: int) -> int:
@@ -605,6 +627,124 @@ class LocalSyncRepository:
     def set_project_id(self, project_id: uuid.UUID) -> None:
         self._meta_row().project_id = project_id
         self._s.flush()
+
+    def dataset_created_seqs(self, ids: set[str]) -> dict[str, int]:
+        """The feed number each of these collections' creation was given (those
+        never numbered, seeded as they were, are left out). Looked up by the
+        collections' own ids, which history is indexed by, never by scanning
+        its kinds and actions."""
+        found: dict[str, int] = {}
+        wanted = sorted(ids)
+        for at in range(0, len(wanted), 500):
+            rows = (
+                self._s.query(AuditLog.entity_id, func.min(AuditLog.hub_seq))
+                .filter(
+                    AuditLog.entity_id.in_(
+                        [uuid.UUID(i) for i in wanted[at : at + 500]]
+                    ),
+                    AuditLog.entity_type == "dataset",
+                    AuditLog.action == "create",
+                    AuditLog.hub_seq.isnot(None),
+                )
+                .group_by(AuditLog.entity_id)
+            )
+            found.update({str(i): int(seq or 0) for i, seq in rows})
+        return found
+
+    def holds_anything(self) -> bool:
+        """Whether there is at least one thing of any kind here, deleted ones
+        included (one probe each, not a count)."""
+        return any(
+            self._s.query(model.id).limit(1).first() is not None
+            for model in _MODELS.values()
+        )
+
+    def collection_trails(
+        self, record_ids: set[uuid.UUID]
+    ) -> dict[uuid.UUID, list[tuple[int, uuid.UUID | None, uuid.UUID | None]]]:
+        """For each record, the numbered changes to it in order, each as `(its
+        feed number, the collection it was in before it when the change says,
+        the collection it was in after it)`, led by `(0, None, where its first
+        change found it)`: where a note
+        was judged to be at a given number. One lookup for all the records,
+        reading only the collection fields (what `entry_collections` reads of an
+        entry) and not the changes themselves."""
+        trails: dict[
+            uuid.UUID, list[tuple[int, uuid.UUID | None, uuid.UUID | None]]
+        ] = {}
+        wanted = sorted(record_ids)
+        for at in range(0, len(wanted), 500):
+            rows = (
+                self._s.query(
+                    AuditLog.entity_id,
+                    AuditLog.hub_seq,
+                    AuditLog.new_data["dataset_id"].as_string(),
+                    AuditLog.old_data["dataset_id"].as_string(),
+                    AuditLog.delta[("dataset_id", "before")].as_string(),
+                    AuditLog.delta[("dataset_id", "after")].as_string(),
+                )
+                .filter(
+                    AuditLog.entity_id.in_(wanted[at : at + 500]),
+                    AuditLog.entity_type == "record",
+                    AuditLog.hub_seq.isnot(None),
+                    AuditLog.apply_state != "superseded",
+                )
+                .order_by(AuditLog.entity_id, AuditLog.hub_seq)
+            )
+            for rid, seq, new, old, moved_from, moved_to in rows:
+                after = new or old
+                if moved_from or moved_to:
+                    after = moved_to or after
+                elif old and new:
+                    after = new
+                trail = trails.setdefault(rid, [])
+                if not trail:
+                    # Before its first numbered change a record was where that
+                    # change found it: a note made then is judged by that, not
+                    # by where the record ended up.
+                    before = (
+                        (moved_from or old) if (moved_from or (old and new)) else after
+                    )
+                    trail.append((0, None, _uuid_or_none(before)))
+                said = (moved_from or old) if (moved_from or (old and new)) else None
+                trail.append((int(seq), _uuid_or_none(said), _uuid_or_none(after)))
+        return trails
+
+    def readable(self) -> set[str] | None:
+        """The collections this device was last told it may read (None: not
+        known yet)."""
+        found = self._meta_row().readable
+        return None if found is None else {str(c) for c in found}
+
+    def set_readable(self, collections: set[str]) -> None:
+        self._meta_row().readable = sorted(collections)
+        self._s.flush()
+
+    def record_ids_in(self, dataset: uuid.UUID) -> set[str]:
+        """Every record held here in this collection, deleted ones included."""
+        return {
+            str(i)
+            for (i,) in self._s.query(Record.id).filter(Record.dataset_id == dataset)
+        }
+
+    def note_record_id(self, note_id: uuid.UUID) -> uuid.UUID | None:
+        """The record a note is on, whatever the session may see; None when
+        there is no such note."""
+        return (
+            self._s.query(RecordNote.record_id)
+            .filter(RecordNote.id == note_id)
+            .scalar()
+        )
+
+    def note_snapshots(self, record_id: uuid.UUID) -> list[dict[str, Any]]:
+        """Every note on this record (deleted ones too), as sync carries them."""
+        rows = (
+            self._s.query(RecordNote)
+            .filter(RecordNote.record_id == record_id)
+            .order_by(RecordNote.created_at, RecordNote.id)
+            .all()
+        )
+        return self._dicts("note", rows)
 
     def set_cursor(self, seq: int) -> None:
         self._meta_row().cursor = seq
@@ -1082,15 +1222,6 @@ class LocalSyncRepository:
         deleted ones included: zero is an empty project."""
         return sum(self.entity_counts().values())
 
-    def note_record_id(self, note_id: uuid.UUID) -> uuid.UUID | None:
-        """The record a note is on, whatever the session may see; None when
-        there is no such note."""
-        return (
-            self._s.query(RecordNote.record_id)
-            .filter(RecordNote.id == note_id)
-            .scalar()
-        )
-
     def entity_counts(self) -> dict[str, int]:
         """How many of each kind there are, deleted ones included."""
         return {
@@ -1106,12 +1237,64 @@ class LocalSyncRepository:
         return self._dicts(kind, [row])[0]
 
     def snapshots_page(
-        self, kind: str, after: str | None, limit: int
+        self,
+        kind: str,
+        after: str | None,
+        limit: int,
+        dataset: uuid.UUID | None = None,
+        left_after: int | None = None,
     ) -> list[dict[str, Any]]:
         """Up to `limit` things of `kind` in the order they were made, starting
-        after the `snapshot_cursor` `after` (None: from the first)."""
+        after the `snapshot_cursor` `after` (None: from the first). With
+        `dataset`, only what belongs to that collection: the collection, its
+        records and their notes (nothing of any other kind belongs to one). With
+        `left_after` as well, instead the records that left that collection
+        after that feed number (and are elsewhere now), and their notes."""
         model = _MODELS[kind]
         query = self._s.query(model)
+        if dataset is not None and left_after is not None:
+            left = self._left(dataset, left_after)
+            if kind == "record":
+                # The records that left, and what each sits under (one made
+                # since the device's cursor is not held yet, and the record
+                # cannot be written without it).
+                rec = Record.__table__
+                chain = (
+                    select(rec.c.id, rec.c.parent_record_id)
+                    .where(rec.c.id.in_(left))
+                    .cte("left_chain", recursive=True)
+                )
+                chain = chain.union(
+                    select(rec.c.id, rec.c.parent_record_id).where(
+                        rec.c.id == chain.c.parent_record_id
+                    )
+                )
+                query = query.filter(
+                    Record.id.in_(select(chain.c.id)), Record.dataset_id != dataset
+                )
+            elif kind == "note":
+                query = query.filter(
+                    RecordNote.record_id.in_(
+                        select(Record.id).where(
+                            Record.id.in_(left), Record.dataset_id != dataset
+                        )
+                    )
+                )
+            else:
+                return []
+        elif dataset is not None:
+            if kind == "dataset":
+                query = query.filter(Dataset.id == dataset)
+            elif kind == "record":
+                query = query.filter(Record.dataset_id == dataset)
+            elif kind == "note":
+                query = query.filter(
+                    RecordNote.record_id.in_(
+                        select(Record.id).where(Record.dataset_id == dataset)
+                    )
+                )
+            else:
+                return []
         if after:
             created, id_ = parse_snapshot_cursor(after)
             at, rid = _parse(created), uuid.UUID(id_)
@@ -1123,6 +1306,21 @@ class LocalSyncRepository:
             )
         rows = query.order_by(model.created_at, model.id).limit(limit).all()
         return self._dicts(kind, rows)
+
+    @staticmethod
+    def _left(dataset: uuid.UUID, after: int) -> Any:
+        """The records some numbered change after `after` took, or may have
+        taken, out of `dataset`: those whose change names it as where the
+        record was. Superset-safe: the caller keeps only what is elsewhere now."""
+        where = str(dataset)
+        return select(AuditLog.entity_id).where(
+            AuditLog.entity_type == "record",
+            AuditLog.hub_seq > after,
+            or_(
+                AuditLog.delta[("dataset_id", "before")].as_string() == where,
+                AuditLog.old_data["dataset_id"].as_string() == where,
+            ),
+        )
 
     def record_seed_order(self) -> list[str]:
         """Every record's id, each after the records it needs to exist first: the

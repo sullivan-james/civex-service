@@ -1099,6 +1099,23 @@ class SyncMeta(Base):
     feed_floor: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default="0"
     )
+    # Device: the collections (ids) the authority last said this device may
+    # read. A collection newly in the list is one this device has been given
+    # since and does not hold yet: it asks for it (`snapshot` with `dataset`).
+    # NULL until the first sync that learns it (nothing is asked for then).
+    readable: Mapped[list[str] | None] = mapped_column(_JSON, nullable=True)
+    # Authority: entries numbered up to this were stored before they were
+    # stamped with where the authority really had the record (they carry the
+    # collection a device *claimed*), so a device limited to some collections is
+    # sent one only while the record is still somewhere it may read. New
+    # databases start at 0; an upgrade sets it to the head at that moment.
+    placed_from: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0"
+    )
+    # Device: how far fetching the history from before joining has looked, which
+    # can be past the last entry stored (a device that may not read everything is
+    # not sent what it may not see). NULL when not fetching.
+    history_scan: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     # Device: the number it was copied at. Its own history starts there; what
     # came before is the authority's to show.
     history_from: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

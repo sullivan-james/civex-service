@@ -753,6 +753,7 @@ def build_context(
         unscoped=lambda: read_scope.unscoped(session),
         readable=(None if may.read_scope().unrestricted else file_svc.readable),
         sees=(None if may.read_scope().unrestricted else may.read_scope().sees),
+        scope=may.read_scope,
         # The same answer a person at a browser gets, asked of each change a
         # device pushes (the local user's refuses nothing).
         policy=may,

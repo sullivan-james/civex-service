@@ -126,8 +126,21 @@ class HttpSyncTransport:
             self._json("GET", f"/feed?after={after}&limit={limit}")
         )
 
-    def snapshot(self, kind: str, after: str | None, limit: int) -> SnapshotPage:
-        query = {"limit": limit} | ({"after": after} if after else {})
+    def snapshot(
+        self,
+        kind: str,
+        after: str | None,
+        limit: int,
+        dataset: str | None = None,
+        left_after: int | None = None,
+    ) -> SnapshotPage:
+        query: dict[str, Any] = {"limit": limit}
+        if after:
+            query["after"] = after
+        if dataset:
+            query["dataset"] = dataset
+            if left_after is not None:
+                query["left_after"] = left_after
         return SnapshotPage.from_dict(
             self._json("GET", f"/snapshot/{kind}?{urllib.parse.urlencode(query)}")
         )

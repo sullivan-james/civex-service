@@ -92,3 +92,46 @@ def test_random_changes_with_a_postgresql_authority_keep_the_rules(
 ):
     problems = scenario(project, pg_authority, seed)
     assert not problems, f"seed {seed}:\n" + "\n".join(problems[:20])
+
+
+def test_devices_with_a_narrower_read_scope_on_postgresql(project, pg_authority):
+    """Filtering the feed and the copy by collection, and catching up when a
+    device is given more, must hold where the authority is PostgreSQL (the
+    session-level limit is SQL there too)."""
+    from .test_scoped_devices import SECRET, Study, held, text_of
+
+    study = Study(project, pg_authority)
+    assert SECRET not in text_of(study.limited)
+    study.authority.record_svc.add("vault", "encounter", {"site": f"{SECRET} later"})
+    study.authority.record_svc.add("open", "encounter", {"site": "open later"})
+    study.authority.commit()
+    study.sync(study.limited, study.full)
+    assert SECRET not in text_of(study.limited)
+    assert len(held(study.limited, "record")) == 3
+    study.widen(study.open.id, study.vault.id)
+    study.sync(study.limited, study.full)
+    assert held(study.limited, "record") == held(study.full, "record")
+
+
+def test_scoped_catch_up_and_trails_on_postgresql(project, pg_authority):
+    """The JSON lookups behind a note's collection at a given number, and behind
+    the records that left a collection, run in SQL on PostgreSQL (JSONB)."""
+    from .test_scoped_devices import SECRET, Study, held
+
+    study = Study(project, pg_authority)
+    mover = study.vault_records[0]  # has a note
+    study.authority.record_svc.update(str(mover.id), {"site": f"{SECRET} in vault"})
+    study.authority.record_svc.move("open", ids=[str(mover.id)])
+    study.authority.record_svc.update(str(mover.id), {"site": "in open"})
+    study.authority.commit()
+    study.authority.authority_svc.feed(0, 1)  # numbers the authority's own changes
+    study.authority.commit()
+    repo = study.authority.sync_repo
+    trail = repo.collection_trails({mover.id})[mover.id]
+    assert trail[0][2] == study.vault.id and trail[-1][2] == study.open.id
+    left = repo.snapshots_page("record", None, 50, study.vault.id, 0)
+    assert [r["id"] for r in left] == [str(mover.id)]
+    study.widen(study.open.id, study.vault.id)
+    study.sync(study.limited, study.full)
+    assert held(study.limited, "record") == held(study.full, "record")
+    assert held(study.limited, "note") == held(study.full, "note")

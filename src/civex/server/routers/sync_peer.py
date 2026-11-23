@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+import uuid
 from collections import deque
 from dataclasses import dataclass
 from typing import Any
@@ -46,6 +47,7 @@ from civex.domain.sync import (
     DIRECT_FILES,
     PROTOCOL_MAX,
     PROTOCOL_MIN,
+    SCOPED_PROTOCOL,
     FeedPage,
     PushAccepted,
     PushResult,
@@ -102,6 +104,14 @@ class SyncHelloResponse(BaseModel):
         description="Optional features it has, by name. Adding one is not a "
         "protocol change.",
     )
+    readable: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Protocol 5: the collections the caller may read, each "
+        "`{id, seq}` (`seq`: the feed number of its creation, 0 when it has "
+        "none). One newly in it that was made before the device's cursor is one "
+        "it has been given since it last synced: it asks for it with `snapshot` "
+        "and `dataset`. Absent on an older protocol.",
+    )
 
 
 class SyncPushRequest(BaseModel):
@@ -144,6 +154,12 @@ class SyncFeedResponse(BaseModel):
     )
     head_seq: int
     more: bool = Field(description="There are more past this page.")
+    through: int | None = Field(
+        default=None,
+        description="Protocol 5: the last number looked at to make this page. "
+        "A caller who may not see some changes is sent only the others, so the "
+        "cursor moves to this, not to the last change sent.",
+    )
 
 
 class SyncSnapshotResponse(BaseModel):
@@ -315,13 +331,6 @@ def _serving(request: Request) -> int:
         # Indistinguishable from there being nothing here, so a server that
         # is not an authority reveals nothing.
         raise HTTPException(404, detail="Not found")
-    if not current_project(request).permissions.read_scope().unrestricted:
-        # The feed, the snapshots and the files are not yet limited to what a
-        # caller may read, so a caller who may not read everything gets none of
-        # it: nothing is sent that a person at a browser would not be shown.
-        raise HTTPException(
-            403, detail="Syncing needs permission to read the whole project."
-        )
     theirs = protocol_range(request.headers.get("x-civex-protocol"))
     protocol = agree(theirs) if theirs else None
     if protocol is None:
@@ -331,6 +340,22 @@ def _serving(request: Request) -> int:
             detail={
                 "message": protocol_mismatch(theirs, "the device", "this server"),
                 "protocol_min": PROTOCOL_MIN,
+                "protocol_max": PROTOCOL_MAX,
+            },
+        )
+    if protocol < SCOPED_PROTOCOL and not (
+        current_project(request).permissions.read_scope().unrestricted
+    ):
+        # An older device cannot be told where the authority looked past what
+        # it may not see (`through`), so it would read the same hidden tail at
+        # every sync, and cannot learn of a collection it is given: it must
+        # update before it syncs a project it may only partly read.
+        raise HTTPException(
+            426,
+            detail={
+                "message": "Syncing a project you can only partly read needs a "
+                "newer civex on this device: update it.",
+                "protocol_min": SCOPED_PROTOCOL,
                 "protocol_max": PROTOCOL_MAX,
             },
         )
@@ -525,15 +550,38 @@ def snapshot(
         default=None, description="The previous page's `next`; omit for the first."
     ),
     limit: int = Query(default=200, ge=1, le=500),
+    dataset: str | None = Query(
+        default=None,
+        description="Only this collection's own things (the collection, its "
+        "records, their notes): how a device catches up on a collection it "
+        "has been given access to since it last synced (protocol 5).",
+    ),
+    left_after: int | None = Query(
+        default=None,
+        ge=0,
+        description="With `dataset`, for `record` and `note`: instead of the "
+        "collection's own things, those of its records that left it after this "
+        "feed number and that the caller can read where they are now (a device "
+        "given the collection reads them, or it would never hold a record "
+        "moved out of it while it could not read it; protocol 5).",
+    ),
     call: Peer = Depends(peer),
 ):
     """One kind of thing as it is now, a page at a time, for a device joining
     the project: schema, field, dataset, view, dashboard, record (in that
-    order)."""
+    order). Only what the caller may read."""
     if kind not in kinds_for(call.protocol):
         raise HTTPException(422, detail=f"Unknown kind '{kind}'")
     try:
-        page = call.ctx.authority_svc.snapshot(kind, after, limit)
+        wanted = None
+        if dataset is not None:
+            try:
+                wanted = uuid.UUID(dataset)
+            except ValueError:
+                raise HTTPException(422, detail="Not a collection id")
+        if left_after is not None and wanted is None:
+            raise HTTPException(422, detail="`left_after` needs `dataset`")
+        page = call.ctx.authority_svc.snapshot(kind, after, limit, wanted, left_after)
         page.items = [snapshot_for(call.protocol, kind, i) or {} for i in page.items]
         return SyncSnapshotResponse(**page.to_dict())
     except ValidationError as e:

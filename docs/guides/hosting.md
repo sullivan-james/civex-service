@@ -210,11 +210,6 @@ read grants nothing; a denial that cannot be read denies the action everywhere.
 
 ### Devices and pushes
 
-**Sync and a caller who cannot read everything.** Sync is not yet limited to what a
-device may read, so every `/sync/v1` route answers 403 to a request whose
-permissions do not let it read the whole project. (A later release filters the
-feed, snapshots and files by the device's scope and replaces this refusal.)
-
 `Project.permissions` is used for a device's sync requests too: your resolver sees
 the device's request and should return the permissions of the person the device
 belongs to. A push is judged with the same object: a change in a collection the
@@ -228,3 +223,25 @@ ids of the changes taken, counts by status and by kind, and their feed numbers).
 A change a device sends again (answered as before, nothing done) is not counted.
 It replaces reading push responses in middleware; an exception in it is logged and
 never fails the push.
+
+### Devices that may not read everything (sync)
+
+For a device whose person may not read some collections, the authority (your
+app's `/sync/v1`, with the permissions your resolver gave that request) sends only
+what the person may read: the feed, a joining device's copy, `hello.counts` and the
+files used only by hidden collections. A change to a hidden collection is never
+sent; a record moved across the line is sent as its removal or its full creation.
+Releases (bundles of records from anywhere) go only to a device whose person reads
+everything. The device's own pushes are refused through the ordinary not-taken
+path when they would write into, or point at, what it may not read.
+
+- **Widening** is automatic: the next sync's `hello` lists the readable collections
+  (protocol 5), and the device reads the ones it did not have. Nothing for the host to
+  do. **Narrowing** stops delivery at once, but **data already on a device cannot
+  be clawed back**; say so wherever your product promises revocation.
+- A device whose person may not read the whole project must be on sync protocol 5 or
+  later: on an older one it is answered 426 with "update civex on this device" (it
+  could not be told how far the authority looked, nor of a collection it is given). A
+  device whose person reads everything is served on any version, as before.
+- The feed's numbers are shared by everyone, so a device can see gaps (that
+  something happened it may not see), never what.

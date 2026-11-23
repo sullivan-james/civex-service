@@ -1,5 +1,7 @@
-"""Until sync is limited to what a device may read (C3b), a caller who may not
-read the whole project gets none of it: the stack is safe at every commit."""
+"""A device whose person may not read the whole project is served on sync
+protocol 5 and up (the feed says how far it looked, the hello lists what it may
+read): an older device is told to update, with a clear message, rather than being
+served a feed it would read in full at every sync."""
 
 from __future__ import annotations
 
@@ -8,6 +10,7 @@ import pytest
 from civex.config import load_config, save_config
 from civex.domain import permissions as p
 from civex.domain.permissions import Permissions
+
 from .test_hidden_collections import (  # noqa: F401
     World,
     _client,
@@ -16,22 +19,35 @@ from .test_hidden_collections import (  # noqa: F401
 )
 
 
-def test_sync_is_refused_to_a_caller_who_cannot_read_everything(
-    world: World, monkeypatch: pytest.MonkeyPatch
-):
+@pytest.fixture()
+def serving(world: World, monkeypatch: pytest.MonkeyPatch) -> World:
     monkeypatch.chdir(world.root)
     config = load_config()
     config.sync.serve = True
     save_config(config)
-    restricted = _client(world, outsider_perms(world, p.WRITE_RECORDS))
-    whole = _client(world, Permissions.everything())
-    for method, url in (
-        ("GET", "/api/sync/v1/feed"),
-        ("GET", "/api/sync/v1/hello"),
-        ("GET", "/api/sync/v1/snapshot/record"),
-        ("POST", "/api/sync/v1/push"),
-        ("POST", "/api/sync/v1/files/missing"),
-    ):
-        r = restricted.request(method, url)
-        assert r.status_code == 403, (url, r.status_code)
-        assert whole.request(method, url).status_code != 403
+    return world
+
+
+def _get(client, url: str, protocol: str):
+    return client.get(url, headers={"x-civex-protocol": protocol})
+
+
+def test_a_restricted_device_on_protocol_4_is_told_to_update(serving: World):
+    restricted = _client(serving, outsider_perms(serving, p.WRITE_RECORDS))
+    for url in ("/api/sync/v1/feed", "/api/sync/v1/hello"):
+        r = _get(restricted, url, "4")
+        assert r.status_code == 426, url
+        assert "update" in r.json()["detail"]["message"].lower()
+        assert r.json()["detail"]["protocol_min"] == 5
+
+
+def test_a_restricted_device_on_protocol_5_is_served(serving: World):
+    restricted = _client(serving, outsider_perms(serving, p.WRITE_RECORDS))
+    r = _get(restricted, "/api/sync/v1/feed", "5")
+    assert r.status_code == 401  # past the protocol: it only lacks a token
+
+
+def test_a_device_that_may_read_everything_is_served_on_protocol_4(serving: World):
+    whole = _client(serving, Permissions.everything())
+    r = _get(whole, "/api/sync/v1/feed", "4")
+    assert r.status_code == 401

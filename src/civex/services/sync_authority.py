@@ -36,6 +36,8 @@ from civex.domain.audit_diff import (
 from civex.domain.exceptions import ValidationError
 from civex.domain.permissions import FILE_UNAVAILABLE, file_changes
 from civex.domain.merge import LIFECYCLE_KEYS, DERIVED_KEYS, merge
+from civex.domain.permissions import ReadScope
+from civex.services.sync_scope import FeedShaper
 from civex.domain.sync import (
     APPLIED,
     CAPABILITIES,
@@ -43,6 +45,7 @@ from civex.domain.sync import (
     DEFERRED,
     ENTITY_ORDER,
     MERGED,
+    SCOPED_PROTOCOL,
     PROTOCOL_MAX,
     PROTOCOL_RETIRING,
     PROTOCOL_MIN,
@@ -68,6 +71,9 @@ from civex.services.record_service import RecordService
 from civex.services.sync_applier import SyncApplier, stamp_of
 
 FEED_MAX = 500
+# The most raw entries one request to a restricted device looks at, whatever it
+# may see of them (`feed`).
+FEED_SCAN_MAX = 2000
 SNAPSHOT_MAX = 500
 PUSH_MAX = 500
 
@@ -100,6 +106,7 @@ class SyncAuthorityService:
         unscoped: Callable[[], AbstractContextManager[None]] | None = None,
         readable: Callable[[str], bool] | None = None,
         sees: Callable[[Any], bool] | None = None,
+        scope: Callable[[], ReadScope] | None = None,
     ) -> None:
         self._repo = repo
         # Whether the device may see a collection, None when it may see all.
@@ -112,6 +119,8 @@ class SyncAuthorityService:
         # work that settles a push or serves a device: those see the whole
         # project and ask `policy` about each thing, never the query layer.
         self._unscoped = unscoped or nullcontext
+        # Which collections the caller may read (everything when not given).
+        self._scope = scope or (lambda: ReadScope())
         # () -> ReleaseService: whether a pushed release is one a person could
         # have made, and that a made one's content stays as it is.
         self._releases = releases
@@ -147,15 +156,36 @@ class SyncAuthorityService:
     # Joining
     # ------------------------------------------------------------------
 
-    @_whole_project
     def hello(self, who: Principal, protocol: int) -> Hello:
-        meta = self._repo.meta()
+        scope = self._scope()
+        with self._unscoped():
+            meta = self._repo.meta()
+            head = self._head()
+            # Whether it holds anything at all is about the project, not about
+            # what this caller may see of it: a caller who sees nothing must
+            # not take an authority that holds data for an empty one. Asked of
+            # a caller who sees it all by the counts below; of any other by
+            # looking for one thing of any kind, never by counting twice.
+            holds = None if scope.unrestricted else self._repo.holds_anything()
+        # What this caller may see of it (the session is limited to that).
         counts = self._repo.entity_counts()
+        empty = (sum(counts.values()) == 0) if holds is None else not holds
+        if not scope.unrestricted:
+            counts["release"] = 0
+        readable = None
+        if protocol >= SCOPED_PROTOCOL:
+            # Which collections this caller may read, so a device can tell when
+            # it has been given one it does not hold. Their creation numbers
+            # are found by key (their own history), never by scanning it.
+            ids = self._repo.all_ids("dataset")
+            with self._unscoped():
+                made = self._repo.dataset_created_seqs(ids)
+            readable = [{"id": i, "seq": made.get(i, 0)} for i in sorted(ids)]
         return Hello(
             protocol_version=protocol,
             project_id=meta.project_id,
-            head_seq=self._head(),
-            empty=sum(counts.values()) == 0,
+            head_seq=head,
+            empty=empty,
             seeded_by=meta.seeded_by,
             device_name=who.name,
             counts=counts,
@@ -165,19 +195,44 @@ class SyncAuthorityService:
             server_version=__version__,
             capabilities=list(self._capabilities),
             protocol_retiring=PROTOCOL_RETIRING,
+            readable=readable,
         )
 
-    @_whole_project
-    def snapshot(self, kind: str, after: str | None, limit: int) -> SnapshotPage:
+    def snapshot(
+        self,
+        kind: str,
+        after: str | None,
+        limit: int,
+        dataset: uuid.UUID | None = None,
+        left_after: int | None = None,
+    ) -> SnapshotPage:
         """A page of one kind as it is now, for a device joining, continuing
         after the cursor `after` (None: the first page). `head_seq` is read
-        first: what changes while the device reads is in the feed past it."""
+        first: what changes while the device reads is in the feed past it.
+        What the caller may not read is not in it (the session is limited to
+        what they may see), whole pages of it included; `dataset` asks for one
+        collection's own things (a collection newly readable), or with
+        `left_after` those of its records that have since left it."""
         if kind not in ENTITY_ORDER:
             raise ValidationError(f"Unknown kind '{kind}'")
-        head = self._head()
+        with self._unscoped():
+            head = self._head()
         limit = max(1, min(limit, SNAPSHOT_MAX))
+        if left_after is not None:
+            # Never before what this authority still holds history of: a request
+            # to look back over all of it is not a thing a device needs.
+            left_after = max(left_after, self._repo.meta().feed_floor)
+        if dataset is not None and not self._scope().sees(dataset):
+            # A collection the caller may not read is asked about like one that
+            # is not there: an empty page, never what once lived in it.
+            return SnapshotPage(kind, [], False, head, None)
+        if kind == "release" and not self._scope().unrestricted:
+            # A release is a bundle of records from anywhere in the project.
+            return SnapshotPage(kind, [], False, head, None)
         try:
-            items = self._repo.snapshots_page(kind, after, limit + 1)
+            items = self._repo.snapshots_page(
+                kind, after, limit + 1, dataset, left_after
+            )
         except ValueError as e:
             raise ValidationError(f"Not a page cursor: {after!r}") from e
         page = items[:limit]
@@ -199,8 +254,46 @@ class SyncAuthorityService:
     @_whole_project
     def feed(self, after: int, limit: int = 200) -> FeedPage:
         head = self._head()
-        entries, more = self._repo.entries_after(after, max(1, min(limit, FEED_MAX)))
-        return FeedPage(entries, head, more)
+        limit = max(1, min(limit, FEED_MAX))
+        scope = self._scope()
+        if scope.unrestricted:
+            entries, more = self._repo.entries_after(after, limit)
+            return FeedPage(entries, head, more)
+        shaper = FeedShaper(
+            scope,
+            self._records.records_repo.dataset_of,
+            lambda record: self._repo.snapshot("record", record),
+            self._repo.note_snapshots,
+            self._repo.collection_trails,
+            self._repo.placed_from(),
+        )
+        # What the device may not see is looked past, but only so far in one
+        # request: a long hidden run is answered with an empty page that says
+        # how far was looked (`through`, `more`), and the device asks again
+        # from there, so no request scans without end.
+        through = after
+        scanned = 0
+        while scanned < FEED_SCAN_MAX:
+            # Always in whole batches, whatever the page asked for: a small
+            # `limit` must not turn one request into thousands of lookups.
+            raw, more = self._repo.entries_after(through, FEED_MAX)
+            if raw:
+                through = raw[-1].hub_seq or through
+            scanned += len(raw)
+            kept: list[SyncEntry] = []
+            for i, group in enumerate(shaper.shape_each(raw)):
+                if (
+                    kept
+                    and len(kept) + len(group) > limit
+                    and (not raw[i].op or raw[i].op != raw[i - 1].op)
+                ):
+                    # The page asked for is full: it ends before this change (an
+                    # action is never cut), and the device asks again from there.
+                    return FeedPage(kept, head, True, raw[i - 1].hub_seq or through)
+                kept += group
+            if kept or not more:
+                return FeedPage(kept, head, more, through)
+        return FeedPage([], head, True, through)
 
     # ------------------------------------------------------------------
     # Files

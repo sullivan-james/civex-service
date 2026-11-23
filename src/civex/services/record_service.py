@@ -2026,7 +2026,8 @@ class RecordService:
         named = self._ids_to_names(data, shape)
         before_named = self._ids_to_names(before, shape) if before is not None else None
         self._validate_data(_changed_values(named, before_named), shape)
-        self._check_references(named, shape, dataset, unchanged=before_named)
+        with self.as_caller():
+            self._check_references(named, shape, dataset, unchanged=before_named)
         self._check_unique(
             shape, dataset.id, parent_id, data, exclude_id=record_id, unchanged=before
         )

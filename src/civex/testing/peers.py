@@ -201,11 +201,13 @@ class Loopback:
         self.calls.append("feed")
         return FeedPage.from_dict(self._done(self._svc().feed(after, limit).to_dict()))
 
-    def snapshot(self, kind, after, limit):
+    def snapshot(self, kind, after, limit, dataset=None, left_after=None):
         from civex.domain.sync import SnapshotPage
 
         self.calls.append("snapshot")
-        page = self._svc().snapshot(kind, after, limit)
+        page = self._svc().snapshot(
+            kind, after, limit, uuid.UUID(dataset) if dataset else None, left_after
+        )
         return SnapshotPage.from_dict(self._done(page.to_dict()))
 
     def missing_files(self, shas):
