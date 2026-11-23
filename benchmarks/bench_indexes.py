@@ -84,6 +84,7 @@ _DROP_INDEX_DDL = [
 # Seeding
 # ---------------------------------------------------------------------------
 
+
 def seed(conn, schema_id: uuid.UUID, dataset_id: uuid.UUID, n: int) -> None:
     print(f"  Seeding {n:,} records in batches of {BATCH_SIZE:,}...")
     inserted = 0
@@ -94,13 +95,15 @@ def seed(conn, schema_id: uuid.UUID, dataset_id: uuid.UUID, n: int) -> None:
                 "id": str(uuid.uuid4()),
                 "dataset_id": str(dataset_id),
                 "schema_id": str(schema_id),
-                "data": json.dumps({
-                    "subject_id": f"S{random.randint(1, 2000):04d}",
-                    "site": random.choice(SITES),
-                    "status": random.choice(STATUSES),
-                    "age": random.randint(18, 90),
-                    "score": round(random.uniform(0.0, 100.0), 2),
-                }),
+                "data": json.dumps(
+                    {
+                        "subject_id": f"S{random.randint(1, 2000):04d}",
+                        "site": random.choice(SITES),
+                        "status": random.choice(STATUSES),
+                        "age": random.randint(18, 90),
+                        "score": round(random.uniform(0.0, 100.0), 2),
+                    }
+                ),
             }
             for _ in range(batch_n)
         ]
@@ -120,6 +123,7 @@ def seed(conn, schema_id: uuid.UUID, dataset_id: uuid.UUID, n: int) -> None:
 # Query definitions (mirror the real record_repo patterns)
 # ---------------------------------------------------------------------------
 
+
 def q_gin_field_eq(conn, dataset_id: uuid.UUID, schema_id: uuid.UUID) -> int:
     """
     Exact match on a JSONB field using @> containment.
@@ -129,7 +133,7 @@ def q_gin_field_eq(conn, dataset_id: uuid.UUID, schema_id: uuid.UUID) -> int:
         text(
             "SELECT COUNT(*) FROM bm_records "
             "WHERE dataset_id = :did AND schema_id = :sid "
-            "AND data @> '{\"site\": \"SiteAlpha\"}'::jsonb"
+            'AND data @> \'{"site": "SiteAlpha"}\'::jsonb'
         ),
         {"did": str(dataset_id), "sid": str(schema_id)},
     ).scalar()
@@ -168,6 +172,7 @@ def q_btree_count(conn, dataset_id: uuid.UUID, schema_id: uuid.UUID) -> int:
 # Timing + EXPLAIN
 # ---------------------------------------------------------------------------
 
+
 def measure(conn, fn, reps: int) -> float:
     """Return the median wall time in ms."""
     times = []
@@ -180,7 +185,9 @@ def measure(conn, fn, reps: int) -> float:
 
 
 def explain(conn, sql: str, params: dict) -> list[str]:
-    rows = conn.execute(text(f"EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) {sql}"), params).fetchall()
+    rows = conn.execute(
+        text(f"EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) {sql}"), params
+    ).fetchall()
     return [r[0] for r in rows]
 
 
@@ -189,7 +196,7 @@ def print_explain(conn, dataset_id: uuid.UUID, schema_id: uuid.UUID) -> None:
         conn,
         "SELECT COUNT(*) FROM bm_records "
         "WHERE dataset_id = :did AND schema_id = :sid "
-        "AND data @> '{\"site\": \"SiteAlpha\"}'::jsonb",
+        'AND data @> \'{"site": "SiteAlpha"}\'::jsonb',
         {"did": str(dataset_id), "sid": str(schema_id)},
     )
     for line in lines[:12]:  # cap output length
@@ -202,12 +209,23 @@ def print_explain(conn, dataset_id: uuid.UUID, schema_id: uuid.UUID) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--records", type=int, default=DEFAULT_N, metavar="N",
-                        help=f"Number of records to seed (default: {DEFAULT_N:,})")
-    parser.add_argument("--url", default=PG_URL,
-                        help="PostgreSQL connection URL (default: $PG_URL or civex:civex@localhost/civex_bench)")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--records",
+        type=int,
+        default=DEFAULT_N,
+        metavar="N",
+        help=f"Number of records to seed (default: {DEFAULT_N:,})",
+    )
+    parser.add_argument(
+        "--url",
+        default=PG_URL,
+        help="PostgreSQL connection URL (default: $PG_URL or civex:civex@localhost/civex_bench)",
+    )
     args = parser.parse_args()
 
     try:
@@ -219,7 +237,9 @@ def main() -> None:
         print("Set PG_URL=postgresql://user:pass@host/db or pass --url")
         sys.exit(1)
 
-    print(f"\nPostgreSQL benchmark — {args.records:,} records, {QUERY_REPS} reps per measurement\n")
+    print(
+        f"\nPostgreSQL benchmark — {args.records:,} records, {QUERY_REPS} reps per measurement\n"
+    )
 
     schema_id = uuid.uuid4()
     dataset_id = uuid.uuid4()
@@ -227,8 +247,14 @@ def main() -> None:
     with engine.begin() as conn:
         conn.execute(text(_TEARDOWN_DDL))
         conn.execute(text(_SETUP_DDL))
-        conn.execute(text("INSERT INTO bm_schemas  VALUES (:id, 'Encounter')"), {"id": str(schema_id)})
-        conn.execute(text("INSERT INTO bm_datasets VALUES (:id, 'Study2024')"), {"id": str(dataset_id)})
+        conn.execute(
+            text("INSERT INTO bm_schemas  VALUES (:id, 'Encounter')"),
+            {"id": str(schema_id)},
+        )
+        conn.execute(
+            text("INSERT INTO bm_datasets VALUES (:id, 'Study2024')"),
+            {"id": str(dataset_id)},
+        )
 
     with engine.begin() as conn:
         seed(conn, schema_id, dataset_id, args.records)
@@ -245,16 +271,22 @@ def main() -> None:
         print("\nEXPLAIN ANALYZE — GIN field-equality query:")
         print_explain(conn, dataset_id, schema_id)
 
-        t_gin_before    = measure(conn, lambda c: q_gin_field_eq(c, dataset_id, schema_id), QUERY_REPS)
-        t_list_before   = measure(conn, lambda c: q_btree_list(c, dataset_id, schema_id),   QUERY_REPS)
-        t_count_before  = measure(conn, lambda c: q_btree_count(c, dataset_id, schema_id),  QUERY_REPS)
+        t_gin_before = measure(
+            conn, lambda c: q_gin_field_eq(c, dataset_id, schema_id), QUERY_REPS
+        )
+        t_list_before = measure(
+            conn, lambda c: q_btree_list(c, dataset_id, schema_id), QUERY_REPS
+        )
+        t_count_before = measure(
+            conn, lambda c: q_btree_count(c, dataset_id, schema_id), QUERY_REPS
+        )
 
     print(f"\n  GIN field-equality (data @> ...)    {t_gin_before:>8.1f} ms  (median)")
     print(f"  B-tree list  (WHERE + ORDER LIMIT)  {t_list_before:>8.1f} ms  (median)")
     print(f"  B-tree count (WHERE COUNT(*))        {t_count_before:>8.1f} ms  (median)")
 
     # ---- ADD indexes ----
-    print(f"\n{'─'*60}")
+    print(f"\n{'─' * 60}")
     print("Adding indexes...")
     with engine.begin() as conn:
         for ddl in _INDEX_DDL:
@@ -271,9 +303,15 @@ def main() -> None:
         print("\nEXPLAIN ANALYZE — GIN field-equality query:")
         print_explain(conn, dataset_id, schema_id)
 
-        t_gin_after    = measure(conn, lambda c: q_gin_field_eq(c, dataset_id, schema_id), QUERY_REPS)
-        t_list_after   = measure(conn, lambda c: q_btree_list(c, dataset_id, schema_id),   QUERY_REPS)
-        t_count_after  = measure(conn, lambda c: q_btree_count(c, dataset_id, schema_id),  QUERY_REPS)
+        t_gin_after = measure(
+            conn, lambda c: q_gin_field_eq(c, dataset_id, schema_id), QUERY_REPS
+        )
+        t_list_after = measure(
+            conn, lambda c: q_btree_list(c, dataset_id, schema_id), QUERY_REPS
+        )
+        t_count_after = measure(
+            conn, lambda c: q_btree_count(c, dataset_id, schema_id), QUERY_REPS
+        )
 
     print(f"\n  GIN field-equality (data @> ...)    {t_gin_after:>8.1f} ms  (median)")
     print(f"  B-tree list  (WHERE + ORDER LIMIT)  {t_list_after:>8.1f} ms  (median)")
@@ -284,19 +322,25 @@ def main() -> None:
         if after == 0:
             return "∞"
         ratio = before / after
-        return f"{ratio:.1f}x faster" if ratio >= 1 else f"{1/ratio:.1f}x slower"
+        return f"{ratio:.1f}x faster" if ratio >= 1 else f"{1 / ratio:.1f}x slower"
 
     print(f"\n{'=' * 60}")
     print("SUMMARY")
     print(f"{'=' * 60}")
     print(f"  {'Query':<40} {'Before':>8}   {'After':>8}   {'Speedup'}")
-    print(f"  {'-'*40}   {'-'*8}   {'-'*8}   {'-'*15}")
-    print(f"  {'GIN field-equality':<40} {t_gin_before:>7.1f}ms   {t_gin_after:>7.1f}ms   {speedup(t_gin_before, t_gin_after)}")
-    print(f"  {'B-tree list (ORDER BY LIMIT 50)':<40} {t_list_before:>7.1f}ms   {t_list_after:>7.1f}ms   {speedup(t_list_before, t_list_after)}")
-    print(f"  {'B-tree count':<40} {t_count_before:>7.1f}ms   {t_count_after:>7.1f}ms   {speedup(t_count_before, t_count_after)}")
+    print(f"  {'-' * 40}   {'-' * 8}   {'-' * 8}   {'-' * 15}")
+    print(
+        f"  {'GIN field-equality':<40} {t_gin_before:>7.1f}ms   {t_gin_after:>7.1f}ms   {speedup(t_gin_before, t_gin_after)}"
+    )
+    print(
+        f"  {'B-tree list (ORDER BY LIMIT 50)':<40} {t_list_before:>7.1f}ms   {t_list_after:>7.1f}ms   {speedup(t_list_before, t_list_after)}"
+    )
+    print(
+        f"  {'B-tree count':<40} {t_count_before:>7.1f}ms   {t_count_after:>7.1f}ms   {speedup(t_count_before, t_count_after)}"
+    )
 
     # ---- Cleanup ----
-    print(f"\n{'─'*60}")
+    print(f"\n{'─' * 60}")
     print("Cleaning up benchmark tables...")
     with engine.begin() as conn:
         conn.execute(text(_TEARDOWN_DDL))

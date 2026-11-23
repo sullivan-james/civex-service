@@ -21,7 +21,7 @@ import uuid
 from collections import deque
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import (
@@ -720,7 +720,7 @@ class _PackStream:
         self._left = int(size)
         return sha, int(size)
 
-    async def body(self) -> AsyncIterator[memoryview]:
+    async def body(self) -> AsyncIterator[bytes]:
         """The current file's bytes, exactly as many as its header said."""
         while self._left:
             if not await self._more():
@@ -728,7 +728,8 @@ class _PackStream:
             chunk = self._rest[: self._left]
             self._rest = self._rest[len(chunk) :]
             self._left -= len(chunk)
-            yield chunk
+            # A view, not a copy: hashing and writing take it as bytes.
+            yield cast(bytes, chunk)
 
     async def skip(self) -> None:
         """Read past what is left of the current file."""

@@ -52,6 +52,9 @@ _CHUNK = 1024 * 1024
 # held in memory while it is sent, so at most PART_THREADS x the part size is).
 PARTS_MIN_BYTES = 2 * FILE_PART_BYTES
 PART_THREADS = 4
+# Finishing a big file takes the authority a while (it reads the whole once, or
+# storage joins the parts): a longer wait than an ordinary call.
+FINISH_SECONDS = 600.0
 API = "/api/sync/v1"
 
 
@@ -244,7 +247,12 @@ class HttpSyncTransport:
             self._again_if_expired(send)
 
         _in_parts(source, size, part_size, held, put)
-        self._json("POST", f"/files/{sha256}/parts/complete", {"size": size})
+        self._json(
+            "POST",
+            f"/files/{sha256}/parts/complete",
+            {"size": size},
+            timeout=FINISH_SECONDS,
+        )
         return True
 
     def _upload_direct(self, sha256: str, source: UploadSource, size: int) -> bool:
@@ -278,6 +286,7 @@ class HttpSyncTransport:
             "POST",
             f"/files/{sha256}/complete",
             {"size": size, "upload_id": target.upload_id, "parts": parts},
+            timeout=FINISH_SECONDS,
         )
         source.seek(start)
         return True
@@ -445,30 +454,38 @@ class HttpSyncTransport:
         request.add_header("Authorization", f"Bearer {self._token()}")
         return request
 
-    def _json(self, method: str, path: str, body: Any = None) -> dict[str, Any]:
+    def _json(
+        self, method: str, path: str, body: Any = None, timeout: float | None = None
+    ) -> dict[str, Any]:
         data = json.dumps(body).encode("utf-8") if body is not None else None
 
         def call() -> dict[str, Any]:
             request = self._signed_in(method, path, data=data)
             if data is not None:
                 request.add_header("Content-Type", "application/json")
-            with self._open(request) as response:
+            with self._open(request, timeout=timeout) as response:
                 raw = response.read()
                 # 204 (a removal) has no body.
                 return json.loads(raw.decode("utf-8")) if raw else {}
 
         return self._again_if_expired(call)
 
-    def _open(self, request: urllib.request.Request, follow: bool = True):
+    def _open(
+        self,
+        request: urllib.request.Request,
+        follow: bool = True,
+        timeout: float | None = None,
+    ):
+        wait = timeout or self._timeout
         try:
             if follow:
                 return urllib.request.urlopen(
-                    request, timeout=self._timeout, context=ssl_context()
+                    request, timeout=wait, context=ssl_context()
                 )
             opener = urllib.request.build_opener(
                 _NoRedirect, urllib.request.HTTPSHandler(context=ssl_context())
             )
-            return opener.open(request, timeout=self._timeout)
+            return opener.open(request, timeout=wait)
         except urllib.error.HTTPError as e:
             if not follow and e.code in (301, 302, 303, 307, 308):
                 raise _Redirected(e.headers.get("Location") or "") from e
