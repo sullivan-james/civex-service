@@ -86,6 +86,7 @@ from civex.domain import summary
 from civex.domain.timezones import offset_changes, parse_datetime
 from civex.domain.uniqueness import key_values
 from civex.repositories.protocols import (
+    RecordPlace,
     AuditRepository,
     DatasetRepository,
     ObjectStore,
@@ -705,19 +706,69 @@ class RecordPage:
     next_cursor: str | None
 
 
+def _as_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else [value]
+
+
+def _key_mark(
+    dataset_id: uuid.UUID,
+    schema_id: uuid.UUID,
+    parent_id: uuid.UUID | None,
+    key: list[str],
+    values: list[Any],
+) -> tuple[Any, ...]:
+    """A uniqueness key's place and values, as one comparable thing. Numbers are
+    compared as numbers and the rest by what they print as: two values that
+    could be one to the database are one here (too many alike is only slower)."""
+    return (
+        dataset_id,
+        schema_id,
+        parent_id,
+        tuple(key),
+        tuple(
+            repr(float(v))
+            if isinstance(v, (int, float)) and not isinstance(v, bool)
+            else str(v)
+            for v in values
+        ),
+    )
+
+
 class IncomingCache:
     """What a run of `RecordService.check_incoming` has read: schemas (resolved
-    once each) and collections."""
+    once each) and collections, and, where `use_records` is set, the records it
+    asks about (`RecordService.prefetch_incoming`) and which uniqueness keys no
+    stored record holds."""
 
     def __init__(self, resolver: Callable[[], Callable[[uuid.UUID], Any]]) -> None:
         self._resolver = resolver
         self.shapes = resolver()
         self.datasets: dict[uuid.UUID, Any] = {}
+        # Whether records may be answered from here: not for a caller who sees
+        # only some collections (what it finds is its own view of them).
+        self.use_records = False
+        # Record id -> where it is (None: not there), for every record the
+        # run names: read at once, and kept up with what the run writes.
+        self.places: dict[uuid.UUID, RecordPlace | None] = {}
+        # Uniqueness keys (see `RecordService.unique_marks`) that no stored
+        # record held when they were read, and those the run has since made.
+        self.free: set[tuple[Any, ...]] = set()
+        self.made: set[tuple[Any, ...]] = set()
+        # Records were changed since `places` was read: to be read again.
+        self.stale = True
 
     def clear(self) -> None:
         """Forget what was read (a schema or a collection may have changed)."""
         self.shapes = self._resolver()
         self.datasets.clear()
+        self.clear_records()
+
+    def clear_records(self) -> None:
+        """Forget the records (and keys) read: something wrote some."""
+        self.places.clear()
+        self.free.clear()
+        self.made.clear()
+        self.stale = True
 
 
 class RecordService:
@@ -1698,6 +1749,7 @@ class RecordService:
         id_data: dict[str, Any],
         exclude_id: uuid.UUID | None = None,
         unchanged: dict[str, Any] | None = None,
+        cache: IncomingCache | None = None,
     ) -> None:
         """Refuse a record that would share a uniqueness key's values with
         another live record of its schema in the same place (under the same
@@ -1713,6 +1765,12 @@ class RecordService:
                 continue
             if unchanged is not None and key_values(unchanged, key) == values:
                 continue
+            if cache is not None and cache.free:
+                mark = _key_mark(
+                    dataset_id, shape.schema.id, parent_record_id, key, values
+                )
+                if mark in cache.free and mark not in cache.made:
+                    continue  # read already: nothing held has these values
             other = self._records.find_key_match(
                 dataset_id,
                 shape.schema.id,
@@ -1744,6 +1802,7 @@ class RecordService:
         shape: ResolvedSchema | None,
         dataset: DatasetDTO,
         unchanged: dict[str, Any] | None = None,
+        cache: IncomingCache | None = None,
     ) -> None:
         """Every reference/reference_list value must point at a live record in
         this collection or in a global one (see civex.domain.scopes). Values
@@ -1762,16 +1821,20 @@ class RecordService:
                 continue
             for item in value if isinstance(value, list) else [value]:
                 wanted.append((field.name, item))
-        self._check_reference_targets(wanted, dataset)
+        self._check_reference_targets(wanted, dataset, cache)
 
     def _check_reference_targets(
-        self, wanted: list[tuple[str, Any]], dataset: DatasetDTO
+        self,
+        wanted: list[tuple[str, Any]],
+        dataset: DatasetDTO,
+        cache: IncomingCache | None = None,
     ) -> None:
         """Check every (field name, record id) in `wanted` against `dataset`:
         the target must be a live record here or in a global collection. All
         the targets are fetched together, and each collection looked up once,
         however many references a record holds."""
-        for problem in self.reference_problems(wanted, dataset.id):
+        owners = cache.datasets if cache is not None else None
+        for problem in self.reference_problems(wanted, dataset.id, owners, cache):
             if problem:
                 raise ValidationError(problem)
 
@@ -1780,6 +1843,7 @@ class RecordService:
         wanted: list[tuple[str, Any]],
         dataset_id: uuid.UUID,
         owners: dict[uuid.UUID, DatasetDTO | None] | None = None,
+        cache: IncomingCache | None = None,
     ) -> list[str | None]:
         """For each (field name, record id) in `wanted`, why a record in
         collection `dataset_id` can't hold that reference, or None: the target
@@ -1796,7 +1860,13 @@ class RecordService:
             except ValueError:
                 ids.append(None)
         found = [i for i in ids if i is not None]
-        targets = {t.id: t for t in self._records.list_by_ids(found)} if found else {}
+        targets: dict[uuid.UUID, Any] = {}
+        if found:
+            # (what a run has read already is not asked for again)
+            held = cache.places if cache is not None else {}
+            targets = {i: held[i] for i in found if held.get(i) is not None}
+            asked = [i for i in found if i not in held]
+            targets.update({t.id: t for t in self._records.list_by_ids(asked)})
         owners = {} if owners is None else owners
         problems: list[str | None] = []
         for (field_name, raw), target_id in zip(wanted, ids):
@@ -1955,6 +2025,21 @@ class RecordService:
                 f"expected '{expected.name if expected else schema.parent_id}'"
             )
 
+    def _record_at(
+        self,
+        record_id: uuid.UUID,
+        cache: IncomingCache | None,
+        include_deleted: bool = False,
+    ) -> Any:
+        """A record by id, from what a run has read when it has (the record is
+        then as `get_by_id` finds it, for what is asked of it here)."""
+        if cache is not None and record_id in cache.places:
+            found = cache.places[record_id]
+            if found is not None and not include_deleted and found.deleted_at:
+                return None
+            return found
+        return self._records.get_by_id(record_id, include_deleted=include_deleted)
+
     def shape_of(self, state: dict[str, Any], cache: IncomingCache) -> Any:
         """The resolved schema a record state names (None when there is none),
         as `check_incoming` finds it."""
@@ -1974,6 +2059,113 @@ class RecordService:
         """For a run of `check_incoming` calls that change neither schemas nor
         collections: each schema and collection is read once for the run."""
         return IncomingCache(self._schema_svc.resolver)
+
+    def unique_marks(
+        self,
+        state: dict[str, Any],
+        shape: Any,
+    ) -> list[tuple[Any, ...]]:
+        """What each uniqueness key of the schema is for this record state (a
+        key with a blank value is not one): the same two records have the same
+        marks."""
+        if not shape.schema.unique_keys:
+            return []
+        try:
+            where = uuid.UUID(str(state["dataset_id"]))
+            parent = (
+                uuid.UUID(str(state["parent_record_id"]))
+                if state.get("parent_record_id")
+                else None
+            )
+        except (KeyError, ValueError):
+            return []
+        data = state.get("data") or {}
+        marks = []
+        for key in shape.schema.unique_keys:
+            values = key_values(data, key) if isinstance(data, dict) else None
+            if values is not None:
+                marks.append(_key_mark(where, shape.schema.id, parent, key, values))
+        return marks
+
+    def prefetch_incoming(
+        self, cache: IncomingCache, states: list[dict[str, Any]]
+    ) -> None:
+        """Read, for record states about to be made, what `check_incoming` will
+        ask of the records: where each record they sit under or point at is
+        (one query for all), and which of their uniqueness keys nothing stored
+        holds (one per collection and schema). Records the run writes are
+        added with `note_made`; a write by anything else is `clear_records`."""
+        cache.stale = False
+        if not cache.use_records:
+            return
+        want: set[uuid.UUID] = set()
+        keys: dict[tuple[uuid.UUID, uuid.UUID], list[tuple[Any, ...]]] = {}
+        places: dict[tuple[Any, ...], tuple[uuid.UUID | None, dict[str, Any]]] = {}
+        for state in states:
+            try:
+                schema_id = uuid.UUID(str(state["schema_id"]))
+                where = uuid.UUID(str(state["dataset_id"]))
+            except (KeyError, ValueError):
+                continue
+            shape = cache.shapes(schema_id)
+            data = state.get("data")
+            if shape is None or not isinstance(data, dict):
+                continue
+            for raw in [state.get("parent_record_id")] + [
+                item
+                for rf in shape.fields
+                if rf.field.dtype in ("reference", "reference_list")
+                for item in _as_list(data.get(str(rf.field.id)))
+            ]:
+                try:
+                    if raw:
+                        want.add(uuid.UUID(str(raw)))
+                except ValueError:
+                    pass
+            for mark in self.unique_marks(state, shape):
+                if mark in cache.free or mark in places:
+                    continue
+                key = dict(zip(mark[3], key_values(data, list(mark[3])) or []))
+                places[mark] = (mark[2], key)
+                keys.setdefault((where, schema_id), []).append(mark)
+        want -= cache.places.keys()
+        if want:
+            found = self._records.placement_of(list(want))
+            for rid in want:
+                cache.places[rid] = found.get(rid)
+        for (where, schema_id), marks in keys.items():
+            for at in range(0, len(marks), 100):
+                chunk = marks[at : at + 100]
+                if not self._records.any_key_match(
+                    where, schema_id, [places[m] for m in chunk]
+                ):
+                    cache.free.update(chunk)
+                    continue
+                for mark in chunk:  # one holds: which, is asked of each
+                    if not self._records.any_key_match(
+                        where, schema_id, [places[mark]]
+                    ):
+                        cache.free.add(mark)
+
+    def note_made(
+        self,
+        cache: IncomingCache,
+        state: dict[str, Any],
+        shape: Any,
+    ) -> None:
+        """A record state the run is about to write: it is there for what comes
+        after it (a record under it, one pointing at it, one sharing its key)."""
+        if not cache.use_records:
+            return
+        record_id = uuid.UUID(str(state["id"]))
+        cache.places[record_id] = RecordPlace(
+            record_id,
+            uuid.UUID(str(state["dataset_id"])),
+            shape.schema.id,
+            shape.schema.name,
+            None,
+        )
+        cache.made.update(self.unique_marks(state, shape))
 
     def check_incoming(
         self,
@@ -2038,7 +2230,7 @@ class RecordService:
             # person's add or restore here would be refused. (A record already
             # live under one, left by deleting a parent schema, can still be
             # edited, as it can here.)
-            above = self._records.get_by_id(parent_id, include_deleted=True)
+            above = self._record_at(parent_id, cache, include_deleted=True)
             if above is not None and above.deleted_at is not None:
                 raise ValidationError(
                     "The record it sits under was deleted on the server"
@@ -2051,7 +2243,7 @@ class RecordService:
         if head is None or head.get("deleted_at") or moved:
             # Made, brought back, or moved: only where it could be added.
             if shape.schema.parent_id:
-                parent = self._records.get_by_id(parent_id) if parent_id else None
+                parent = self._record_at(parent_id, cache) if parent_id else None
                 if parent is None:
                     raise ValidationError(
                         f"Schema '{shape.schema.name}' inherits from another "
@@ -2070,9 +2262,17 @@ class RecordService:
         before_named = self._ids_to_names(before, shape) if before is not None else None
         self._validate_data(_changed_values(named, before_named), shape)
         with self.as_caller():
-            self._check_references(named, shape, dataset, unchanged=before_named)
+            self._check_references(
+                named, shape, dataset, unchanged=before_named, cache=cache
+            )
         self._check_unique(
-            shape, dataset.id, parent_id, data, exclude_id=record_id, unchanged=before
+            shape,
+            dataset.id,
+            parent_id,
+            data,
+            exclude_id=record_id,
+            unchanged=before,
+            cache=cache,
         )
 
     def _validate_data(
@@ -4949,7 +5149,9 @@ class RecordService:
                     )
         return problems
 
-    def placed_with_parent(self, state: dict[str, Any]) -> dict[str, Any]:
+    def placed_with_parent(
+        self, state: dict[str, Any], cache: IncomingCache | None = None
+    ) -> dict[str, Any]:
         """The record state with its collection made its parent's, when the
         parent is held here in another one: a child's collection *is* its
         parent's, so a change made against a parent that has since moved
@@ -4959,8 +5161,8 @@ class RecordService:
         if not parent_id:
             return state
         try:
-            parent = self._records.get_by_id(
-                uuid.UUID(str(parent_id)), include_deleted=True
+            parent = self._record_at(
+                uuid.UUID(str(parent_id)), cache, include_deleted=True
             )
         except ValueError:
             return state

@@ -12,6 +12,10 @@ afterwards.
     PG_URL=postgresql+psycopg2://civexhub@localhost:5545/postgres \
         python benchmarks/bench_bulk_push.py --prefill 200000 --batches 8
 
+`--shape parented` makes the records parent/child shaped instead: one encounter
+in four, and three recordings under each (a uniqueness key on the label within
+its parent, and a reference to a species held in a global collection).
+
 `--profile` prints where the authority's time goes (cProfile, by cumulative).
 """
 
@@ -101,6 +105,7 @@ def main() -> None:
     ap.add_argument("--prefill", type=int, default=200_000)
     ap.add_argument("--batches", type=int, default=8)
     ap.add_argument("--mode", choices=("seed", "pending"), default="seed")
+    ap.add_argument("--shape", choices=("flat", "parented"), default="flat")
     ap.add_argument("--profile", action="store_true")
     args = ap.parse_args()
     base = os.environ["PG_URL"]
@@ -120,6 +125,21 @@ def main() -> None:
         laptop.schema_svc.add_field("encounter", "seen", "date")
         laptop.schema_svc.add_field("encounter", "ok", "boolean")
         laptop.schema_svc.add_field("encounter", "scan", "file")
+        taxa: list[str] = []
+        if args.shape == "parented":
+            laptop.schema_svc.create("species")
+            laptop.schema_svc.add_field("species", "latin", "string")
+            laptop.schema_svc.create("recording", parent="encounter")
+            laptop.schema_svc.add_field("recording", "label", "string")
+            laptop.schema_svc.add_field(
+                "recording", "taxon", "reference", restrictions={"schema": "species"}
+            )
+            laptop.schema_svc.set_unique_keys("recording", [["label"]])
+            laptop.dataset_svc.create("taxa", scope="global")
+            taxa = [
+                str(laptop.record_svc.add("taxa", "species", {"latin": f"sp{i}"}).id)
+                for i in range(10)
+            ]
         laptop.commit()
         connect(laptop)  # seeds the one record and the structure
         t = time.perf_counter()
@@ -131,8 +151,18 @@ def main() -> None:
             laptop.file_svc.store_bytes(os.urandom(2048), f"f{i}.bin").to_dict()
             for i in range(50)
         ]
+        parent: str | None = None
         for i in range(n):
-            laptop.record_svc.add(
+            if args.shape == "parented" and i % 4:
+                laptop.record_svc.add(
+                    "study",
+                    "recording",
+                    {"label": f"rec-{i}", "taxon": taxa[i % len(taxa)]},
+                    parent_record_id=parent,
+                    with_labels=False,
+                )
+                continue
+            made = laptop.record_svc.add(
                 "study",
                 "encounter",
                 {
@@ -144,7 +174,9 @@ def main() -> None:
                     "ok": bool(i % 2),
                     "scan": pool[i % len(pool)],
                 },
+                with_labels=False,
             )
+            parent = str(made.id)
         laptop.commit()
 
         counts = Counter(authority._session.get_bind())
@@ -178,7 +210,7 @@ def main() -> None:
         client = total - spent["server"]
         records = sum(1 for s, _ in results if s == "applied")
         print(
-            f"{args.mode}: {spent['calls']} pushes, {len(results)} entries, "
+            f"{args.mode} ({args.shape}): {spent['calls']} pushes, {len(results)} entries, "
             f"{records} applied\n"
             f"  authority {spent['server'] / n * 1000:6.2f} ms/record\n"
             f"  client    {client / n * 1000:6.2f} ms/record  "

@@ -1195,14 +1195,24 @@ class LocalSyncRepository:
         anything is written."""
         if not states:
             return
-        groups: dict[frozenset[str], list[dict[str, Any]]] = {}
-        for values in (record_values(state) for state in states):
-            groups.setdefault(frozenset(values), []).append(values)
+        every = [record_values(state) for state in states]
+        # A record goes in after the record it sits under (one of these, or
+        # one held): written level by level, each level in groups of rows that
+        # fill the same columns.
+        depth: dict[uuid.UUID, int] = {}
+        levels: dict[int, dict[frozenset[str], list[dict[str, Any]]]] = {}
+        for values in every:
+            above = values.get("parent_record_id")
+            level = depth[above] + 1 if above in depth else 0
+            depth[values["id"]] = level
+            levels.setdefault(level, {}).setdefault(frozenset(values), []).append(
+                values
+            )
         self._s.flush()
         conn = self._s.connection()
-        for rows in groups.values():
-            conn.execute(insert(Record), rows)
-        every = [v for rows in groups.values() for v in rows]
+        for level in sorted(levels):
+            for rows in levels[level].values():
+                conn.execute(insert(Record), rows)
         insert_record_refs(conn, [(v["id"], v.get("data")) for v in every])
         if self._absent is not None:
             self._absent.difference_update(v["id"] for v in every)

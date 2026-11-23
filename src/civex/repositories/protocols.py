@@ -21,6 +21,7 @@ from typing import (
     ContextManager,
     Iterable,
     Iterator,
+    NamedTuple,
     Protocol,
     runtime_checkable,
 )
@@ -68,6 +69,19 @@ from civex.domain.transfers import CopyResult, TransferRecord
 
 # (day, dataset_name, schema_name, count) -- see LocalRecordRepository.growth_by_period
 RecordGrowthRow = tuple[date, str, str, int]
+
+
+class RecordPlace(NamedTuple):
+    """Where a record is (what `RecordRepository.placement_of` finds): enough
+    to judge a record placed under it or pointing at it."""
+
+    id: uuid.UUID
+    dataset_id: uuid.UUID
+    schema_id: uuid.UUID
+    schema_name: str
+    deleted_at: datetime | None
+
+
 # (day, status, count) -- see LocalWorkflowJobRepository.status_counts_by_period
 JobStatusRow = tuple[date, str, int]
 # (bucket_start, plugin, count) -- already bucketed, see
@@ -362,6 +376,13 @@ class RecordRepository(Protocol):
     def list_by_dataset(self, dataset_id: uuid.UUID) -> list[RecordDTO]: ...
     def list_by_ids(self, ids: list[uuid.UUID]) -> list[RecordDTO]: ...
     def dataset_of(self, id: uuid.UUID) -> uuid.UUID | None: ...
+    def placement_of(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, RecordPlace]: ...
+    def any_key_match(
+        self,
+        dataset_id: uuid.UUID,
+        schema_id: uuid.UUID,
+        places: list[tuple[uuid.UUID | None, dict[str, Any]]],
+    ) -> bool: ...
     def hidden_referrers(
         self, target_ids: list[uuid.UUID], field_ids: list[uuid.UUID]
     ) -> int: ...

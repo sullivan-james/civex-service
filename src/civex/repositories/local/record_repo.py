@@ -50,7 +50,7 @@ from civex.domain.summary import RawSummary, SummaryPlan
 from civex.repositories.local._ids import prefix_span
 from civex.repositories.local._bucketing import day_bucket
 from civex.repositories.local._jobs import bulk_delete_jobs
-from civex.repositories.protocols import RecordGrowthRow
+from civex.repositories.protocols import RecordGrowthRow, RecordPlace
 
 
 class _Explain(Executable, ClauseElement):
@@ -391,6 +391,58 @@ class LocalRecordRepository:
         with read_scope.unscoped(self._s):
             every = {r for r, _, _ in self.referrers_of(target_ids, field_ids)}
         return len(every - seen)
+
+    def placement_of(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, RecordPlace]:
+        """Where each of these records is (collection, schema and its name,
+        whether deleted), deleted ones too, in one query per chunk of ids and
+        without loading the records. A record that is not there is left out."""
+        found: dict[uuid.UUID, RecordPlace] = {}
+        for chunk in _chunks(list(ids)):
+            for rid, did, sid, name, gone in (
+                self._s.query(
+                    Record.id,
+                    Record.dataset_id,
+                    Record.schema_id,
+                    Schema.name,
+                    Record.deleted_at,
+                )
+                .outerjoin(Schema, Schema.id == Record.schema_id)
+                .filter(Record.id.in_(chunk))
+            ):
+                found[rid] = RecordPlace(rid, did, sid, name or "unknown", gone)
+        return found
+
+    def any_key_match(
+        self,
+        dataset_id: uuid.UUID,
+        schema_id: uuid.UUID,
+        places: list[tuple[uuid.UUID | None, dict[str, Any]]],
+    ) -> bool:
+        """Whether a live record of the schema in the collection matches any of
+        these (parent, key values): what `find_key_match` asks for each, asked
+        for all at once."""
+        if not places:
+            return False
+        options = []
+        for parent, key in places:
+            parts = [
+                Record.parent_record_id.is_(None)
+                if parent is None
+                else Record.parent_record_id == parent
+            ]
+            parts += [_typed_comparison(Record, f, "eq", v) for f, v in key.items()]
+            options.append(and_(*parts))
+        return (
+            self._s.query(Record.id)
+            .filter(
+                Record.dataset_id == dataset_id,
+                Record.schema_id == schema_id,
+                Record.deleted_at.is_(None),
+                or_(*options),
+            )
+            .first()
+            is not None
+        )
 
     def dataset_of(self, id: uuid.UUID) -> uuid.UUID | None:
         """The collection a record is in (deleted ones too), without loading it

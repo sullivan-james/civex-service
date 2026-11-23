@@ -146,6 +146,20 @@ from the next tag forward.
   before, in the order sent. The first upload's client does one lookup of open
   refusals per batch rather than one per change (0.65 to 0.14 ms per record on
   PostgreSQL). `benchmarks/bench_bulk_push.py` measures both.
+- **The bulk write takes records with a parent, references and uniqueness
+  keys.** A record under a parent (stored, or made earlier in the same push), one
+  citing other records, or one in a schema with a uniqueness key is written in
+  bulk too. A push reads once, with one query, where every record it sits under
+  or points at is, and, per collection and schema, which uniqueness keys nothing
+  stored holds; records the push makes are added as it goes, so a child is judged
+  with its parent there and two records sharing a key in one push are settled
+  one at a time (the second is refused as before). Records the batch refuses, a
+  parent that comes after its child, a parent in another collection and callers
+  limited to some collections take the one-at-a-time path as before. Changes
+  settled one at a time also use the schemas, collections and records read for
+  the push instead of reading them again. Answers and rows are identical
+  (`tests/sync/test_bulk_push.py`). `bench_bulk_push.py --shape parented` times
+  the parent/child shape.
 
 ### v2.2.1
 

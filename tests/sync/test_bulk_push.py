@@ -259,3 +259,233 @@ def test_a_schema_with_a_uniqueness_key_is_checked_against_the_batch(project):
     assert answers[0] == answers[1]
     assert [r[1] for r in answers[0][0]] == ["applied", "applied", "rejected"]
     assert rows(fast) == rows(slow)
+
+
+def again(entry: SyncEntry) -> SyncEntry:
+    """Another record, new in every id, holding the same values."""
+    fresh = uuid.uuid4()
+    return dataclasses.replace(
+        entry,
+        id=uuid.uuid4(),
+        entity_id=fresh,
+        new_data={**entry.new_data, "id": str(fresh)},
+    )
+
+
+class Family:
+    """Structure with parents, references and a uniqueness key, and records of
+    it made on a laptop as entries to send."""
+
+    def __init__(self, project) -> None:
+        self.laptop = laptop = project("laptop")
+        laptop.schema_svc.create("species")
+        laptop.schema_svc.add_field("species", "latin", "string")
+        laptop.schema_svc.create("encounter")
+        laptop.schema_svc.add_field("encounter", "site", "string")
+        laptop.schema_svc.add_field(
+            "encounter", "seen", "reference", restrictions={"schema": "species"}
+        )
+        laptop.schema_svc.create("recording", parent="encounter")
+        laptop.schema_svc.add_field("recording", "label", "string")
+        laptop.schema_svc.set_unique_keys("recording", [["label"]])
+        laptop.schema_svc.create("clip", parent="recording")
+        laptop.schema_svc.add_field("clip", "secs", "float")
+        laptop.dataset_svc.create("mine")
+        laptop.dataset_svc.create("theirs")
+        laptop.dataset_svc.create("taxa", scope="global")
+        laptop.commit()
+        self.structure = self.take()
+
+    def take(self) -> list[SyncEntry]:
+        entries = self.laptop.sync_repo.pending_entries(1000)
+        self.laptop.sync_repo.mark_all_synced()
+        self.laptop.commit()
+        return entries
+
+    def add(self, dataset, schema, values, parent=None) -> SyncEntry:
+        made = self.laptop.record_svc.add(
+            dataset, schema, values, parent_record_id=parent
+        )
+        self.laptop.commit()
+        [entry] = [e for e in self.take() if e.entity_type == "record"]
+        assert entry.entity_id == made.id
+        return entry
+
+
+def _compare(project, structure, batches, monkeypatch=None, policy=None):
+    """Send the same batches to a bulk and to a one-at-a-time authority."""
+    fast, slow = two_authorities(project)
+    calls = count_bulk(fast, monkeypatch) if monkeypatch else []
+    for authority in (fast, slow):
+        send(authority, structure)
+        if policy is not None:
+            authority.authority_svc._policy = policy
+    out = []
+    for batch in batches:
+        answers = [send(a, batch) for a in (fast, slow)]
+        assert answers[0] == answers[1]
+        assert rows(fast) == rows(slow)
+        out.append([r[1] for r in answers[0][0]])
+    return out, calls
+
+
+def test_a_chain_of_parents_in_one_batch_goes_in_together(project, monkeypatch):
+    f = Family(project)
+    enc = f.add("mine", "encounter", {"site": "a"})
+    rec1 = f.add("mine", "recording", {"label": "x"}, str(enc.entity_id))
+    rec2 = f.add("mine", "recording", {"label": "y"}, str(enc.entity_id))
+    clip = f.add("mine", "clip", {"secs": 1.0}, str(rec1.entity_id))
+    enc2 = f.add("theirs", "encounter", {"site": "b"})
+    rec3 = f.add("theirs", "recording", {"label": "x"}, str(enc2.entity_id))
+    statuses, calls = _compare(
+        project, f.structure, [[enc, rec1, rec2, clip, enc2, rec3]], monkeypatch
+    )
+    assert statuses == [["applied"] * 6]
+    assert calls == [6]  # parents and children, in one write
+
+
+def test_a_parent_from_an_earlier_push(project, monkeypatch):
+    f = Family(project)
+    enc = f.add("mine", "encounter", {"site": "a"})
+    kids = [
+        f.add("mine", "recording", {"label": f"r{i}"}, str(enc.entity_id))
+        for i in range(3)
+    ]
+    statuses, calls = _compare(project, f.structure, [[enc], kids], monkeypatch)
+    assert statuses == [["applied"], ["applied"] * 3]
+    assert calls == [1, 3]
+
+
+def test_a_missing_parent_is_refused_as_before(project, monkeypatch):
+    f = Family(project)
+    enc = f.add("mine", "encounter", {"site": "a"})
+    rec = f.add("mine", "recording", {"label": "x"}, str(enc.entity_id))
+    orphan = f.add("mine", "recording", {"label": "y"}, str(enc.entity_id))
+    orphan.new_data["parent_record_id"] = str(uuid.uuid4())
+    late = f.add("mine", "recording", {"label": "z"}, str(enc.entity_id))
+    # the child before its parent, one under a parent that was never sent, and
+    # one that is fine
+    statuses, _ = _compare(
+        project, f.structure, [[rec, orphan, enc, late]], monkeypatch
+    )
+    assert statuses[0][0] != "applied"
+    assert statuses[0][1] != "applied"
+    assert statuses[0][2:] == ["applied", "applied"]
+
+
+def test_a_parent_the_batch_refused_leaves_its_children_refused(project):
+    f = Family(project)
+    enc = f.add("mine", "encounter", {"site": "a"})
+    bad = dataclasses.replace(
+        enc, new_data={**enc.new_data, "dataset_id": str(uuid.uuid4())}
+    )
+    rec = f.add("mine", "recording", {"label": "x"}, str(enc.entity_id))
+    statuses, _ = _compare(project, f.structure, [[bad, rec]])
+    assert "applied" not in statuses[0]
+
+
+def test_a_child_of_another_schemas_record_is_refused_as_before(project):
+    f = Family(project)
+    enc = f.add("mine", "encounter", {"site": "a"})
+    rec = f.add("mine", "recording", {"label": "x"}, str(enc.entity_id))
+    clip = f.add("mine", "clip", {"secs": 1.0}, str(rec.entity_id))
+    wrong = dataclasses.replace(
+        clip,
+        id=uuid.uuid4(),
+        entity_id=(new := uuid.uuid4()),
+        new_data={
+            **clip.new_data,
+            "id": str(new),
+            "parent_record_id": str(enc.entity_id),
+        },
+    )
+    statuses, _ = _compare(project, f.structure, [[enc, rec, clip, wrong]])
+    assert statuses[0][:3] == ["applied"] * 3
+    assert statuses[0][3] != "applied"
+
+
+def test_references_to_the_batch_to_stored_records_and_to_what_is_missing(
+    project, monkeypatch
+):
+    f = Family(project)
+    sp1 = f.add("taxa", "species", {"latin": "orca"})
+    sp2 = f.add("taxa", "species", {"latin": "minke"})
+    stored = f.add("mine", "encounter", {"site": "s", "seen": str(sp1.entity_id)})
+    in_batch = f.add("mine", "encounter", {"site": "t", "seen": str(sp2.entity_id)})
+    forward = f.add("mine", "encounter", {"site": "u", "seen": str(sp1.entity_id)})
+    later = f.add("taxa", "species", {"latin": "later"})
+    missing = f.add("mine", "encounter", {"site": "v", "seen": str(sp1.entity_id)})
+    seen_key = next(
+        k for k, v in stored.new_data["data"].items() if v == str(sp1.entity_id)
+    )
+    forward.new_data["data"][seen_key] = str(later.entity_id)
+    missing.new_data["data"][seen_key] = str(uuid.uuid4())
+    other_dataset = f.add(
+        "theirs", "encounter", {"site": "w", "seen": str(sp1.entity_id)}
+    )
+    statuses, calls = _compare(
+        project,
+        f.structure,
+        [[sp1], [stored, sp2, in_batch, forward, later, missing, other_dataset]],
+        monkeypatch,
+    )
+    # a target in a global collection, in the batch or held, is fine; one made
+    # after the record that cites it, or one that is not there, is not
+    assert statuses[1] == [
+        "applied",
+        "applied",
+        "applied",
+        "rejected",
+        "applied",
+        "rejected",
+        "applied",
+    ]
+    assert max(calls) >= 3
+
+
+def test_a_uniqueness_key_is_judged_within_the_parent(project, monkeypatch):
+    f = Family(project)
+    e1 = f.add("mine", "encounter", {"site": "a"})
+    e2 = f.add("mine", "encounter", {"site": "b"})
+    ok1 = f.add("mine", "recording", {"label": "x"}, str(e1.entity_id))
+    ok2 = f.add("mine", "recording", {"label": "x"}, str(e2.entity_id))  # other parent
+    dup = again(ok1)  # same label, same parent
+    ok3 = f.add("mine", "recording", {"label": "y"}, str(e1.entity_id))
+    statuses, calls = _compare(
+        project, f.structure, [[e1, e2, ok1, ok2, dup, ok3]], monkeypatch
+    )
+    assert statuses == [
+        ["applied", "applied", "applied", "applied", "rejected", "applied"]
+    ]
+    assert calls and calls[0] >= 4
+
+
+def test_a_uniqueness_key_taken_by_stored_data(project, monkeypatch):
+    f = Family(project)
+    e1 = f.add("mine", "encounter", {"site": "a"})
+    first = f.add("mine", "recording", {"label": "x"}, str(e1.entity_id))
+    clash = again(first)
+    fine = f.add("mine", "recording", {"label": "z"}, str(e1.entity_id))
+    statuses, _ = _compare(
+        project, f.structure, [[e1, first], [clash, fine]], monkeypatch
+    )
+    assert statuses == [["applied", "applied"], ["rejected", "applied"]]
+
+
+def test_children_are_judged_by_the_collection_they_name(project, monkeypatch):
+    f = Family(project)
+    mine = f.laptop.dataset_svc.get("mine")
+    e1 = f.add("mine", "encounter", {"site": "a"})
+    e2 = f.add("theirs", "encounter", {"site": "b"})
+    r1 = f.add("mine", "recording", {"label": "x"}, str(e1.entity_id))
+    r2 = f.add("theirs", "recording", {"label": "x"}, str(e2.entity_id))
+    r3 = f.add("mine", "recording", {"label": "y"}, str(e1.entity_id))
+    statuses, calls = _compare(
+        project,
+        f.structure,
+        [[e1, e2, r1, r2, r3]],
+        monkeypatch,
+        policy=Permissions.of(READ, WRITE_RECORDS, collections=[mine.id]),
+    )
+    assert statuses == [["applied", "rejected", "applied", "rejected", "applied"]]
+    assert calls == [3]

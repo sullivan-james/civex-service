@@ -140,6 +140,9 @@ class SyncAuthorityService:
         self._rules = rules
         # The things the action being settled has entries for itself.
         self._covered: set[tuple[str, uuid.UUID]] = set()
+        # What the push being settled has read (see `RecordService.incoming_cache`),
+        # for the changes `_take` settles one at a time; None outside a push.
+        self._cache: IncomingCache | None = None
         # Whether runs of new records are written in bulk (`_fast`); off, every
         # change is settled on its own, as the tests compare.
         self._bulk = True
@@ -332,9 +335,41 @@ class SyncAuthorityService:
         # What the push will ask about one change at a time (was it sent
         # before; the record it names) is read once, now the feed is locked.
         cache = self._records.incoming_cache()
+        # (a caller who sees only some collections has its own view of the
+        # records: asked each time, never from what was read at once)
+        cache.use_records = self._scope().unrestricted
+        self._cache = cache
+        position = 0
+        try:
+            self._settle_push(who, taken, results, cache, position)
+        finally:
+            self._cache = None
+        self._log_push(who, entries, results)
+        return PushResult(results, self._repo.head_seq())
+
+    def _settle_push(
+        self,
+        who: Principal,
+        taken: list[SyncEntry],
+        results: list[OpResult],
+        cache: IncomingCache,
+        position: int,
+    ) -> None:
         with self._repo.push_scope(taken):
             run: list[_Fast] = []
             for action in _actions(taken):
+                if self._bulk and len(action) == 1 and cache.stale:
+                    # What the changes to come ask of the records is read
+                    # together (again, after something else wrote some).
+                    self._records.prefetch_incoming(
+                        cache,
+                        [
+                            e.new_data
+                            for e in taken[position:]
+                            if _makes(e) and e.new_data
+                        ],
+                    )
+                position += len(action)
                 fast = (
                     self._fast(who, action[0], run, cache)
                     if self._bulk and len(action) == 1
@@ -352,7 +387,10 @@ class SyncAuthorityService:
                         if len(action) == 1
                         else self._settle_action(who, action)
                     )
-                    cache.clear()  # it may have changed a schema or collection
+                    if len(action) == 1 and action[0].entity_type == "record":
+                        cache.clear_records()  # (a record changes no schema)
+                    else:
+                        cache.clear()  # it may have changed a schema or collection
                     if len(action) > 1 or not _plain_record_write(action[0]):
                         # What it reached beyond the one thing it names (children
                         # deleted, a collection's records) is written in bulk, past
@@ -363,8 +401,6 @@ class SyncAuthorityService:
                     break
             else:
                 results += self._flush_run(who, run)
-        self._log_push(who, entries, results)
-        return PushResult(results, self._repo.head_seq())
 
     def _fast(
         self,
@@ -405,16 +441,31 @@ class SyncAuthorityService:
                 return _Fast(
                     entry, None, self._refuse(who, entry, problem[0], code=problem[1])
                 )
-            if final.get("parent_record_id") or final.get("deleted_at"):
+            if final.get("deleted_at"):
                 return None
             shape = self._records.shape_of(final, cache)
-            if shape is None or shape.schema.unique_keys:
-                return None  # what it must be unique among includes the run
-            if self._records.cites_records(final, shape):
-                return None  # what it points at may be in the run
+            if shape is None:
+                return None
+            marks = self._records.unique_marks(final, shape)
+            if not cache.use_records and (
+                final.get("parent_record_id")
+                or marks
+                or self._records.cites_records(final, shape)
+            ):
+                return None  # (what it sits under, points at or must differ from
+                # is read through the caller's own view)
+            if any(m in cache.made for m in marks):
+                return None  # a record of this push shares its key: settled alone
+            if final.get("parent_record_id"):
+                self._check_parent(final, cache)
+                if self._records.placed_with_parent(final, cache) is not final:
+                    return None  # it follows its parent to another collection
             self._records.check_incoming(final, None, cache)
         except (ValidationError, ValueError, TypeError, KeyError, AttributeError):
             return None
+        # Later changes of the push are judged with this one there (it is
+        # written, in its place, before any of them is settled).
+        self._records.note_made(cache, final, shape)
         return _Fast(entry, final)
 
     def _flush_run(self, who: Principal, run: list[_Fast]) -> list[OpResult]:
@@ -456,6 +507,8 @@ class SyncAuthorityService:
         except (ValidationError, ValueError, TypeError, KeyError, AttributeError):
             # (the savepoint undid the run, and the records this push held)
             self._repo.forget_held()
+            if self._cache is not None:
+                self._cache.clear_records()  # (what it noted as made is not)
             for f in taken:
                 self._repo.drop_op(f.entry.id)  # (answers kept before it failed)
             settled: list[OpResult] = []
@@ -655,6 +708,9 @@ class SyncAuthorityService:
         for entry in action:
             if problem := self._problem(who, entry):
                 return self._refuse_action(who, action, problem[0], code=problem[1])
+        # What one of its entries writes is read by the next: nothing is
+        # answered from what the push read before.
+        cache, self._cache = self._cache, None
         try:
             with self._repo.savepoint():
                 results = [self._take(who, e) for e in action]
@@ -680,6 +736,8 @@ class SyncAuthorityService:
             )
         except (ValueError, TypeError, KeyError, AttributeError) as e:
             return self._refuse_action(who, action, f"A value is not valid: {e}")
+        finally:
+            self._cache = cache
         for entry, result in zip(action, results):
             self._repo.save_op(entry, result, who.device_id, who.name)
         return results
@@ -816,7 +874,9 @@ class SyncAuthorityService:
         self._repo.save_op(entry, result, who.device_id, who.name)
         return result
 
-    def _check_parent(self, state: dict[str, Any]) -> None:
+    def _check_parent(
+        self, state: dict[str, Any], cache: IncomingCache | None = None
+    ) -> None:
         """The record a pushed record sits under must be there as the caller
         finds it: one the caller cannot see is refused in the same words as one
         that does not exist (never taken in, never an error at commit)."""
@@ -827,8 +887,14 @@ class SyncAuthorityService:
             wanted = uuid.UUID(str(parent))
         except ValueError:
             raise ValidationError(PARENT_GONE) from None
-        with self._records.as_caller():
-            found = self._records.records_repo.get_by_id(wanted, include_deleted=True)
+        found: Any
+        if cache is not None and wanted in cache.places:
+            found = cache.places[wanted]  # (the caller sees all: use_records)
+        else:
+            with self._records.as_caller():
+                found = self._records.records_repo.get_by_id(
+                    wanted, include_deleted=True
+                )
         if found is None:
             raise ValidationError(PARENT_GONE)
 
@@ -918,12 +984,12 @@ class SyncAuthorityService:
                 if head is None or str(head.get("parent_record_id") or "") != str(
                     final.get("parent_record_id") or ""
                 ):
-                    self._check_parent(final)
-                placed = self._records.placed_with_parent(final)
+                    self._check_parent(final, self._cache)
+                placed = self._records.placed_with_parent(final, self._cache)
                 if placed is not final:
                     self._check_placement(who, entry, placed)
                 final = placed
-                self._records.check_incoming(final, head)
+                self._records.check_incoming(final, head, self._cache)
             elif kind == "note" and self._notes is not None:
                 self._check_note(who, final)
             self._applier.apply_state(kind, eid, final)
@@ -1267,6 +1333,17 @@ def _kept_from_delete(results: list[OpResult], action: list[SyncEntry]):
         yield entry.action == "delete" and all(
             c.get("kind") == "edit_vs_delete" for c in result.conflicts
         )
+
+
+def _makes(entry: SyncEntry) -> bool:
+    """A record made new, as `_fast` takes one: what it asks of the records
+    is read before the push settles it."""
+    return (
+        entry.entity_type == "record"
+        and entry.action == "create"
+        and isinstance(entry.new_data, dict)
+        and not entry.new_data.get("deleted_at")
+    )
 
 
 def _plain_record_write(entry: SyncEntry) -> bool:
