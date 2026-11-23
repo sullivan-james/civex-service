@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
-from contextlib import AbstractContextManager, contextmanager, nullcontext
+from contextlib import AbstractContextManager, nullcontext
 import numbers
 import re
 import uuid
@@ -734,7 +734,6 @@ class RecordService:
         # What the caller may do, asked per collection before a record is
         # made, changed, restored or deleted (`domain.permissions`).
         self._permissions = permissions
-        self._incoming_cache: IncomingCache | None = None
         self._schema_svc = schema_svc
         self._datasets = dataset_repo
         self._records = record_repo
@@ -1956,12 +1955,10 @@ class RecordService:
                 f"expected '{expected.name if expected else schema.parent_id}'"
             )
 
-    def shape_of(self, state: dict[str, Any]) -> Any:
+    def shape_of(self, state: dict[str, Any], cache: IncomingCache) -> Any:
         """The resolved schema a record state names (None when there is none),
         as `check_incoming` finds it."""
-        schema_id = uuid.UUID(str(state["schema_id"]))
-        cache = self._incoming_cache
-        return (cache.shapes if cache else self._schema_svc.resolver())(schema_id)
+        return cache.shapes(uuid.UUID(str(state["schema_id"])))
 
     @staticmethod
     def cites_records(state: dict[str, Any], shape: Any) -> bool:
@@ -1973,19 +1970,16 @@ class RecordService:
             for rf in shape.fields
         )
 
-    @contextmanager
-    def incoming_cache(self) -> Iterator[IncomingCache]:
+    def incoming_cache(self) -> IncomingCache:
         """For a run of `check_incoming` calls that change neither schemas nor
         collections: each schema and collection is read once for the run."""
-        cache = IncomingCache(self._schema_svc.resolver)
-        previous, self._incoming_cache = self._incoming_cache, cache
-        try:
-            yield cache
-        finally:
-            self._incoming_cache = previous
+        return IncomingCache(self._schema_svc.resolver)
 
     def check_incoming(
-        self, state: dict[str, Any], head: dict[str, Any] | None
+        self,
+        state: dict[str, Any],
+        head: dict[str, Any] | None,
+        cache: IncomingCache | None = None,
     ) -> None:
         """Refuse a record state sent by another device that a person's own write
         would have refused: values outside their field's restrictions,
@@ -2017,7 +2011,6 @@ class RecordService:
         data = state.get("data") or {}
         if not isinstance(data, dict):
             raise ValidationError("The record's values are not an object")
-        cache = self._incoming_cache
         shape = (cache.shapes if cache else self._schema_svc.resolver())(schema_id)
         if shape is None:
             raise ValidationError("The record's schema does not exist here")

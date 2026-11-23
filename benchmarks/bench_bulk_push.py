@@ -105,7 +105,7 @@ def main() -> None:
     args = ap.parse_args()
     base = os.environ["PG_URL"]
     n = args.batches * sync_service.PUSH_BATCH
-    scratch = Path(tempfile.mkdtemp(prefix="civex-bench-", dir=Path.home() / ".cache"))
+    scratch = Path(tempfile.mkdtemp(prefix="civex-bench-"))
     os.environ["CIVEX_USER_STATE"] = str(scratch / "user-state.toml")
     admin = create_engine(base, isolation_level="AUTOCOMMIT")
     a_name, a_url = _database(admin, base, "auth")
