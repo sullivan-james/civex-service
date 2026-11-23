@@ -22,8 +22,11 @@ export function useDismiss(
   useEffect(() => {
     if (!open) return
     function onPointerDown(e: MouseEvent) {
-      const target = e.target as Node
-      if (refsRef.current.some((r) => r.current?.contains(target))) return
+      // Inside a shadow root (a mounted app) `e.target` is the host element,
+      // so ask the event's own path.
+      const path = e.composedPath()
+      if (refsRef.current.some((r) => r.current && path.includes(r.current)))
+        return
       onDismissRef.current()
     }
     function onKeyDown(e: KeyboardEvent) {

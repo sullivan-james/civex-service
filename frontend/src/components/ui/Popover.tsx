@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useAnchoredPosition } from '../../hooks/useAnchoredPosition'
 import { useDismiss } from '../../hooks/useDismiss'
+import { portalRoot } from '../../utils/host'
 
 interface PopoverProps {
   /** Element the popover hangs off (a table cell, a button, ...). Clicks on
@@ -77,6 +78,6 @@ export function Popover({
     >
       {children}
     </div>,
-    document.body,
+    portalRoot(),
   )
 }

@@ -4,7 +4,7 @@
 
 import { projectKey } from './host'
 
-const KEY = projectKey('civex.syncReview')
+const key = () => projectKey('civex.syncReview')
 
 export interface ReviewStep {
   id: string
@@ -13,7 +13,7 @@ export interface ReviewStep {
 
 export function readReview(): ReviewStep[] | null {
   try {
-    const raw = sessionStorage.getItem(KEY)
+    const raw = sessionStorage.getItem(key())
     const parsed: unknown = raw ? JSON.parse(raw) : null
     return Array.isArray(parsed) &&
       parsed.every((s) => s && typeof s.id === 'string')
@@ -26,7 +26,7 @@ export function readReview(): ReviewStep[] | null {
 
 export function saveReview(steps: ReviewStep[]): void {
   try {
-    sessionStorage.setItem(KEY, JSON.stringify(steps))
+    sessionStorage.setItem(key(), JSON.stringify(steps))
   } catch {
     // Without storage the stepper starts afresh on each page; nothing is lost.
   }
@@ -34,7 +34,7 @@ export function saveReview(steps: ReviewStep[]): void {
 
 export function endReview(): void {
   try {
-    sessionStorage.removeItem(KEY)
+    sessionStorage.removeItem(key())
   } catch {
     // Nothing kept, nothing to clear.
   }

@@ -1,4 +1,5 @@
-import 'ol/ol.css'
+import olCss from 'ol/ol.css?inline'
+import { addStyles, styleRoot } from '../../utils/host'
 import OlMap from 'ol/Map'
 import View from 'ol/View'
 import VectorLayer from 'ol/layer/Vector'
@@ -31,8 +32,7 @@ export interface BaseMapOptions {
 
 /** A theme colour (a CSS custom property), read when the map is built. */
 export const themeColor = (name: string, fallback: string) =>
-  getComputedStyle(document.documentElement).getPropertyValue(name).trim() ||
-  fallback
+  getComputedStyle(styleRoot()).getPropertyValue(name).trim() || fallback
 
 /** `color` (a hex or rgb() from the theme) at `alpha` 0..1. */
 export function withAlpha(color: string, alpha: number): string {
@@ -94,6 +94,7 @@ export function createBaseMap(
       }),
     )
 
+  addStyles('ol', olCss)
   const map = new OlMap({
     target,
     layers: [...base, ...overlays],

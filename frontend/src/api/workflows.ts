@@ -1,6 +1,6 @@
 import { api } from './client'
 import type { FilterTreeWire } from '../utils/filterTree'
-import { apiUrl } from '../utils/host'
+import { apiUrl, hostFetch } from '../utils/host'
 
 export interface WorkflowInput {
   type: string
@@ -169,7 +169,7 @@ export const workflowsApi = {
         form.append(inputName, file)
       }
     }
-    const res = await fetch(
+    const res = await hostFetch(
       apiUrl(`/workflows/${encodeURIComponent(name)}/run`),
       {
         method: 'POST',

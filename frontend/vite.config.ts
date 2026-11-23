@@ -28,6 +28,8 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    // The embed entry takes the app's stylesheet as text (`?inline`).
+    css: { include: [/index\.css/] },
     setupFiles: ['./src/test/setup.ts'],
     // Interaction-heavy tests take ~0.5s alone but several times that when the
     // whole suite runs in parallel; the 5s default made them fail intermittently.

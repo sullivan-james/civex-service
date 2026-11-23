@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   MAX_RECENTS,
-  PINS_KEY,
-  RECENTS_KEY,
+  pinsKey,
+  recentsKey,
   parseTargets,
   pushRecent,
   readPins,
@@ -45,7 +45,7 @@ describe('pins', () => {
     expect(
       parseTargets(JSON.stringify([{ key: 1 }, collection('ok')])),
     ).toEqual([collection('ok')])
-    expect(readPins(memoryStorage({ [PINS_KEY]: 'nope' }))).toEqual([])
+    expect(readPins(memoryStorage({ [pinsKey()]: 'nope' }))).toEqual([])
   })
 
   it('survives storage that throws', () => {
@@ -78,6 +78,6 @@ describe('recents', () => {
     const recents = readRecents(s)
     expect(recents).toHaveLength(MAX_RECENTS)
     expect(recents[0].label).toBe(`c${MAX_RECENTS + 4}`)
-    expect(s.getItem(RECENTS_KEY)).not.toBeNull()
+    expect(s.getItem(recentsKey())).not.toBeNull()
   })
 })
