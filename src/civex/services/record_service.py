@@ -717,21 +717,24 @@ def _key_mark(
     key: list[str],
     values: list[Any],
 ) -> tuple[Any, ...]:
-    """A uniqueness key's place and values, as one comparable thing. Numbers are
-    compared as numbers and the rest by what they print as: two values that
-    could be one to the database are one here (too many alike is only slower)."""
-    return (
-        dataset_id,
-        schema_id,
-        parent_id,
-        tuple(key),
-        tuple(
-            repr(float(v))
-            if isinstance(v, (int, float)) and not isinstance(v, bool)
-            else str(v)
-            for v in values
-        ),
-    )
+    """A uniqueness key's place and values, as one comparable thing. The
+    database reads a value as the kind it is compared with (a text "30" is a
+    stored 30, "true" a stored true), so anything that reads as a number is
+    its float and booleans are true/false: two values that could be one there
+    are one here (too many alike is only slower)."""
+    return (dataset_id, schema_id, parent_id, tuple(key), tuple(map(_canon, values)))
+
+
+def _canon(value: Any) -> str:
+    if isinstance(value, bool):
+        return str(value).lower()
+    if isinstance(value, (int, float)):
+        return repr(float(value))
+    text_ = str(value)
+    try:
+        return repr(float(text_))
+    except ValueError:
+        return text_.lower() if text_.lower() in ("true", "false") else text_
 
 
 class IncomingCache:

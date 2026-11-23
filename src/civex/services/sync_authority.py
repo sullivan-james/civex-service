@@ -79,6 +79,8 @@ FEED_MAX = 500
 FEED_SCAN_MAX = 2000
 SNAPSHOT_MAX = 500
 PUSH_MAX = 500
+# How many changes' records one read of what a push asks of them covers.
+PREFETCH_MAX = 150
 
 
 log = logging.getLogger(__name__)
@@ -363,11 +365,7 @@ class SyncAuthorityService:
                     # together (again, after something else wrote some).
                     self._records.prefetch_incoming(
                         cache,
-                        [
-                            e.new_data
-                            for e in taken[position:]
-                            if _makes(e) and e.new_data
-                        ],
+                        self._next_creates(taken[position:]),
                     )
                 position += len(action)
                 fast = (
@@ -387,7 +385,9 @@ class SyncAuthorityService:
                         if len(action) == 1
                         else self._settle_action(who, action)
                     )
-                    if len(action) == 1 and action[0].entity_type == "record":
+                    if len(action) == 1 and settled[-1].replayed:
+                        pass  # answered from before: nothing was written
+                    elif len(action) == 1 and action[0].entity_type == "record":
                         cache.clear_records()  # (a record changes no schema)
                     else:
                         cache.clear()  # it may have changed a schema or collection
@@ -401,6 +401,23 @@ class SyncAuthorityService:
                     break
             else:
                 results += self._flush_run(who, run)
+
+    def _next_creates(self, rest: list[SyncEntry]) -> list[dict[str, Any]]:
+        """The states of the next records the push may make new (a stretch of
+        them: what is read for the push is read again after a change settled
+        alone), leaving out those already held or answered."""
+        out: list[dict[str, Any]] = []
+        for e in rest:
+            if (
+                _makes(e)
+                and e.new_data
+                and self._repo.record_absent(e.entity_id)
+                and self._repo.get_op(e.id) is None
+            ):
+                out.append(e.new_data)
+                if len(out) >= PREFETCH_MAX:
+                    break
+        return out
 
     def _fast(
         self,

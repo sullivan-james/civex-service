@@ -489,3 +489,45 @@ def test_children_are_judged_by_the_collection_they_name(project, monkeypatch):
     )
     assert statuses == [["applied", "rejected", "applied", "rejected", "applied"]]
     assert calls == [3]
+
+
+def test_a_number_and_the_same_number_as_text_share_a_key(project):
+    f = Family(project)
+    f.laptop.schema_svc.create("count")
+    f.laptop.schema_svc.add_field("count", "n", "float")
+    f.laptop.schema_svc.set_unique_keys("count", [["n"]])
+    f.laptop.commit()
+    structure = f.take()
+    f.laptop.record_svc.add("mine", "count", {"n": 30.0})
+    f.laptop.commit()
+    [a] = [e for e in f.take() if e.entity_type == "record"]
+    b = again(a)
+    key = next(iter(b.new_data["data"]))
+    b.new_data["data"] = {key: "30"}
+    statuses, _ = _compare(project, f.structure + structure, [[a, b]])
+    assert statuses == [["applied", "rejected"]]
+
+
+def test_a_resent_push_with_keys_does_not_read_again_for_each(project, monkeypatch):
+    f = Family(project)
+    e1 = f.add("mine", "encounter", {"site": "a"})
+    kids = [
+        f.add("mine", "recording", {"label": f"r{i}"}, str(e1.entity_id))
+        for i in range(30)
+    ]
+    fast, _ = two_authorities(project)
+    send(fast, f.structure)
+    send(fast, [e1] + kids)
+    reads = []
+    real = fast.sync_repo  # noqa: F841
+    from civex.repositories.local.record_repo import LocalRecordRepository
+
+    seen = LocalRecordRepository.any_key_match
+
+    def spy(self, *a, **k):
+        reads.append(1)
+        return seen(self, *a, **k)
+
+    monkeypatch.setattr(LocalRecordRepository, "any_key_match", spy)
+    send(fast, [e1] + kids)
+    assert not reads
