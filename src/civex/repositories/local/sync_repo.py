@@ -73,6 +73,7 @@ from civex.domain.sync import (
     SyncEntry,
     SyncInviteDTO,
     SyncMetaDTO,
+    TAKEN,
     parse_snapshot_cursor,
     wire_state,
 )
@@ -138,6 +139,7 @@ def _kept_owner():  # type: ignore[no-untyped-def]
 
 
 LACK_RETRY_FIRST = timedelta(minutes=10)
+_ID_CHUNK = 500
 LACK_RETRY_MAX = timedelta(days=1)
 
 
@@ -2009,12 +2011,75 @@ class LocalSyncRepository:
         self._s.execute(delete(ServerLack))
         self._s.expire_all()
 
+    def forget_refusals(self, taken: set[uuid.UUID], refused: set[uuid.UUID]) -> None:
+        """Filling the authority sent these things. It took those in `taken`:
+        a refusal of their create, by it or by one followed before, no longer
+        says it lacks them (`taken_at`, see `never_taken`), and one nobody has
+        settled yet is no longer true, so it is closed (`TAKEN`); one a person
+        settled, or is having sent again, stays as they left it. It refused
+        those in `refused`: one it had taken before (filled again after a
+        reset, so the refusal is the same row) says so again, and is open again
+        if only sync had closed it."""
+        now = datetime.now(timezone.utc)
+        for start in range(0, len(ids := list(taken)), _ID_CHUNK):
+            chunk = ids[start : start + _ID_CHUNK]
+            self._s.execute(
+                update(AuditLog)
+                .where(
+                    AuditLog.entity_id.in_(chunk),
+                    AuditLog.action == "create",
+                    AuditLog.sync_state == "rejected",
+                )
+                .values(sync_state="synced")
+                .execution_options(synchronize_session=False)
+            )
+            mine = (SyncConflict.entity_id.in_(chunk), SyncConflict.kind == "rejected")
+            self._s.execute(
+                update(SyncConflict)
+                .where(
+                    *mine,
+                    SyncConflict.status == "open",
+                    SyncConflict.resolution.is_(None),
+                )
+                .values(status="resolved", resolution=TAKEN, resolved_at=now)
+                .execution_options(synchronize_session=False)
+            )
+            self._s.execute(
+                update(SyncConflict)
+                .where(*mine, SyncConflict.taken_at.is_(None))
+                .values(taken_at=now)
+                .execution_options(synchronize_session=False)
+            )
+        for start in range(0, len(ids := list(refused)), _ID_CHUNK):
+            chunk = ids[start : start + _ID_CHUNK]
+            was_taken = (
+                SyncConflict.entity_id.in_(chunk),
+                SyncConflict.kind == "rejected",
+                SyncConflict.taken_at.is_not(None),
+            )
+            self._s.execute(
+                update(SyncConflict)
+                .where(*was_taken, SyncConflict.resolution == TAKEN)
+                .values(status="open", resolution=None, resolved_at=None)
+                .execution_options(synchronize_session=False)
+            )
+            self._s.execute(
+                update(SyncConflict)
+                .where(*was_taken)
+                .values(taken_at=None)
+                .execution_options(synchronize_session=False)
+            )
+        self._s.flush()
+        self._s.expire_all()
+
     def never_taken(self, things: set[tuple[str, uuid.UUID]]) -> set[uuid.UUID]:
         """Of these things, the ids of those the authority has never taken: its
         create was refused (made here, or sent when the authority was filled:
         a refusal whose change isn't held here), and nothing carrying the thing
         has been numbered since (a delete of something it never had is numbered
-        but takes nothing). An edit to one can't go as an edit."""
+        but takes nothing). An edit to one can't go as an edit. A refusal is
+        forgotten once the authority takes the thing after all (`forget_refusals`,
+        when filling it sends the thing: following another one fills it)."""
         if not things:
             return set()
         ids = {i for _, i in things}
@@ -2032,7 +2097,9 @@ class LocalSyncRepository:
         refused |= {
             c.entity_id
             for c in self._s.query(SyncConflict).filter(
-                SyncConflict.entity_id.in_(ids), SyncConflict.kind == "rejected"
+                SyncConflict.entity_id.in_(ids),
+                SyncConflict.kind == "rejected",
+                SyncConflict.taken_at.is_(None),
             )
             if c.op_id is not None and c.op_id not in held  # a seed's refusal
         }

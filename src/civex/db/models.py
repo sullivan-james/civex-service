@@ -1428,7 +1428,10 @@ class SyncConflict(Base):
     authority refused. `yours` is what the device sent, `theirs` what stayed."""
 
     __tablename__ = "sync_conflicts"
-    __table_args__ = (Index("ix_sync_conflicts_status", "status", "created_at"),)
+    __table_args__ = (
+        Index("ix_sync_conflicts_status", "status", "created_at"),
+        Index("ix_sync_conflicts_entity", "entity_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -1460,3 +1463,8 @@ class SyncConflict(Base):
         Integer, nullable=False, default=0, server_default="0"
     )
     retried_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+    # A refusal of a create: when the authority took the thing after all
+    # (filling it sent the thing and it took it), so it no longer says the
+    # authority lacks it (see `SyncRepository.never_taken`). Apart from how the
+    # refusal was settled, which stays a person's.
+    taken_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
