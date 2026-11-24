@@ -268,6 +268,25 @@ def client(project_dir: Path) -> TestClient:
 
 
 @pytest.fixture()
+def releases_client(project_dir: Path) -> TestClient:
+    """A host that offers releases (`features.RELEASES`), serving the project:
+    the app and each request's project carry the same feature set."""
+    import dataclasses
+
+    from civex.config import load_config_at
+    from civex.domain.features import LOCAL_FEATURES, RELEASES
+    from civex.project import Project
+    from civex.server.app import create_app
+
+    features = LOCAL_FEATURES | {RELEASES}
+    app = create_app(features=features)
+    app.state.project_resolver = lambda request: dataclasses.replace(
+        Project.local(load_config_at(project_dir)), features=features
+    )
+    return TestClient(app, raise_server_exceptions=False)
+
+
+@pytest.fixture()
 def make_schema(ctx: AppContext):
     """make_schema("trial", fields=[("subject", "string")]) -> SchemaDTO"""
 

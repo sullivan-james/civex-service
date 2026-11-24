@@ -19,8 +19,9 @@ import threading
 import time
 import uuid
 from collections import deque
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import (
@@ -31,6 +32,8 @@ from fastapi.responses import (
     StreamingResponse,
 )
 from pydantic import BaseModel, Field
+from pydantic import ValidationError as PydanticValidationError
+from starlette.concurrency import run_in_threadpool
 
 from civex.context import AppContext
 from civex.domain.dtos import UploadedPart
@@ -45,6 +48,16 @@ from civex.domain.exceptions import (
 from civex.domain.library import MAX_BUNDLE, MAX_BYTES, LibraryItemDTO
 from civex.domain.sync import (
     DIRECT_FILES,
+    FILE_PART_BYTES,
+    FILE_PART_MAX,
+    FILE_PART_MIN,
+    FILE_PARTS,
+    MAX_FILE_PARTS,
+    NOT_SYNCED_AFTER,
+    PACK_FILE_MAX,
+    PACK_MAX_BYTES,
+    PACK_MAX_FILES,
+    NOT_SYNCED_KINDS,
     PROTOCOL_MAX,
     PROTOCOL_MIN,
     SCOPED_PROTOCOL,
@@ -62,10 +75,21 @@ from civex.domain.sync import (
     snapshot_for,
 )
 from civex.server.deps import current_project, get_ctx
+from civex.server.sync_policy import (
+    SyncRoute,
+    deadlines,
+    prefetch_body,
+    read_json_body,
+)
 
 log = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/sync/v1", tags=["sync"])
+router = APIRouter(
+    prefix="/sync/v1",
+    tags=["sync"],
+    route_class=SyncRoute,
+    dependencies=[Depends(prefetch_body), Depends(deadlines)],
+)
 
 _CHUNK = 1024 * 1024
 
@@ -186,6 +210,37 @@ class SyncFilesRequest(BaseModel):
 
 class SyncFilesResponse(BaseModel):
     missing: list[str] = Field(description="Those the authority does not have yet.")
+
+
+class SyncPackedFile(BaseModel):
+    sha256: str = Field(description="The file, as named in the pack.")
+    stored: bool = Field(description="True when the authority holds it now.")
+    error: str | None = Field(default=None, description="Why it was not stored.")
+
+
+class SyncPackResponse(BaseModel):
+    """One answer per file in the pack, in order. A file that failed does not
+    undo the ones that went in."""
+
+    results: list[SyncPackedFile]
+
+
+class SyncPartsRequest(BaseModel):
+    size: int = Field(ge=0, description="How many bytes the whole file is.")
+    part_size: int | None = Field(
+        default=None, description="The part size wanted (the authority may change it)."
+    )
+
+
+class SyncPartsResponse(BaseModel):
+    part_size: int = Field(description="Bytes per part (the last may be shorter).")
+    received: list[int] = Field(
+        description="The parts already held, from an upload begun before."
+    )
+
+
+class SyncPartsCompleteRequest(BaseModel):
+    size: int = Field(ge=0, description="How many bytes the whole file is.")
 
 
 class SyncUploadTargetRequest(BaseModel):
@@ -396,7 +451,13 @@ def _once(request: Request, attempt):
         return attempt()
     except SyncError as e:
         _attempts.failed(request)
-        raise HTTPException(e.status, detail=str(e))
+        # The reason as a header: `detail` stays the sentence older clients
+        # print; a newer client reads the code.
+        raise HTTPException(
+            e.status,
+            detail=str(e),
+            headers={"X-Civex-Code": e.code} if e.code else None,
+        )
 
 
 @router.post("/join", response_model=SyncJoinResponse)
@@ -479,11 +540,39 @@ def hello(call: Peer = Depends(peer)):
     return SyncHelloResponse(**hello.to_dict())
 
 
-@router.post("/push", response_model=SyncPushResponse)
-def push(body: SyncPushRequest, call: Peer = Depends(peer)):
+@router.post(
+    "/push",
+    response_model=SyncPushResponse,
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/SyncPushRequest"}
+                }
+            },
+        }
+    },
+)
+async def push(request: Request, call: Peer = Depends(peer)):
     """Settle the changes a device made. Each is merged with what the authority
     holds, numbered, and answered; the answer is remembered, so a repeat (the
-    device never heard) is answered the same way and nothing is done twice."""
+    device never heard) is answered the same way and nothing is done twice.
+
+    The body (`SyncPushRequest`, optionally `Content-Encoding: gzip`) is read
+    here, once the caller is known, so an anonymous caller never has anything
+    inflated for it."""
+    raw = await read_json_body(request)
+    try:
+        body = SyncPushRequest.model_validate_json(raw)
+    except PydanticValidationError as e:
+        raise HTTPException(
+            422, detail=f"The push is malformed: {e.error_count()} errors"
+        )
+    return await run_in_threadpool(_settle_push, call, body)
+
+
+def _settle_push(call: Peer, body: SyncPushRequest) -> SyncPushResponse:
     try:
         entries = [SyncEntry.from_dict(e) for e in body.entries]
     except (KeyError, ValueError, TypeError) as e:
@@ -570,7 +659,9 @@ def snapshot(
     """One kind of thing as it is now, a page at a time, for a device joining
     the project: schema, field, dataset, view, dashboard, record (in that
     order). Only what the caller may read."""
-    if kind not in kinds_for(call.protocol):
+    if kind not in kinds_for(call.protocol) and not (
+        kind in NOT_SYNCED_KINDS and call.protocol <= NOT_SYNCED_AFTER
+    ):
         raise HTTPException(422, detail=f"Unknown kind '{kind}'")
     try:
         wanted = None
@@ -612,9 +703,199 @@ async def upload_file(sha256: str, request: Request, call: Peer = Depends(peer))
         )
     except VolumeUnavailableError as e:
         raise HTTPException(507, detail=str(e))
+    # Committed now, not after the answer: a write lock held across the wait
+    # for the next request would block a second upload (on SQLite, the loop).
+    call.ctx.commit()
     if ref.sha256 != sha256:
         raise HTTPException(422, detail="The content does not match that hash")
-    call.ctx.authority_svc.received_file(sha256)
+
+
+# Files stored between commits of a pack (where the database has many writers).
+PACK_COMMIT_FILES = 25
+
+
+class _PackStream:
+    """A pack's bytes read as framed files: `<sha256> <size>\n` and then that
+    many bytes, again and again. Nothing is held but the chunk in hand, and a
+    file's bytes are passed on as the slices of the chunks they arrived in (no
+    copy)."""
+
+    def __init__(
+        self, stream: AsyncIterator[bytes], before_wait: Callable[[], None]
+    ) -> None:
+        # `before_wait` is called before every wait for more bytes: what was
+        # stored so far is committed there, so no write lock is held while
+        # other requests run (on SQLite, a second pack waiting for it would
+        # block the whole event loop, and with it the first).
+        self._before_wait = before_wait
+        self._it = stream.__aiter__()
+        self._rest = memoryview(b"")
+        self._left = 0
+        self._eof = False
+
+    async def _more(self) -> bool:
+        """Make `_rest` non-empty; False at the end of the pack."""
+        while not len(self._rest):
+            if self._eof:
+                return False
+            self._before_wait()
+            try:
+                self._rest = memoryview(await self._it.__anext__())
+            except StopAsyncIteration:
+                self._eof = True
+        return True
+
+    async def header(self) -> tuple[str, int] | None:
+        """The next file's hash and size; None at the end of the pack."""
+        line = bytearray()
+        while True:
+            if not await self._more():
+                if line:
+                    raise HTTPException(422, detail="The pack was cut short")
+                return None
+            at = bytes(self._rest[:129]).find(b"\n")
+            if at >= 0:
+                line += self._rest[:at]
+                self._rest = self._rest[at + 1 :]
+                break
+            line += self._rest[:129]
+            self._rest = self._rest[129:]
+            if len(line) > 128:
+                raise HTTPException(422, detail="Not a pack")
+        sha, _, size = line.decode("ascii", "replace").partition(" ")
+        if not size.isdigit():
+            raise HTTPException(422, detail="Not a pack")
+        self._left = int(size)
+        return sha, int(size)
+
+    async def body(self) -> AsyncIterator[bytes]:
+        """The current file's bytes, exactly as many as its header said."""
+        while self._left:
+            if not await self._more():
+                raise HTTPException(422, detail="The pack was cut short")
+            chunk = self._rest[: self._left]
+            self._rest = self._rest[len(chunk) :]
+            self._left -= len(chunk)
+            # A view, not a copy: hashing and writing take it as bytes.
+            yield cast(bytes, chunk)
+
+    async def skip(self) -> None:
+        """Read past what is left of the current file."""
+        async for _ in self.body():
+            pass
+
+
+@router.post("/files/pack", response_model=SyncPackResponse)
+async def upload_pack(request: Request, call: Peer = Depends(peer)):
+    """Many small files in one request (capability `file_packs`): the body is
+    `<sha256> <size>\n` and the bytes, for each file in turn, read as it
+    arrives. Every file is hashed and stored, and the answer says per file
+    whether it went in, so one that fails (its bytes do not match its hash, a
+    full drive) leaves the others stored."""
+    files = call.ctx.file_svc
+    # SQLite has one writer: files stored are committed before every wait for
+    # more bytes, so the lock is never held while another request runs (the
+    # second would block the event loop, and with it the first). Elsewhere it
+    # is committed every PACK_COMMIT_FILES files, and at the end.
+    one_writer = str(call.ctx.project.config.db.url).startswith("sqlite")
+    stored = [0]
+
+    def settle(force: bool = False) -> None:
+        if stored[0] and (force or one_writer or stored[0] >= PACK_COMMIT_FILES):
+            files.flush()
+            call.ctx.commit()
+            stored[0] = 0
+
+    pack = _PackStream(request.stream(), settle)
+    results: list[SyncPackedFile] = []
+    with files.batched():
+        try:
+            await _store_pack(pack, call, results, stored)
+        except VolumeUnavailableError as e:
+            settle(force=True)  # what was stored stays; the sender backs off
+            raise HTTPException(507, detail=str(e))
+        settle(force=True)
+    return SyncPackResponse(results=results)
+
+
+async def _store_pack(
+    pack: _PackStream, call: Peer, results: list[SyncPackedFile], stored: list[int]
+) -> None:
+    total = 0
+    while (head := await pack.header()) is not None:
+        sha, size = head
+        total += size
+        if len(results) >= PACK_MAX_FILES or total > PACK_MAX_BYTES:
+            raise HTTPException(413, detail="That pack is too big")
+        error: str | None = None
+        if len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha):
+            error = "Not a sha256"
+        elif size > PACK_FILE_MAX:
+            error = "That file is too big for a pack"
+        else:
+            try:
+                ref = await call.ctx.file_svc.store_stream(pack.body(), sha, size)
+                stored[0] += 1
+                if ref.sha256 != sha:
+                    error = "The content does not match that hash"
+            except VolumeUnavailableError:
+                raise  # the drive, not the file: the whole pack is refused
+        await pack.skip()  # whatever a refused file left unread
+        results.append(SyncPackedFile(sha256=sha, stored=error is None, error=error))
+
+
+def _parts_ready(call: Peer) -> None:
+    if not call.ctx.file_svc.takes_parts:
+        raise FeatureUnavailableError(FILE_PARTS)
+
+
+@router.post("/files/{sha256}/parts", response_model=SyncPartsResponse)
+def begin_parts(sha256: str, body: SyncPartsRequest, call: Peer = Depends(peer)):
+    """Begin sending a big file in parts (capability `file_parts`), or pick up
+    one begun before: which parts are already held, so only the rest go."""
+    _a_sha(sha256)
+    _parts_ready(call)
+    part_size = max(body.part_size or FILE_PART_BYTES, FILE_PART_MIN)
+    part_size = max(part_size, -(-body.size // MAX_FILE_PARTS))
+    part_size = min(part_size, max(FILE_PART_MAX, -(-body.size // MAX_FILE_PARTS)))
+    try:
+        size, received = call.ctx.file_svc.begin_parts(sha256, body.size, part_size)
+    except VolumeUnavailableError as e:
+        raise HTTPException(507, detail=str(e))
+    return SyncPartsResponse(part_size=size, received=received)
+
+
+@router.put("/files/{sha256}/parts/{number}", status_code=204)
+async def upload_part(
+    sha256: str, number: int, request: Request, call: Peer = Depends(peer)
+):
+    """One part of a file begun with `POST /files/{sha256}/parts`, streamed to
+    its place. Sent again, it replaces the one held."""
+    _a_sha(sha256)
+    _parts_ready(call)
+    try:
+        await call.ctx.file_svc.put_part(sha256, number, request.stream())
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    except VolumeUnavailableError as e:
+        raise HTTPException(507, detail=str(e))
+
+
+@router.post("/files/{sha256}/parts/complete", status_code=204)
+def complete_parts(
+    sha256: str, body: SyncPartsCompleteRequest, call: Peer = Depends(peer)
+):
+    """Every part has gone: the authority checks they are all held and that
+    the whole hashes to `sha256`, then stores it."""
+    _a_sha(sha256)
+    _parts_ready(call)
+    try:
+        call.ctx.file_svc.finish_parts(sha256, body.size, sha256)
+    except ValidationError as e:
+        raise HTTPException(422, detail=str(e))
+    except VolumeUnavailableError as e:
+        raise HTTPException(507, detail=str(e))
+    return Response(status_code=204)
 
 
 @router.post(
@@ -662,7 +943,6 @@ def complete_upload(
         raise HTTPException(422, detail=str(e))
     except VolumeUnavailableError as e:
         raise HTTPException(507, detail=str(e))
-    call.ctx.authority_svc.received_file(sha256)
     return Response(status_code=204)
 
 

@@ -740,3 +740,54 @@ def test_every_file_of_every_collection_is_listed_with_no_scope(
         "doc.txt",
         "s1.txt",
     ]
+
+
+def test_a_slow_listing_is_kept_briefly_and_dropped_by_any_change(
+    client, study, monkeypatch
+) -> None:
+    from civex.server.routers import file_access
+    from civex.services.file_access_service import FileAccessService
+
+    file_access.forget_listings()
+    study.add("a", b"a")
+    calls: list[int] = []
+    real = FileAccessService.listing
+
+    def slow(self, *args, **kwargs):
+        calls.append(1)
+        time.sleep(0.02)
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(FileAccessService, "listing", slow)
+    monkeypatch.setattr(file_access, "LISTING_SLOW_SECONDS", 0.01)
+
+    first = client.post("/api/file-access/files", json=BODY).json()
+    again = client.post("/api/file-access/files", json=BODY).json()
+    assert again == first and len(calls) == 1  # the refresh cost nothing
+
+    other = client.post("/api/file-access/files", json={**BODY, "limit": 1}).json()
+    assert len(calls) == 2 and other["total"] == first["total"]  # its own entry
+
+    study.add("b", b"b")
+    client.post("/api/file-access/plan", json={**BODY, "include_items": False})
+    fresh = client.post("/api/file-access/files", json=BODY).json()
+    assert len(calls) == 3 and fresh["total"] == first["total"] + 1
+
+
+def test_a_quick_listing_is_never_kept(client, study, monkeypatch) -> None:
+    from civex.server.routers import file_access
+    from civex.services.file_access_service import FileAccessService
+
+    file_access.forget_listings()
+    study.add("a", b"a")
+    calls: list[int] = []
+    real = FileAccessService.listing
+    monkeypatch.setattr(
+        FileAccessService,
+        "listing",
+        lambda self, *a, **k: (calls.append(1), real(self, *a, **k))[1],
+    )
+    client.post("/api/file-access/files", json=BODY)
+    study.add("b", b"b")
+    assert client.post("/api/file-access/files", json=BODY).json()["total"] == 2
+    assert len(calls) == 2

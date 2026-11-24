@@ -23,6 +23,358 @@ from the next tag forward.
 
 ## Unreleased
 
+## v2.3.0 — upload speed, hub-only releases, embeddable data views, sync fixes (2026-11-24)
+
+#### Breaking
+
+- **Releases are hub-only and never synced. Sync protocol 6.** A release is
+  published on a host (a civex hub), not made on a personal device, so it no
+  longer travels. A host that wants releases turns on the new `RELEASES`
+  feature (off by default; not in `LOCAL_FEATURES`). Every `/releases` route
+  (making, correcting, withdrawing, yanking, listing, reading, comparing, the
+  files, the bundle) and the app's Releases pages are gated by it: with it off
+  they answer **404** (a project on a host that mounts the router without the
+  feature answers 501), and the app hides them.
+  - **Sync:** the authority never feeds or snapshots a release, hello counts
+    leave them out, and a push of one is refused (`rejected`, code
+    `not_synced`, "Releases are published on a civex hub"); a protocol 3-5 peer
+    that sends one is refused the same way and one that asks for
+    `/snapshot/release` gets an empty page. A device no longer sends releases or
+    counts them as unsent, and release-owned `file_references` are not files it
+    sends or fetches (they stay on the host that made them, so clean-up still
+    keeps them). Update the authority first. Releases already held by an
+    authority keep working there (REST); they are just not fed.
+  - **Desktop:** the whole `civex release` command group is gone (it only
+    says "Releases are published on a civex hub"), as are the app's release pages
+    and the explorer's "Release these...". **Releases an older civex made on a
+    computer are no longer listed, verified, cited, compared or exported there**
+    (their rows and bundles are left in the project, untouched; nothing converts
+    them). Take a hub's release with `civex clone <repo-url> --release NAME`.
+  - **A new `RELEASE` permission** replaces `change_structure` for making,
+    correcting, withdrawing and yanking. A host that says nothing about it gets
+    it wherever `change_structure` goes (roles behave as before); granting it
+    alone allows releasing without editing the structure, and `lacking` it
+    takes it away alone. `GET /releases/{name}/bundle` now answers 200 with one
+    bundle that includes the release's files (it was a redirect to a bundle of
+    records only).
+- **No migration.** Nothing is converted: existing release rows, their
+  bundles and file ownership are untouched.
+
+#### Added
+
+- **`civex clone <repo-url> --release NAME`** downloads a hub's release bundle
+  (records and files, streamed to disk in chunks) and reads it into a **new**
+  project that follows nothing. It starts read-only (`[project] read_only` in
+  config.toml; `--writable` to allow changes); `--token` (or `CIVEX_TOKEN`)
+  authorises a private repository. Workflows and plugins in the bundle are not
+  installed. Over plain HTTPS it is the same as downloading the bundle and
+  running `civex bundle import`.
+
+#### Added (bulk file upload)
+
+- **Small files go many to a request.** Files under 8 MiB are sent in packs of
+  about 32 MiB or 100 files (`PACK_BYTES`, `PACK_FILES`), four packs at a time,
+  to `POST /sync/v1/files/pack` (capability `file_packs`, no protocol bump). The
+  authority reads the body as it arrives (never whole in memory), hashes and
+  stores each file, and answers per file, so one that fails (hash mismatch, a
+  full drive) keeps the rest: the sender confirms exactly what was answered
+  stored. A pack is one HTTP request. An authority without the capability is
+  sent one file per request as before. Over SQLite the authority commits before
+  each wait for bytes (one writer); elsewhere every 25 files; a pack records its
+  files in the inventory in one statement.
+- **Big files go in parallel parts.** A file over two parts (32 MiB) is read once
+  and sent in 16 MiB parts, four at a time, at most four parts in memory. In a
+  bucket (`direct_files`) those are S3 multipart parts (files over 32 MiB now go
+  multipart instead of one PUT; before, up to 5 GiB went as one stream). On an
+  authority with files on drives the same shape is `POST /files/{sha}/parts`,
+  `PUT /files/{sha}/parts/{n}`, `POST /files/{sha}/parts/complete` (capability
+  `file_parts`): parts are written in place, an interrupted upload is picked up
+  by asking which parts are held and sending only the rest, and the whole is
+  hashed once at the end. A big file is never packed or mixed with others.
+  A 429 or 402 on any of these still stops the pass and backs off.
+- `benchmarks/bench_bulk_files.py` times a many-small or few-huge upload to an
+  authority in its own process, files on a drive or in a bucket.
+
+#### Changed (bulk file upload)
+
+- Where `direct_files` is on, small files are not packed: a pack streams bytes
+  through the authority, and direct is what keeps them off it. They go one
+  presigned upload each, four at a time, as before; only big files change
+  (multipart, in parallel).
+- The authority commits a streamed file (`PUT /files/{sha}`) before answering,
+  so a write lock is not held while the next upload is read (on SQLite parallel
+  uploads could stall until their timeout).
+
+#### Changed (one client transport)
+
+- **Every call to an authority goes through one HTTP client**
+  (`services/http_wire.py`): connect/join, device sign-in, sync, files, packs,
+  parts, storage URLs, the library and `clone --release`. It keeps one
+  keep-alive connection per thread and host (a pass no longer pays TCP and TLS
+  for every request), sends `Accept-Encoding: gzip` on JSON calls, and never
+  takes the session to another host on a redirect or gzips file bytes.
+  A push body is gzipped only when the server's `hello` lists the new
+  capability `gzip_requests`; older servers get plain JSON as before.
+- **One status table.** 429 and 503 wait what `Retry-After` says (seconds or a
+  date, capped at 120 s, +-25% jitter) and send the same request again inside
+  the pass, a bounded number of times; network errors, timeouts and other 5xx
+  back off exponentially with jitter. 402 and 413 are refused at once with a
+  message ("this change is too big to send in one go"). A call that still
+  fails carries `SyncError.retry_after`, which the background worker waits on.
+- **Timeouts by call type:** pushes 120 s (`CLIENT_PUSH_TIMEOUT_SECONDS`),
+  other JSON calls 60 s, uploads 120 s, finishing a big file 600 s.
+- The background worker jitters the poll interval, the sync interval and its
+  failure back-off, so devices that failed together do not retry together.
+- **Pushes are batched by bytes as well as entries** (about 2 MiB serialized,
+  never splitting an action; an oversized action goes alone), and a push that
+  the server answered short now carries on with the rest in the same pass
+  (stopping when an answer settles nothing).
+
+- Review fixes: the client honours the system and environment proxies
+  (`HTTPS_PROXY`, `NO_PROXY`, ...; a CONNECT tunnel for https) including for
+  `clone --release`; a call that is not safe to repeat (join, device sign-in
+  start, finishing a big file, publishing) is resent only on 429/503 or when
+  it never went out, and says so when its answer was lost; connections are
+  pooled across threads (at most 8 idle per host), released when a download is
+  closed and closed when a sync pass ends, so big uploads leave no sockets.
+- **Clone/connect without an invite signs in in the browser even when this
+  computer joined that server for another project.** Each project is its own
+  device, so the client now asks the server whether it knows this device
+  instead of guessing from a per-machine record. Device refusals carry a
+  machine-readable code (`not_a_device`, `clock_skew`, `bad_signature`) in an
+  `X-Civex-Code` header; the message text is unchanged for older clients. A
+  revoked device signs in again the same way; other refusals keep their messages.
+
+#### Changes
+
+- **A first upload that was interrupted always resumes.** A project whose
+  history was all settled with another server set no changes aside for the
+  upload, so nothing marked it unfinished: after the connect failed (or either
+  side restarted) the next sync sent nothing and the new server kept only the
+  part that had gone. `sync_meta.seed_open` (automatic migration) now records
+  that an upload began and is cleared when it finishes; the next sync or
+  connect finishes it, using the seed acks to skip what was answered. A sync
+  also says so (`notice`) when the server is behind where this copy had followed
+  it, instead of quietly sending nothing.
+- **A first upload to a hub is much faster.**
+  - A first upload (seed) that is interrupted or reconnects **resumes after what
+    the authority already answered** instead of sending the whole project from
+    the start: each answered batch is remembered (new table `seed_acks`, added
+    by an automatic migration; cleared when the seed finishes) and left out
+    next time.
+  - Records go in batches of 250 (was 100); the authority takes at most 500.
+  - Files: the slice's locations and sizes are looked up in one query; files up
+    to 8 MiB (`sync_service.LARGE_FILE_BYTES`) go four at a time over HTTP and
+    are confirmed and committed in groups (50 files or 2 s); a larger file is
+    always sent alone, one at a time, and confirmed and committed as soon as it
+    arrives. A failed upload still keeps the files of its group that arrived.
+  - The Files page's list (`POST /api/file-access/files`) keeps an answer that
+    took 0.3 s or more for 3 s, so the screen's refreshes while sync runs don't
+    each recompute every file; any other `/file-access` call drops it.
+  - `benchmarks/bench_first_upload.py` measures it on PostgreSQL.
+- **An authority writes a pushed batch of new records in bulk.** A run of
+  records made new (no parent, no uniqueness key, no references to other records)
+  is validated against schemas and collections read once per run, then written
+  with one statement each for the records (and their file and record
+  references), the history rows, the answers kept and the feed numbers (one
+  `head_seq` update), instead of about 11 statements per record. On PostgreSQL
+  with 200k records already held, a seed batch of 250 went from about 7.0 ms to
+  0.4 ms per record on the authority. The answers, the rows and the numbers are
+  those of settling each change alone (tests compare the two); anything else (a
+  refused or invalid change, a clash, an edit, a delete, a child record, one
+  whose id or entry appears twice in the push) is settled one at a time as
+  before, in the order sent. The first upload's client does one lookup of open
+  refusals per batch rather than one per change (0.65 to 0.14 ms per record on
+  PostgreSQL). `benchmarks/bench_bulk_push.py` measures both.
+- **The bulk write takes records with a parent, references and uniqueness
+  keys.** A record under a parent (stored, or made earlier in the same push), one
+  citing other records, or one in a schema with a uniqueness key is written in
+  bulk too. A push reads once, with one query, where every record it sits under
+  or points at is, and, per collection and schema, which uniqueness keys nothing
+  stored holds; records the push makes are added as it goes, so a child is judged
+  with its parent there and two records sharing a key in one push are settled
+  one at a time (the second is refused as before). Records the batch refuses, a
+  parent that comes after its child, a parent in another collection and callers
+  limited to some collections take the one-at-a-time path as before. Changes
+  settled one at a time also use the schemas, collections and records read for
+  the push instead of reading them again. Answers and rows are identical
+  (`tests/sync/test_bulk_push.py`). `bench_bulk_push.py --shape parented` times
+  the parent/child shape.
+
+### Workflow steps (breaking)
+
+#### Breaking
+
+- **The built-in workflow steps are redesigned for people who don't program, and
+  every step now has a version.** Eleven steps became five, in three groups
+  ("Bring in", "Work out", "Save"), named in a workflow with their version:
+
+  | New step | Replaces |
+  |---|---|
+  | `civex.files@1` (Files: chosen when run, a folder on this computer, or a field of the record) | `civex.load_file_list`; workflow `inputs: {x: {type: files}}` |
+  | `civex.table@1` (Table: CSV, TSV or Excel from a Files step or a file field) | `civex.load_file` + `civex.parse_table` |
+  | `civex.value_from_filename@1` | `civex.extract_from_filename` |
+  | `civex.save_records@1` (Save as records: rows or files; `if_exists` update, skip or add_new) | `civex.rows_to_records`, `civex.upsert_records`, `civex.create_records_from_files`, `civex.match_files_to_records` |
+  | `civex.set_fields@1` (Set fields on this record) | `civex.save_field`, `civex.save_fields` |
+
+  `civex.get_field` is gone as a step: any setting of any step may be written
+  `{from_field: name}` to take its value from a field of the record the workflow
+  runs on. The old ids no longer run; an id without a version means version 0.
+- **Workflow files are upgraded automatically.** When civex loads a workflow
+  file written for the old steps (or a workflow is pasted, shared or saved), it
+  rewrites it for the new ones: old steps are mapped one to one, `load_file` +
+  `parse_table` merge into one Table step, and `inputs: {x: {type: files}}`
+  becomes a Files step named `x` with the later steps rewired. The old file is
+  kept beside it as `<name>.yaml.bak` (not a workflow, not synced) and the change
+  is logged. Comments in the file are not kept in the rewrite (the backup has
+  them). A workflow that can't be mapped by itself (a step of your own reading
+  `load_file`'s file name, say) is left untouched and the error says which step
+  to edit. A workflow naming a step version this civex doesn't know is refused
+  ("needs a newer civex") rather than guessed at, since workflow files sync
+  between computers. Future contract changes follow the same path: a new step
+  version plus an upgrade function (`workflows/upgrades.py`), with golden tests
+  per version (`tests/workflows/test_step_upgrades.py`).
+- **Run-time files are asked for by a Files step.** A run's files are given under
+  the step's id (`civex workflow run x --input <step id>=*.wav`; the run dialog
+  and the API use the same name). The old workflow-level `inputs` of type `files`
+  are upgraded into such a step; plain `value` inputs are unchanged.
+- **Table reads commas, tabs or semicolons by itself** when no separator is
+  given (the old Read a table step assumed commas).
+
+#### Added
+
+- **Read a folder on this computer.** A Files step set to a folder (or the run
+  dialog's "choose a folder on this computer") reads the files from disk itself:
+  nothing is uploaded, files whose content is already stored are skipped (by
+  content hash) and the run shows its progress. It needs the new
+  `server_path_import` feature, on for a computer's own civex and off on a host
+  (a hub never reads host paths), and a built-in-only host function
+  (`store_folder`) that no plugin gets from a permission action.
+- **Table reads Excel (`.xlsx`) files**, and several files at once.
+- The workflow builder offers the steps in their three groups, shows a step's
+  settings only when they apply (the folder, once "A folder" is chosen) and lets
+  a setting take its value from a field of the record.
+
+### Sync server policies and fixes
+
+#### Sync server policies (no protocol change)
+
+Server-side only, or advertised in `hello`; older devices keep working.
+
+- **One page budget for every paged read.** Feed, snapshot and history pages
+  stop at 2 MiB of entry payload as well as at `limit` (now an "at most"), and
+  `more`/`next` is decided in one place (`domain/sync_page.py`) as "the page
+  stopped before the end". Only the rows of a page are loaded. An action is
+  kept whole while it fits a page (up to 5,000 entries); one over the budget
+  alone is cut and says `more: true`. Fixes the feed cutting an action of
+  over ~400 entries and answering `more: false`.
+- **One request-deadline policy on `/sync/v1`**, at router level so a host that
+  mounts `api_routers` gets it: on PostgreSQL `SET LOCAL lock_timeout` (30 s)
+  for the feed lock and numbering, and `statement_timeout` (15 s) for
+  hello/feed/snapshot reads (never session-level; numbering a backlog is exempt
+  from the statement timeout). A wait that runs out is `503` with
+  `Retry-After` (`BusyError`), also on a docker-managed project. A push that
+  has run for 10 s (`PUSH_BUDGET_SECONDS`) finishes its current action and
+  answers for what it settled; the device sends the rest next.
+- **One wire-encoding policy for JSON routes.** `push` accepts a
+  `Content-Encoding: gzip` body, read after the caller is authenticated and
+  inflated off the event loop up to 64 MiB (`CIVEX_SYNC_MAX_REQUEST_BYTES`;
+  over it: `413` `{"code": "too_large"}`); every other route answers `415` to a
+  compressed body. `hello` advertises `gzip_requests`. JSON answers over 1 KiB
+  are gzipped for a caller that sends `Accept-Encoding: gzip`, except those of
+  `push`, `join` and `device-login` (a host in front reads them). Files, packs,
+  parts and downloads are never compressed.
+- **File parts no longer race.** Beginning or finishing the parts of one file
+  takes a per-file lock (a lock file on the volume naming its owner's process
+  id and start time, valid across processes and on Windows; a stale one is
+  taken over by one waiter at a time); two `begin`s never wipe each other's
+  parts, `finish` is idempotent (the file already stored is success, not a
+  507), and a part that lands after the file was stored is accepted. A part and
+  a finish for the same file never overlap: whichever sees the other's marker
+  backs off with a retryable 503 (`upload_busy`).
+
+#### Other changes
+
+- **File uploads work when civex is embedded in a host.** The browser uploads
+  (a file on a record, files into a collection) are XHR so they can show
+  progress, which skipped the host's sign-in and answered 401. A host now
+  supplies request headers for them: `headers()` in the mount options
+  (`embed.tsx`), or `window.__CIVEX_HEADERS__` on a page civex serves.
+
+- **A file field's attachment list reads properly on a phone.** The file
+  name now takes the row's width (cut with an ellipsis, full name on hover)
+  and the size and remove button wrap beneath it instead of squeezing the name
+  away; sizes use KB, MB or GB (55707.6 KB is now 54.4 MB); a file with no
+  name shows its short hash.
+
+- **A restore of a record the server once refused goes in as a restore.** A
+  device remembered that a server had refused a record's create even after a
+  later fill of a server (following another one, or filling the same one again)
+  had sent the record and been taken. Every later edit or restore of it was then
+  sent as a create of the record as it is: a restore made after pulling a
+  delete from the server met that delete as an "edit" and was refused with the
+  rest of its tree ("deleted on the server, and edited here", "part of one
+  change that could not go in whole"), and the records went back to deleted.
+  Filling a server now notes, on the refusals of what it took, that it was
+  taken (new column `sync_conflicts.taken_at`, with an index on
+  `sync_conflicts.entity_id`; how a person settled a refusal is left as it was,
+  so letting one go can still be undone), and a refusal of the same thing by a
+  server filled again after a reset says it is missing there again. Copies
+  that already hold such stale refusals are not repaired (re-clone them).
+  Also: following another server settles what was waiting for review as
+  `followed` (it wrote "followed another server", longer than the
+  column, so a device on PostgreSQL could not follow another server).
+- **Undoing a bulk action is one step, however big, through one code path.**
+  Restoring what a bulk delete took stopped at 5,000 records (and eight rounds
+  of parents first): a delete of 69,574 records offered "Restore" and then
+  brought back 5,000, "5,000 records in all". There is no cap now, and undo is
+  no longer a path of its own: `RecordService.apply_changes` takes a set of
+  record changes (delete, restore, put fields back), plans it in memory from
+  the few columns it needs, writes it a chunk at a time (5,000 ids, 2,000
+  history entries per statement, a fixed number of statements per chunk, never
+  one per record) and records it with the new bulk history writer. Bulk
+  delete, bulk edit's chunks, restore-all, a restore from Trash and the undo
+  of any bulk action (`revert_batch`: now a bulk edit, a delete or a restore;
+  the inverse change set is read from the batch's history) all use it, and the
+  old per-kind paths (one-at-a-time reverts, the eight-pass loop, a history
+  entry per `log_change`) are gone. What is left deleted is only what is
+  genuinely held back (a collection, schema or record above it that is deleted
+  and not coming back, or a clash of unique values) and is counted; unique
+  keys are checked a chunk of records at a time instead of per record. The
+  preview and the restore are the same computation, so the dialog's numbers
+  are exactly what happens. An undo is one step and one batch in history; each
+  tree it restores is its own action when sent, so one refused tree splits
+  nothing else, and a preview runs the same checks as the undo (referrers,
+  permissions, `force`). The History restore dialog shows the true
+  count and a busy state. `GET /audit/restore-all` no longer has a `truncated`
+  field. History entries go in with COPY on PostgreSQL (about 30k rows/s through the
+  driver, against 5k/s before). Measured on PostgreSQL with 69,572 records:
+  delete 10 s, undo preview 3.6 s, undo 8 s, redo 13.5 s.
+
+- **Faster pushes to an authority.** A push of 100 changes ran about 17
+  statements per change (20 for edits), all under the feed's lock; it now runs
+  about 10 (13 for edits): what the push asks one change at a time (was it sent
+  before, the record it names, the feed's row) is read once for the whole push,
+  and the feed's counter comes back from the statement that raises it. Asking
+  which of 1000 files the authority lacks (`missing_files`) was 1000 statements
+  and is now 4. Same answers, order and audit; no change to the wire. Measured
+  by `benchmarks/bench_push.py` (PostgreSQL: 1.37 s to 0.85 s for 100 new
+  records, 535 ms to 37 ms for 1000 hashes).
+- **Sending a large project's files shows one total from the start.** The
+  total of the "files sent" bar used to grow, because each background pass
+  only counted the files it had already asked the server about, and the
+  server was asked about every file still owed, again, on every 20 s pass
+  (tens of thousands of `files/missing` calls on a big first upload, all
+  charged against the upload time). The total (files, and their bytes) is now
+  one aggregate query over the references and the file inventory, so the bar
+  reads "x of N files · a of b GB" from the first moment and holds steady.
+  A pass asks only about the slice of files it is about to send, time spent
+  asking no longer counts against the upload budget, and a file the server
+  already holds counts as done; one that can't be read here is shown apart
+  ("N not readable here"), never as sent. An `everything` pass still checks every file,
+  so one the server has lost is found and sent. Resumable and idempotent as
+  before.
+
 ## v2.2.0 — hidden collections and filtered sync, hosted chrome, CLI sign-in (2026-11-23)
 
 ### Breaking

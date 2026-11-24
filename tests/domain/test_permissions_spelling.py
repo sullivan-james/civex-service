@@ -118,9 +118,7 @@ def test_a_pushed_uniqueness_rule_is_for_someone_who_sees_everything():
             delta=None,
         )
 
-    restricted = Permissions.of(
-        p.READ, p.CHANGE_STRUCTURE, read_collections=[OTHER]
-    )
+    restricted = Permissions.of(p.READ, p.CHANGE_STRUCTURE, read_collections=[OTHER])
     whole = Permissions.everything()
     rule = update(unique_keys=[["a"]])
     assert restricted.refuses(None, rule)

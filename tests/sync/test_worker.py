@@ -6,8 +6,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from civex.config import SyncConfig
 from civex.domain.sync import SyncError
+from civex.services import sync_worker
 from civex.services.sync_lock import SyncBusy
 from civex.services.sync_worker import BASE_BACKOFF, DEBOUNCE, MAX_BACKOFF, SyncWorker
 
@@ -82,6 +85,28 @@ def test_it_syncs_at_once_then_waits_for_the_interval() -> None:
     assert r.tick(10) is None
     assert r.tick(60) == "report"
     assert r.calls == 2
+
+
+@pytest.fixture(autouse=True)
+def _no_jitter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The schedule is exact here; jitter has its own test."""
+    monkeypatch.setattr(sync_worker, "jittered", lambda seconds, rng=None: seconds)
+
+
+def test_waits_are_jittered_and_a_retry_after_is_honoured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        sync_worker, "jittered", lambda seconds, rng=None: seconds * 1.25
+    )
+    r = Rig()
+    e = SyncError("busy", status=429)
+    e.retry_after = 100.0
+    r.outcomes = [e]
+    r.tick()
+    r.pending = 1
+    assert r.tick(124) is None  # 100 s asked, jittered to 125
+    assert r.tick(2) == "report"
 
 
 def test_it_does_nothing_without_an_authority_or_when_paused() -> None:
@@ -259,5 +284,10 @@ def test_sending_over_several_passes_is_one_bar():
     r.files_tick()
     r.files_tick(1)
     bars = [(p.done, p.total, p.bytes_done, p.bytes_total) for p in seen if p]
-    assert bars == [(0, 3, 0, 300), (2, 3, 200, 300), (2, 3, 200, 300), (3, 3, 300, 300)]
+    assert bars == [
+        (0, 3, 0, 300),
+        (2, 3, 200, 300),
+        (2, 3, 200, 300),
+        (3, 3, 300, 300),
+    ]
     assert seen[-1] is None  # all sent: the bar goes

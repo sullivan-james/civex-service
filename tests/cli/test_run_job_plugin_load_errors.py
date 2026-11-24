@@ -28,7 +28,7 @@ def test_broken_plugin_file_warning_lands_in_the_job_log(
 name: fine
 steps:
   - id: read
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config: {field: name}
 """)
     job = ctx.job_svc.enqueue_manual("fine", record)

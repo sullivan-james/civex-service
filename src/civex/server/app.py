@@ -432,7 +432,7 @@ def api_routers(
         (bundle.router, None),
         (plugins.router, features_.PLUGIN_EDITOR),
         (notes.router, None),
-        (releases.router, None),
+        (releases.router, features_.RELEASES),
         (records.router, None),
         (record_files.router, None),
         (export_definitions.router, None),

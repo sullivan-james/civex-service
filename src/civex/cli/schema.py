@@ -532,7 +532,7 @@ def schema_add_field(
     """Add a field to a schema.
 
     The field name is a slug because workflow steps reference it by name
-    (e.g. civex.get_field's field:). Use --label for the human-readable
+    (e.g. a field: setting). Use --label for the human-readable
     version shown in the UI and in `civex schema show`.
 
     Restriction examples:

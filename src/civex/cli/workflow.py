@@ -11,7 +11,7 @@ from rich.table import Table
 from civex.cli.utils import cli_load_config, drain_jobs, get_ctx
 from civex.console import console
 from civex.domain.exceptions import CivexError, NotFoundError, WorkflowValidationError
-from civex.workflows.definition import WorkflowDef, load_workflow
+from civex.workflows.definition import WorkflowDef, load_workflow, run_inputs
 
 log = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ def _resolve_inputs(
     if not raw_args:
         return {}
 
-    declared = wf_def.inputs or {}
+    declared = run_inputs(wf_def)
     resolved: dict[str, Any] = {}
 
     for arg in raw_args:
@@ -114,8 +114,7 @@ def workflow_list() -> None:
         try:
             wf = load_workflow(path)
             inputs_summary = (
-                ", ".join(f"{k} ({v.type})" for k, v in (wf.inputs or {}).items())
-                or "—"
+                ", ".join(f"{k} ({v.type})" for k, v in run_inputs(wf).items()) or "—"
             )
             table.add_row(
                 wf.name,
@@ -145,10 +144,9 @@ def workflow_run(
 ) -> None:
     """Run a workflow against a specific record.
 
-    Declared workflow inputs can be supplied with --input name=value.
-    For inputs of type 'files', value is a glob pattern (e.g. --input files=*.csv).
-    Supplied values are pre-seeded as __input__.<name> and can be referenced in
-    step inputs like: files: __input__.files
+    What the workflow asks for when run is given with --input name=value:
+    a Files step set to "chosen when the workflow is run" is named by its step
+    id, and its value is a glob pattern (e.g. --input wav-files=*.wav).
     """
     config = cli_load_config()
     wf_def = _find_workflow(name, config.civex_dir / "workflows")

@@ -7,10 +7,15 @@ import {
   CheckRow,
   Field,
   Input,
+  Modal,
+  ModalBody,
+  ModalHeader,
   Select,
   Textarea,
 } from '../../ui'
 import { PatternFromExampleDialog } from '../../files/PatternFromExample'
+import { FolderBrowser } from '../../settings/FolderBrowser'
+import { useHasFeature } from '../../../hooks/useFeatures'
 import { useExampleFilenames } from '../../../hooks/useExampleFilenames'
 import { fieldsWithInherited } from '../../../utils/schemaFields'
 import { displayLabel } from '../../../utils/naming'
@@ -225,10 +230,49 @@ function PatternControl(props: Props & { id?: string }) {
   )
 }
 
+/** A folder on the computer civex runs on: typed, or chosen from a list of
+ * its folders (a browser can't see them itself). */
+function FolderControl({ value, onChange, id }: Props & { id?: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Input
+        size="sm"
+        id={id}
+        value={str(value)}
+        className="min-w-0 flex-1 font-mono"
+        placeholder="/path/to/the/folder"
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <Button size="sm" onClick={() => setOpen(true)}>
+        Choose a folder…
+      </Button>
+      {open && (
+        <Modal onClose={() => setOpen(false)}>
+          <ModalHeader>Choose a folder</ModalHeader>
+          <ModalBody>
+            <FolderBrowser
+              initialPath={str(value)}
+              onSelect={(path) => {
+                onChange(path)
+                setOpen(false)
+              }}
+              onCancel={() => setOpen(false)}
+            />
+          </ModalBody>
+        </Modal>
+      )}
+    </div>
+  )
+}
+
 function Control(props: Props & { id?: string }) {
   const { setting, value, onChange, ctx, id } = props
   const { hint } = setting
+  const has = useHasFeature()
   switch (hint.kind) {
+    case 'folder':
+      return <FolderControl {...props} />
     case 'field':
       return setting.type === 'array' ? (
         <FieldsPicker {...props} />
@@ -280,7 +324,9 @@ function Control(props: Props & { id?: string }) {
       )
     case 'choice': {
       const current = str(value === undefined ? setting.default : value)
-      const options = hint.choices ?? []
+      const options = (hint.choices ?? []).filter(
+        (o) => !o.feature || has(o.feature),
+      )
       return (
         <Select
           size="sm"
@@ -388,16 +434,73 @@ function ObjectControl({ value, onChange, id }: Props & { id?: string }) {
   )
 }
 
+/** Whether a setting's value is "from this record's field X": any setting
+ * of any step may be (`{from_field: x}`). */
+function fromField(value: unknown): string | null {
+  if (
+    value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    'from_field' in value
+  )
+    return str((value as { from_field: unknown }).from_field)
+  return null
+}
+
+/** The settings that are plain text, numbers or a choice may take their
+ * value from a field of the record the workflow runs on instead. */
+function canTakeFromField(setting: Setting): boolean {
+  const kind = setting.hint.kind
+  if (kind && kind !== 'choice') return false
+  return ['string', 'integer', 'number', 'boolean', 'any'].includes(
+    setting.type,
+  )
+}
+
 export function SettingControl(props: Props) {
-  const { setting, missing } = props
-  return (
-    <Field
-      label={setting.title}
-      info={setting.description || undefined}
-      required={setting.required}
-      error={missing ? 'Choose this to finish the step.' : undefined}
+  const { setting, missing, value, onChange, ctx } = props
+  const field = fromField(value)
+  const takeable = canTakeFromField(setting)
+  const toggle = takeable && field === null && (
+    <Button
+      size="sm"
+      type="button"
+      onClick={() => onChange({ from_field: '' })}
     >
-      <Control {...props} />
-    </Field>
+      Use a field of this record instead
+    </Button>
+  )
+  return (
+    <>
+      <Field
+        label={setting.title}
+        info={setting.description || undefined}
+        required={setting.required}
+        error={missing ? 'Choose this to finish the step.' : undefined}
+      >
+        {field !== null ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-fg-muted">
+              From this record’s field
+            </span>
+            <div className="min-w-0 flex-1">
+              <FieldPicker
+                {...props}
+                setting={{ ...setting, hint: { kind: 'field' } }}
+                value={field}
+                onChange={(name) => onChange({ from_field: name })}
+                ctx={ctx}
+              />
+            </div>
+            <Button size="sm" onClick={() => onChange(undefined)}>
+              Type a value instead
+            </Button>
+          </div>
+        ) : (
+          <Control {...props} />
+        )}
+      </Field>
+      {toggle}
+    </>
   )
 }

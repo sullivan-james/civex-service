@@ -10,8 +10,7 @@ any form, so each change the feed would send is looked at before it goes:
   one moved into sight is sent as its creation, in full (the device never had
   it), with its notes. Nothing else of what was hidden before travels.
 - a note goes with its record's collection, a collection's own changes only
-  when it is seen, a release (a bundle of records from anywhere) only to one who
-  sees everything. Kinds and fields, views and the Analytics page are
+  when it is seen. Releases are never synced. Kinds and fields, views and the Analytics page are
   project-wide, as everywhere in civex.
 
 Pure of storage: the lookups are handed in.
@@ -107,8 +106,6 @@ class FeedShaper:
             return [entry]
         if kind == "dataset":
             return [entry] if self._scope.sees(entry.entity_id) else []
-        if kind == "release":
-            return [entry] if self._scope.unrestricted else []
         if kind in _PROJECT_WIDE:
             return [entry]
         return []  # a kind this does not know holds nothing it can place

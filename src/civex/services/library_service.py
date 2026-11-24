@@ -74,6 +74,7 @@ from civex.services.plugin_service import PluginService
 from civex.services.workflow_service import WorkflowService
 from civex.workflows.contract_validation import validate_workflow_contracts
 from civex.workflows.definition import WorkflowDef, trigger_summaries
+from civex.workflows.definition import parse_workflow as parse_workflow_text
 
 if TYPE_CHECKING:
     from civex.plugins.registry import PluginRegistration
@@ -102,7 +103,7 @@ def parse_workflow(name: str, content: str) -> WorkflowDef:
                 raise ValidationError(
                     f"{name}.yaml uses YAML aliases (*name): a shared workflow can't"
                 )
-        return WorkflowDef.model_validate(yaml.safe_load(content))
+        return parse_workflow_text(content)
     except ValidationError:
         raise
     except Exception as e:

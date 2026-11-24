@@ -2602,7 +2602,6 @@ class RestoreAllPlanResponse(BaseModel):
         description="Matched, but under something deleted that is not in the set "
         "(for a field, also one whose name has since been taken)."
     )
-    truncated: bool = Field(description="More matched than were looked at.")
 
     @classmethod
     def from_dto(cls, dto: RestoreAllPlanDTO) -> RestoreAllPlanResponse:

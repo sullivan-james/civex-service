@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -38,7 +40,54 @@ from civex.services.archive import build_download
 from civex.services.progress import Progress, registry as progress_registry
 from civex.services.transfer_jobs import jobs
 
-router = APIRouter(prefix="/file-access", tags=["files"])
+# The page of the Files list is worked out from every file the selection holds,
+# which on a large project is seconds of CPU on each refresh of the screen. An
+# answer that took this long is kept for a few seconds, so the screen's
+# refreshes (and a sync running meanwhile, whose progress it shows) don't each
+# pay again. A quick answer is never kept, and any other call of this router
+# (a move, a download, freeing space) drops what is kept.
+LISTING_SLOW_SECONDS = 0.3
+LISTING_KEEP_SECONDS = 3.0
+LISTING_KEEP_MAX = 16
+_listings: dict[str, tuple[float, dict]] = {}
+_listings_lock = threading.Lock()
+_generation = (
+    0  # moves on at every forgetting: an answer worked out before it is not kept
+)
+
+
+def forget_listings() -> None:
+    global _generation
+    with _listings_lock:
+        _generation += 1
+        _listings.clear()
+
+
+def _forget_on_change(request: Request) -> None:
+    # Reading calls (polling a transfer's progress, listing definitions) leave it.
+    if request.method != "GET" and not request.url.path.endswith("/file-access/files"):
+        forget_listings()
+
+
+def _listing_key(ctx: AppContext, body: FileListRequest) -> str:
+    """Whose answer it is: the project (its database and folder), who asks and
+    what they may do, and the request."""
+    project = ctx.project
+    return "\x1f".join(
+        (
+            str(project.config.db.url),
+            str(project.config.civex_dir),
+            str(project.actor),
+            repr(project.account),
+            repr(project.permissions),
+            body.model_dump_json(),
+        )
+    )
+
+
+router = APIRouter(
+    prefix="/file-access", tags=["files"], dependencies=[Depends(_forget_on_change)]
+)
 
 PROGRESS_HEADER = "X-Civex-Progress"
 
@@ -351,6 +400,25 @@ def list_files(body: FileListRequest, ctx: AppContext = Depends(get_ctx)):
     server, each file says whether the server has it (`sent`), `server`
     counts them (`sent`, and `unsent`: on a drive here, not sent yet), and
     `server` in the request narrows to either. Counts are of files."""
+    key = _listing_key(ctx, body)
+    now = time.monotonic()
+    with _listings_lock:
+        kept = _listings.get(key)
+        generation = _generation
+    if kept is not None and now < kept[0]:
+        return kept[1]
+    answer = _list_files(body, ctx)
+    if time.monotonic() - now >= LISTING_SLOW_SECONDS:
+        with _listings_lock:
+            if generation != _generation:
+                return answer
+            if len(_listings) >= LISTING_KEEP_MAX:
+                _listings.pop(next(iter(_listings)))
+            _listings[key] = (time.monotonic() + LISTING_KEEP_SECONDS, answer)
+    return answer
+
+
+def _list_files(body: FileListRequest, ctx: AppContext) -> dict:
     selection = _base_selection(body, ctx)
     if body.sort:
         selection.query.sort = body.sort

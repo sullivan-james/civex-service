@@ -353,7 +353,12 @@ def test_populated_database_keeps_its_data_indexes_and_foreign_keys(
         )
     after_idx = {t: _index_names(pg_schema, t) for t in ("records", "audit_log")}
     # (an index a later migration adds is not part of what the conversion keeps)
-    after_idx["audit_log"] -= {"ix_audit_log_seeding"}
+    after_idx["audit_log"] -= {
+        "ix_audit_log_seeding",
+        "ix_audit_log_hlc",
+        "ix_audit_log_unsettled",
+        "ix_audit_log_op",
+    }
     # same index names, except the audit_log primary key which now includes
     # the partition key but keeps its name
     assert after_idx == before_idx

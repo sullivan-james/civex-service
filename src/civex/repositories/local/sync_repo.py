@@ -16,18 +16,22 @@ from typing import Any
 from sqlalchemy import (
     BigInteger,
     String,
+    Text,
     Uuid,
     and_,
     cast,
     delete,
+    exists,
     func,
+    insert,
     or_,
     select,
+    text,
     update,
 )
 from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
-from sqlalchemy.orm.attributes import flag_modified
+from sqlalchemy.orm.attributes import flag_modified, set_committed_value
 
 from civex.db.models import (
     IgnoredMissingFile,
@@ -38,12 +42,12 @@ from civex.db.models import (
     Dashboard,
     Dataset,
     RecordNote,
-    Release,
     Field,
     FileReference,
     Record,
     RecordReference,
     Schema,
+    SeedAck,
     ServerFile,
     ServerLack,
     SyncConflict,
@@ -53,11 +57,14 @@ from civex.db.models import (
     SyncOp,
     View,
     _UTCDateTime,
+    insert_record_refs,
 )
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.audit_diff import entry_snapshots
 from civex.domain.merge import value_at
+from civex.domain.sync_page import ACTION_ENTRIES_MAX, budget, take
 from civex.domain.sync import (
+    NOT_SYNCED_KINDS,
     LoginRequestDTO,
     OpResult,
     SyncBatchInfo,
@@ -66,6 +73,7 @@ from civex.domain.sync import (
     SyncEntry,
     SyncInviteDTO,
     SyncMetaDTO,
+    TAKEN,
     parse_snapshot_cursor,
     wire_state,
 )
@@ -75,7 +83,6 @@ from civex.repositories.local.record_repo import _to_dto as _record_dto
 from civex.repositories.local.schema_repo import _field_to_dto, _schema_to_dto
 from civex.repositories.local.dashboard_repo import _to_dto as _dashboard_dto
 from civex.repositories.local.note_repo import _to_dto as _note_dto
-from civex.repositories.local.release_repo import _to_dto as _release_dto
 from civex.repositories.local.view_repo import _to_dto as _view_dto
 
 _MODELS: dict[str, Any] = {
@@ -86,12 +93,14 @@ _MODELS: dict[str, Any] = {
     "dashboard": Dashboard,
     "record": Record,
     "note": RecordNote,
-    "release": Release,
 }
 # A column PostgreSQL maintains itself (a trigger), or one that is this copy's
-# own (a release's place in this copy's history); never written from a snapshot.
+# own; never written from a snapshot.
 _NOT_WRITTEN = frozenset({"search_vector", "local_seq", "indexed"})
 
+# What this copy's history holds that is never synced (a release is published
+# on a host): not sent, not numbered, not counted as unsent, not fed.
+_SYNCED = AuditLog.entity_type.not_in(sorted(NOT_SYNCED_KINDS))
 
 # The order changes were made in here: the number the database gave each entry
 # as it was written (`AuditLog.local_seq`), not its time, since a clock can step
@@ -124,13 +133,13 @@ def _parse(value: str | None) -> datetime | None:
 
 def _kept_owner():  # type: ignore[no-untyped-def]
     """A file_references row whose owner keeps the file on the authority: a
-    live record or a release (with `Record` outer-joined)."""
-    return (
-        FileReference.record_id.is_not(None) & Record.deleted_at.is_(None)
-    ) | FileReference.release_id.is_not(None)
+    live record (with `Record` outer-joined). A release owns files too, but it
+    is never synced, so what it keeps is not something to send or fetch."""
+    return FileReference.record_id.is_not(None) & Record.deleted_at.is_(None)
 
 
 LACK_RETRY_FIRST = timedelta(minutes=10)
+_ID_CHUNK = 500
 LACK_RETRY_MAX = timedelta(days=1)
 
 
@@ -140,9 +149,25 @@ def lack_wait(misses: int) -> timedelta:
     return min(LACK_RETRY_FIRST * 2 ** min(max(misses, 1) - 1, 12), LACK_RETRY_MAX)
 
 
+# The same text as the WHERE of `ix_audit_log_unsettled` (db/models.py), so the
+# database can see that the index covers a query (SQLite only recognises a
+# partial index whose condition is written out in the query, not bound).
+_UNSETTLED = text("audit_log.apply_state NOT IN ('applied', 'superseded')")
+
+
 class LocalSyncRepository:
     def __init__(self, session: Session) -> None:
         self._s = session
+        # Ops known for the length of one push (`ops_known`), else None.
+        self._ops: dict[uuid.UUID, OpResult | None] | None = None
+        # Records known not to be there, for the length of one push.
+        self._absent: set[uuid.UUID] | None = None
+        # The records the push names; `_absent` is read again from these when
+        # something that reached other records has made it unsure.
+        self._wanted: list[uuid.UUID] = []
+        self._stale = False
+        self._held: list[Record] = []
+        self._meta_held: SyncMeta | None = None
 
     def rollback(self) -> None:
         """Drop what the session holds that was not committed."""
@@ -163,9 +188,11 @@ class LocalSyncRepository:
             # Even when the failed flush has already ended it: until it is rolled
             # back the session refuses further work.
             nested.rollback()
+            self.forget_held()  # bulk writes it undid aren't seen by held rows
             raise ValidationError(_brief(e)) from e
         except BaseException:
             nested.rollback()
+            self.forget_held()
             raise
 
     # ------------------------------------------------------------------
@@ -227,7 +254,7 @@ class LocalSyncRepository:
         self, after: str, limit: int, unconfirmed: bool = False
     ) -> list[str]:
         """Hashes of the files live records cite (a deleted record's are sent if
-        it is restored) and of releases' bundles, in hash order, `limit` of them
+        it is restored), in hash order, `limit` of them
         after `after`; `unconfirmed`: only those the authority hasn't said it
         holds. The catalog is kept up to date as records are written, so
         what a device still owes its authority is worked out from it each time
@@ -241,6 +268,17 @@ class LocalSyncRepository:
         not every reference each time: with tens of thousands of files, a
         `DISTINCT` over all of them per page was minutes of work and tens of
         megabytes of shared memory for PostgreSQL's parallel workers."""
+        return (
+            self._referenced_unordered(after, unconfirmed)
+            .group_by(FileReference.sha256)
+            .order_by(FileReference.sha256)
+            .limit(limit)
+        )
+
+    def _referenced_unordered(self, after: str, unconfirmed: bool):  # type: ignore[no-untyped-def]
+        """The references after `after` (optionally only those the authority
+        hasn't confirmed), one row each, ungrouped: for a page (grouped,
+        ordered and limited) or an aggregate (grouped, nothing else)."""
         sha = FileReference.sha256
         # An EXISTS per candidate row, not a join: the planner can then walk
         # the index in order and stop at the limit.
@@ -250,19 +288,17 @@ class LocalSyncRepository:
             .exists()
         )
         query = select(sha).where(
-            sha > after,
-            (FileReference.record_id.is_not(None) & live_owner)
-            | FileReference.release_id.is_not(None),
+            sha > after, FileReference.record_id.is_not(None) & live_owner
         )
         if unconfirmed:
             query = query.where(
                 ~select(ServerFile.sha256).where(ServerFile.sha256 == sha).exists()
             )
-        return query.group_by(sha).order_by(sha).limit(limit)
+        return query
 
     def _referenced(self):  # type: ignore[no-untyped-def]
         """The column of every file this project needs the authority to hold:
-        those its live records and its releases own."""
+        those its live records own."""
         return (
             select(FileReference.sha256.label("sha256"))
             .outerjoin(Record, Record.id == FileReference.record_id)
@@ -273,11 +309,42 @@ class LocalSyncRepository:
         )
 
     def count_unconfirmed(self) -> int:
-        """How many files live records cite (or releases keep) that the
+        """How many files live records cite that the
         authority hasn't said it holds: not on the server yet, as far as this
         device knows."""
         page = self._referenced_page("", 2**31, True).subquery()
         return int(self._s.execute(select(func.count()).select_from(page)).scalar_one())
+
+    def unconfirmed_totals(
+        self, after: str = "", volumes: Iterable[str] | None = None
+    ) -> tuple[int, int]:
+        """(files, bytes) of what live records cite after
+        `after` that the authority hasn't said it holds: one aggregate over the
+        references and the inventory, never a list. Bytes are of the copy this
+        computer holds on the `volumes` named (all, when None; a copy on a
+        volume no longer configured isn't one), a file with none counting as a
+        file with no bytes. No ORDER BY or LIMIT: it is a count and a sum."""
+        pending = (
+            self._referenced_unordered(after, True)
+            .group_by(FileReference.sha256)
+            .subquery()
+        )
+        on = StoredObject.sha256 == pending.c.sha256
+        if volumes is not None:
+            on = on & StoredObject.volume.in_(list(volumes))
+        sized = (
+            select(
+                pending.c.sha256,
+                func.max(StoredObject.size).label("size"),
+            )
+            .select_from(pending.outerjoin(StoredObject, on))
+            .group_by(pending.c.sha256)
+            .subquery()
+        )
+        files, size = self._s.execute(
+            select(func.count(), func.coalesce(func.sum(sized.c.size), 0))
+        ).one()
+        return int(files), int(size)
 
     def unconfirmed_copies(self, limit: int) -> dict[str, list[str]]:
         """Up to `limit` files live records cite that the authority hasn't said
@@ -471,12 +538,11 @@ class LocalSyncRepository:
     def _not_here(  # type: ignore[no-untyped-def]
         self, collections: set[uuid.UUID] | None = None, lacks: str = "hide"
     ):
-        """Files live records or releases here own that no drive here is
+        """Files live records here own that no drive here is
         recorded to hold (a deleted record's files are fetched if it comes back
         and is opened, not in the background), each with a collection that
-        uses it (none for a release's); with `collections`, only files records
-        in those use, and releases'. A release that came from another device
-        owns only its bundle here, so that is what it brings.
+        uses it; with `collections`, only files records in those use. Releases
+        are never synced, so what one keeps is not fetched.
 
         `lacks` says what to do with files the authority said it hasn't got:
         `hide` leaves out every one (and those a person ignored): what is
@@ -496,9 +562,7 @@ class LocalSyncRepository:
             .outerjoin(Record, Record.id == FileReference.record_id)
             .outerjoin(stored, stored.c.sha == FileReference.sha256)
             .outerjoin(ServerLack, ServerLack.sha256 == FileReference.sha256)
-            .where(
-                stored.c.sha.is_(None), record | FileReference.release_id.is_not(None)
-            )
+            .where(stored.c.sha.is_(None), record)
         )
         if lacks == "wait":
             query = query.where(
@@ -522,7 +586,7 @@ class LocalSyncRepository:
         shas: list[str] | None = None,
         collections: set[uuid.UUID] | None = None,
     ) -> list[tuple[str, uuid.UUID | None]]:
-        """Files the records here cite (or releases keep) that no drive here
+        """Files the records here cite that no drive here
         holds (another device added them), in hash order after `after`, each
         with a collection that uses it (to choose the drive it is written to).
         With `shas`, only those (asked for by name, so whatever the authority
@@ -775,15 +839,27 @@ class LocalSyncRepository:
     def next_hub_seq(self) -> int:
         """The next number, taken atomically: the counter is incremented in the
         database, never read and written back, so two writers can't hand out the
-        same one."""
-        self._meta_row()
-        self._s.execute(
+        same one. The new number comes back from the same statement (where the
+        database can say so), and the held row is told it, so taking one costs
+        one statement and expires nothing else the session holds."""
+        row = self._meta_row()
+        statement = (
             update(SyncMeta)
             .where(SyncMeta.id == 1)
             .values(head_seq=SyncMeta.head_seq + 1)
         )
+        if self._returning():
+            new = self._s.execute(statement.returning(SyncMeta.head_seq)).scalar_one()
+            set_committed_value(row, "head_seq", new)
+            return int(new)
+        self._s.execute(statement)
         self._s.expire_all()
         return self._meta_row().head_seq
+
+    def _returning(self) -> bool:
+        """Whether the database answers an UPDATE with the row (PostgreSQL, and
+        SQLite from 3.35)."""
+        return bool(self._s.get_bind().dialect.update_returning)
 
     def head_seq(self) -> int:
         return self._meta_row().head_seq
@@ -792,10 +868,18 @@ class LocalSyncRepository:
         """Hold the feed's counter until this transaction ends, so whoever
         takes it next waits: a row lock on PostgreSQL, the write lock on
         SQLite (a write that changes nothing still takes it)."""
-        self._meta_row()
-        self._s.execute(
+        row = self._meta_row()
+        statement = (
             update(SyncMeta).where(SyncMeta.id == 1).values(head_seq=SyncMeta.head_seq)
         )
+        if self._returning():
+            # The counter as it is once the lock is ours (another push may have
+            # moved it while this one waited), so what is held is current.
+            held = self._s.execute(statement.returning(SyncMeta.head_seq)).scalar_one()
+            set_committed_value(row, "head_seq", held)
+        else:
+            self._s.execute(statement)
+            self._s.expire(row)
 
     def record_outcome(self, error: str | None) -> None:
         row = self._meta_row()
@@ -969,10 +1053,76 @@ class LocalSyncRepository:
     # What an authority has been sent
     # ------------------------------------------------------------------
 
-    def get_op(self, op_id: uuid.UUID) -> OpResult | None:
-        row = self._s.get(SyncOp, op_id)
-        if row is None:
-            return None
+    @contextmanager
+    def push_scope(self, entries: Iterable[SyncEntry]) -> Iterator[None]:
+        """For the length of one push, with the feed's lock held (so nothing
+        else writes these): what the push will ask of the database one thing
+        at a time is read once, and kept current by the writes that follow.
+
+        - which changes were sent before (`get_op`, `save_op`, `drop_op`);
+        - the feed's own row, held (the session keeps rows only while something
+          refers to them) and read afresh once the lock is ours;
+        - the records the changes name, in one query, locked (`FOR UPDATE`
+          where the database has it, so an edit made on this instance itself
+          can't slip in between reading a record and writing it back); those
+          not there are known to be absent, so `snapshot` and `apply_snapshot`
+          don't look for each again."""
+        batch = list(entries)
+        wanted = list(dict.fromkeys(e.id for e in batch))
+        known: dict[uuid.UUID, OpResult | None] = {i: None for i in wanted}
+        for at in range(0, len(wanted), 500):
+            for row in self._s.scalars(
+                select(SyncOp).where(SyncOp.op_id.in_(wanted[at : at + 500]))
+            ):
+                known[row.op_id] = self._op_result(row)
+        pinned = self._meta_row()
+        self._s.refresh(pinned)
+        record_ids = sorted(
+            {e.entity_id for e in batch if e.entity_type == "record"}
+        )  # in id order, so the locks are taken in one order
+        held: list[Record] = []
+        absent = set(record_ids)
+        for at in range(0, len(record_ids), 500):
+            for record in self._s.scalars(
+                select(Record)
+                .where(Record.id.in_(record_ids[at : at + 500]))
+                .order_by(Record.id)  # one lock order, whoever else locks records
+                .with_for_update(of=Record)
+            ):
+                held.append(record)
+                absent.discard(record.id)
+        # Only now that everything was read: nothing is left set if it failed.
+        self._ops, self._absent, self._held, self._meta_held = (
+            known,
+            absent,
+            held,
+            pinned,
+        )
+        self._wanted, self._stale = record_ids, False
+        try:
+            yield
+        finally:
+            self._ops = self._absent = self._meta_held = None
+            self._held = []
+
+    def forget_held(self) -> None:
+        """What a push read at its start is read again when next needed: the
+        records it held, the feed's row, and which records were absent. Called
+        after a change that can reach other records than the one it names (a
+        delete or a move takes children with it, in bulk statements the session
+        doesn't see) and after a savepoint was rolled back (which undoes
+        counters and bulk writes the session didn't track)."""
+        for record in self._held:
+            if record in self._s:  # not one the session has let go of
+                self._s.expire(record)
+        if self._meta_held is not None and self._meta_held in self._s:
+            self._s.expire(self._meta_held)
+        if self._absent is not None:
+            self._absent = set()  # look for them again
+            self._stale = True
+
+    @staticmethod
+    def _op_result(row: SyncOp) -> OpResult:
         return OpResult(
             op_id=row.op_id,
             status=row.status,
@@ -980,6 +1130,14 @@ class LocalSyncRepository:
             conflicts=list(row.conflicts or []),
             hub_seq=row.hub_seq,
         )
+
+    def get_op(self, op_id: uuid.UUID) -> OpResult | None:
+        if self._ops is not None and op_id in self._ops:
+            return self._ops[op_id]
+        row = self._s.get(SyncOp, op_id)
+        if row is None:
+            return None
+        return self._op_result(row)
 
     def save_op(
         self,
@@ -1002,6 +1160,138 @@ class LocalSyncRepository:
             )
         )
         self._s.flush()
+        if self._ops is not None:
+            self._ops[entry.id] = result
+
+    def record_absent(self, id: uuid.UUID) -> bool:
+        """Whether this push has found no record with this id (so a lookup of
+        it would find nothing)."""
+        if self._absent is None:
+            return False
+        if self._stale:
+            self._stale = False
+            present: set[uuid.UUID] = set()
+            for at in range(0, len(self._wanted), 500):
+                present.update(
+                    self._s.scalars(
+                        select(Record.id).where(
+                            Record.id.in_(self._wanted[at : at + 500])
+                        )
+                    )
+                )
+            self._absent = set(self._wanted) - present
+        return id in self._absent
+
+    def reserve_hub_seqs(self, count: int) -> int:
+        """Take `count` consecutive numbers in one statement; the first is
+        returned. What `next_hub_seq` does, for a batch."""
+        row = self._meta_row()
+        statement = (
+            update(SyncMeta)
+            .where(SyncMeta.id == 1)
+            .values(head_seq=SyncMeta.head_seq + count)
+        )
+        if self._returning():
+            new = self._s.execute(statement.returning(SyncMeta.head_seq)).scalar_one()
+            set_committed_value(row, "head_seq", new)
+            return int(new) - count + 1
+        self._s.execute(statement)
+        self._s.expire_all()
+        return self._meta_row().head_seq - count + 1
+
+    def insert_records(self, states: list[dict[str, Any]]) -> None:
+        """Make these records exist, none of them held: what `apply_snapshot`
+        does for each, in a few statements (its references too, which the ORM
+        writes through a hook this skips). Values are read as `apply_snapshot`
+        reads them (`record_values`), so one that can't be raises before
+        anything is written."""
+        if not states:
+            return
+        every = [record_values(state) for state in states]
+        # A record goes in after the record it sits under (one of these, or
+        # one held): written level by level, each level in groups of rows that
+        # fill the same columns.
+        depth: dict[uuid.UUID, int] = {}
+        levels: dict[int, dict[frozenset[str], list[dict[str, Any]]]] = {}
+        for values in every:
+            above = values.get("parent_record_id")
+            level = depth[above] + 1 if above in depth else 0
+            depth[values["id"]] = level
+            levels.setdefault(level, {}).setdefault(frozenset(values), []).append(
+                values
+            )
+        self._s.flush()
+        conn = self._s.connection()
+        for level in sorted(levels):
+            for rows in levels[level].values():
+                conn.execute(insert(Record), rows)
+        insert_record_refs(conn, [(v["id"], v.get("data")) for v in every])
+        if self._absent is not None:
+            self._absent.difference_update(v["id"] for v in every)
+
+    def insert_entries(self, rows: list[tuple[SyncEntry, int]]) -> None:
+        """Keep entries made elsewhere (each with its number), as
+        `insert_entry` does, in one statement; none belongs to a batch."""
+        if not rows:
+            return
+        self._s.flush()
+        self._s.connection().execute(
+            insert(AuditLog),
+            [
+                {
+                    "id": e.id,
+                    "action": e.action,
+                    "entity_type": e.entity_type,
+                    "entity_id": e.entity_id,
+                    "old_data": e.old_data,
+                    "new_data": e.new_data,
+                    "delta": e.delta,
+                    "format": 2 if e.delta is not None else 1,
+                    "op_id": uuid.UUID(e.op) if e.op else None,
+                    "timestamp": _parse(e.timestamp),
+                    "batch_id": None,
+                    "actor": e.actor,
+                    "device": e.device,
+                    "device_id": uuid.UUID(e.device_id) if e.device_id else None,
+                    "hlc": e.hlc,
+                    "hub_seq": seq,
+                    "sync_state": "synced",
+                    "apply_state": "applied",
+                }
+                for e, seq in rows
+            ],
+        )
+
+    def save_ops(
+        self,
+        items: list[tuple[SyncEntry, OpResult]],
+        device_id: str | None,
+        device_name: str | None,
+    ) -> None:
+        """`save_op` for several, in one statement."""
+        if not items:
+            return
+        self._s.flush()
+        self._s.connection().execute(
+            insert(SyncOp),
+            [
+                {
+                    "op_id": entry.id,
+                    "device_id": device_id,
+                    "device_name": device_name,
+                    "entity_type": entry.entity_type,
+                    "entity_id": entry.entity_id,
+                    "status": result.status,
+                    "message": result.message,
+                    "conflicts": result.conflicts,
+                    "hub_seq": result.hub_seq,
+                }
+                for entry, result in items
+            ],
+        )
+        if self._ops is not None:
+            for entry, result in items:
+                self._ops[entry.id] = result
 
     def drop_op(self, op_id: uuid.UUID) -> None:
         """Forget an op that is to be tried again (it was deferred)."""
@@ -1009,6 +1299,8 @@ class LocalSyncRepository:
         if row is not None:
             self._s.delete(row)
             self._s.flush()
+        if self._ops is not None and op_id in self._ops:
+            self._ops[op_id] = None
 
     # ------------------------------------------------------------------
     # Conflicts
@@ -1192,6 +1484,24 @@ class LocalSyncRepository:
             q = q.filter(SyncConflict.entity_id == entity_id)
         return [_conflict_dto(r) for r in q.order_by(SyncConflict.created_at)]
 
+    def with_open_refusals(self, entity_ids: Iterable[uuid.UUID]) -> set[uuid.UUID]:
+        """Which of these things have an open refusal, one query per chunk."""
+        wanted = list(dict.fromkeys(entity_ids))
+        found: set[uuid.UUID] = set()
+        for at in range(0, len(wanted), 500):
+            found.update(
+                self._s.scalars(
+                    select(SyncConflict.entity_id)
+                    .where(
+                        SyncConflict.status == "open",
+                        SyncConflict.kind == "rejected",
+                        SyncConflict.entity_id.in_(wanted[at : at + 500]),
+                    )
+                    .distinct()
+                )
+            )
+        return found
+
     def resolve_conflicts(self, ids: list[uuid.UUID], resolution: str) -> int:
         """Mark open conflicts settled, in one statement. Returns how many were."""
         if not ids:
@@ -1249,6 +1559,8 @@ class LocalSyncRepository:
 
     def snapshot(self, kind: str, id: uuid.UUID) -> dict[str, Any] | None:
         """One thing as it is now, in the shape a history entry stores."""
+        if kind == "record" and self._absent is not None and id in self._absent:
+            return None
         row = self._s.get(_MODELS[kind], id)
         if row is None:
             return None
@@ -1421,8 +1733,6 @@ class LocalSyncRepository:
             dicts = [_dashboard_dto(r).to_dict() for r in rows]
         elif kind == "note":
             dicts = [_note_dto(r).to_dict() for r in rows]
-        elif kind == "release":
-            dicts = [_release_dto(r).to_dict() for r in rows]
         else:
             dicts = [_record_dto(r).to_dict() for r in rows]
         return [wire_state(kind, d) or {} for d in dicts]
@@ -1438,10 +1748,18 @@ class LocalSyncRepository:
             for name, value in snap.items()
             if name in columns
         }
-        row = self._s.get(model, values["id"])
+        row = None
+        if not (
+            kind == "record"
+            and self._absent is not None
+            and values["id"] in self._absent
+        ):
+            row = self._s.get(model, values["id"])
         if row is None:
             row = model(**values)
             self._s.add(row)
+            if self._absent is not None:
+                self._absent.discard(values["id"])
         else:
             for name, value in values.items():
                 setattr(row, name, value)
@@ -1451,21 +1769,6 @@ class LocalSyncRepository:
                 # it with this machine's clock, and the copies drift apart.
                 flag_modified(row, "updated_at")
         self._s.flush()
-        if kind == "release":
-            self._own_release(row)
-
-    def _own_release(self, row: Release) -> None:
-        """A release from the feed owns its bundle here (so it is fetched and
-        kept), until it is yanked: then it owns nothing. The files it cites are
-        owned once its bundle is read (`ReleaseService.index_waiting`), on the
-        copy that keeps everyone's files."""
-        from civex.repositories.local.release_repo import LocalReleaseRepository
-
-        releases = LocalReleaseRepository(self._s)
-        if row.yanked_at is not None:
-            releases.disown(row.id)
-        else:
-            releases.own(row.id, [row.bundle_sha256])
 
     def soft_delete(self, kind: str, id: uuid.UUID, stamp: datetime) -> None:
         """Delete as a person's delete does, but stamped `stamp`: a schema or
@@ -1574,7 +1877,7 @@ class LocalSyncRepository:
         `limit` of them, and the rest of the action the last one belongs to, so
         an action is never split across two pushes (it is taken whole or not)."""
         pending = self._s.query(AuditLog).filter(
-            AuditLog.sync_state == "pending", AuditLog.hub_seq.is_(None)
+            AuditLog.sync_state == "pending", AuditLog.hub_seq.is_(None), _SYNCED
         )
         rows = pending.order_by(*_WRITE_ORDER).limit(limit).all()
         if len(rows) == limit and rows[-1].op_id is not None:
@@ -1591,7 +1894,9 @@ class LocalSyncRepository:
     def count_pending(self) -> int:
         return (
             self._s.query(func.count(AuditLog.id))
-            .filter(AuditLog.sync_state == "pending", AuditLog.hub_seq.is_(None))
+            .filter(
+                AuditLog.sync_state == "pending", AuditLog.hub_seq.is_(None), _SYNCED
+            )
             .scalar()
             or 0
         )
@@ -1701,7 +2006,70 @@ class LocalSyncRepository:
         )
         # And which files it said it holds or lacks: the new one is asked afresh.
         self._s.execute(delete(ServerFile))
+        self._s.execute(delete(SeedAck))
+        self._meta_row().seed_open = False
         self._s.execute(delete(ServerLack))
+        self._s.expire_all()
+
+    def forget_refusals(self, taken: set[uuid.UUID], refused: set[uuid.UUID]) -> None:
+        """Filling the authority sent these things. It took those in `taken`:
+        a refusal of their create, by it or by one followed before, no longer
+        says it lacks them (`taken_at`, see `never_taken`), and one nobody has
+        settled yet is no longer true, so it is closed (`TAKEN`); one a person
+        settled, or is having sent again, stays as they left it. It refused
+        those in `refused`: one it had taken before (filled again after a
+        reset, so the refusal is the same row) says so again, and is open again
+        if only sync had closed it."""
+        now = datetime.now(timezone.utc)
+        for start in range(0, len(ids := list(taken)), _ID_CHUNK):
+            chunk = ids[start : start + _ID_CHUNK]
+            self._s.execute(
+                update(AuditLog)
+                .where(
+                    AuditLog.entity_id.in_(chunk),
+                    AuditLog.action == "create",
+                    AuditLog.sync_state == "rejected",
+                )
+                .values(sync_state="synced")
+                .execution_options(synchronize_session=False)
+            )
+            mine = (SyncConflict.entity_id.in_(chunk), SyncConflict.kind == "rejected")
+            self._s.execute(
+                update(SyncConflict)
+                .where(
+                    *mine,
+                    SyncConflict.status == "open",
+                    SyncConflict.resolution.is_(None),
+                )
+                .values(status="resolved", resolution=TAKEN, resolved_at=now)
+                .execution_options(synchronize_session=False)
+            )
+            self._s.execute(
+                update(SyncConflict)
+                .where(*mine, SyncConflict.taken_at.is_(None))
+                .values(taken_at=now)
+                .execution_options(synchronize_session=False)
+            )
+        for start in range(0, len(ids := list(refused)), _ID_CHUNK):
+            chunk = ids[start : start + _ID_CHUNK]
+            was_taken = (
+                SyncConflict.entity_id.in_(chunk),
+                SyncConflict.kind == "rejected",
+                SyncConflict.taken_at.is_not(None),
+            )
+            self._s.execute(
+                update(SyncConflict)
+                .where(*was_taken, SyncConflict.resolution == TAKEN)
+                .values(status="open", resolution=None, resolved_at=None)
+                .execution_options(synchronize_session=False)
+            )
+            self._s.execute(
+                update(SyncConflict)
+                .where(*was_taken)
+                .values(taken_at=None)
+                .execution_options(synchronize_session=False)
+            )
+        self._s.flush()
         self._s.expire_all()
 
     def never_taken(self, things: set[tuple[str, uuid.UUID]]) -> set[uuid.UUID]:
@@ -1709,7 +2077,9 @@ class LocalSyncRepository:
         create was refused (made here, or sent when the authority was filled:
         a refusal whose change isn't held here), and nothing carrying the thing
         has been numbered since (a delete of something it never had is numbered
-        but takes nothing). An edit to one can't go as an edit."""
+        but takes nothing). An edit to one can't go as an edit. A refusal is
+        forgotten once the authority takes the thing after all (`forget_refusals`,
+        when filling it sends the thing: following another one fills it)."""
         if not things:
             return set()
         ids = {i for _, i in things}
@@ -1727,7 +2097,9 @@ class LocalSyncRepository:
         refused |= {
             c.entity_id
             for c in self._s.query(SyncConflict).filter(
-                SyncConflict.entity_id.in_(ids), SyncConflict.kind == "rejected"
+                SyncConflict.entity_id.in_(ids),
+                SyncConflict.kind == "rejected",
+                SyncConflict.taken_at.is_(None),
             )
             if c.op_id is not None and c.op_id not in held  # a seed's refusal
         }
@@ -1784,25 +2156,63 @@ class LocalSyncRepository:
         wanted = [uuid.UUID(i) for i in ids]
         return {str(i) for (i,) in self._s.query(model.id).filter(model.id.in_(wanted))}
 
+    def seed_open(self) -> bool:
+        """A first upload was begun and has not finished (whatever it set aside)."""
+        return bool(self._meta_row().seed_open)
+
     def begin_seed(self) -> None:
         """Set aside the changes a seed covers: those not yet sent when the
         first attempt began. A seed run again after an interruption keeps the
         first attempt's set (any left are still `seeding`), so a change made in
         between is still sent on its own."""
+        self._meta_row().seed_open = True
         started = (
             self._s.query(AuditLog.id).filter(AuditLog.sync_state == "seeding").first()
         )
         if started is None:
             self._s.execute(
                 update(AuditLog)
-                .where(AuditLog.sync_state == "pending", AuditLog.hub_seq.is_(None))
+                .where(
+                    AuditLog.sync_state == "pending",
+                    AuditLog.hub_seq.is_(None),
+                    _SYNCED,
+                )
                 .values(sync_state="seeding")
                 .execution_options(synchronize_session=False)
             )
             self._s.expire_all()
 
+    def forget_seed_acks(self) -> None:
+        """Drop what a first upload remembers of the authority's answers."""
+        self._s.execute(delete(SeedAck))
+
+    def seed_acked(self) -> set[str]:
+        """Ids of the first-upload changes the authority has answered."""
+        return {i for (i,) in self._s.query(SeedAck.entry_id)}
+
+    def seed_acked_head(self) -> int:
+        """The highest authority position any remembered answer came with."""
+        return self._s.query(func.max(SeedAck.head_seq)).scalar() or 0
+
+    def note_seed_acked(self, entry_ids: list[uuid.UUID], head_seq: int) -> None:
+        """Remember these first-upload changes as answered (idempotent), with
+        the authority's position (`head_seq`) when it answered."""
+        wanted = [str(i) for i in entry_ids]
+        known = {
+            i
+            for (i,) in self._s.query(SeedAck.entry_id).filter(
+                SeedAck.entry_id.in_(wanted)
+            )
+        }
+        self._s.add_all(
+            SeedAck(entry_id=i, head_seq=head_seq) for i in wanted if i not in known
+        )
+        self._s.flush()
+
     def finish_seed(self) -> None:
         """The seed went in: what it covered counts as sent."""
+        self._meta_row().seed_open = False
+        self._s.execute(delete(SeedAck))
         self._s.execute(
             update(AuditLog)
             .where(AuditLog.sync_state == "seeding")
@@ -1872,11 +2282,62 @@ class LocalSyncRepository:
         """Changes from the authority kept but not applied yet, oldest first."""
         rows = (
             self._s.query(AuditLog)
-            .filter(AuditLog.apply_state == "held")
+            .filter(_UNSETTLED, AuditLog.apply_state == "held")
             .order_by(AuditLog.hub_seq)
             .all()
         )
         return self._entries(rows)
+
+    # An action cut across feed pages is kept on disk as it arrives, in state
+    # `arriving` (nothing seen to hold it so far) or `arrhold` (some entry of it
+    # must wait for a push of this device's own), until its last entry has
+    # arrived and it is applied or held whole.
+    def arriving_action(self) -> tuple[str | None, bool]:
+        """The action still arriving (its `op`) and whether it is to be held,
+        or (None, False). A lookup, not a scan: see `ix_audit_log_unsettled`."""
+        row = (
+            self._s.query(AuditLog.op_id, AuditLog.apply_state)
+            .filter(_UNSETTLED, AuditLog.apply_state.in_(("arriving", "arrhold")))
+            .limit(1)
+            .first()
+        )
+        if row is None or row[0] is None:
+            return None, False
+        return str(row[0]), row[1] == "arrhold"
+
+    def arriving_entries(
+        self,
+        op: str,
+        after: int,
+        limit: int,
+        state: str = "arriving",
+        upto: int | None = None,
+    ) -> list[SyncEntry]:
+        """The next `limit` entries of an action (in `state`) past number
+        `after`, and no later than `upto` when given."""
+        query = self._s.query(AuditLog).filter(
+            _UNSETTLED,
+            AuditLog.op_id == uuid.UUID(op),
+            AuditLog.apply_state == state,
+            AuditLog.hub_seq > after,
+        )
+        if upto is not None:
+            query = query.filter(AuditLog.hub_seq <= upto)
+        return self._entries(query.order_by(AuditLog.hub_seq).limit(limit).all())
+
+    def set_arriving(self, op: str, was: tuple[str, ...], now: str) -> None:
+        """Move every entry of an arriving action from state `was` to `now`."""
+        self._s.execute(
+            update(AuditLog)
+            .where(
+                _UNSETTLED,
+                AuditLog.op_id == uuid.UUID(op),
+                AuditLog.apply_state.in_(was),
+            )
+            .values(apply_state=now)
+            .execution_options(synchronize_session=False)
+        )
+        self._s.expire_all()
 
     def mark_applied(self, entry_ids: list[uuid.UUID]) -> None:
         if entry_ids:
@@ -1910,57 +2371,168 @@ class LocalSyncRepository:
                 AuditLog.entity_type == kind,
                 AuditLog.entity_id == entity_id,
                 AuditLog.hub_seq >= from_seq,
-                AuditLog.apply_state != "superseded",
+                # Never a step of an action that has not all arrived: it is
+                # applied (or held) whole, when its last entry is in.
+                AuditLog.apply_state.notin_(("superseded", "arriving", "arrhold")),
             )
             .order_by(AuditLog.hub_seq)
             .all()
         )
         return self._entries(rows)
 
+    @contextmanager
+    def _numbering_has_no_deadline(self) -> Iterator[None]:
+        """Numbering a backlog is one statement whose length is the backlog's:
+        a host's `statement_timeout` (set for this transaction by the sync
+        routes) must not cut it, or a big enough backlog would time out at
+        every attempt and never be numbered. It is put back as it was for what
+        follows. A lock wait is still bounded (`lock_timeout`)."""
+        bind = self._s.get_bind()
+        if bind.dialect.name != "postgresql":
+            yield
+            return
+        was: str = self._s.execute(text("SHOW statement_timeout")).scalar_one()
+        self._s.execute(text("SET LOCAL statement_timeout = 0"))
+        yield
+        # Only when the statement went through: after a failure the transaction
+        # is aborted, and one more statement would hide the real error (a lock
+        # timeout, a deadlock) behind "current transaction is aborted".
+        self._s.execute(
+            text("SELECT set_config('statement_timeout', :v, true)"), {"v": was}
+        )
+
     def sequence_local_entries(self) -> int:
         """Authority: number the changes made on this instance itself, in the
-        order they were made, so they join the feed. Returns how many."""
-        rows = (
-            self._s.query(AuditLog)
-            .filter(AuditLog.hub_seq.is_(None), AuditLog.sync_state == "pending")
-            .order_by(*_WRITE_ORDER)
-            .all()
-        )
-        for row in rows:
-            row.hub_seq = self.next_hub_seq()
-            row.sync_state = "synced"
-        self._s.flush()
-        return len(rows)
+        order they were made, so they join the feed. Returns how many.
 
-    def entries_after(self, seq: int, limit: int) -> tuple[list[SyncEntry], bool]:
-        """Numbered entries past `seq`, in order, and whether more follow. A
-        page ends with the action its last entry belongs to, never inside
-        one: a device takes an action whole (a tree moved to another
-        collection is one), so a page that cut one in two would leave it
-        half done at the device's commit."""
+        The feed's counter is taken first, then the pending rows are counted:
+        a caller that waited for the lock finds the one before it already
+        numbered them and has nothing left to do (selecting first would have
+        every waiter number the same rows again). The numbering is one
+        statement in the database (`row_number()` over the write order), so no
+        row, and none of its JSON, is loaded and the counter moves once."""
+        pending = (
+            AuditLog.hub_seq.is_(None),
+            AuditLog.sync_state == "pending",
+            _SYNCED,
+        )
+        self._s.flush()
+        if not self._s.query(exists().where(*pending)).scalar():
+            return 0  # the common case: nothing to number, nothing locked
+        self.lock_feed()
+        # The numbers start where the counter stands now (held: nobody else
+        # takes one). The rows numbered are the ones the statement sees, which
+        # may be more than a count taken earlier would say if a local write
+        # committed meanwhile (writes do not take the lock), so the counter
+        # moves by what was numbered.
+        base = self.head_seq()
+        order = (
+            select(
+                AuditLog.id.label("id"),
+                AuditLog.timestamp.label("timestamp"),
+                func.row_number().over(order_by=_WRITE_ORDER).label("n"),
+            )
+            .where(*pending)
+            .subquery()
+        )
+        with self._numbering_has_no_deadline():
+            done = self._s.execute(
+                update(AuditLog)
+                .where(
+                    AuditLog.id == order.c.id,
+                    AuditLog.timestamp == order.c.timestamp,
+                    *pending,
+                )
+                .values(hub_seq=order.c.n + base, sync_state="synced")
+                .execution_options(synchronize_session=False)
+            ).rowcount  # type: ignore[attr-defined]
+        if done:
+            first = self.reserve_hub_seqs(done)
+            assert first == base + 1, "the feed counter moved while it was held"
+        self._s.expire_all()
+        return int(done)
+
+    def _keys_after(self, seq: int, n: int) -> list[tuple[int, uuid.UUID | None, int]]:
+        """Up to `n` numbered rows past `seq`, in order, as (number, action,
+        payload size): what the page budget counts, read without the rows
+        themselves, so choosing a page never holds more than it takes."""
+
+        def width(col: Any) -> Any:
+            return func.coalesce(func.length(cast(col, Text)), 0)
+
+        size = (
+            width(AuditLog.old_data) + width(AuditLog.new_data) + width(AuditLog.delta)
+        )
         rows = (
-            self._s.query(AuditLog)
-            .filter(AuditLog.hub_seq > seq)
+            self._s.query(AuditLog.hub_seq, AuditLog.op_id, size)
+            .filter(AuditLog.hub_seq > seq, _SYNCED)
             .order_by(AuditLog.hub_seq)
-            .limit(limit + 1)
+            .limit(n)
             .all()
         )
-        more = len(rows) > limit
-        rows = rows[:limit]
-        if more and rows and rows[-1].op_id is not None:
-            rest = (
-                self._s.query(AuditLog)
-                .filter(AuditLog.hub_seq > rows[-1].hub_seq)
-                .order_by(AuditLog.hub_seq)
-                .limit(limit + 1)
-                .all()
+        return [(int(h), op, int(sz or 0)) for h, op, sz in rows]
+
+    def entries_after(
+        self, seq: int, limit: int, max_bytes: int | None = None
+    ) -> tuple[list[SyncEntry], bool]:
+        """Numbered entries past `seq`, in order, and whether more follow. The
+        page is bounded by `limit` (an "at most") and by `max_bytes` of payload
+        (`domain.sync_page`), and `more` is whether it stopped before the end.
+        It ends with the action its last entry belongs to, never inside one,
+        while the whole action fits (`ACTION_ENTRIES_MAX` entries, the byte
+        budget): a device takes an action whole (a tree moved to another
+        collection is one). One over that on its own is cut; the page then
+        says more follows, and the device holds the part it has until the
+        rest comes. Only the rows of the page are loaded."""
+        max_bytes = budget() if max_bytes is None else max_bytes
+        keys = self._keys_after(seq, limit + 1)
+        kept, more = take(keys, [k[2] for k in keys], limit, max_bytes)
+        if more and kept and kept[-1][1] is not None:
+            kept, more = self._finish_action(kept, max_bytes)
+        if not kept:
+            return [], more
+        rows = (
+            self._s.query(AuditLog)
+            .filter(
+                AuditLog.hub_seq >= kept[0][0],
+                AuditLog.hub_seq <= kept[-1][0],
+                _SYNCED,
             )
-            same = 0
-            while same < len(rest) and rest[same].op_id == rows[-1].op_id:
-                same += 1
-            rows += rest[:same]
-            more = len(rest) > same
+            .order_by(AuditLog.hub_seq)
+            .all()
+        )
         return self._entries(rows), more
+
+    def _finish_action(
+        self, kept: list[tuple[int, uuid.UUID | None, int]], max_bytes: int
+    ) -> tuple[list[tuple[int, uuid.UUID | None, int]], bool]:
+        """Add the rest of the action `kept` ends in, if it fits the page. If
+        it does not, the page ends before the action (it is sent whole in the
+        next, alone) unless it is the whole page, when it is cut where it is."""
+        op = kept[-1][1]
+        used = sum(k[2] for k in kept)
+        start = len(kept)
+        while start and kept[start - 1][1] == op:
+            start -= 1
+        extra: list[tuple[int, uuid.UUID | None, int]] = []
+        cursor = kept[-1][0]
+        while True:
+            more_keys = self._keys_after(cursor, 500)
+            for key in more_keys:
+                if key[1] != op:
+                    return kept + extra, True  # the action ended; something follows
+                if (
+                    len(kept) + len(extra) >= ACTION_ENTRIES_MAX
+                    or used + key[2] > max_bytes
+                ):
+                    if start:
+                        return kept[:start], True  # sent whole in the next page
+                    return kept + extra, True  # over the budget alone: cut
+                extra.append(key)
+                used += key[2]
+            if len(more_keys) < 500:
+                return kept + extra, False  # the action ran to the end
+            cursor = more_keys[-1][0]
 
     def _entries(self, rows: list[AuditLog]) -> list[SyncEntry]:
         batch_ids = {r.batch_id for r in rows if r.batch_id}
@@ -2010,6 +2582,18 @@ class LocalSyncRepository:
             ).on_the_wire()
             for r in rows
         ]
+
+
+def record_values(snap: dict[str, Any]) -> dict[str, Any]:
+    """A record snapshot as the columns it fills, in the types they hold."""
+    columns = {
+        c.name: c for c in Record.__table__.columns if c.name not in _NOT_WRITTEN
+    }
+    return {
+        name: _coerce(columns[name], value)
+        for name, value in snap.items()
+        if name in columns
+    }
 
 
 def _coerce(column: Any, value: Any) -> Any:

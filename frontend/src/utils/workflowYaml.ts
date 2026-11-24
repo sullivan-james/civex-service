@@ -1,9 +1,8 @@
 /**
  * Hand-rolled YAML generation for the guided import's "save as automation"
  * escape hatch. Only ever emits the two fixed shapes below (a files-input
- * workflow around `civex.create_records_from_files` /
- * `civex.match_files_to_records`, or a record-triggered CSV workflow around
- * `civex.load_file` -> `civex.parse_table` -> `civex.rows_to_records`) so a
+ * workflow of a Files step and `civex.save_records`, or a record-triggered CSV
+ * workflow of a `civex.table` step and `civex.save_records`) so a
  * full YAML emitter would be overkill — `JSON.stringify` on every scalar
  * keeps each line valid YAML (YAML flow scalars accept JSON string syntax)
  * without hand-writing escaping rules.
@@ -30,21 +29,18 @@ export interface FilesImportAutomationParams {
 export function buildFilesImportWorkflowYaml(
   p: FilesImportAutomationParams,
 ): string {
-  const plugin =
-    p.strategy === 'match'
-      ? 'civex.match_files_to_records'
-      : 'civex.create_records_from_files'
   const lines: string[] = [`name: ${str(p.name)}`]
   if (p.description) lines.push(`description: ${str(p.description)}`)
   lines.push(
-    'inputs:',
-    '  files:',
-    '    type: files',
     'steps:',
+    '  - id: files',
+    '    plugin: civex.files@1',
+    '    config:',
+    '      source: run',
     '  - id: import',
-    `    plugin: ${plugin}`,
+    '    plugin: civex.save_records@1',
     '    inputs:',
-    '      files: __input__.files',
+    '      files: files.files',
     '    config:',
     `      schema: ${str(p.schemaName)}`,
     `      file_field: ${str(p.fileField)}`,
@@ -52,12 +48,16 @@ export function buildFilesImportWorkflowYaml(
   )
   if (p.strategy === 'match') {
     lines.push(
-      `      key_field: ${str(p.keyField ?? '')}`,
-      `      pattern: ${str(p.pattern ?? '')}`,
+      '      if_exists: update',
+      '      match_on:',
+      `        - ${str(p.keyField ?? '')}`,
+      `      filename_pattern: ${str(p.pattern ?? '')}`,
       `      parent_record_id: ${str(p.parentRecordId ?? '')}`,
     )
-  } else if (p.parentRecordId) {
-    lines.push(`      context_record_id: ${str(p.parentRecordId)}`)
+  } else {
+    lines.push('      if_exists: add_new')
+    if (p.parentRecordId)
+      lines.push(`      parent_record_id: ${str(p.parentRecordId)}`)
   }
   return lines.join('\n') + '\n'
 }
@@ -85,18 +85,14 @@ export function buildCsvImportWorkflowYaml(
     '  record_created:',
     `    schema: ${str(p.triggerSchemaName)}`,
     'steps:',
-    '  - id: load',
-    '    plugin: civex.load_file',
+    '  - id: parse',
+    '    plugin: civex.table@1',
     '    config:',
     `      field: ${str(p.csvFieldName)}`,
-    '  - id: parse',
-    '    plugin: civex.parse_table',
-    '    inputs:',
-    '      bytes: load.bytes',
     '  - id: create',
-    '    plugin: civex.rows_to_records',
+    '    plugin: civex.save_records@1',
     '    inputs:',
-    '      table: parse.table',
+    '      rows: parse.table',
     '    config:',
     `      schema: ${str(p.targetSchemaName)}`,
     `      dataset: ${str(p.datasetName)}`,

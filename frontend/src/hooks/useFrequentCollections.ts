@@ -4,7 +4,7 @@ import {
   readVisits,
   recordVisit,
   topCollections,
-  VISITS_KEY,
+  visitsKey,
 } from '../utils/collectionVisits'
 
 const VISIT_EVENT = 'civex:collection-visit'
@@ -41,7 +41,7 @@ export function useFrequentCollections(limit = 5) {
       }
     }
     const onStorage = (e: StorageEvent) => {
-      if (e.key === VISITS_KEY) refresh()
+      if (e.key === visitsKey()) refresh()
     }
     window.addEventListener(VISIT_EVENT, refresh)
     window.addEventListener('storage', onStorage)

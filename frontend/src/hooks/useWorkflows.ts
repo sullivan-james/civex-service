@@ -10,6 +10,7 @@ import {
   jobsApi,
   workflowsApi,
   type AutomationStatus,
+  type FolderChoice,
   type RunPick,
   type RunQuery,
   type WorkflowJob,
@@ -130,11 +131,13 @@ export function useRunWorkflowWithFiles() {
       name,
       recordId,
       fileInputs,
+      folders,
     }: {
       name: string
       recordId: string
       fileInputs: Record<string, File[]>
-    }) => workflowsApi.runWithFiles(name, recordId, fileInputs),
+      folders?: Record<string, FolderChoice>
+    }) => workflowsApi.runWithFiles(name, recordId, fileInputs, folders),
     onSuccess: () => refreshRuns(qc),
   })
 }

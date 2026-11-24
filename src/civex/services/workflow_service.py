@@ -7,12 +7,12 @@ save_workflow tools (CIVEX-54).
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import yaml
 
 from civex.domain.exceptions import (
     NotFoundError,
@@ -24,11 +24,19 @@ from civex.workflows.contract_validation import (
     ContractError,
     validate_workflow_contracts,
 )
-from civex.workflows.definition import WorkflowDef, load_workflow, set_enabled_text
+from civex.workflows.definition import (
+    WorkflowDef,
+    load_workflow,
+    parse_workflow,
+    set_enabled_text,
+)
+from civex.workflows.upgrades import NeedsNewerCivex, WorkflowUpgradeError, upgrade_text
 from civex.workflows.executor import topological_sort
 
 if TYPE_CHECKING:
     from civex.plugins.registry import PluginRegistration
+
+log = logging.getLogger(__name__)
 
 _SAFE_STEM = re.compile(r"^[\w-]+$")
 
@@ -67,15 +75,29 @@ class WorkflowService:
         for path in sorted(self._dir.glob("*.yaml")) + sorted(self._dir.glob("*.yml")):
             try:
                 results.append((path, load_workflow(path)))
+            except (NeedsNewerCivex, WorkflowUpgradeError) as e:
+                # Not hidden: it works on another computer, and this one must
+                # say why it doesn't (its triggers don't run here).
+                log.warning("Workflow %s was not loaded: %s", path.name, e)
             except Exception:
                 continue
         return results
 
     def find_by_name(self, name: str) -> WorkflowDef | None:
-        """Match by workflow name or filename stem."""
+        """Match by workflow name or filename stem. A workflow that needs a
+        newer civex than this one is refused (`NeedsNewerCivex`) rather than
+        reported missing."""
         for path, wf in self.list_defs():
             if wf.name == name or path.stem == name:
                 return wf
+        by_stem = self.find_path(name)
+        if by_stem is not None:
+            try:
+                load_workflow(by_stem)  # says why it can't be used
+            except (NeedsNewerCivex, WorkflowUpgradeError) as e:
+                raise ValidationError(str(e))
+            except Exception:
+                return None
         return None
 
     def find_path(self, stem: str) -> Path | None:
@@ -94,12 +116,14 @@ class WorkflowService:
         path = self.find_path(stem)
         if path is None:
             raise NotFoundError(f"Workflow '{stem}' not found")
-        content = path.read_text(encoding="utf-8")
         try:
             wf = load_workflow(path)
+        except NeedsNewerCivex as e:
+            raise ValidationError(str(e))
         except Exception as e:
             raise ValidationError(f"Invalid workflow YAML: {e}")
-        return path, wf, content
+        # What is on disk now: load_workflow may have upgraded the file.
+        return path, wf, path.read_text(encoding="utf-8")
 
     def list_raw(self) -> list[dict]:
         """[{"filename", "content"}] for every *.yaml file, or {"filename",
@@ -146,8 +170,9 @@ class WorkflowService:
         """Everything `validate` checks but the file name: what a workflow that
         isn't saved yet must pass before it is tried."""
         try:
-            raw = yaml.safe_load(content)
-            wf = WorkflowDef.model_validate(raw)
+            wf = parse_workflow(content)
+        except (NeedsNewerCivex, WorkflowUpgradeError) as e:
+            raise ValidationError(str(e))
         except Exception as e:
             raise ValidationError(f"Invalid workflow YAML: {e}")
 
@@ -171,7 +196,8 @@ class WorkflowService:
     def save(self, stem: str, content: str) -> tuple[Path, WorkflowDef]:
         wf = self.validate(stem, content)
         path = self._dir / f"{stem}.yaml"
-        path.write_text(content, encoding="utf-8")
+        # Written for older steps: saved as the steps it now uses.
+        path.write_text(upgrade_text(content)[0], encoding="utf-8")
         return path, wf
 
     def set_enabled(self, stem: str, enabled: bool) -> tuple[Path, WorkflowDef, str]:

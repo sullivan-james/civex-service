@@ -42,7 +42,7 @@ import {
 } from '../ui'
 
 /** What the dialog gives back: the pattern, and for a date read in two steps
- * (`civex.extract_from_filename`), the date format beside it. */
+ * (`civex.value_from_filename`), the date format beside it. */
 export interface PatternChoice {
   pattern: string
   dateFormat?: string

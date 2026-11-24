@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+import contextlib
+import hashlib
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import AsyncIterable
 
@@ -65,6 +67,35 @@ class FileService:
             path, original_filename=filename, collection_id=collection_id
         )
 
+    def store_unless_stored(
+        self,
+        path: Path,
+        collection_id: str | None = None,
+        filename: str | None = None,
+    ) -> tuple[FileRef, bool]:
+        """`store`, except that a file whose content is already stored is not
+        copied again: its content hash is worked out first (the file is read
+        once, never held whole) and, when the store has it, only the reference
+        is made. Returns the reference and whether anything was stored."""
+        self._may_add(collection_id)
+        name = filename or path.name
+        hasher = hashlib.sha256()
+        with path.open("rb") as src:
+            while chunk := src.read(_CHUNK):
+                hasher.update(chunk)
+        sha256 = hasher.hexdigest()
+        if self._store.exists(sha256):
+            volume = self._store.locate_volumes([sha256]).get(sha256)
+            if volume is not None:
+                size = self._store.size_of(sha256)
+                if size is None:
+                    size = path.stat().st_size
+                return FileRef(sha256, name, size, volume), False
+        ref = self._store.put_path(
+            path, original_filename=name, collection_id=collection_id
+        )
+        return ref, True
+
     def store_bytes(
         self, data: bytes, filename: str, collection_id: str | None = None
     ) -> FileRef:
@@ -121,6 +152,10 @@ class FileService:
     def exists(self, sha256: str) -> bool:
         return self._store.exists(sha256)
 
+    def exists_many(self, shas: Iterable[str]) -> set[str]:
+        """Which of these are held, asked together."""
+        return self._store.exists_many(shas)
+
     def size_of(self, sha256: str) -> int | None:
         return self._store.size_of(sha256)
 
@@ -129,6 +164,44 @@ class FileService:
         if self._volumes is None:
             raise FileNotFoundError(f"Object {sha256} is not on a drive here")
         return self._volumes.object_path(sha256)
+
+    @contextlib.contextmanager
+    def batched(self) -> Iterator[None]:
+        """Many files stored in this block are recorded together (where the
+        store can: `flush` before committing)."""
+        batch = getattr(self._store, "batched_registration", None)
+        if batch is None:
+            yield
+        else:
+            with batch():
+                yield
+
+    def flush(self) -> None:
+        flush = getattr(self._store, "flush_registrations", None)
+        if flush is not None:
+            flush()
+
+    # -- a big file in parts (`file_parts`) -----------------------------------
+
+    @property
+    def takes_parts(self) -> bool:
+        return bool(getattr(self._store, "supports_parts", False))
+
+    def begin_parts(
+        self, sha256: str, size: int, part_size: int
+    ) -> tuple[int, list[int]]:
+        self._may_add(None)
+        return self._store.begin_parts(sha256, size, part_size)
+
+    async def put_part(
+        self, sha256: str, number: int, chunks: AsyncIterable[bytes]
+    ) -> None:
+        self._may_add(None)
+        await self._store.put_part(sha256, number, chunks)
+
+    def finish_parts(self, sha256: str, size: int, filename: str) -> FileRef:
+        self._may_add(None)
+        return self._store.finish_parts(sha256, size, filename)
 
     # -- straight to and from storage (`direct_files`) ------------------------
 

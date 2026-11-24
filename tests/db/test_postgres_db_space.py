@@ -8,6 +8,7 @@ otherwise.
 from __future__ import annotations
 
 import os
+import uuid
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -26,18 +27,17 @@ pytestmark = [
     ),
 ]
 
-SCHEMA = "space_test"
-
 
 @pytest.fixture()
 def engine(monkeypatch):
     monkeypatch.setattr(db_space, "WORTH_BYTES", 2 * 1024 * 1024)
     monkeypatch.setattr(db_space, "MIN_BYTES", 256 * 1024)
+    # A schema of its own per test, so nothing else touching the shared
+    # scratch database can pull it out from under the test.
+    SCHEMA = f"space_{uuid.uuid4().hex[:12]}"
     eng = create_engine(_PG_URL)
     with eng.begin() as c:
-        c.execute(text(f"DROP SCHEMA IF EXISTS {SCHEMA} CASCADE"))
         c.execute(text(f"CREATE SCHEMA {SCHEMA}"))
-        c.execute(text(f"SET search_path TO {SCHEMA}"))
     # Every connection of this engine is scoped to the schema, as the hub does.
     scoped = create_engine(_PG_URL, connect_args={"options": f"-csearch_path={SCHEMA}"})
     yield scoped
@@ -48,17 +48,31 @@ def engine(monkeypatch):
 
 
 def _bloat(engine, table: str) -> None:
+    """A table that is mostly empty room. The room comes from an insert that is
+    rolled back, not from a DELETE: rows deleted by a committed transaction are
+    only reclaimable once no snapshot in the cluster predates it, and the
+    other tests running in parallel on the shared scratch server hold such
+    snapshots. Aborted rows are dead to everyone at once."""
     with engine.begin() as c:
         c.execute(text(f"CREATE TABLE {table} (id int PRIMARY KEY, note text)"))
+    with engine.connect() as c:
+        tx = c.begin()
         c.execute(
             text(
                 f"INSERT INTO {table} SELECT g, repeat('x', 200) "
-                "FROM generate_series(1, 40000) g"
+                "FROM generate_series(1, 36000) g"
+            )
+        )
+        tx.rollback()
+    with engine.begin() as c:  # lands after the aborted rows' pages
+        c.execute(
+            text(
+                f"INSERT INTO {table} SELECT g, repeat('x', 200) "
+                "FROM generate_series(36001, 40000) g"
             )
         )
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
         c.execute(text(f"ANALYZE {table}"))
-        c.execute(text(f"DELETE FROM {table} WHERE id <= 36000"))
         c.execute(text(f"VACUUM {table}"))  # reusable, but the table stays big
 
 

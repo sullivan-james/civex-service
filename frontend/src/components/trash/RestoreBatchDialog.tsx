@@ -63,6 +63,18 @@ export function RestoreBatchDialog({
               come back, {n(plan.restores, 'record')} in all, with the parent
               first so everything lands where it was.
             </p>
+            {restore.isPending && (
+              <div
+                role="status"
+                className="flex items-center gap-2 text-sm text-fg-muted"
+              >
+                <Spinner />
+                <span>
+                  Restoring {n(plan.restores, 'record')} in one step. A big
+                  delete takes a few seconds; keep this open until it is done.
+                </span>
+              </div>
+            )}
             {plan.blocked > 0 && (
               <p className="text-sm text-fg-muted">
                 {plan.blocked.toLocaleString()} stay deleted: something they

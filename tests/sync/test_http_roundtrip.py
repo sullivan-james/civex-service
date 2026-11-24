@@ -110,7 +110,7 @@ def test_the_library_over_a_socket(project, server):
     laptop = project("laptop")
     laptop.sync_svc.connect(url, invite)
     laptop.commit()
-    text = "name: tidy\nsteps:\n  - id: a\n    plugin: civex.get_field\n    config:\n      field: site\n"
+    text = "name: tidy\nsteps:\n  - id: a\n    plugin: civex.value_from_filename@1\n    config:\n      field: site\n"
     laptop.workflow_svc.save("tidy", text)
 
     with pytest.raises(NotAllowedError, match="may not publish"):
@@ -127,3 +127,28 @@ def test_the_library_over_a_socket(project, server):
     laptop.library_svc.unpublish(WORKFLOW, "tidy", version=1)
     [left] = laptop.library_svc.browse()
     assert [h["version"] for h in left.history] == [2]
+
+
+def test_connect_and_pull_leave_no_open_sockets(project, server, monkeypatch):
+    from civex.services.sync_transport import HttpSyncTransport
+
+    made: list[HttpSyncTransport] = []
+    real = HttpSyncTransport.__init__
+
+    def init(self, *args, **kwargs):
+        real(self, *args, **kwargs)
+        made.append(self)
+
+    monkeypatch.setattr(HttpSyncTransport, "__init__", init)
+    url, invite, _ = server
+    first = project("first")
+    populate(first)
+    first.sync_svc.connect(url, invite)
+    first.commit()
+    assert made
+    assert [t._wire.open_connections() for t in made] == [0] * len(made)
+    made.clear()
+    first.sync_svc.pull()
+    first.sync_svc.identity()
+    assert made
+    assert [t._wire.open_connections() for t in made] == [0] * len(made)

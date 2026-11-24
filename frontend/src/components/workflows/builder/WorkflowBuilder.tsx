@@ -97,7 +97,12 @@ export function WorkflowBuilder({
         (c) => c === 'update_record' || c === 'create_record',
       ),
   )
-  const filesInput = draft.inputs.find((i) => i.type === 'files')
+  // A Files step set to "chosen when the workflow is run" asks for files.
+  const takesFiles = draft.steps.some(
+    (s) =>
+      s.plugin.startsWith('civex.files') &&
+      (s.config.source ?? 'run') === 'run',
+  )
 
   function setSteps(steps: DraftStep[]) {
     set({ steps })
@@ -234,37 +239,6 @@ export function WorkflowBuilder({
               )}
             </div>
           </CheckRow>
-          <CheckRow
-            checked={!!filesInput}
-            onChange={(on) =>
-              set({
-                inputs: on
-                  ? [
-                      ...draft.inputs,
-                      { key: 'files', type: 'files', label: 'Files' },
-                    ]
-                  : draft.inputs.filter((i) => i.type !== 'files'),
-              })
-            }
-            title="Asks for files when someone starts it"
-            description="For a batch of files to sort onto records: they are chosen each time it runs."
-          >
-            {filesInput && (
-              <Field label="What to call them">
-                <Input
-                  size="sm"
-                  value={filesInput.label}
-                  onChange={(e) =>
-                    set({
-                      inputs: draft.inputs.map((i) =>
-                        i === filesInput ? { ...i, label: e.target.value } : i,
-                      ),
-                    })
-                  }
-                />
-              </Field>
-            )}
-          </CheckRow>
           {draft.onCreated || draft.onUpdated ? (
             <p className="text-xs text-fg-muted">
               {draft.enabled
@@ -295,7 +269,7 @@ export function WorkflowBuilder({
               schema: draft.schema,
               schemas,
               collections,
-              takesFiles: !!filesInput,
+              takesFiles,
             }}
             errors={errors.get(step.id) ?? []}
             showMissing={showMissing}

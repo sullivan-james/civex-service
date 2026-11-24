@@ -98,17 +98,11 @@ triggers:
     schema: sample
 
 steps:
-  - id: read_condition
-    plugin: civex.get_field
-    config:
-      field: condition
-
   - id: write_summary
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config:
-      field: summary
-    inputs:
-      value: read_condition.value    # the output of the step above
+      fields:
+        summary: {from_field: condition}    # copy another field of this record
 ```
 
 Add another sample (step 3 again) and the workflow runs straight away:

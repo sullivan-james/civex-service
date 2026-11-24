@@ -17,6 +17,7 @@ from civex.domain.exceptions import (
     FeatureUnavailableError,
 )
 from civex.project import Project
+from civex.server.errors import is_busy_error
 
 
 def _recovery_failure_message(result) -> str:  # noqa: ANN001 — ContainerRecoveryResult
@@ -158,9 +159,10 @@ def get_ctx(request: Request) -> Generator[AppContext, None, None]:
     try:
         yield ctx
         ctx.commit()
-    except OperationalError:
+    except OperationalError as e:
         ctx._session.rollback()
-        _recover_after_query_failure(project)
+        if not is_busy_error(e):  # a wait that ran out is not a lost database
+            _recover_after_query_failure(project)
         raise
     except Exception:
         ctx._session.rollback()
@@ -203,9 +205,10 @@ def get_read_ctx(request: Request) -> Generator[AppContext, None, None]:
             ctx._session.rollback()  # a read has nothing to keep
         else:
             ctx.commit()
-    except OperationalError:
+    except OperationalError as e:
         ctx._session.rollback()
-        _recover_after_query_failure(project)
+        if not is_busy_error(e):  # a wait that ran out is not a lost database
+            _recover_after_query_failure(project)
         raise
     except Exception:
         ctx._session.rollback()

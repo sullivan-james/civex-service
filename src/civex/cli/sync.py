@@ -7,6 +7,7 @@ from __future__ import annotations
 from datetime import datetime
 import json
 import os
+import shutil
 import uuid
 from pathlib import Path
 
@@ -268,11 +269,12 @@ def send(
             def told(p) -> None:  # noqa: ANN001 — SyncProgress
                 rate = f", {format_bytes(int(p.rate))}/s" if p.rate else ""
                 of = f" of {format_bytes(p.bytes_total)}" if p.bytes_total else ""
+                unread = f", {p.owed} not readable here" if p.owed else ""
                 bar.update(
                     task,
                     total=p.total,
                     completed=p.done,
-                    sent=f"{format_bytes(p.bytes_done or 0)}{of}{rate}",
+                    sent=f"{format_bytes(p.bytes_done or 0)}{of}{rate}{unread}",
                 )
 
             try:
@@ -1022,6 +1024,91 @@ def _set_publish(name: str, allowed: bool) -> None:
     )
 
 
+def _clone_release(
+    url: str, release: str, path: Path | None, token: str | None, writable: bool
+) -> None:
+    """`civex clone <repo-url> --release NAME`: download the release's bundle
+    (records and files, to a temporary file in chunks), then read it into a
+    new project. The project is left read-only unless `writable`."""
+    import tempfile
+
+    from rich.progress import (
+        BarColumn,
+        DownloadColumn,
+        Progress,
+        TextColumn,
+        TransferSpeedColumn,
+    )
+
+    from civex.cli.init import _init_working
+    from civex.config import load_config, save_config
+    from civex.domain.bundle import BundleError
+    from civex.services.release_fetch import fetch_release_bundle
+
+    parts = [p for p in url.rstrip("/").split("/") if p]
+    if parts and parts[-1] == "data" and len(parts) > 1:
+        parts.pop()  # a hub's address ends in /data: name the repository
+    target = (path or Path(f"{(parts or ['civex-project'])[-1]}-{release}")).resolve()
+    if (target / "_civex").exists():
+        raise _fail(
+            ValueError(f"{target} is already a civex project: clone into a new folder")
+        )
+    with tempfile.TemporaryDirectory(prefix="civex-release-") as scratch:
+        bundle = Path(scratch) / "release.civex.zip"
+        try:
+            with Progress(
+                TextColumn("Downloading"),
+                BarColumn(),
+                DownloadColumn(),
+                TransferSpeedColumn(),
+                console=console,
+            ) as bar:
+                task = bar.add_task("download", total=None)
+
+                def advance(done: int, total: int | None) -> None:
+                    bar.update(task, completed=done, total=total)
+
+                fetch_release_bundle(url, release, bundle, token, advance)
+        except SyncError as e:
+            raise _fail(e)
+        made = not target.exists()
+        origin = Path.cwd()
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            _init_working(target, use_sqlite=True)
+            os.chdir(target)
+            c = _ctx()
+            try:
+                # Code from a stranger is not installed: the data is what a
+                # release is.
+                result = c.bundle_svc.import_bundle(bundle, install_code=False)
+                c.commit()
+            finally:
+                c.close()
+        except BaseException as e:
+            os.chdir(origin)
+            # Leave nothing half made (whatever stopped it, an interrupt
+            # included): a retry into the same place must work.
+            shutil.rmtree(target / "_civex", ignore_errors=True)
+            if made:
+                shutil.rmtree(target, ignore_errors=True)
+            if isinstance(e, (BundleError, CivexError)):
+                raise _fail(e)
+            raise
+    if not writable:
+        os.chdir(target)
+        config = load_config()
+        config.project.read_only = True
+        save_config(config)
+    from civex.cli.bundle import _print_result
+
+    _print_result(result)
+    console.print(
+        f"[success]Release {escape(release)} cloned into {target}"
+        f"{'' if writable else ' (read-only)'}.[/success]"
+    )
+
+
 def clone(
     url: str = typer.Argument(help="The authority's address."),
     path: Path = typer.Argument(
@@ -1034,12 +1121,38 @@ def clone(
         help="The invite the authority's admin gave. Leave out to sign in: a code "
         "is shown to approve, and the copy starts once it is.",
     ),
+    release: str | None = typer.Option(
+        None,
+        "--release",
+        help="Instead of following the repository, make a new project from one "
+        "of its releases: its bundle, with the files, is downloaded and read in. "
+        "Nothing is connected and nothing syncs.",
+    ),
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        envvar="CIVEX_TOKEN",
+        help="With --release: the host's access token, for a private repository.",
+    ),
+    writable: bool = typer.Option(
+        False,
+        "--writable",
+        help="With --release: allow changes to the new project (it starts "
+        "read-only, a copy to read and cite).",
+    ),
 ) -> None:
     """Make a new project that is a copy of an authority's, and keep it in step.
     Without an invite, this computer signs in as a device: it shows a code (and
     the page to enter it at, when the server has one), waits for approval, then
-    copies."""
+    copies. With --release NAME, make a new project from that release of the
+    repository instead: a frozen copy, read-only by default, never in step with
+    anything (over plain HTTPS the same as downloading the bundle and running
+    `civex bundle import`)."""
     from civex.cli.init import _init_working
+
+    if release is not None:
+        _clone_release(url, release, path, token, writable)
+        return
 
     target = (
         path or Path(url.rstrip("/").rsplit("/", 1)[-1] or "civex-project")

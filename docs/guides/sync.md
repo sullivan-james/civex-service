@@ -104,6 +104,13 @@ Files move in the background, on their own, beside syncing.
   then tells the authority it is done; downloads are a redirect to the bucket.
   The authority only says where and records what arrived. An older device, or an
   authority with its files on drives, streams them as before.
+- **Packs and parts:** small files go many to a request (`file_packs`; not where
+  files go straight to a bucket, about
+  32 MiB or 100 files, four requests at a time, answered per file), and a big
+  file goes in 16 MiB parts four at a time (S3 multipart in a bucket, else
+  `file_parts` on an authority with files on drives, resumable per part). Both
+  are offered through `hello`; an authority without them is sent one file per
+  request.
 
 ### Which files a computer keeps
 

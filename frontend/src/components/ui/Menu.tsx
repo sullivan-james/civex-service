@@ -1,5 +1,6 @@
 import { useRef, useState, type ComponentType, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { portalRoot } from '../../utils/host'
 import { useAnchoredPosition } from '../../hooks/useAnchoredPosition'
 import { useDismiss } from '../../hooks/useDismiss'
 
@@ -134,7 +135,7 @@ export function Menu({
               )
             })}
           </div>,
-          document.body,
+          portalRoot(),
         )}
     </div>
   )

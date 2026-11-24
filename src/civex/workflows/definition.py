@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import copy
 import re
 from pathlib import Path
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
+
+from civex.workflows import upgrades
 
 
 class StepDef(BaseModel):
@@ -65,6 +68,22 @@ class WorkflowDef(BaseModel):
     steps: list[StepDef]
 
 
+def run_inputs(wf: WorkflowDef) -> dict[str, WorkflowInput]:
+    """What a person is asked for when starting the workflow: the Files steps
+    set to be chosen at run time (named by their step id, whose files they
+    become), then any plain `inputs` the workflow declares."""
+    asked: dict[str, WorkflowInput] = {}
+    for step in wf.steps:
+        if upgrades.split_step(step.plugin)[0] != "civex.files":
+            continue
+        if step.config.get("source", "run") != "run":
+            continue
+        asked[step.id] = WorkflowInput(
+            type="files", label=step.config.get("label") or step.id
+        )
+    return {**asked, **(wf.inputs or {})}
+
+
 def trigger_summaries(wf: WorkflowDef) -> list[str]:
     """What starts a workflow by itself, one line per trigger ("record_created
     on sample (site, depth)"): what the list and the library show."""
@@ -100,5 +119,21 @@ def set_enabled_text(content: str, enabled: bool) -> str:
     return "".join(lines)
 
 
+def parse_workflow(text: str) -> WorkflowDef:
+    """A workflow from its YAML text, upgraded in memory to this civex's steps
+    first (`workflows.upgrades`), nothing written. Raises `NeedsNewerCivex` for
+    a step version this civex doesn't have, `WorkflowUpgradeError` for an old
+    workflow that can't be upgraded by itself."""
+    raw = yaml.safe_load(text)
+    if isinstance(raw, dict):
+        raw = copy.deepcopy(raw)
+        upgrades.upgrade_raw(raw)
+    return WorkflowDef.model_validate(raw)
+
+
 def load_workflow(path: Path) -> WorkflowDef:
-    return WorkflowDef.model_validate(yaml.safe_load(path.read_text()))
+    """The workflow in a file. A file written for older steps is upgraded and
+    rewritten here (its old text kept as `<name>.yaml.bak`): see
+    `workflows.upgrades`."""
+    raw, _ = upgrades.upgrade_file(path, path.read_text(encoding="utf-8"))
+    return WorkflowDef.model_validate(raw)

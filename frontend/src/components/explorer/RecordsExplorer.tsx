@@ -97,6 +97,7 @@ import { HIGH_IMPACT_RECORD_THRESHOLD } from '../../lib/deleteImpact'
 import { errorMessage } from '../../lib/errors'
 import { pluralise } from '../../lib/utils'
 import { displayLabel } from '../../utils/naming'
+import { useHasFeature } from '../../hooks/useFeatures'
 
 /** A kind's display name, for a chart's title. */
 const listedLabelOf = (
@@ -529,6 +530,7 @@ export function RecordsExplorer({
   const navigate = useNavigate()
   // What this person may do here: the controls stay, off, saying why.
   const { can, why } = usePermissions()
+  const hasFeature = useHasFeature()
   const mayWrite = can('write_records', collection?.id)
   const mayDelete = can('delete', collection?.id)
   const starters = dataset ? (x.schemas ?? []).filter((s) => !s.parent_id) : []
@@ -1124,38 +1126,46 @@ export function RecordsExplorer({
                                     Edit…
                                   </Button>
                                 )}
-                              <Button
-                                size="sm"
-                                disabled={
-                                  !can('change_structure') ||
-                                  (allKinds && allMatching)
-                                }
-                                title={
-                                  allKinds && allMatching
-                                    ? pickKind('release every matching record')
-                                    : can('change_structure')
-                                      ? 'Freeze these records, with the files they cite, as a citable release'
-                                      : why('change_structure')
-                                }
-                                onClick={() =>
-                                  navigate(
-                                    `/releases/new?${new URLSearchParams(
-                                      allMatching
-                                        ? {
-                                            query: JSON.stringify(
-                                              queryBody(
-                                                { ...x.query, sort: undefined },
-                                                dataset,
+                              {hasFeature('releases') && (
+                                <Button
+                                  size="sm"
+                                  disabled={
+                                    !can('release') || (allKinds && allMatching)
+                                  }
+                                  title={
+                                    allKinds && allMatching
+                                      ? pickKind(
+                                          'release every matching record',
+                                        )
+                                      : can('release')
+                                        ? 'Freeze these records, with the files they cite, as a citable release'
+                                        : why('release')
+                                  }
+                                  onClick={() =>
+                                    navigate(
+                                      `/releases/new?${new URLSearchParams(
+                                        allMatching
+                                          ? {
+                                              query: JSON.stringify(
+                                                queryBody(
+                                                  {
+                                                    ...x.query,
+                                                    sort: undefined,
+                                                  },
+                                                  dataset,
+                                                ),
                                               ),
-                                            ),
-                                          }
-                                        : { records: [...selected].join(',') },
-                                    )}`,
-                                  )
-                                }
-                              >
-                                Release these…
-                              </Button>
+                                            }
+                                          : {
+                                              records: [...selected].join(','),
+                                            },
+                                      )}`,
+                                    )
+                                  }
+                                >
+                                  Release these…
+                                </Button>
+                              )}
                               {(listed || allKinds) && (
                                 // Moving takes the records out of this collection, so
                                 // it asks for the same permission as deleting here.

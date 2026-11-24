@@ -20,6 +20,7 @@ from civex.domain.sync import DIRECT_FILES
 from civex.project import scaffold_project
 from civex.repositories.local import inventory
 from civex.repositories.s3 import store as s3_module
+from civex.services import sync_service
 
 from civex.testing import build_study, principal, serve
 
@@ -79,6 +80,7 @@ def test_files_go_between_a_device_and_the_bucket(project, server, bucket, monke
     # Small enough for one PUT; the second is sent in parts.
     monkeypatch.setattr(s3_module, "SINGLE_PUT_MAX", 64)
     monkeypatch.setattr(s3_module, "PART_SIZE", 1024)
+    monkeypatch.setattr(sync_service, "LARGE_FILE_BYTES", 1000)  # the 3 KB one is big
     laptop = project("laptop")
     record = build_study(laptop)
     small = _with_file(laptop, record, b"a small scan")
@@ -92,7 +94,8 @@ def test_files_go_between_a_device_and_the_bucket(project, server, bucket, monke
     assert bucket.objects[("lab", key)][0] == b"a small scan"
     assert authority.file_svc.exists(small.sha256)
     if direct:
-        # The authority only presigned and recorded: not one byte through it.
+        # The authority only presigned and recorded: not one byte through it
+        # (no pack either: a pack would stream the bytes through the authority).
         assert "put_object" not in bucket.calls and "upload_file" not in bucket.calls
     else:
         assert "upload_file" in bucket.calls  # streamed to it, then put by it

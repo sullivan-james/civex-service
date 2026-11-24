@@ -61,7 +61,11 @@ log = logging.getLogger(__name__)
 # A presigned PUT for a whole file up to this size (S3's limit for one PUT);
 # bigger files go in parts.
 SINGLE_PUT_MAX = 5 * 1024**3
-PART_SIZE = 64 * 1024**2
+# A file above MULTIPART_MIN goes in parts of PART_SIZE (more for a very big
+# file), so the uploader can send several at once: one PUT is one connection,
+# and one connection does not fill a fast line.
+MULTIPART_MIN = 32 * 1024**2
+PART_SIZE = 16 * 1024**2
 MAX_PARTS = 10_000  # S3's limit on a multipart upload
 # How long a presigned URL works. Uploads get longer: a big file over a slow
 # link takes a while, and an expired part means asking for a fresh target.
@@ -175,6 +179,8 @@ class _Reader:
 
 
 class S3ObjectStore:
+    supports_parts = False  # a bucket takes parts straight (`upload_target`)
+
     def __init__(
         self,
         config: S3Config,
@@ -351,6 +357,14 @@ class S3ObjectStore:
         if self._session is not None:
             return sha256 in self.copies([sha256])
         return self._head(sha256) is not None
+
+    def exists_many(self, shas: Iterable[str]) -> set[str]:
+        """Which of these are held: from the inventory in one lookup when there
+        is one, else each asked of the bucket."""
+        wanted = list(dict.fromkeys(shas))
+        if self._session is not None:
+            return set(self.copies(wanted))
+        return {sha for sha in wanted if self._head(sha) is not None}
 
     def size_of(self, sha256: str) -> int | None:
         rows = self.copies([sha256]).get(sha256)
@@ -589,12 +603,21 @@ class S3ObjectStore:
 
     # -- straight to the bucket (`direct_files`) -----------------------------
 
+    def begin_parts(self, *args: Any, **kwargs: Any) -> tuple[int, list[int]]:
+        raise VolumeUnavailableError("This store takes parts straight (direct_files)")
+
+    async def put_part(self, *args: Any, **kwargs: Any) -> None:
+        raise VolumeUnavailableError("This store takes parts straight (direct_files)")
+
+    def finish_parts(self, *args: Any, **kwargs: Any) -> FileRef:
+        raise VolumeUnavailableError("This store takes parts straight (direct_files)")
+
     def upload_target(self, sha256: str, size: int) -> DirectUpload | None:
         if not self._cfg.direct:
             return None
         bucket, key = self._cfg.bucket, self.key_of(sha256)
         expires = int(time.time()) + UPLOAD_SECONDS
-        if size <= SINGLE_PUT_MAX:
+        if size <= min(SINGLE_PUT_MAX, MULTIPART_MIN):
             # S3 checks the whole object against this hash before keeping it.
             url = self._call(
                 self.client.generate_presigned_url,
@@ -672,8 +695,9 @@ class S3ObjectStore:
             raise ValidationError(
                 f"The upload is {found} bytes, not the {size} announced; it was removed"
             )
-        # One PUT was checked against the hash by S3 itself; parts were each
-        # checked, but the whole waits for a read-back (`verify`).
+        # One PUT was checked against the hash by S3 itself; a file in parts is
+        # not (the part URLs carry no checksum): the whole waits for a read-back
+        # (`verify`).
         self._register(sha256, size, verified=upload_id is None)
         return self._ref(sha256, original_filename, size)
 

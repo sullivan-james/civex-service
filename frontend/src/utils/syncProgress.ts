@@ -61,7 +61,9 @@ export function describeSyncProgress(p: SyncProgress): SyncProgressText {
   return {
     title: PHASES[p.phase] ?? 'Syncing',
     detail: what ? `${what} · ${count}` : count,
-    count: amounts,
+    count: p.owed
+      ? `${amounts} · ${p.owed.toLocaleString()} not readable here`
+      : amounts,
     fraction: byBytes
       ? Math.min(1, bytesDone / bytesTotal)
       : p.total != null && p.total > 0

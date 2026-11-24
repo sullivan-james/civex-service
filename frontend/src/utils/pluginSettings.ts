@@ -19,6 +19,7 @@ export interface SettingHint {
     | 'pattern'
     | 'date_format'
     | 'choice'
+    | 'folder'
   of?: string
   dtypes?: string[]
   on?: string
@@ -28,8 +29,11 @@ export interface SettingHint {
   /** A list of fields rather than one (`field` only). */
   many?: boolean
   pattern?: string
-  choices?: { value: string; label: string }[]
+  /** A choice may name the server feature it needs (left out without it). */
+  choices?: { value: string; label: string; feature?: string }[]
   advanced?: boolean
+  /** Shown only while another setting holds one of these values. */
+  when?: { setting: string; is: string[] }
 }
 
 export interface Setting {

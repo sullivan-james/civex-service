@@ -1,0 +1,51 @@
+name: Prune dev builds
+
+# Deletes `dev-*` prereleases (and their tags) older than 90 days, except any
+# listed in dev-builds-keep.txt on the default branch. See CONTRIBUTING.md.
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "List what would be deleted, delete nothing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  prune:
+    if: github.repository == 'sullivan-james/civex-service'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+    steps:
+      # The default branch's keep file, even when run by hand from another.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: dev-builds-keep.txt
+          sparse-checkout-cone-mode: false
+
+      - name: Delete old dev builds
+        run: |
+          cutoff="$(date -u -d '90 days ago' +%Y-%m-%dT%H:%M:%SZ)"
+          # Entries: a commit sha (7+ hex) or a dev-<sha12> tag; # starts a comment.
+          sed 's/#.*//' dev-builds-keep.txt | tr -s ' \t' '\n' | sed 's/^dev-//' | grep -E '^[0-9a-f]{7,40}$' > keep.txt || true
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName,isPrerelease,createdAt \
+            --jq ".[] | select(.isPrerelease and (.tagName | startswith(\"dev-\")) and .createdAt < \"$cutoff\") | .tagName" |
+          while read -r tag; do
+            sha="${tag#dev-}"
+            # An entry keeps the build when it and the tag's sha agree as far as both go.
+            if awk -v s="$sha" 'index(s,$0)==1 || index($0,s)==1 {f=1} END{exit !f}' keep.txt; then
+              echo "keep   $tag"
+            elif [ "$DRY_RUN" = true ]; then
+              echo "would delete $tag"
+            else
+              echo "delete $tag"
+              gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+            fi
+          done

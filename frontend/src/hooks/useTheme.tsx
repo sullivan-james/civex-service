@@ -22,8 +22,10 @@ function readStoredPreference(): ThemePreference {
   return stored === 'light' || stored === 'dark' ? stored : 'system'
 }
 
-function applyPreference(preference: ThemePreference) {
-  const root = document.documentElement
+function applyPreference(
+  preference: ThemePreference,
+  root: HTMLElement = document.documentElement,
+) {
   if (preference === 'system') root.removeAttribute('data-theme')
   else root.setAttribute('data-theme', preference)
 }
@@ -36,9 +38,21 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null)
 
-export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [preference, setPreferenceState] =
-    useState<ThemePreference>(readStoredPreference)
+/** `target` and `scheme` are for a mounted app (`embed.tsx`): the theme is the
+ * host's (`scheme`, or the browser's), set on the mounted element rather than
+ * the page's `<html>`, and neither read from nor written to storage. */
+export function ThemeProvider({
+  children,
+  target,
+  scheme,
+}: {
+  children: ReactNode
+  target?: HTMLElement
+  scheme?: 'light' | 'dark'
+}) {
+  const [preference, setPreferenceState] = useState<ThemePreference>(() =>
+    target ? (scheme ?? 'system') : readStoredPreference(),
+  )
   // Only tracks the OS setting; combined with `preference` below to derive
   // `resolved` during render instead of mirroring it into more state.
   const [systemIsDark, setSystemIsDark] = useState(
@@ -46,8 +60,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   )
 
   useEffect(() => {
-    applyPreference(preference)
-  }, [preference])
+    applyPreference(preference, target)
+  }, [preference, target])
 
   useEffect(() => {
     const mql = window.matchMedia('(prefers-color-scheme: dark)')
@@ -60,8 +74,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     preference === 'system' ? (systemIsDark ? 'dark' : 'light') : preference
 
   function setPreference(next: ThemePreference) {
-    if (next === 'system') localStorage.removeItem(STORAGE_KEY)
-    else localStorage.setItem(STORAGE_KEY, next)
+    if (!target) {
+      if (next === 'system') localStorage.removeItem(STORAGE_KEY)
+      else localStorage.setItem(STORAGE_KEY, next)
+    }
     setPreferenceState(next)
   }
 

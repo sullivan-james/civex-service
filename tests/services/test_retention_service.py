@@ -203,9 +203,7 @@ def test_a_batch_with_nothing_left_is_removed_too(ctx, survey, make_record):
     assert ctx._session.query(AuditBatch).count() == 0
 
 
-def test_a_live_record_keeps_its_creation_and_latest_change_however_old(
-    ctx, survey
-):
+def test_a_live_record_keeps_its_creation_and_latest_change_however_old(ctx, survey):
     """Pruning by age once left a live record with no history at all: nothing
     said where it came from, or how it came to be where it was."""
     rec = survey["recs"][2]

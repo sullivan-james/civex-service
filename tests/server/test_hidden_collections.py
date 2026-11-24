@@ -16,8 +16,11 @@ from civex.context import build_local_context
 from civex.domain import permissions as p
 from civex.domain.permissions import Permissions
 from civex.project import Project, scaffold_project
+from civex.domain.features import LOCAL_FEATURES, RELEASES
 from civex.server.app import create_app
 
+# Releases are a host's feature: these tests are about one that offers them.
+WITH_RELEASES = LOCAL_FEATURES | {RELEASES}
 SECRET = "TOPSECRET"
 
 
@@ -70,6 +73,7 @@ class World:
             config_store=FileConfigStore(self.root),
             actor="Dr Example",
             permissions=perms,
+            features=WITH_RELEASES,
         )
 
 
@@ -82,7 +86,7 @@ def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> World:
 
 
 def _client(world: World, perms: Permissions) -> TestClient:
-    app = create_app()
+    app = create_app(features=WITH_RELEASES)
     app.state.project_resolver = lambda request: world.project(perms)
     return TestClient(app, raise_server_exceptions=False)
 

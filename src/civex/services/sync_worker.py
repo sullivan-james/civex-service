@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING
 from civex.config import Config
 from civex.domain.rates import RateWindow
 from civex.domain.sync import FILES, SyncError, SyncProgress
+from civex.services.http_wire import jittered
 from civex.services.sync_lock import SyncBusy
 
 if TYPE_CHECKING:
@@ -67,6 +68,7 @@ class _SendRun:
 
     files: int = 0
     bytes: int = 0
+    owed: int = 0  # files earlier passes couldn't read here
     rate: RateWindow = field(default_factory=RateWindow)
     last: SyncProgress | None = None
     after: str = ""  # where the last pass got to (hash order)
@@ -78,7 +80,8 @@ class _SendRun:
         return replace(
             p,
             done=self.files + p.done,
-            total=None if p.total is None else self.files + p.total,
+            owed=self.owed + p.owed,
+            total=None if p.total is None else self.files + self.owed + p.total,
             bytes_done=sent,
             bytes_total=None if p.bytes_total is None else self.bytes + p.bytes_total,
             rate=self.rate.add(now, sent),
@@ -87,6 +90,7 @@ class _SendRun:
     def close_pass(self) -> None:
         if self.last is not None:
             self.files += self.last.done
+            self.owed += self.last.owed
             self.bytes += self.last.bytes_done
             self.last = None
 
@@ -135,6 +139,8 @@ class SyncWorker:
         # The run of uploads under way, over as many passes as it takes, so
         # its bar carries on from pass to pass instead of starting again.
         self._send_run: _SendRun | None = None
+        # Set while `run_files` runs, so sending can see a shutdown mid-pass.
+        self._stop: threading.Event | None = None
         # What the last sync run here did, for the app to report. Kept in memory:
         # it is a notice, not state anyone needs after a restart.
         self.last_report: SyncReport | None = None
@@ -241,7 +247,11 @@ class SyncWorker:
         try:
             more = {"after": run.after} if run.after else {}
             report = ctx.sync_svc.send_files(
-                everything=everything, seconds=FILES_SECONDS, progress=told, **more
+                everything=everything,
+                seconds=FILES_SECONDS,
+                progress=told,
+                should_stop=self._should_stop_sending,
+                **more,
             )
         except SyncError as e:
             log.info("sending files failed (%s); it carries on later", e)
@@ -262,6 +272,18 @@ class SyncWorker:
         self._send_run = None
         if sending:  # no bar left where uploading ended
             self._on_files(None)
+
+    def _should_stop_sending(self) -> bool:
+        """Asked between slices of files: a shutdown, or a pause (unless a
+        person asked for the sending) ends the pass, which carries on later."""
+        if self._stop is not None and self._stop.is_set():
+            return True
+        asked = self._files_asked.is_set() or self._send_asked.is_set()
+        try:
+            config = self._load_config()
+        except Exception:  # noqa: BLE001 - a config read failing must not end sending
+            return False
+        return bool(config.sync.paused and not asked) or not config.sync.remote
 
     def _fetch_history(self, ctx: AppContext) -> None:
         """A few pages of the history from before this project joined, while
@@ -388,13 +410,18 @@ class SyncWorker:
                 if not e.retryable
                 else min(MAX_BACKOFF, BASE_BACKOFF * 2**self._failures)
             )
+            if e.retry_after:  # the server said how long it needs
+                wait = max(wait, min(e.retry_after, MAX_BACKOFF))
+            # Jittered, so devices that failed together (a restart, a deploy)
+            # don't come back together.
+            wait = jittered(wait)
             self._backoff_until = now + wait
-            self._next_interval = now + config.sync.interval_seconds
+            self._next_interval = now + jittered(config.sync.interval_seconds)
             log.warning("sync failed (%s); trying again in %ds", e, wait)
             return None
         self._failures = 0
         self._backoff_until = 0.0
-        self._next_interval = now + config.sync.interval_seconds
+        self._next_interval = now + jittered(config.sync.interval_seconds)
         return report
 
     def run(self, stop: threading.Event, poll: float = 2.0) -> None:
@@ -411,6 +438,7 @@ class SyncWorker:
             files.join(5.0)
 
     def run_files(self, stop: threading.Event, poll: float = 2.0) -> None:
+        self._stop = stop
         self._loop(stop, poll, self.files_tick, self._files_wake, "files tick failed")
 
     @staticmethod
@@ -427,5 +455,5 @@ class SyncWorker:
             except Exception:  # noqa: BLE001 - one bad tick must not end syncing
                 log.exception(what)
             # Sleep until the next look, or until someone asks for something.
-            wake.wait(poll)
+            wake.wait(jittered(poll))
             wake.clear()

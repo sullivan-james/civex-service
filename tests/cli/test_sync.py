@@ -262,7 +262,10 @@ def test_clone_will_not_connect_a_project_that_already_holds_data(
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(SyncService, "connect", _fake_connect(None, {}))
-    assert runner.invoke(app, ["clone", "https://hub.example/birds", "copy"]).exit_code == 0
+    assert (
+        runner.invoke(app, ["clone", "https://hub.example/birds", "copy"]).exit_code
+        == 0
+    )
     monkeypatch.chdir(tmp_path / "copy")
     assert runner.invoke(app, ["schema", "create", "thing"]).exit_code == 0
     monkeypatch.chdir(tmp_path)

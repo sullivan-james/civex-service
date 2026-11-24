@@ -151,21 +151,6 @@ class LocalReleaseRepository:
             )
         self._s.flush()
 
-    def mark_indexed(self, release_id: uuid.UUID) -> None:
-        self._s.execute(
-            update(Release).where(Release.id == release_id).values(indexed=True)
-        )
-
-    def waiting_index(self, bundle_sha256: str | None = None) -> list[ReleaseDTO]:
-        """Releases (not yanked) whose cited files this copy hasn't owned
-        yet: made elsewhere, their bundle not read here."""
-        q = self._s.query(Release).filter(
-            Release.indexed.is_(False), Release.yanked_at.is_(None)
-        )
-        if bundle_sha256 is not None:
-            q = q.filter(Release.bundle_sha256 == bundle_sha256)
-        return [_to_dto(r) for r in q]
-
     def owned_pointers(self, release_id: uuid.UUID) -> dict[str, str | None]:
         """Each file a release owns and the copy it points at (None: no copy
         here yet)."""

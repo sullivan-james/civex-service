@@ -1,0 +1,139 @@
+name: Dev build
+
+# Every push to a branch of this repository publishes an installable wheel
+# (web app included) as a GitHub prerelease tagged `dev-<sha12>`, so civex-hub
+# can depend on an unreleased civex by URL instead of through PyPI:
+#   https://github.com/sullivan-james/civex-service/releases/download/dev-<sha12>/<wheel>
+# `scripts/dev_build_url.sh <branch|sha>` prints that URL and the wheel's sha256.
+#
+# There is no pull_request trigger, so a fork's PR never runs this with write
+# access; a fork's own pushes run in the fork, which the repository guard below
+# refuses. Tags don't trigger it (release.yml owns those).
+on:
+  push:
+    branches: ["**"]
+
+concurrency:
+  # One run per commit at a time (the same sha pushed to two branches), never
+  # cancelled: a half-published build is worse than a queued one.
+  group: dev-build-${{ github.sha }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.repository == 'sullivan-james/civex-service'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Name the release
+        id: name
+        run: echo "tag=dev-${GITHUB_SHA:0:12}" >> "$GITHUB_OUTPUT"
+
+      # Re-running on a sha that already has its build is a no-op; a draft
+      # left by a run that died halfway is removed so the sha can be retried.
+      - name: Is this commit already built?
+        id: exists
+        run: |
+          tag="${{ steps.name.outputs.tag }}"
+          state="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName,isDraft \
+            --jq "[.[] | select(.tagName == \"$tag\")] | if length == 0 then \"none\" elif .[0].isDraft then \"draft\" else \"published\" end")"
+          if [ "$state" = draft ]; then
+            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes
+            state=none
+          fi
+          if [ "$state" = published ]; then
+            echo "$tag exists; nothing to do."
+            echo "built=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "built=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v7
+        if: steps.exists.outputs.built == 'false'
+        with:
+          fetch-depth: 0
+
+      # <next patch after the last v* tag>.dev<commits since it>: orders after
+      # the last release and before the next one, and carries no local part
+      # (a `+` doesn't survive in a release asset's name). Only this workflow
+      # sets it; release.yml builds from the tag as before.
+      - name: Work out the version
+        if: steps.exists.outputs.built == 'false'
+        id: version
+        run: |
+          desc="$(git describe --tags --long --match 'v[0-9]*')"   # v2.2.0-12-gabc1234
+          python3 scripts/dev_version.py "$desc" >> "$GITHUB_OUTPUT"
+
+      - uses: astral-sh/setup-uv@v7
+        if: steps.exists.outputs.built == 'false'
+        with:
+          enable-cache: true
+
+      - name: Set up Node
+        if: steps.exists.outputs.built == 'false'
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      # The same steps release.yml runs: a wheel built from git alone has no
+      # web app, which is why this workflow exists.
+      - name: Build frontend
+        if: steps.exists.outputs.built == 'false'
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Copy frontend dist into package
+        if: steps.exists.outputs.built == 'false'
+        run: cp -r frontend/dist/. src/civex/server/static/
+
+      - name: Set up Python
+        if: steps.exists.outputs.built == 'false'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build wheel
+        if: steps.exists.outputs.built == 'false'
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          pip install build
+          python -m build --wheel
+
+      - name: Check the wheel
+        if: steps.exists.outputs.built == 'false'
+        run: |
+          set -e
+          [ "$(ls dist/*.whl | wc -l)" = 1 ]
+          wheel="$(ls dist/*.whl)"
+          case "$wheel" in *"-${{ steps.version.outputs.version }}-"*) ;; *) echo "wrong version: $wheel"; exit 1 ;; esac
+          unzip -l "$wheel" | grep -q 'civex/server/static/index.html' \
+            || { echo "the wheel has no web app"; exit 1; }
+          (cd dist && sha256sum *.whl > SHA256SUMS && cat SHA256SUMS)
+
+      # Created as a draft, assets attached, then published: with the
+      # repository's "immutable releases" setting on, a published release's
+      # assets and tag can't change afterwards.
+      - name: Publish the prerelease
+        if: steps.exists.outputs.built == 'false'
+        env:
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          tag="${{ steps.name.outputs.tag }}"
+          printf 'Development build of civex %s.\n\nBranch: `%s`\nCommit: %s\n\nNot a release: it is not on PyPI.\n' \
+            "${{ steps.version.outputs.version }}" "$BRANCH" "$GITHUB_SHA" > notes.md
+          gh release create "$tag" dist/*.whl dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" --draft --prerelease --latest=false \
+            --target "$GITHUB_SHA" --title "Dev build ${GITHUB_SHA:0:12}" --notes-file notes.md
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease --latest=false
+          echo "https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/$(basename dist/*.whl)" >> "$GITHUB_STEP_SUMMARY"

@@ -10,10 +10,11 @@ entry's id, which is what makes sending it twice harmless.
 from __future__ import annotations
 
 import dataclasses
+import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any, Protocol
 
 from civex.domain import features
@@ -25,7 +26,7 @@ from civex.domain import hlc
 # changed meaning); MIN goes up when an older one is no longer served. An
 # authority is upgraded first and answers a device on any version both speak.
 PROTOCOL_MIN = 3
-PROTOCOL_MAX = 5
+PROTOCOL_MAX = 6
 # The first version whose feed tells a device how far the authority looked
 # (`FeedPage.through`) and whose hello lists the collections it may read: what a
 # device whose person may not read the whole project needs to sync it.
@@ -37,7 +38,35 @@ SCOPED_PROTOCOL = 5
 PROTOCOL_RETIRING: int | None = None
 # Optional features, by name, that a peer can look for in `Hello`. Adding one is
 # not a protocol change; an older peer just doesn't have it.
-CAPABILITIES: tuple[str, ...] = ("library", "device_login")
+CAPABILITIES: tuple[str, ...] = (
+    "library",
+    "device_login",
+    "file_packs",
+    "gzip_requests",
+)
+# JSON request bodies (a push) may be sent `Content-Encoding: gzip`; the
+# authority decompresses them up to a cap (`server.sync_policy`).
+GZIP_REQUESTS = "gzip_requests"
+# Many small files in one request (`POST /files/pack`): each is checked and
+# stored, and the answer says which went in. Offered by every authority that
+# serves; one without it is sent the files one request each.
+FILE_PACKS = "file_packs"
+# A big file in numbered parts, several at a time, resumable: `POST
+# /files/{sha}/parts` (answers which parts are held), `PUT /files/{sha}/parts/{n}`
+# and `POST /files/{sha}/parts/complete`. Offered when the authority's files are
+# on drives (a bucket takes parts straight, `direct_files`).
+FILE_PARTS = "file_parts"
+# The limits a pack and a part keep to, on both sides: a file in a pack is
+# smaller than PACK_FILE_MAX, a pack holds at most PACK_MAX_FILES files and
+# PACK_MAX_BYTES bytes; a part is FILE_PART_BYTES unless the file is so big that
+# MAX_FILE_PARTS parts would not cover it.
+PACK_FILE_MAX = 64 * 1024 * 1024
+PACK_MAX_FILES = 1000
+PACK_MAX_BYTES = 256 * 1024 * 1024
+FILE_PART_BYTES = 16 * 1024 * 1024
+FILE_PART_MIN = 1024 * 1024
+FILE_PART_MAX = 64 * 1024 * 1024
+MAX_FILE_PARTS = 10_000
 # A device may ask to join without an invite: it shows a short code, a person
 # approves it on the authority (`POST /device-login`, polled at
 # `GET /device-login/{device_code}`).
@@ -57,8 +86,16 @@ ENTITY_ORDER = (
     "dashboard",
     "record",
     "note",
-    "release",
 )
+
+# A kind that is no longer synced (protocol 6): releases are published on a
+# host and never travel, so a device never sends one, the authority never feeds
+# or snapshots one and refuses one it is sent (`REFUSAL_NOT_SYNCED`). Kept out
+# of `ENTITY_ORDER`, so nothing seeds, joins or counts them.
+NOT_SYNCED_KINDS = frozenset({"release"})
+# Releases were part of protocols 4 and 5, so a device on either may still ask
+# for their snapshot: it is answered with an empty page, never an error.
+NOT_SYNCED_AFTER = 5
 
 # What of each kind travels, and nothing else: a column added for this machine
 # alone (a cache, a search index) stays off the wire, and adding one here is a
@@ -144,44 +181,13 @@ WIRE_FIELDS: dict[str, frozenset[str]] = {
             "deleted_at",
         }
     ),
-    # A release's manifest and citation (`domain/release`); its bundle travels
-    # as a file, and the files it cites are the records' own. `local_seq` and
-    # `indexed` are this copy's own and stay here.
-    "release": frozenset(
-        {
-            "id",
-            "name",
-            "title",
-            "description",
-            "authors",
-            "licence",
-            "doi",
-            "keywords",
-            "scope",
-            "content_hash",
-            "bundle_sha256",
-            "bundle_size",
-            "counts",
-            "feed_seq",
-            "civex_version",
-            "created_at",
-            "created_by",
-            "updated_at",
-            "withdrawn_at",
-            "withdrawn_by",
-            "withdrawn_reason",
-            "yanked_at",
-            "yanked_by",
-            "yanked_reason",
-        }
-    ),
 }
 
 # What each protocol version added, so a server still answers a device on an
 # older one with only what it can read (`kinds_for`, `entry_for`,
 # `snapshot_for`; applied in the peer router, never in the core): a kind, or a
 # kind's field, and the version it travels from.
-KINDS_SINCE: dict[str, int] = {"dashboard": 4, "note": 4, "release": 4}
+KINDS_SINCE: dict[str, int] = {"dashboard": 4, "note": 4}
 FIELDS_SINCE: dict[str, dict[str, int]] = {"schema": {"charts": 4}}
 
 
@@ -204,7 +210,9 @@ def entry_for(protocol: int, entry: SyncEntry) -> SyncEntry | None:
     """An entry as a peer on `protocol` can read it: None for a kind it
     doesn't know, else without the fields it doesn't (an edit of only those
     leaves an edit of nothing, which applies as no change)."""
-    if entry.entity_type not in kinds_for(protocol):
+    if entry.entity_type in NOT_SYNCED_KINDS or entry.entity_type not in kinds_for(
+        protocol
+    ):
         return None
     kind = entry.entity_type
     newer = {f for f, v in FIELDS_SINCE.get(kind, {}).items() if v > protocol}
@@ -328,6 +336,13 @@ DUPLICATE = "duplicate"  # seen before; nothing done
 REJECTED = "rejected"  # can never be accepted (it breaks a rule); say why
 DEFERRED = "deferred"  # not yet (a file hasn't arrived); send it again later
 
+# How sync itself settles a conflict (the column holds at most 10 chars): what
+# was waiting for review when the project moves to another server (that
+# server's answers were about it, not the new one); and a refusal of a thing's
+# create, still unsettled, once a fill of the authority takes the thing after all.
+FOLLOWED = "followed"
+TAKEN = "taken"
+
 RETRY_STATUSES = frozenset({DEFERRED})
 
 # Why a refusal (`REJECTED`) was made, in the `code` of its `conflicts` item
@@ -336,6 +351,12 @@ RETRY_STATUSES = frozenset({DEFERRED})
 # again.
 REFUSAL_PERMISSION = "permission"
 REFUSAL_INVALID = "invalid"
+# The change is about a kind that is not synced (a release: those are published
+# on a host). Never sent again; the device keeps what it made.
+REFUSAL_NOT_SYNCED = "not_synced"
+NOT_SYNCED_MESSAGE = (
+    "Releases are published on a civex hub and are not synced: make this one there."
+)
 
 ACTIONS = frozenset({"create", "update", "delete", "restore", "purge"})
 # A delete's time becomes the `deleted_at` of what it deletes, so a device whose
@@ -768,6 +789,9 @@ class SyncProgress:
     bytes_done: int = 0
     rate: float = 0.0
     bytes_total: int | None = None
+    # Sending files: how many couldn't be read here (a drive not plugged in).
+    # Not counted in `done`, nor their bytes in `bytes_done`.
+    owed: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -778,6 +802,7 @@ class SyncProgress:
             "bytes_done": self.bytes_done,
             "bytes_total": self.bytes_total,
             "rate": self.rate,
+            "owed": self.owed,
         }
 
 
@@ -860,9 +885,17 @@ class SyncError(RuntimeError):
         retryable: bool = True,
         status: int = 400,
         detail: str = "",
+        retry_after: float | None = None,
+        code: str = "",
     ) -> None:
         super().__init__(message)
+        # Why, for a program to act on (not_a_device, clock_skew, bad_signature,
+        # too_large...), when the authority said; empty from an older server.
+        self.code = code
         self.retryable = retryable
+        # Seconds the server asked to wait before trying again (`Retry-After`),
+        # when it said.
+        self.retry_after = retry_after
         # How an authority reports it over HTTP: 401 no/invalid token, 403 a
         # token used from another device.
         self.status = status
@@ -1267,3 +1300,40 @@ class SyncTransport(Protocol):
     def unpublish(
         self, kind: str, name: str, version: int | None = None, force: bool = False
     ) -> None: ...
+
+
+# A push carries at most this many serialized bytes (an action over it goes
+# alone), so the size of a request doesn't depend on how wide the records are.
+PUSH_BUDGET_BYTES = 2 * 1024 * 1024
+
+
+def batch_by_budget(
+    entries: list[SyncEntry],
+    max_entries: int,
+    max_bytes: int = PUSH_BUDGET_BYTES,
+    size_of: Callable[[SyncEntry], int] | None = None,
+) -> list[SyncEntry]:
+    """The leading entries to send in one push: at most `max_entries` and about
+    `max_bytes` serialized, but never part of an action (entries sharing an
+    `op` are taken together or not at all; an action over the budget goes
+    alone, and the first action is always taken). Entries with no `op` are each
+    an action of their own."""
+    size = size_of or (lambda e: len(json.dumps(e.to_dict())))
+    taken: list[SyncEntry] = []
+    used = 0
+    i = 0
+    while i < len(entries):
+        j = i + 1
+        if entries[i].op is not None:
+            while j < len(entries) and entries[j].op == entries[i].op:
+                j += 1
+        action = entries[i:j]
+        cost = sum(size(e) for e in action)
+        if taken and (
+            len(taken) + len(action) > max_entries or used + cost > max_bytes
+        ):
+            break
+        taken += action
+        used += cost
+        i = j
+    return taken

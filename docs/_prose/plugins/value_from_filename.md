@@ -1,0 +1,47 @@
+# `civex.value_from_filename@1`  (Value from the file name)
+
+Apply a regex to a file field's filename (or a plain string field) and optionally convert the captured value to a typed output. Reach for this when the data you need — a timestamp, a sample number, a session ID — is embedded in a filename rather than stored as its own field. Works with `file`, `file_list`, and `string` fields.
+
+<!-- civex:tables -->
+
+**`date_format` tokens**
+
+| Token | Matches | Example |
+|---|---|---|
+| `YYYY` | 4-digit year | `2024` |
+| `MM` | 2-digit month | `03` |
+| `DD` | 2-digit day | `15` |
+| `HH` | 2-digit hour (24h) | `09` |
+| `mm` | 2-digit minute | `30` |
+| `SS` | 2-digit second | `00` |
+
+All other characters in the format string are treated as **raw regex fragments** — not strftime codes. This lets you use `[-_]` to match either a dash or underscore as a separator:
+
+```
+YYYYMMDD[-_]HHmmSS   →  matches  20240315-093000  and  20240315_093000
+```
+
+Extracted datetimes carry no UTC offset: a timestamp in a filename is wall time where the file was made. When the value is saved it is read in the datetime field's `timezone` restriction, else the collection's timezone, else UTC, and stored as a UTC ISO 8601 string. Set the collection's timezone (`civex collection update NAME --timezone Europe/London`) so extracted times land on the right instant.
+
+**Examples**
+
+Extract a datetime from `20240315_093000.csv`:
+```yaml
+- id: extract_time
+  plugin: civex.value_from_filename@1
+  config:
+    field: reading
+    pattern: '(\d{8}[-_]\d{6})'
+    output_type: datetime
+    date_format: 'YYYYMMDD[-_]HHmmSS'
+```
+
+Extract a sample number from `sample_042_photo.jpg`:
+```yaml
+- id: extract_num
+  plugin: civex.value_from_filename@1
+  config:
+    field: photo
+    pattern: 'sample_(\d+)'
+    output_type: integer
+```

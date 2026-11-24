@@ -49,6 +49,9 @@ class HostFn:
     action: str | None
     call: Call
     description: str
+    #: Granted only to a plugin that lists this function by name, never by
+    #: the action it needs: for a function that reaches beyond the project.
+    explicit: bool = False
 
 
 def _record(dto: Any) -> dict[str, Any]:
@@ -259,6 +262,17 @@ _FNS = [
         "Store the file at a path in the run's folder, in the run's collection.",
     ),
     HostFn(
+        "store_folder",
+        MANAGE_FILES,
+        lambda ctx, a, s: ctx.store_folder(
+            a["folder"], a.get("pattern", "*"), bool(a.get("subfolders", False))
+        ),
+        "Store the files of a folder on the server's machine, in the run's "
+        "collection (only where the host offers it, and to a plugin that lists "
+        "`store_folder` by name).",
+        explicit=True,
+    ),
+    HostFn(
         "delete_record",
         DELETE,
         _delete_record,
@@ -283,8 +297,15 @@ def granted(capabilities: Iterable[str]) -> frozenset[str]:
     return frozenset(
         fn.name
         for fn in _FNS
-        if fn.action is None or fn.action in listed or fn.name in listed
+        if fn.action is None
+        or fn.name in listed
+        or (fn.action in listed and not fn.explicit)
     )
+
+
+def explicit_functions() -> frozenset[str]:
+    """The functions granted only by name, and only to a built-in step."""
+    return frozenset(fn.name for fn in _FNS if fn.explicit)
 
 
 def unknown_capabilities(capabilities: Iterable[str]) -> list[str]:

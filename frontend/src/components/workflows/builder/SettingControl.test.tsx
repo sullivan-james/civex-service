@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { Schema } from '../../../api/schemas'
 import type { Setting } from '../../../utils/pluginSettings'
 import { SettingControl, type SettingContext } from './SettingControl'
@@ -65,13 +66,15 @@ describe('a setting naming several fields', () => {
   it("offers a box per field of the kind's own, and ticks add to the list", async () => {
     const onChange = vi.fn()
     render(
-      <SettingControl
-        setting={MATCH_ON}
-        value={['number']}
-        onChange={onChange}
-        onChangeSome={() => {}}
-        ctx={ctx({ schema: 'selection' })}
-      />,
+      <QueryClientProvider client={new QueryClient()}>
+        <SettingControl
+          setting={MATCH_ON}
+          value={['number']}
+          onChange={onChange}
+          onChangeSome={() => {}}
+          ctx={ctx({ schema: 'selection' })}
+        />
+      </QueryClientProvider>,
     )
 
     expect(screen.getByRole('checkbox', { name: 'Number' })).toBeChecked()

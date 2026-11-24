@@ -35,10 +35,10 @@ def test_guide_lists_every_builtin_with_its_declared_config_and_io(
         if plugin_id["builtin"]:
             assert plugin_id["id"] in guide
 
-    # get_field: a single required config key, one declared output.
-    assert "civex.get_field" in guide
-    assert "config: {field}" in guide
-    assert "outputs: value" in guide
+    # set_fields: only optional settings, two optional inputs, no output.
+    assert "civex.set_fields@1" in guide
+    assert "config: {fields?, field?}" in guide
+    assert "inputs: value, updates" in guide
 
     # extract_from_filename: required field first, the rest optional (each
     # has a default and so isn't in the config schema's `required` list).
@@ -111,3 +111,23 @@ def test_format_builtin_reference_omits_config_and_io_segments_when_empty():
         }
     ]
     assert _format_builtin_reference(registered) == "civex.bare"
+
+
+def test_guide_teaches_versioned_steps_and_the_three_groups(ctx: AppContext) -> None:
+    guide = GetWorkflowAuthoringGuideTool().run({}, _tool_ctx(ctx))
+    assert "Bring in" in guide and "Work out" in guide and "Save" in guide
+    assert "civex.save_records@1" in guide
+    assert "needs a newer civex" in guide
+    assert "from_field" in guide
+    # None of the retired step ids is taught as a step to use.
+    for old in (
+        "civex.load_file",
+        "civex.parse_table",
+        "civex.rows_to_records",
+        "civex.upsert_records",
+        "civex.get_field",
+        "civex.save_field",
+        "civex.match_files_to_records",
+        "civex.create_records_from_files",
+    ):
+        assert old not in guide, old

@@ -1,15 +1,15 @@
 import { useEffect, useRef } from 'react'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import '@xterm/xterm/css/xterm.css'
+import xtermCss from '@xterm/xterm/css/xterm.css?inline'
 import { Page } from '../components/ui'
 import { useTheme } from '../hooks/useTheme'
-import { apiUrl } from '../utils/host'
+import { addStyles, apiUrl, styleRoot } from '../utils/host'
 
 // xterm renders to canvas, which can't resolve CSS custom properties, so
 // the current token values are read out of computed styles instead.
 function xtermTheme(): ITheme {
-  const style = getComputedStyle(document.documentElement)
+  const style = getComputedStyle(styleRoot())
   const token = (name: string) => style.getPropertyValue(name).trim()
   return {
     background: token('--color-canvas'),
@@ -42,6 +42,7 @@ export default function TerminalPage() {
   const termRef = useRef<Terminal | null>(null)
 
   useEffect(() => {
+    addStyles('xterm', xtermCss)
     const term = new Terminal({
       cursorBlink: true,
       fontSize: 13,

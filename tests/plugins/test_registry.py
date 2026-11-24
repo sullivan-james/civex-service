@@ -22,43 +22,48 @@ from civex.plugins.registry import all_plugins, discover_user_plugins, get_plugi
 # _ALL_BUILTIN_IDS_AND_CAPABILITIES above. Whether those declarations match
 # what invoke() actually returns is enforced separately, in test_builtins.py.
 _BUILTIN_CONTRACTS = {
-    "civex.get_field": ((), ("value",)),
-    "civex.save_field": (("value",), ()),
-    "civex.save_fields": (("updates",), ()),
-    "civex.load_file": ((), ("bytes", "filename", "sha256")),
-    "civex.load_file_list": ((), ("files",)),
-    "civex.extract_from_filename": ((), ("value", "filename", "extracted")),
-    "civex.parse_table": (("bytes",), ("table",)),
-    "civex.create_records_from_files": (("files",), ("created", "skipped")),
-    "civex.match_files_to_records": (
-        ("files",),
-        ("created", "updated", "unmatched", "ambiguous"),
+    "civex.files@1": (("provided",), ("files",)),
+    "civex.table@1": (("files",), ("table",)),
+    "civex.value_from_filename@1": ((), ("value", "filename", "extracted")),
+    "civex.save_records@1": (
+        ("rows", "files"),
+        (
+            "created",
+            "updated",
+            "unchanged",
+            "skipped",
+            "skipped_rows",
+            "unmatched",
+            "ambiguous",
+        ),
     ),
-    "civex.rows_to_records": (
-        ("table",),
-        ("created", "updated", "unchanged", "skipped", "skipped_rows"),
-    ),
-    "civex.upsert_records": (
-        ("table",),
-        ("created", "updated", "unchanged", "skipped", "skipped_rows"),
-    ),
+    "civex.set_fields@1": (("value", "updates"), ()),
 }
 
 # Built-ins run through the host functions like any plugin, so what they
 # declare is what they are allowed (permission actions, `host_api`).
 _ALL_BUILTIN_IDS_AND_CAPABILITIES = {
-    "civex.get_field": ["read"],
-    "civex.save_field": ["read", "write_records"],
-    "civex.save_fields": ["read", "write_records"],
-    "civex.load_file": ["read"],
-    "civex.load_file_list": ["read"],
-    "civex.extract_from_filename": ["read"],
-    "civex.parse_table": [],
-    "civex.create_records_from_files": ["read", "write_records"],
-    "civex.match_files_to_records": ["read", "write_records"],
-    "civex.rows_to_records": ["read", "write_records"],
-    "civex.upsert_records": ["read", "write_records"],
+    "civex.files@1": ["read", "store_folder"],
+    "civex.table@1": ["read"],
+    "civex.value_from_filename@1": ["read"],
+    "civex.save_records@1": ["read", "write_records"],
+    "civex.set_fields@1": ["read", "write_records"],
 }
+
+
+def test_every_builtin_is_the_newest_version_the_upgrades_know():
+    """`workflows.upgrades.LATEST` says which version of each step this civex
+    has; a built-in added or bumped without it would never be upgraded to."""
+    from civex.workflows.upgrades import LATEST, split_step
+
+    newest: dict[str, int] = {}
+    for plugin_id in all_plugins():
+        base, version = split_step(plugin_id)
+        if base.startswith("civex."):
+            newest[base] = max(newest.get(base, 0), version)
+    assert newest == LATEST
+    for base, version in LATEST.items():
+        assert f"{base}@{version}" in all_plugins()
 
 
 def test_all_builtins_register_with_tier_builtin_and_declared_capabilities():
@@ -112,13 +117,14 @@ def test_builtin_io_declarations_use_the_known_type_vocabulary():
 
 
 def test_builtin_invoke_returns_step_result_wrapping_outputs():
-    registration = get_plugin("civex.get_field")
+    registration = get_plugin("civex.files@1")
     assert registration is not None
-    config = registration.config_model(field="anything")
+    config = registration.config_model(source="field", field="anything")
+    ref = {"sha256": "s" * 64, "filename": "f.txt", "size": 1}
 
     class _FakeRecord:
         def to_dict(self) -> dict:
-            return {"id": "r1", "data": {"anything": "value"}}
+            return {"id": "r1", "data": {"anything": [ref]}}
 
     class _FakeCtx:
         def get_context_record(self) -> _FakeRecord:
@@ -126,7 +132,7 @@ def test_builtin_invoke_returns_step_result_wrapping_outputs():
 
     result = registration.invoke({}, config, _FakeCtx(), 60.0)
     assert isinstance(result, StepResult)
-    assert result.outputs == {"value": "value"}
+    assert result.outputs == {"files": [ref]}
     assert result.logs == []
     assert result.error is None
 

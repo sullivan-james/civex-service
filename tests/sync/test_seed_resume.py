@@ -17,7 +17,9 @@ def _records(ctx) -> set[str]:
     return {str(r.id) for r in ctx.sync_repo._s.query(Record).all()}
 
 
-def _interrupted_laptop(project, authority, monkeypatch, pushes=2, presynced=False):
+def _interrupted_laptop(
+    project, authority, monkeypatch, pushes=2, presynced=False, all_synced=False
+):
     monkeypatch.setattr(sync_service, "PUSH_BATCH", 1)
     laptop = device(project, authority, "laptop")
     build_study(laptop)
@@ -32,6 +34,11 @@ def _interrupted_laptop(project, authority, monkeypatch, pushes=2, presynced=Fal
                 "UPDATE audit_log SET sync_state = 'synced' WHERE entity_type = 'record'"
             )
         )
+        laptop.commit()
+    if all_synced:  # nothing left for a seed to set aside (the field case)
+        from sqlalchemy import text
+
+        laptop.sync_repo._s.execute(text("UPDATE audit_log SET sync_state = 'synced'"))
         laptop.commit()
     original = sync_service.SyncService._seed
     broke = []
@@ -159,12 +166,12 @@ def test_a_resume_leaves_other_devices_work_alone(project, authority, monkeypatc
     assert laptop.sync_svc.status().seeding == 0
 
 
-def test_a_release_made_over_an_unfinished_seed_arrives_with_every_record(
+def test_a_release_made_over_an_unfinished_seed_stays_local_and_the_seed_finishes(
     project, authority, monkeypatch
 ):
-    """The field case: a release is made while the first upload is stranded; it
-    goes as an ordinary change, and the resumed seed brings the records it
-    counts, and its bundle file is uploaded."""
+    """Releases are never synced: one made while the first upload is stranded
+    is not sent (nor counted as unsent), and the resumed seed still brings
+    every record."""
     laptop = _interrupted_laptop(project, authority, monkeypatch)
     laptop.release_svc.create("v1", "A release")
     laptop.commit()
@@ -173,10 +180,10 @@ def test_a_release_made_over_an_unfinished_seed_arrives_with_every_record(
     laptop.sync_svc.send_files()
 
     assert laptop.sync_svc.status().seeding == 0
+    assert laptop.sync_svc.status().pending == 0
     assert _records(authority) == _records(laptop)
-    made = authority.release_svc.get("v1")
-    assert made is not None
-    assert authority.file_svc.exists(made.bundle_sha256)
+    assert laptop.release_svc.get("v1") is not None
+    assert authority.release_svc.list_all() == []
 
 
 def test_a_first_upload_another_copy_began_is_sent_as_ordinary_changes(
@@ -320,3 +327,52 @@ def test_a_pull_does_not_overwrite_a_thing_still_set_aside_by_the_first_upload(
     laptop.sync_svc.pull()
 
     assert laptop.record_svc.get(rid).data == mine  # held, not overwritten
+
+
+def test_a_seed_of_history_already_settled_elsewhere_is_finished(
+    project, authority, monkeypatch
+):
+    """The field case: every local change was already `synced` (with another
+    authority), so the seed set none aside; nothing marked the upload as
+    unfinished and a later sync, after a pull moved the cursor, sent nothing."""
+    laptop = _interrupted_laptop(project, authority, monkeypatch, all_synced=True)
+    assert laptop.sync_repo.count_seeding() == 0
+    assert _records(authority) < _records(laptop)
+    laptop.sync_svc.pull()
+
+    report = laptop.sync_svc.sync()
+
+    assert _records(authority) == _records(laptop)
+    assert report is not None
+    laptop.sync_svc.sync()
+    assert _records(authority) == _records(laptop)
+
+
+def test_a_seed_that_never_got_a_batch_in_is_finished_too(
+    project, authority, monkeypatch
+):
+    laptop = _interrupted_laptop(
+        project, authority, monkeypatch, pushes=0, all_synced=True
+    )
+    laptop.sync_svc.sync()
+    assert _records(authority) == _records(laptop)
+
+
+def test_the_marker_survives_a_restart(project, authority, monkeypatch):
+    laptop = _interrupted_laptop(project, authority, monkeypatch, all_synced=True)
+    laptop.sync_repo._s.expire_all()
+    assert laptop.sync_repo.seed_open()
+    laptop.sync_svc.sync()
+    assert not laptop.sync_repo.seed_open()
+
+
+def test_a_server_behind_where_this_copy_followed_is_reported(project, authority):
+    laptop = device(project, authority, "laptop")
+    build_study(laptop)
+    assert connect(laptop) == "seeded"
+    laptop.sync_repo.set_cursor(laptop.sync_repo.meta().cursor + 1000)
+    laptop.commit()
+
+    report = laptop.sync_svc.sync()
+
+    assert report.notice and "different server" in report.notice

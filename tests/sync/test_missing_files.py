@@ -26,9 +26,7 @@ def _cite_lost_file(ctx, record, content: bytes, field: str = "scan"):
     """A record citing a file this project never stored."""
     ref = ctx.file_svc.store_bytes(content, "lost.bin")
     value = ref.to_dict() if field == "scan" else [ref.to_dict()]
-    ctx.record_svc.update(
-        str(record.id), {"site": "x", "depth": 1.0, field: value}
-    )
+    ctx.record_svc.update(str(record.id), {"site": "x", "depth": 1.0, field: value})
     ctx.commit()
     ctx.file_svc._store.delete(ref.sha256)
     ctx.commit()
@@ -47,7 +45,10 @@ def test_missing_files_are_listed_by_collection_and_field(study):
     report = laptop.sync_svc.missing_files()
     assert len(report.shas) == 2 and sha in report.shas
     fields = {(g.collection, g.schema, g.field, g.records) for g in report.groups}
-    assert fields == {("study", "encounter", "scan", 1), ("study", "encounter", "extras", 1)}
+    assert fields == {
+        ("study", "encounter", "scan", 1),
+        ("study", "encounter", "extras", 1),
+    }
 
 
 def test_a_file_that_exists_here_is_never_listed(study):

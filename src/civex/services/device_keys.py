@@ -58,8 +58,8 @@ def _hash(code: str) -> str:
     return hashlib.sha256(code.encode("utf-8")).hexdigest()
 
 
-def _refused(message: str) -> SyncError:
-    return SyncError(message, retryable=False, status=401)
+def _refused(message: str, code: str = "") -> SyncError:
+    return SyncError(message, retryable=False, status=401, code=code)
 
 
 class DeviceKeys:
@@ -242,21 +242,24 @@ class DeviceKeys:
         if device is None:
             raise _refused(
                 "This computer is not a device of that server: it never joined, "
-                "or it was revoked. Ask for an invite."
+                "or it was revoked. Ask for an invite.",
+                code="not_a_device",
             )
         off = at - int(time.time())
         if abs(off) > CLOCK_SKEW_SECONDS:
             raise _refused(
                 f"This computer's clock is {abs(off) // 60} minutes "
                 f"{'ahead of' if off > 0 else 'behind'} the server's. Set it right "
-                "and try again."
+                "and try again.",
+                code="clock_skew",
             )
         private = self._private_key()
         request = session_request(keys.public_of(private), device_id, at)
         if not keys.verifies(device.public_key, request, signature):
             raise _refused(
                 "The sign-in isn't signed with the key this computer joined with "
-                "(or it joined a different server at this address)"
+                "(or it joined a different server at this address)",
+                code="bad_signature",
             )
         self._repo.touch_device(device.id)
         expires = int(time.time()) + SESSION_SECONDS

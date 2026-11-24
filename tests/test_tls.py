@@ -12,7 +12,7 @@ import pytest
 
 from civex import updates
 from civex.domain.sync import SyncError
-from civex.services import sync_transport
+from civex.services import http_wire
 from civex.tls import certificate_problem, ssl_context
 
 
@@ -44,22 +44,28 @@ def test_a_certificate_failure_says_what_to_do() -> None:
 def test_sync_requests_use_it_and_do_not_retry_a_bad_certificate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    seen: dict[str, Any] = {}
+    calls = {"n": 0}
 
-    def urlopen(request: Any, timeout: float, context: ssl.SSLContext) -> Any:
-        seen["context"] = context
-        raise _cert_failure()
+    def once(self: Any, *args: Any, **kwargs: Any) -> Any:
+        calls["n"] += 1
+        raise _cert_failure().reason
 
-    monkeypatch.setattr(sync_transport.urllib.request, "urlopen", urlopen)
-    transport = sync_transport.HttpSyncTransport.__new__(
-        sync_transport.HttpSyncTransport
-    )
-    transport._timeout = 1
+    monkeypatch.setattr(http_wire.Wire, "_once", once)
+    wire = http_wire.Wire(sleep=lambda s: None)
     with pytest.raises(SyncError) as raised:
-        transport._open(urllib.request.Request("https://civex.example.com/x"))
-    assert isinstance(seen["context"], ssl.SSLContext)
+        wire.request("GET", "https://civex.example.com/x")
+    assert calls["n"] == 1  # waiting won't fix a certificate
     assert not raised.value.retryable
     assert "certificate couldn't be checked" in str(raised.value)
+
+
+def test_the_wire_builds_its_https_connections_with_that_context() -> None:
+    import urllib.parse
+
+    wire = http_wire.Wire()
+    conn = wire._connect(urllib.parse.urlsplit("https://civex.example.com/x"), 5.0)
+    assert isinstance(conn._context, ssl.SSLContext)  # type: ignore[attr-defined]
+    assert conn._context.verify_mode == ssl.CERT_REQUIRED  # type: ignore[attr-defined]
 
 
 def test_the_update_check_uses_it(monkeypatch: pytest.MonkeyPatch) -> None:

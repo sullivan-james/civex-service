@@ -52,7 +52,7 @@ def analytics_filters(
     ),
     plugin_id: str | None = Query(
         default=None,
-        description="Plugin id to scope to, e.g. 'civex.load_file'.",
+        description="Plugin id to scope to, e.g. 'civex.table@1'.",
     ),
     status: str | None = Query(
         default=None, description="Job or step status to scope to."

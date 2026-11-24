@@ -758,9 +758,9 @@ def build_context(
         # device pushes (the local user's refuses nothing).
         policy=may,
         notes=note_svc,
-        releases=lambda: ctx.release_svc,
         capabilities=CAPABILITIES
-        + ((DIRECT_FILES,) if features.DIRECT_FILES in project.features else ()),
+        + ((DIRECT_FILES,) if features.DIRECT_FILES in project.features else ())
+        + (("file_parts",) if file_svc.takes_parts else ()),
     )
     sync_svc = SyncService(
         config,

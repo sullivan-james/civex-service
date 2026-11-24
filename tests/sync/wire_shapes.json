@@ -308,5 +308,78 @@
    "schema_id",
    "sort"
   ]
+ },
+ "6": {
+  "dashboard": [
+   "cards",
+   "created_at",
+   "id"
+  ],
+  "dataset": [
+   "created_at",
+   "deleted_at",
+   "description",
+   "id",
+   "name",
+   "scope",
+   "timezone"
+  ],
+  "field": [
+   "created_at",
+   "default_value",
+   "deleted_at",
+   "dtype",
+   "id",
+   "label",
+   "name",
+   "position",
+   "required",
+   "restrictions",
+   "schema_id"
+  ],
+  "note": [
+   "author",
+   "body",
+   "created_at",
+   "deleted_at",
+   "edited_at",
+   "id",
+   "record_id",
+   "resolved_at",
+   "resolved_by",
+   "thread_id"
+  ],
+  "record": [
+   "created_at",
+   "data",
+   "dataset_id",
+   "deleted_at",
+   "id",
+   "parent_record_id",
+   "schema_id",
+   "updated_at"
+  ],
+  "schema": [
+   "charts",
+   "created_at",
+   "deleted_at",
+   "description",
+   "display_template",
+   "id",
+   "label",
+   "name",
+   "parent_id",
+   "unique_keys"
+  ],
+  "view": [
+   "columns",
+   "created_at",
+   "files_layout",
+   "filter_tree",
+   "id",
+   "name",
+   "schema_id",
+   "sort"
+  ]
  }
 }

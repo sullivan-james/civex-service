@@ -116,12 +116,47 @@ def _resolve_inputs(
     return resolved
 
 
+def _is_from_field(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and "from_field" in value
+        and set(value) <= {"from_field", "if_empty"}
+    )
+
+
+def resolve_from_fields(config: Any, ctx: WorkflowContext) -> Any:
+    """`config` with every `{from_field: name}` (at any depth) replaced by the
+    value of that field of the record the workflow runs on, as it is now (an
+    earlier step may have just set it): any setting of any step may take its
+    value from the record this way. A field with nothing in it is an error that
+    says so, rather than a step silently given nothing."""
+    if _is_from_field(config):
+        name = config["from_field"]
+        record = ctx.get_record(str(ctx.record.id))
+        value = record.data.get(name)
+        if value is None or value == "":
+            if config.get("if_empty") == "clear":
+                return None
+            raise ValueError(f"The field '{name}' is empty on this record.")
+        return value
+    if isinstance(config, dict):
+        return {k: resolve_from_fields(v, ctx) for k, v in config.items()}
+    if isinstance(config, list):
+        return [resolve_from_fields(v, ctx) for v in config]
+    return config
+
+
+#: The input a step declares to be given what was chosen when the workflow was
+#: run (the Files step): `__input__.<step id>` of the run's inputs.
+RUN_CHOICE_INPUT = "provided"
+
+
 def _json_safe(value: Any) -> Any:
     """Reduce a resolved input/output value to something a JSON column can
     store, for the per-step execution record (CIVEX-117).
 
-    Plugin inputs/outputs aren't guaranteed JSON-safe -- `civex.load_file`
-    hands back raw `bytes`, `civex.parse_table` a pandas DataFrame -- so this
+    Plugin inputs/outputs aren't guaranteed JSON-safe -- `civex.files`
+    hands back stored files, `civex.table` a pandas DataFrame -- so this
     summarizes what it can't represent instead of failing the whole job
     write over a value nobody needed byte-for-byte in a job record.
     """
@@ -296,10 +331,19 @@ def _run(
         if job_id is not None:
             RUNS.step_started(job_id, wf.name, step.id, step.plugin)
         t = time.perf_counter()
-        config = registration.config_model(**step.config)
-        inputs = _resolve_inputs(step.inputs, step_outputs)
         timeout = step.timeout if step.timeout is not None else default_timeout_seconds
+        inputs: dict[str, Any] = {}
         try:
+            config = registration.config_model(**resolve_from_fields(step.config, ctx))
+            inputs = _resolve_inputs(step.inputs, step_outputs)
+            # Only the run itself says what a Files step reads: never another
+            # step's output or a record's field.
+            inputs.pop(RUN_CHOICE_INPUT, None)
+            chosen = step_outputs.get("__input__", {}).get(step.id)
+            if chosen is not None and any(
+                spec.name == RUN_CHOICE_INPUT for spec in registration.inputs or []
+            ):
+                inputs[RUN_CHOICE_INPUT] = chosen
             result = registration.invoke(inputs, config, ctx, timeout)
             refused = _take_duplicates(ctx)
             if refused:

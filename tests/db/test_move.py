@@ -177,6 +177,7 @@ def _add_sync_state(ctx: AppContext) -> None:
     ctx.sync_repo.confirm_on_server(["ab" * 32])  # a file the server said it has
     ctx.sync_repo.note_server_lacks(["cd" * 32])  # one it said it hasn't got
     ctx.sync_repo.ignore_missing(["ef" * 32])  # a lost file chosen to be ignored
+    ctx.sync_repo.note_seed_acked([uuid.uuid4()], 7)  # a first-upload change answered
 
 
 def _add_storage_transfer(ctx: AppContext) -> None:

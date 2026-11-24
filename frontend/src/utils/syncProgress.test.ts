@@ -91,4 +91,18 @@ describe('describeSyncProgress', () => {
     expect(text.count).toContain('of 2.0 KB')
     expect(text.fraction).toBe(0)
   })
+
+  it('says how many files could not be read here, apart from those sent', () => {
+    const text = describeSyncProgress({
+      phase: 'sending',
+      done: 8,
+      total: 10,
+      kind: null,
+      owed: 2,
+      bytes_done: 800,
+      bytes_total: 1000,
+    })
+    expect(text.count).toContain('2 not readable here')
+    expect(text.count).toContain('8 of 10 files')
+  })
 })

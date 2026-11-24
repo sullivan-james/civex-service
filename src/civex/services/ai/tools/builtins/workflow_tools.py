@@ -179,13 +179,9 @@ triggers:
   record_updated:
     schema: SchemaName
     fields: [field1]
-inputs:                        # for manual runs only
-  input_name:
-    type: files | value
-    label: "Display label"
 steps:
   - id: unique-kebab-id        # must be unique; referenced as id.output_name
-    plugin: civex.plugin_id
+    plugin: civex.step_name@1  # built-in steps are named with their version
     config:
       key: value
     inputs:
@@ -195,11 +191,33 @@ steps:
 ## Built-in plugins (complete reference)
 {{BUILTIN_PLUGIN_REFERENCE}}
 
+The built-in steps come in three groups, as the app shows them: Bring in (files, table),
+Work out (value_from_filename), Save (save_records, set_fields). Always write the version
+(`civex.save_records@1`); an unversioned id is the older version-0 step, which civex upgrades when
+it loads the file (the old file is kept as .bak). A workflow naming a newer version than this civex
+knows is refused ("needs a newer civex").
+
 Notes not captured in the table above:
-  civex.extract_from_filename: output_type is "string"|"date"|"datetime"|"integer"|"float".
+  civex.files: `source` is run (the person running the workflow chooses files, or a folder on
+    this computer, each time: this replaces the old workflow-level `inputs:`), folder (`folder`,
+    `glob`, `subfolders`; only on a computer, never a hub) or field (a file or file list field of
+    the record the workflow runs on).
+  civex.table: reads CSV, TSV or Excel from the `files` input (a files step) or from `field`
+    (a file field of the record). `table` is a pandas DataFrame.
+  civex.save_records: give `rows` (a table) or `files`, not both. `if_exists` is update (change
+    only the columns/file brought; a re-run changes nothing), skip (leave a matching record alone)
+    or add_new (always make a new record). `match_on` lists the fields that make a row the same
+    record (empty: the kind's unique key, else every row is new). For files: `filename_pattern` is
+    a Python regex with one capture group giving the key, compared with the single `match_on`
+    field; `file_field` is where the file goes (a file_list field gets the file added, once).
+  civex.value_from_filename: output_type is "string"|"date"|"datetime"|"integer"|"float".
     date_format tokens: YYYY MM DD HH mm SS (NOT strftime — do not use %Y etc.).
     pattern is a Python regex; non-token chars are literal so [-_] matches separator alternatives.
-  civex.parse_table / civex.upsert_records / civex.rows_to_records: `table` is a pandas DataFrame.
+  civex.set_fields: `fields` maps field names to values, a value being `{from_field: other_field}`
+    to copy another field of the record. The `value` input (with `field`) and `updates` input
+    take values worked out by earlier steps.
+  Any setting of any step may be `{from_field: name}`: the value is read from that field of the
+    record the workflow runs on, when the step runs. There is no step for reading a field.
 
 ## Custom plugin format
 File: _civex/plugins/{name}.py — a real OS-process script (Tier 1, uv-managed subprocess),
@@ -265,9 +283,9 @@ project data through the declared `ctx.*` capability calls, nothing else.
 2. Input references: step_id.output_name (dot notation, no wrapping object).
 3. record_updated fires on record creation too, but only for fields explicitly set to a non-null value.
    A trigger with fields: [my_field] will NOT fire on create if my_field was left null.
-4. date_format in extract_from_filename uses YYYY MM DD tokens — NOT strftime (%Y %m %d).
-5. Typical table pipeline (CSV, TSV, ...): load_file → parse_table → (optional transform) → rows_to_records (set `match_on` to the key fields, or leave it empty to use the schema's unique key, so a re-run updates instead of duplicating; upsert_records is its older one-key name).
-6. match_files_to_records config.pattern is a Python regex applied to the filename to extract the key.
+4. date_format in value_from_filename uses YYYY MM DD tokens — NOT strftime (%Y %m %d).
+5. Typical table pipeline (CSV, TSV, Excel): table (config `field`: the file field) → save_records (`rows: <table step>.table`; set `match_on` to the key fields, or leave it empty to use the schema's unique key, so a re-run updates instead of duplicating).
+6. save_records with files: config `filename_pattern` is a Python regex applied to the filename to extract the key; files come from a files step (`files: <step>.files`).
 7. dataset="" in plugin config means "use the trigger record's collection" — leave empty unless targeting a different one.
 8. Custom plugins are auto-discovered on workflow run — no registration needed after saving.
 9. A custom plugin's `capabilities` must grant every `ctx.*` call it makes ("read",
@@ -276,12 +294,12 @@ project data through the declared `ctx.*` capability calls, nothing else.
 
 ## CIRCULAR LOOP PREVENTION — MANDATORY
 
-Any workflow that uses save_field, save_fields, or any plugin that updates a record on the SAME schema
+Any workflow that uses set_fields, or any plugin that updates a record on the SAME schema
 as its own trigger WILL cause an infinite loop UNLESS the record_updated trigger is field-restricted.
 
 RULE: Whenever you generate a workflow that both:
   (a) triggers on record_updated (or record_created + record_updated), AND
-  (b) writes back to the trigger record (via save_field, save_fields, update_record, or any plugin that mutates the record)
+  (b) writes back to the trigger record (via set_fields, update_record, or any plugin that mutates the record)
 
 You MUST add `fields: [<input_field_name>]` to the record_updated trigger so it only fires when the
 INPUT field changes — never when the OUTPUT field is written.
@@ -295,9 +313,9 @@ CORRECT (safe — loop-proof):
     - id: compute
       ...
     - id: save-result
-      plugin: civex.save_field
+      plugin: civex.set_fields@1
       config:
-        field: output_field   ← writing output_field does NOT re-trigger because it's not in fields
+        fields: {output_field: ...}   ← writing output_field does NOT re-trigger because it's not in fields
 
 WRONG (causes infinite loop — never generate this):
   triggers:

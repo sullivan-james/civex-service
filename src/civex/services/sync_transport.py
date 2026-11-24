@@ -1,22 +1,24 @@
 """Talking to an authority over HTTP(S): the transport a device uses.
 
-HTTP from the standard library (urllib). Signing in is this transport's own
+Every request goes through one `http_wire.Wire` (the transport's own: keep-alive
+connections per thread, gzip, and the one status table that waits `Retry-After`
+or backs off and sends again inside the pass). Signing in is this transport's own
 business: it signs in with the device's key when it has no session or the one
 it has is about to expire, and once more if the server says it has expired.
 Every failure becomes a `SyncError` saying whether trying again can help: a
-network error or a 5xx can; a refused device or a protocol mismatch cannot, and
-retrying them would only hammer a server that has said no.
+network error or a 5xx can; a refused device, a too-big change or a protocol
+mismatch cannot, and retrying them would only hammer a server that has said no.
 """
 
 from __future__ import annotations
 
+import gzip
 import json
-import socket
+import threading
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from typing import Any
 
@@ -24,6 +26,12 @@ from civex import keys
 from civex.domain.dtos import DirectUpload
 from civex.domain.sync import (
     DIRECT_FILES,
+    FILE_PACKS,
+    GZIP_REQUESTS,
+    FILE_PART_BYTES,
+    FILE_PART_MAX,
+    FILE_PARTS,
+    MAX_FILE_PARTS,
     DeviceCredentials,
     FeedPage,
     Hello,
@@ -36,26 +44,62 @@ from civex.domain.sync import (
     SyncError,
     UploadSource,
     protocol_header,
-    protocol_mismatch,
     session_answer,
     session_request,
 )
-from civex.tls import certificate_problem, ssl_context
+from civex.services.http_wire import Reply, Wire, retries
 
 _CHUNK = 1024 * 1024
+# A file above this many bytes goes in parts, this many at a time (each part is
+# held in memory while it is sent, so at most PART_THREADS x the part size is).
+PARTS_MIN_BYTES = 2 * FILE_PART_BYTES
+PART_THREADS = 4
+# Finishing a big file takes the authority a while (it reads the whole once, or
+# storage joins the parts): a longer wait than an ordinary call.
+FINISH_SECONDS = 600.0
+# How long a push may take before this side gives up on the answer. The
+# authority's own budget for a push is below this, so a slow push is answered
+# short (the rest goes next) rather than timing out here.
+CLIENT_PUSH_TIMEOUT_SECONDS = 120.0
+# An ordinary call (feed, snapshot, hello, sign-in), and a file or part upload.
+READ_TIMEOUT_SECONDS = 60.0
+UPLOAD_TIMEOUT_SECONDS = 120.0
+GZIP_MIN_BYTES = 1024
 API = "/api/sync/v1"
 
 
 class HttpSyncTransport:
+    # How many small files the sender may upload at once over this transport
+    # (each is its own HTTP request; the session token is shared).
+    upload_threads = 4
+
     def __init__(
-        self, base_url: str, credentials: DeviceCredentials, timeout: float = 30.0
+        self,
+        base_url: str,
+        credentials: DeviceCredentials,
+        timeout: float = READ_TIMEOUT_SECONDS,
     ) -> None:
         self._base = base_url.rstrip("/")
         self._credentials = credentials
         self._timeout = timeout
+        # One keep-alive client for everything this transport says (and the
+        # presigned storage URLs it is sent to, which never get the session).
+        self._wire = Wire()
         self._session: SessionGrant | None = None
+        # Uploads run on several threads: signing in, and dropping a session the
+        # server refused, are one at a time.
+        self._session_lock = threading.RLock()
         # What the authority said it offers (`Hello.capabilities`), once asked.
         self._capabilities: frozenset[str] | None = None
+
+    def close(self) -> None:
+        """Close the connections this transport holds open."""
+        self._wire.close()
+
+    def __del__(self) -> None:  # a backstop: whoever has it should close it
+        wire = getattr(self, "_wire", None)
+        if wire is not None:
+            wire.close()
 
     # -- the protocol ----------------------------------------------------
 
@@ -66,10 +110,7 @@ class HttpSyncTransport:
             "device_id": creds.device_id,
             "public_key": keys.public_of(creds.private_key),
         }
-        request = self._request("POST", "/join", data=json.dumps(body).encode())
-        request.add_header("Content-Type", "application/json")
-        with self._open(request) as response:
-            joined = Joined.from_dict(json.loads(response.read().decode("utf-8")))
+        joined = Joined.from_dict(self._plain("POST", "/join", body).json())
         self._credentials = replace(creds, authority_key=joined.authority_key)
         return joined
 
@@ -79,13 +120,10 @@ class HttpSyncTransport:
             "device_id": creds.device_id,
             "public_key": keys.public_of(creds.private_key),
         }
-        request = self._request("POST", "/device-login", data=json.dumps(body).encode())
-        request.add_header("Content-Type", "application/json")
         try:
-            with self._open(request) as response:
-                return LoginStarted.from_dict(
-                    json.loads(response.read().decode("utf-8"))
-                )
+            return LoginStarted.from_dict(
+                self._plain("POST", "/device-login", body).json()
+            )
         except SyncError as e:
             if e.status == 404:  # an authority from before this way in
                 raise SyncError(
@@ -96,9 +134,7 @@ class HttpSyncTransport:
             raise
 
     def poll_login(self, device_code: str) -> Joined | None:
-        request = self._request("GET", f"/device-login/{device_code}")
-        with self._open(request) as response:
-            body = json.loads(response.read().decode("utf-8") or "{}")
+        body = self._plain("GET", f"/device-login/{device_code}").json()
         if "authority_key" not in body:
             return None
         joined = Joined.from_dict(body)
@@ -119,7 +155,17 @@ class HttpSyncTransport:
 
     def push(self, entries: list[SyncEntry]) -> PushResult:
         body = {"entries": [e.to_dict() for e in entries]}
-        return PushResult.from_dict(self._json("POST", "/push", body))
+        # A gzipped body only to an authority that says it reads one.
+        return PushResult.from_dict(
+            self._json(
+                "POST",
+                "/push",
+                body,
+                timeout=CLIENT_PUSH_TIMEOUT_SECONDS,
+                gzip_body=self._offers(GZIP_REQUESTS),
+                idempotent=True,  # the authority answers a repeat from its log
+            )
+        )
 
     def feed(self, after: int, limit: int) -> FeedPage:
         return FeedPage.from_dict(
@@ -146,30 +192,124 @@ class HttpSyncTransport:
         )
 
     def missing_files(self, shas: list[str]) -> list[str]:
-        body = self._json("POST", "/files/missing", {"sha256": shas})
+        body = self._json("POST", "/files/missing", {"sha256": shas}, idempotent=True)
         return list(body["missing"])
+
+    def accepts_packs(self) -> bool:
+        """Whether small files go to the authority many to a request. Not when
+        its files go straight to a bucket (`direct_files`): a pack streams the
+        bytes through the authority, and direct is what keeps them off it."""
+        return self._offers(FILE_PACKS) and not self._offers(DIRECT_FILES)
+
+    def upload_pack(
+        self, items: list[tuple[str, UploadSource, int]]
+    ) -> dict[str, str | None]:
+        """Send small files in one request, each read from its start and
+        streamed (nothing but the chunk in hand is held). Answers, per file,
+        None when the authority stored it, else why not; a file the answer
+        does not mention is not in the dict. Raises `SyncError` when the
+        request itself fails: then nothing is known to have arrived."""
+        body = _PackBody(items)
+
+        def send() -> dict[str, Any]:
+            reply = self._call(
+                "POST",
+                "/files/pack",
+                body=body,
+                prepare=body.rewind,
+                content_type="application/octet-stream",
+                length=body.length,
+                timeout=UPLOAD_TIMEOUT_SECONDS,
+                idempotent=True,  # a file stored twice is stored once
+            )
+            return dict(reply.json())
+
+        answer = self._again_if_expired(send)
+        return {
+            r["sha256"]: None if r.get("stored") else (r.get("error") or "refused")
+            for r in answer.get("results", [])
+        }
 
     def upload_file(self, sha256: str, source: UploadSource, size: int) -> None:
         start = source.tell()
+        big = size > PARTS_MIN_BYTES
         if self._offers(DIRECT_FILES) and self._upload_direct(sha256, source, size):
+            return
+        if (
+            big
+            and self._offers(FILE_PARTS)
+            and self._upload_parts(sha256, source, size)
+        ):
             return
 
         def send():
-            source.seek(start)  # again from the start, when signing in again
-            request = self._signed_in("PUT", f"/files/{sha256}", data=source)
-            request.add_header("Content-Length", str(size))
-            request.add_header("Content-Type", "application/octet-stream")
-            self._open(request).close()
+            # Again from the start, when signing in again or sending again.
+            self._call(
+                "PUT",
+                f"/files/{sha256}",
+                body=source,
+                prepare=lambda: source.seek(start),
+                content_type="application/octet-stream",
+                length=size,
+                timeout=UPLOAD_TIMEOUT_SECONDS,
+            )
 
         self._again_if_expired(send)
 
+    def _upload_parts(self, sha256: str, source: UploadSource, size: int) -> bool:
+        """Send a big file to the authority in parts, several at a time
+        (capability `file_parts`). The authority says which parts it already
+        holds from an upload that was interrupted, and those are not sent
+        again. False when it wants the file streamed whole after all."""
+        try:
+            begun = self._json(
+                "POST",
+                f"/files/{sha256}/parts",
+                {"size": size, "part_size": FILE_PART_BYTES},
+                idempotent=True,  # says which parts it holds already
+            )
+        except SyncError as e:
+            if e.status == 501:
+                return False
+            raise
+        part_size = int(begun["part_size"])
+        if not 0 < part_size <= max(FILE_PART_MAX, -(-size // MAX_FILE_PARTS)):
+            raise SyncError(
+                f"The server asked for parts of {part_size} bytes", retryable=False
+            )
+        held = set(begun.get("received", []))
+
+        def put(number: int, data: bytes) -> None:
+            def send() -> None:
+                self._call(
+                    "PUT",
+                    f"/files/{sha256}/parts/{number}",
+                    body=data,
+                    content_type="application/octet-stream",
+                    length=len(data),
+                    timeout=UPLOAD_TIMEOUT_SECONDS,
+                )
+
+            self._again_if_expired(send)
+
+        _in_parts(source, size, part_size, held, put)
+        self._json(
+            "POST",
+            f"/files/{sha256}/parts/complete",
+            {"size": size},
+            timeout=FINISH_SECONDS,
+        )
+        return True
+
     def _upload_direct(self, sha256: str, source: UploadSource, size: int) -> bool:
         """Send the file straight to the authority's storage: ask where, PUT
-        the bytes there (whole, or a part at a time), then say it is done.
-        True when the authority has the file (it had it, or it went in);
+        the bytes there (whole, or in parts several at a time), then say it is
+        done. True when the authority has the file (it had it, or it went in);
         False when it wants the bytes streamed to it after all."""
         try:
-            answer = self._json("POST", f"/files/{sha256}/upload", {"size": size})
+            answer = self._json(
+                "POST", f"/files/{sha256}/upload", {"size": size}, idempotent=True
+            )
         except SyncError as e:
             if e.status == 501:  # this authority doesn't do it: stream instead
                 return False
@@ -182,14 +322,19 @@ class HttpSyncTransport:
         if target.url is not None:
             self._put_to_storage(target.url, target.headers, source, size)
         else:
-            for part in target.parts:
-                data = source.read(target.part_size)
-                etag = self._put_to_storage(part.url, {}, data, len(data))
-                parts.append({"number": part.number, "etag": etag})
+            urls = {p.number: p.url for p in target.parts}
+            etags: dict[int, str] = {}
+
+            def put(number: int, data: bytes) -> None:
+                etags[number] = self._put_to_storage(urls[number], {}, data, len(data))
+
+            _in_parts(source, size, target.part_size, set(), put)
+            parts = [{"number": n, "etag": etags[n]} for n in sorted(etags)]
         self._json(
             "POST",
             f"/files/{sha256}/complete",
             {"size": size, "upload_id": target.upload_id, "parts": parts},
+            timeout=FINISH_SECONDS,
         )
         source.seek(start)
         return True
@@ -199,24 +344,33 @@ class HttpSyncTransport:
     ) -> str:
         """PUT `size` bytes to a presigned URL (no civex session: the URL is
         the leave), answering the ETag storage gave."""
-        request = urllib.request.Request(url, data=body, method="PUT")
-        for name, value in headers.items():
-            request.add_header(name, value)
-        request.add_header("Content-Length", str(size))
-        request.add_header("Content-Type", "application/octet-stream")
-        try:
-            with urllib.request.urlopen(
-                request, timeout=self._timeout, context=ssl_context()
-            ) as response:
-                return str(response.headers.get("ETag", ""))
-        except urllib.error.HTTPError as e:
+        start = body.tell() if hasattr(body, "tell") else None
+
+        def again() -> None:
+            if start is not None:
+                body.seek(start)
+
+        reply = self._wire.request(
+            "PUT",
+            url,
+            headers={
+                **headers,
+                "Content-Length": str(size),
+                "Content-Type": "application/octet-stream",
+            },
+            body=body,
+            prepare=again,
+            timeout=UPLOAD_TIMEOUT_SECONDS,
+            raise_for_status=False,
+            what="storage",
+        )
+        if reply.status >= 300:
             raise SyncError(
-                f"Storage refused the upload ({e.code})",
-                retryable=e.code in (408, 429) or e.code >= 500,
-                status=e.code,
-            ) from e
-        except (urllib.error.URLError, socket.timeout, ConnectionError, OSError) as e:
-            raise SyncError(f"Could not reach storage: {_reason(e)}") from e
+                f"Storage refused the upload ({reply.status})",
+                retryable=retries(reply.status),
+                status=reply.status,
+            )
+        return reply.header("ETag")
 
     def file_chunks(self, sha256: str) -> Iterator[bytes]:
         """A file's bytes from the server, as they arrive. Asks at once, so a
@@ -227,12 +381,12 @@ class HttpSyncTransport:
         leave, and the session must not go to another host."""
         try:
             response = self._again_if_expired(
-                lambda: self._open(
-                    self._signed_in("GET", f"/files/{sha256}"), follow=False
-                )
+                lambda: self._call("GET", f"/files/{sha256}", stream=True, gzip=False)
             )
-        except _Redirected as to:
-            response = self._open_storage(to.url, sha256)
+            if response.status in (301, 302, 303, 307, 308):
+                location = response.header("Location")
+                response.close()
+                response = self._open_storage(location, sha256)
         except SyncError as e:
             if e.status == 404:  # the server answered: it doesn't have it
                 raise FileNotFoundError(sha256) from e
@@ -288,8 +442,13 @@ class HttpSyncTransport:
         expire. The authority's answer must carry its signature over this very
         request, so a server that isn't the one this device joined is refused
         before anything is sent to it."""
-        if self._session and self._session.expires_at - 60 > time.time():
-            return self._session.token
+        with self._session_lock:
+            return self._token_locked()
+
+    def _token_locked(self) -> str:
+        session = self._session
+        if session and session.expires_at - 60 > time.time():
+            return session.token
         creds = self._credentials
         if not creds.authority_key:
             raise SyncError(
@@ -301,10 +460,9 @@ class HttpSyncTransport:
             creds.private_key, session_request(creds.authority_key, creds.device_id, at)
         )
         body = {"device_id": creds.device_id, "at": at, "signature": signature}
-        request = self._request("POST", "/session", data=json.dumps(body).encode())
-        request.add_header("Content-Type", "application/json")
-        with self._open(request) as response:
-            grant = SessionGrant.from_dict(json.loads(response.read().decode("utf-8")))
+        grant = SessionGrant.from_dict(
+            self._plain("POST", "/session", body, idempotent=True).json()
+        )
         if not keys.verifies(
             creds.authority_key, session_answer(signature), grant.signature
         ):
@@ -319,152 +477,226 @@ class HttpSyncTransport:
     def _again_if_expired(self, call):
         """Make an authenticated call, signing in again once if the server says
         the session is no longer good (it expired, or the server restarted)."""
+        used = self._session
         try:
             return call()
         except SyncError as e:
-            if e.status != 401 or self._session is None:
+            if e.status != 401:
                 raise
-            self._session = None
+            # Dropped under the lock, and only the session that was refused:
+            # with several uploads refused at once, the first drops it, the
+            # others find a new one already made and use it (one sign-in).
+            with self._session_lock:
+                if self._session is used:
+                    self._session = None
             return call()
 
     # -- plumbing --------------------------------------------------------
 
-    def _request(
-        self, method: str, path: str, data: Any = None
-    ) -> urllib.request.Request:
-        request = urllib.request.Request(
-            f"{self._base}{API}{path}", data=data, method=method
-        )
-        request.add_header("X-Civex-Protocol", protocol_header())
-        request.add_header("Accept", "application/json")
-        return request
+    def _headers(self, content_type: str | None = None) -> dict[str, str]:
+        headers = {"X-Civex-Protocol": protocol_header(), "Accept": "application/json"}
+        if content_type:
+            headers["Content-Type"] = content_type
+        return headers
 
-    def _signed_in(
-        self, method: str, path: str, data: Any = None
-    ) -> urllib.request.Request:
-        request = self._request(method, path, data=data)
-        request.add_header("Authorization", f"Bearer {self._token()}")
-        return request
-
-    def _json(self, method: str, path: str, body: Any = None) -> dict[str, Any]:
+    def _plain(
+        self,
+        method: str,
+        path: str,
+        body: Any = None,
+        idempotent: bool | None = None,
+    ) -> Reply:
+        """A call that needs no session (join, sign-in): JSON in, JSON out."""
         data = json.dumps(body).encode("utf-8") if body is not None else None
+        return self._wire.request(
+            method,
+            f"{self._base}{API}{path}",
+            headers=self._headers("application/json" if data is not None else None),
+            body=data,
+            timeout=self._timeout,
+            follow="same_host",
+            accept_gzip=True,
+            idempotent=idempotent,
+        )
+
+    def _call(
+        self,
+        method: str,
+        path: str,
+        *,
+        body: Any = None,
+        prepare: Callable[[], None] | None = None,
+        content_type: str | None = None,
+        length: int | None = None,
+        timeout: float | None = None,
+        stream: bool = False,
+        gzip: bool = True,
+        extra: dict[str, str] | None = None,
+        idempotent: bool | None = None,
+    ) -> Reply:
+        """A signed-in call through the wire (the status table applies)."""
+        headers = self._headers(content_type)
+        headers["Authorization"] = f"Bearer {self._token()}"
+        if length is not None:
+            headers["Content-Length"] = str(length)
+        headers.update(extra or {})
+        return self._wire.request(
+            method,
+            f"{self._base}{API}{path}",
+            headers=headers,
+            body=body,
+            prepare=prepare,
+            timeout=timeout or self._timeout,
+            stream=stream,
+            follow="never" if stream else "same_host",
+            accept_gzip=gzip and not stream,
+            idempotent=idempotent,
+        )
+
+    def _json(
+        self,
+        method: str,
+        path: str,
+        body: Any = None,
+        timeout: float | None = None,
+        gzip_body: bool = False,
+        idempotent: bool | None = None,
+    ) -> dict[str, Any]:
+        data = json.dumps(body).encode("utf-8") if body is not None else None
+        extra: dict[str, str] = {}
+        if data is not None and gzip_body and len(data) >= GZIP_MIN_BYTES:
+            data = gzip.compress(data, compresslevel=3)
+            extra["Content-Encoding"] = "gzip"
 
         def call() -> dict[str, Any]:
-            request = self._signed_in(method, path, data=data)
-            if data is not None:
-                request.add_header("Content-Type", "application/json")
-            with self._open(request) as response:
-                raw = response.read()
-                # 204 (a removal) has no body.
-                return json.loads(raw.decode("utf-8")) if raw else {}
+            reply = self._call(
+                method,
+                path,
+                body=data,
+                content_type="application/json" if data is not None else None,
+                length=len(data) if data is not None else None,
+                timeout=timeout,
+                extra=extra,
+                idempotent=idempotent,
+            )
+            # 204 (a removal) has no body.
+            return dict(reply.json())
 
         return self._again_if_expired(call)
 
-    def _open(self, request: urllib.request.Request, follow: bool = True):
-        try:
-            if follow:
-                return urllib.request.urlopen(
-                    request, timeout=self._timeout, context=ssl_context()
-                )
-            opener = urllib.request.build_opener(
-                _NoRedirect, urllib.request.HTTPSHandler(context=ssl_context())
-            )
-            return opener.open(request, timeout=self._timeout)
-        except urllib.error.HTTPError as e:
-            if not follow and e.code in (301, 302, 303, 307, 308):
-                raise _Redirected(e.headers.get("Location") or "") from e
-            raise _from_status(e) from e
-        except (urllib.error.URLError, socket.timeout, ConnectionError, OSError) as e:
-            problem = certificate_problem(e)
-            if problem:
-                # Waiting won't fix a certificate; trying again every few
-                # seconds would only fill the status bar.
-                raise SyncError(
-                    f"Could not reach the server: {problem}", retryable=False
-                ) from e
-            raise SyncError(f"Could not reach the server: {_reason(e)}") from e
-
-    def _open_storage(self, url: str, sha256: str):
+    def _open_storage(self, url: str, sha256: str) -> Reply:
         """GET from storage (a presigned URL), with none of the authority's
         headers. Storage saying it hasn't the object is FileNotFoundError."""
         if not url:
             raise SyncError("The server pointed at storage without saying where")
-        request = urllib.request.Request(url, method="GET")
+        reply = self._wire.request(
+            "GET",
+            url,
+            timeout=self._timeout,
+            stream=True,
+            raise_for_status=False,
+            what="storage",
+        )
+        if reply.status < 300:
+            return reply
+        reply.close()
+        if reply.status == 404:
+            raise FileNotFoundError(sha256)
+        raise SyncError(
+            f"Storage would not serve the file ({reply.status})",
+            retryable=retries(reply.status),
+            status=reply.status,
+        )
+
+
+class _PackBody:
+    """A pack's request body, read as it is sent: for each file a line
+    `<sha256> <size>` and the file's bytes (a megabyte at a time). It can be
+    rewound, to send again."""
+
+    def __init__(self, items: list[tuple[str, UploadSource, int]]) -> None:
+        self._items = items
+        self.length = sum(len(f"{sha} {size}\n") + size for sha, _, size in items)
+        self.rewind()
+
+    def rewind(self) -> None:
+        for _, source, _ in self._items:
+            source.seek(0)
+        self._frames = self._generate()
+        self._buf = b""
+        self._pos = 0
+
+    def _generate(self) -> Iterator[bytes]:
+        for sha, source, size in self._items:
+            yield f"{sha} {size}\n".encode("ascii")
+            left = size
+            while left:
+                chunk = source.read(min(left, _CHUNK))
+                if not chunk:
+                    raise SyncError("A file being sent was cut short", retryable=True)
+                left -= len(chunk)
+                yield chunk
+
+    def read(self, n: int = -1) -> bytes:
+        while n < 0 or len(self._buf) - self._pos < n:
+            chunk = next(self._frames, None)
+            if chunk is None:
+                break
+            self._buf = self._buf[self._pos :] + chunk
+            self._pos = 0
+        end = len(self._buf) if n < 0 else self._pos + n
+        out = self._buf[self._pos : end]
+        self._pos += len(out)
+        return out
+
+
+def _in_parts(
+    source: UploadSource,
+    size: int,
+    part_size: int,
+    held: set[int],
+    put: Callable[[int, bytes], None],
+) -> None:
+    """Read `source` a part at a time and `put` each (but those in `held`),
+    PART_THREADS at once. One thread reads, in order, so the file is read once;
+    it waits for a free slot before reading the next part, so memory holds at
+    most PART_THREADS parts. The first failure stops reading, lets the parts in
+    flight finish (they stay with the authority, for the next try), and is
+    raised."""
+    count = max(1, -(-size // part_size)) if size else 0
+    slots = threading.BoundedSemaphore(PART_THREADS)
+    flying: set[Future[None]] = set()
+    failure: list[BaseException] = []
+
+    def send(number: int, data: bytes) -> None:
         try:
-            return urllib.request.urlopen(
-                request, timeout=self._timeout, context=ssl_context()
-            )
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                raise FileNotFoundError(sha256) from e
-            raise SyncError(
-                f"Storage would not serve the file ({e.code})",
-                retryable=e.code in (408, 429) or e.code >= 500,
-                status=e.code,
-            ) from e
-        except (urllib.error.URLError, socket.timeout, ConnectionError, OSError) as e:
-            raise SyncError(f"Could not reach storage: {_reason(e)}") from e
+            put(number, data)
+        except BaseException as e:
+            failure.append(e)
+            raise
+        finally:
+            slots.release()
 
-
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    """Leaves a redirect to the caller, so the session token never follows
-    one to another host."""
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
-        return None
-
-
-class _Redirected(Exception):
-    def __init__(self, url: str) -> None:
-        super().__init__(url)
-        self.url = url
-
-
-def _reason(error: Exception) -> str:
-    return str(getattr(error, "reason", None) or error)
-
-
-def _from_status(error: urllib.error.HTTPError) -> SyncError:
-    try:
-        detail = json.loads(error.read().decode("utf-8")).get("detail")
-    except Exception:  # an HTML error page, or nothing
-        detail = None
-    if error.code == 426:
-        return SyncError(_mismatch(detail), retryable=False, status=426)
-    text = f"{detail}" if detail else f"The server answered {error.code}"
-    if error.code == 401:
-        return SyncError(
-            f"The server refused this device: {text}", retryable=False, status=401
-        )
-    if error.code == 403:
-        # Signed in, but not allowed to do that (publish to the library).
-        return SyncError(text, retryable=False, status=403)
-    if error.code == 429:
-        return SyncError(text, retryable=True, status=429)
-    if error.code == 404:
-        return SyncError(
-            "That address is not a civex sync server (or sync is not switched on there)",
-            retryable=False,
-            status=404,
-        )
-    if error.code == 501:
-        # The server exists but doesn't do that (a feature its host lacks):
-        # waiting won't change it.
-        return SyncError(text, retryable=False, status=501)
-    if error.code in (408, 429) or error.code >= 500:
-        return SyncError(text, retryable=True, status=error.code)
-    return SyncError(text, retryable=False, status=error.code)
-
-
-def _mismatch(detail: Any) -> str:
-    """A 426 in this computer's words: which side to update. A server from
-    before the protocol range says it in a sentence of its own."""
-    if not isinstance(detail, dict) or "protocol_max" not in detail:
-        return str(detail or "The server speaks another sync protocol")
-    theirs = (int(detail["protocol_min"]), int(detail["protocol_max"]))
-    return protocol_mismatch(
-        theirs, "the server", "this computer", detail.get("server_version")
-    )
+    with ThreadPoolExecutor(PART_THREADS) as pool:
+        for number in range(1, count + 1):
+            length = min(part_size, size - (number - 1) * part_size)
+            if number in held:
+                source.seek(length, 1)  # held already: counted, not sent
+                continue
+            slots.acquire()
+            if failure:
+                slots.release()
+                break
+            data = source.read(length)
+            if len(data) != length:
+                slots.release()
+                raise SyncError("A file being sent was cut short", retryable=True)
+            flying.add(pool.submit(send, number, data))
+            del data
+            flying -= {f for f in flying if f.done()}
+        wait(flying)
+    if failure:
+        raise failure[0]
 
 
 def build_transport(base_url: str, credentials: DeviceCredentials) -> HttpSyncTransport:
@@ -477,4 +709,8 @@ def build_transport(base_url: str, credentials: DeviceCredentials) -> HttpSyncTr
     return HttpSyncTransport(base_url, credentials)
 
 
-__all__ = ["HttpSyncTransport", "build_transport"]
+__all__ = [
+    "CLIENT_PUSH_TIMEOUT_SECONDS",
+    "HttpSyncTransport",
+    "build_transport",
+]

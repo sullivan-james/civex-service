@@ -44,6 +44,7 @@ from civex.domain.dtos import (
     ResolvedSchema,
     RevertFieldDTO,
     BatchRevertDTO,
+    RecordChangesDTO,
     RevertPlanDTO,
     RevertResultDTO,
 )
@@ -53,15 +54,11 @@ from civex.services.dataset_service import DatasetService
 from civex.services.record_service import MAX_REPORTED, RecordService
 from civex.services.schema_service import SchemaResolver, SchemaService
 
-# Bulk operations whose changes can be undone together (`revert_batch`).
-REVERTIBLE_BATCHES = ("edit",)
+# Bulk operations whose changes can be undone together (`revert_batch`), and
+# the kind of batch the undo of each is.
+REVERTIBLE_BATCHES = ("edit", "delete", "restore")
+_UNDO_KIND = {"edit": "edit", "delete": "restore", "restore": "delete"}
 _BATCH_PAGE = 500
-
-
-# How many things a restore-all will look at, and how many rounds it will make
-# to bring back records under others in the same set.
-MAX_RESTORE_ALL = 5000
-MAX_RESTORE_PASSES = 8
 
 
 class AuditService:
@@ -407,7 +404,7 @@ class AuditService:
         count. With `batch_id`, only what that one bulk delete took (a record
         and everything beneath it, say), so it can be undone as the one event
         it was."""
-        collections, schemas, fields, records, truncated = self._deleted_matching(
+        collections, schemas, fields, records = self._deleted_matching(
             where, search, batch_id
         )
         blocked = 0
@@ -430,7 +427,6 @@ class AuditService:
             len(records),
             restores,
             blocked,
-            truncated,
             fields=len(fields),
         )
 
@@ -444,7 +440,7 @@ class AuditService:
         history. Collections and schemas first, then records parent-first; a
         record still under something deleted that is not in the set stays
         deleted and is counted as blocked."""
-        collections, schemas, fields, records, _ = self._deleted_matching(
+        collections, schemas, fields, records = self._deleted_matching(
             where, search, batch_id
         )
         restored = came_back = 0
@@ -465,31 +461,26 @@ class AuditService:
                     field_blocked += 1  # its name was taken, or it is already back
                     continue
                 restored += 1
-            pending = list(records)
-            # A record under another in the set comes back with it, or once it
-            # has: go round until nothing more can. Each round restores every
-            # record that nothing deleted holds back, all together.
-            for _ in range(MAX_RESTORE_PASSES):
-                if not pending:
-                    break
-                done = self._records.restore_set(pending)
-                restored += done.restored
-                came_back += done.came_back
-                pending = done.left
-                if not done.restored:
-                    break
-        return RestoreAllResultDTO(restored, came_back, len(pending) + field_blocked)
+            # Every record at once, however many: the set is worked out in
+            # memory, parents first, and written a chunk at a time, as one
+            # action; what is left is held back by something deleted that is
+            # not in the set.
+            done = self._records.apply_changes(
+                RecordChangesDTO(restore=[uuid.UUID(r) for r in records])
+            )
+            restored += done.restored
+            came_back += done.came_back
+        return RestoreAllResultDTO(restored, came_back, done.left_count + field_blocked)
 
     def _deleted_matching(
         self,
         where: Any,
         search: str | None,
         batch_id: uuid.UUID | str | None = None,
-    ) -> tuple[list[str], list[str], list[tuple[str, uuid.UUID]], list[str], bool]:
+    ) -> tuple[list[str], list[str], list[tuple[str, uuid.UUID]], list[str]]:
         """Names of the deleted collections, names of the deleted schemas, the
         deleted fields as (schema name, field id) and ids of the deleted records
-        a history filter matches (and whether there were more than were looked
-        at)."""
+        a history filter matches: all of them, however many."""
         tree = _parsed(where)
         scope: list[FilterNode] = [
             FilterCondition("now", "eq", "deleted"),
@@ -498,9 +489,8 @@ class AuditService:
         if tree is not None:
             scope.insert(0, self._resolve(tree))
         batch = _as_uuid(batch_id, "batch") if batch_id else None
-        things, truncated = self._audit.entities(
-            AuditFilter(where=FilterGroup("and", scope), search=search, batch_id=batch),
-            MAX_RESTORE_ALL,
+        things, _ = self._audit.entities(
+            AuditFilter(where=FilterGroup("and", scope), search=search, batch_id=batch)
         )
         ids = {
             t: {i for kind, i in things if kind == t}
@@ -522,7 +512,7 @@ class AuditService:
             if field.deleted_at
         )
         records = [str(i) for kind, i in things if kind == "record"]
-        return collections, schemas, fields, records, truncated
+        return collections, schemas, fields, records
 
     # ------------------------------------------------------------------
     # Reverting
@@ -613,13 +603,12 @@ class AuditService:
         return self._apply_revert(plan, force)
 
     def _apply_revert(self, plan: RevertPlanDTO, force: bool) -> RevertResultDTO:
-        record_id = str(plan.entity_id)
         result = RevertResultDTO(plan.audit_id, plan.entity_id, plan.kind or "")
 
         if plan.kind == "restore":
-            self._records.restore(record_id)
+            changes = RecordChangesDTO(restore=[plan.entity_id])
         elif plan.kind == "delete":
-            self._records.delete(record_id)
+            changes = RecordChangesDTO(delete=[plan.entity_id])
         else:
             put_back = [
                 f
@@ -630,15 +619,13 @@ class AuditService:
                 raise ValidationError(
                     "Every field was edited since. Revert anyway to overwrite them."
                 )
-            # The record is replaced whole, so start from what it holds now.
-            data = dict(self._records.get(record_id).data)
-            for f in put_back:
-                if f.target is None:
-                    data.pop(f.field, None)
-                else:
-                    data[f.field] = f.target
-            self._records.update(record_id, data)
+            changes = RecordChangesDTO(
+                update={plan.entity_id: {f.field: f.target for f in put_back}}
+            )
             result.applied = [f.field for f in put_back]
+        done = self._records.apply_changes(changes)
+        if done.left:
+            raise ValidationError(next(iter(done.left.values())))
         return result
 
     def revert_batch(
@@ -673,13 +660,16 @@ class AuditService:
 
         A chunk is read and planned as a set (its entries, its records, each
         schema once), then the changes that put fields back are saved as a
-        chunk of a bulk edit is (`RecordService.put_fields_back`): a fixed
+        chunk of a bulk edit is (`RecordService.apply_changes`): a fixed
         number of queries per chunk however many records. What a bulk edit
         left alone is judged per field against the record as it is now, so a
         field edited again since is a conflict (left unless `force`) and a
         record edited since in other fields is still put back in the fields
-        the bulk edit changed. A change to anything but a plain field update
-        (a restore, a delete) is applied one at a time, as before.
+        the bulk edit changed. The undo of a delete (or of a restore) is the
+        inverse set (restore, or delete, those records) and goes through the
+        same core, `RecordService.apply_changes`, as one action: all of them
+        at once, not a page at a time; a delete it is refused (records still
+        referenced) refuses the undo whole.
 
         Nothing says where it got to: a change already undone is `same`, so
         an undo stopped half way is finished by running it again. Stop by
@@ -689,12 +679,12 @@ class AuditService:
             raise NotFoundError(f"Batch '{batch_id}' not found")
         if batch.kind not in REVERTIBLE_BATCHES:
             raise ValidationError(
-                "Only a bulk edit can be undone as a whole. Open its changes "
-                "to undo them one by one."
+                "Only a bulk edit, a delete or a restore can be undone as a "
+                "whole. Open its changes to undo them one by one."
             )
         result = BatchRevertDTO(batch_id=batch.id)
-        entry_ids = self._audit.batch_entry_ids(batch.id)
-        result.entries = len(entry_ids)
+        entries = self._audit.batch_entries(batch.id)
+        result.entries = len(entries)
         shapes = self._schema_svc.resolver()
 
         def leave(entity_id: uuid.UUID, reason: str) -> None:
@@ -702,43 +692,81 @@ class AuditService:
             if len(result.reasons) < MAX_REPORTED:
                 result.reasons.append({"record_id": str(entity_id), "reason": reason})
 
-        # Changes to put fields back, waiting to be saved as one set.
-        queued: dict[uuid.UUID, dict[str, Any]] = {}
-        # Records already changed by this undo, to be read again if met again.
-        stale: set[uuid.UUID] = set()
+        def left_by(applied: Any) -> None:
+            """What the core left: counted exactly, the first few named."""
+            for record_id, reason in applied.left.items():
+                leave(record_id, reason)
+            result.left += applied.left_count - len(applied.left)
 
-        def save_queued() -> None:
-            if not queued:
-                return
-            failed, _ = self._records.put_fields_back(queued)
-            for record_id in queued:
-                if record_id in failed:
-                    leave(record_id, failed[record_id])
-                else:
-                    result.applied += 1
-            queued.clear()
+        # The inverse of the batch, as one set of changes: what was edited goes
+        # back (below, a page at a time, judged against the record as it is
+        # now), what was deleted or restored is restored or deleted again.
+        update_ids: list[uuid.UUID] = []
+        undelete: list[uuid.UUID] = []
+        delete: list[uuid.UUID] = []
+        for entry_id, entity_type, action, entity_id in entries:
+            if entity_type != "record":
+                leave(entity_id, "Only changes to records can be reverted.")
+            elif action == "update":
+                update_ids.append(entry_id)
+            elif action == "delete":
+                undelete.append(entity_id)
+            elif action in ("create", "restore"):
+                delete.append(entity_id)
+            else:
+                leave(entity_id, f"A '{action}' entry can't be reverted.")
+        undelete = list(dict.fromkeys(undelete))
+        delete = list(dict.fromkeys(delete))
 
-        label = f"Undo {batch.label}" if batch.label else "Undo a bulk edit"
-        with self.batch("edit", label):
-            for start in range(0, len(entry_ids), _BATCH_PAGE):
-                page = entry_ids[start : start + _BATCH_PAGE]
+        label = f"Undo {batch.label}" if batch.label else f"Undo a bulk {batch.kind}"
+        with self.batch(_UNDO_KIND[batch.kind], label):
+            if undelete or delete:
+                # Restore what was deleted, delete what was restored: the
+                # inverse set, through the one core. What is already as wanted
+                # is `same`; what is gone altogether is left.
+                done = self._records.apply_changes(
+                    RecordChangesDTO(restore=undelete, delete=delete),
+                    force=force,
+                    dry_run=dry_run,
+                )
+                result.applied += done.restored + done.deleted_asked
+                result.same += done.unchanged
+                left_by(done)
+                yield result
+
+            # Changes to put fields back, waiting to be saved as one set.
+            queued: dict[uuid.UUID, dict[str, Any]] = {}
+
+            def save_queued() -> None:
+                if not queued:
+                    return
+                done = self._records.apply_changes(RecordChangesDTO(update=queued))
+                result.applied += done.updated
+                left_by(done)
+                queued.clear()
+
+            for start in range(0, len(update_ids), _BATCH_PAGE):
+                page = update_ids[start : start + _BATCH_PAGE]
                 read = {e.id: e for e in self._audit.get_audit_many(page)}
-                entries = self._with_changes([read[i] for i in page if i in read])
-                now = {
+                found = self._with_changes([read[i] for i in page if i in read])
+                now_records = {
                     r.id: r
                     for r in self._records.labels(
-                        [str(e.entity_id) for e in entries if e.entity_type == "record"]
+                        [str(e.entity_id) for e in found if e.entity_type == "record"]
                     )
                 }
-                for entry in entries:
-                    if entry.entity_id in queued or entry.entity_id in stale:
+                would_change: list[uuid.UUID] = []
+                for entry in found:
+                    if entry.entity_id in queued:
                         # A second change to a record: judge it against what
                         # the first leaves.
                         save_queued()
                         again = self._records.labels([str(entry.entity_id)])
                         if again:
-                            now[entry.entity_id] = again[0]
-                    plan = self._plan(entry, now.get(entry.entity_id), None, shapes)
+                            now_records[entry.entity_id] = again[0]
+                    plan = self._plan(
+                        entry, now_records.get(entry.entity_id), None, shapes
+                    )
                     if plan.blocked:
                         leave(plan.entity_id, plan.blocked)
                         continue
@@ -753,33 +781,29 @@ class AuditService:
                             leave(plan.entity_id, "Every field was edited since.")
                             continue
                     if dry_run:
+                        would_change.append(plan.entity_id)
                         result.applied += 1
-                    elif plan.kind == "update":
-                        put_back = {
-                            f.field: f.target
-                            for f in plan.fields
-                            if f.status == REVERT_APPLY
-                            or (force and f.status == REVERT_CONFLICT)
-                        }
-                        if not put_back:
-                            leave(
-                                plan.entity_id,
-                                "Every field was edited since. Revert anyway "
-                                "to overwrite them.",
-                            )
-                            continue
-                        queued[plan.entity_id] = put_back
-                    else:
-                        try:
-                            self._apply_revert(plan, force)
-                        except ValidationError as e:
-                            leave(plan.entity_id, str(e))
-                            continue
-                        result.applied += 1
-                        stale.add(entry.entity_id)  # judged anew if met again
+                        continue
+                    put_back = {
+                        f.field: f.target
+                        for f in plan.fields
+                        if f.status == REVERT_APPLY
+                        or (force and f.status == REVERT_CONFLICT)
+                    }
+                    if not put_back:
+                        leave(
+                            plan.entity_id,
+                            "Every field was edited since. Revert anyway to "
+                            "overwrite them.",
+                        )
+                        continue
+                    queued[plan.entity_id] = put_back
                 save_queued()
+                if would_change:
+                    # What the real run will ask: write access, once for the page.
+                    self._records.require_write(would_change)
                 yield result
-            if not entry_ids:
+            if not entries:
                 yield result
 
     def _plan_fields(

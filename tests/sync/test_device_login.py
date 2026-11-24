@@ -178,3 +178,103 @@ def test_identity_says_who_this_computer_is_before_and_after_joining(
 
 def _unused(*_: object) -> None:  # keep the imports honest for ruff
     DeviceKeys, Loopback, AsDevice, user_state
+
+
+def _approver(authority, name, shown):
+    def approve(started) -> None:
+        shown.append(started.user_code)
+        authority.device_keys.approve_login(started.user_code, name)
+        authority.commit()
+
+    return approve
+
+
+def test_a_second_project_on_a_machine_that_joined_signs_in_instead_of_being_refused(
+    project, authority
+):
+    """Device ids are per project; the machine joined this address already for
+    another project, and the authority doesn't know the new one."""
+    from civex.testing.peers import build_study
+
+    build_study(authority)
+    first = device(project, authority, "laptop")
+    svc = object.__getattribute__(first.sync_svc, "_svc")
+    svc._sleep = lambda _s: None
+    shown: list[str] = []
+    first.sync_svc.connect(
+        "https://authority.test", None, on_code=_approver(authority, "laptop", shown)
+    )
+    assert len(shown) == 1
+
+    second = device(project, authority, "tablet")
+    # The same computer: one user-state file, but a device of its own per project.
+    object.__setattr__(
+        second.sync_svc, "_state", object.__getattribute__(first.sync_svc, "_state")
+    )
+    svc2 = object.__getattribute__(second.sync_svc, "_svc")
+    svc2._sleep = lambda _s: None
+    shown2: list[str] = []
+    second.sync_svc.connect(
+        "https://authority.test", None, on_code=_approver(authority, "tablet", shown2)
+    )
+    assert len(shown2) == 1  # the browser sign-in, not a refusal
+    assert "tablet" in [d.name for d in authority.device_keys.list_devices()]
+
+
+def test_a_revoked_device_signs_in_again(project, authority):
+    from civex.testing.peers import build_study
+
+    build_study(authority)
+    laptop = device(project, authority, "laptop")
+    svc = object.__getattribute__(laptop.sync_svc, "_svc")
+    svc._sleep = lambda _s: None
+    shown: list[str] = []
+    laptop.sync_svc.connect(
+        "https://authority.test", None, on_code=_approver(authority, "laptop", shown)
+    )
+    authority.device_keys.revoke_device("laptop")
+    authority.commit()
+    laptop.sync_svc.connect(
+        "https://authority.test", None, on_code=_approver(authority, "laptop", shown)
+    )
+    assert len(shown) == 2
+
+
+def test_an_invite_still_works_for_a_second_project(project, authority):
+    first = device(project, authority, "laptop")
+    connect(first)
+    second = device(project, authority, "tablet")
+    object.__setattr__(
+        second.sync_svc, "_state", object.__getattribute__(first.sync_svc, "_state")
+    )
+    assert second.sync_svc.connect("https://authority.test", second._invite) in (
+        "joined",
+        "empty",
+        "seeded",
+    )
+
+
+def test_a_bad_signature_is_not_turned_into_a_sign_in(project, authority, monkeypatch):
+    laptop = device(project, authority, "laptop")
+    connect(laptop)
+    shown: list[str] = []
+    real = authority.device_keys.start_session
+
+    def wrong(device_id, at, signature):
+        raise SyncError("bad", retryable=False, status=401, code="bad_signature")
+
+    monkeypatch.setattr(authority.device_keys, "start_session", wrong)
+    laptop._holder["inner"]._token = None  # a new session is needed
+    with pytest.raises(SyncError, match="bad"):
+        laptop.sync_svc.connect(
+            "https://authority.test", None, on_code=_approver(authority, "x", shown)
+        )
+    assert shown == [] and real is not None
+
+
+def test_the_refusals_carry_a_code_and_the_http_answer_a_header_older_clients_ignore(
+    authority,
+):
+    with pytest.raises(SyncError) as e:
+        authority.device_keys.start_session(device_uuid("nobody"), 0, "x")
+    assert e.value.code == "not_a_device" and "never joined" in str(e.value)

@@ -566,6 +566,28 @@ class AuditLog(Base):
             postgresql_where=text("sync_state = 'seeding'"),
             sqlite_where=text("sync_state = 'seeding'"),
         ),
+        # The changes from the authority not settled yet (held for a push, or
+        # an action still arriving): almost always none, so asking is a lookup
+        # (migration e8c1b4d7a925). A query uses it by repeating this condition
+        # (`sync_repo._UNSETTLED`).
+        Index(
+            "ix_audit_log_unsettled",
+            "hub_seq",
+            postgresql_where=text("apply_state NOT IN ('applied', 'superseded')"),
+            sqlite_where=text("apply_state NOT IN ('applied', 'superseded')"),
+        ),
+        # An action's entries in order: settling a big one reads them in
+        # chunks (migration e8c1b4d7a925). Most rows have no action.
+        Index(
+            "ix_audit_log_op",
+            "op_id",
+            "hub_seq",
+            postgresql_where=text("op_id IS NOT NULL"),
+            sqlite_where=text("op_id IS NOT NULL"),
+        ),
+        # `max(hlc)`: the newest stamp, read whenever a change is stamped
+        # (migration d7a3c9e5f2b8).
+        Index("ix_audit_log_hlc", "hlc"),
         # The edits still stored whole (written before deltas), for converting
         # them: empty once they all are (migration a4d9e2c7f310).
         Index(
@@ -621,7 +643,10 @@ class AuditLog(Base):
     # because this device had its own unsent change to the same thing; applied
     # later if it is still the latest, see SyncService._catch_up) or
     # `superseded` (the authority settled on something else, carried by a later
-    # entry, so this one's state is never applied).
+    # entry, so this one's state is never applied). An action cut across feed
+    # pages is kept as it arrives: `arriving` (nothing seen to hold it so far)
+    # or `arrhold` (an entry of it must wait), then applied or held whole when
+    # its last entry is in (`settling` is only seen inside that transaction).
     apply_state: Mapped[str] = mapped_column(
         String(10), nullable=False, default="applied", server_default="applied"
     )
@@ -1062,8 +1087,62 @@ def _data_changed(target: Any, attr: str) -> bool:
 
 @event.listens_for(Record, "after_insert")
 def _record_inserted(mapper: Any, connection: Any, target: Record) -> None:
-    _sync_file_refs(connection, "record_id", target.id, target.data, is_new=True)
-    _sync_record_refs(connection, target.id, target.data, is_new=True)
+    insert_record_refs(connection, [(target.id, target.data)])
+
+
+def insert_record_refs(connection: Any, records: list[tuple[uuid.UUID, Any]]) -> None:
+    """The file and record references of records just inserted, for all of them
+    at once (one lookup of where each file is kept, one insert per table). The
+    hook above and a bulk insert (`SyncRepository.insert_records`, which skips
+    the hook) both come here, so they cannot drift apart."""
+    from civex.domain.file_refs import collect_sha256_refs
+    from civex.domain.references import collect_record_refs
+
+    files: list[tuple[uuid.UUID, set[str]]] = []
+    refs: list[tuple[uuid.UUID, set[tuple[uuid.UUID, uuid.UUID]]]] = []
+    for record_id, data in records:
+        if wanted := collect_sha256_refs(data):
+            files.append((record_id, wanted))
+        if cited := collect_record_refs(data):
+            refs.append((record_id, cited))
+    if files:
+        table = cast(Table, FileReference.__table__)
+        stored = cast(Table, StoredObject.__table__)
+        every = sorted({sha for _, shas in files for sha in shas})
+        # Each points at the file's newest copy: the one an upload just wrote
+        # (or reused, on the collection's own drive when it has one). None
+        # until a copy is here; recording one then points at it.
+        newest: dict[str, str] = {}
+        for at in range(0, len(every), 5000):
+            for sha, volume in connection.execute(
+                select(stored.c.sha256, stored.c.volume)
+                .where(stored.c.sha256.in_(every[at : at + 5000]))
+                .order_by(stored.c.created_at, stored.c.volume)
+            ):
+                newest[sha] = volume
+        connection.execute(
+            insert(table),
+            [
+                {
+                    "id": row_id(),
+                    "sha256": sha,
+                    "record_id": record_id,
+                    "job_id": None,
+                    "volume": newest.get(sha),
+                }
+                for record_id, shas in files
+                for sha in sorted(shas)
+            ],
+        )
+    if refs:
+        connection.execute(
+            insert(cast(Table, RecordReference.__table__)),
+            [
+                {"record_id": record_id, "field_id": f, "target_id": t}
+                for record_id, cited in refs
+                for f, t in sorted(cited)
+            ],
+        )
 
 
 @event.listens_for(Record, "after_update")
@@ -1120,6 +1199,13 @@ class SyncMeta(Base):
     placed_from: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default="0"
     )
+    # Device: a first upload (seed) was begun and has not finished. Kept apart
+    # from the changes it sets aside (`audit_log.sync_state = 'seeding'`): a
+    # project whose history was all settled with another authority sets none
+    # aside, yet its records still have to go to this one.
+    seed_open: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
     # Device: how far fetching the history from before joining has looked, which
     # can be past the last entry stored (a device that may not read everything is
     # not sent what it may not see). NULL when not fetching.
@@ -1150,6 +1236,22 @@ class ServerFile(Base):
     __tablename__ = "server_files"
 
     sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+
+
+class SeedAck(Base):
+    """Device: the id of a first-upload change the authority has answered.
+    A seed interrupted and run again leaves these out (the ids are made from
+    the project and the thing, so they are the same every time), instead of
+    sending everything from the start. `head_seq` is the authority's position
+    when it answered: an authority found behind it (restored from a backup) or
+    empty no longer holds these, so they are dropped. Cleared when the seed
+    finishes, then, and on following another authority (`forget_numbers`). A new
+    seed does not clear them: that is how it resumes."""
+
+    __tablename__ = "seed_acks"
+
+    entry_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    head_seq: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 class IgnoredMissingFile(Base):
@@ -1326,7 +1428,10 @@ class SyncConflict(Base):
     authority refused. `yours` is what the device sent, `theirs` what stayed."""
 
     __tablename__ = "sync_conflicts"
-    __table_args__ = (Index("ix_sync_conflicts_status", "status", "created_at"),)
+    __table_args__ = (
+        Index("ix_sync_conflicts_status", "status", "created_at"),
+        Index("ix_sync_conflicts_entity", "entity_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -1358,3 +1463,8 @@ class SyncConflict(Base):
         Integer, nullable=False, default=0, server_default="0"
     )
     retried_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
+    # A refusal of a create: when the authority took the thing after all
+    # (filling it sent the thing and it took it), so it no longer says the
+    # authority lacks it (see `SyncRepository.never_taken`). Apart from how the
+    # refusal was settled, which stays a person's.
+    taken_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)

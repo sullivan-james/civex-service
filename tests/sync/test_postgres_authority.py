@@ -29,6 +29,18 @@ pytestmark = pytest.mark.skipif(not _SERVER, reason="CIVEX_TEST_POSTGRES_URL not
 
 @pytest.fixture()
 def pg_authority(tmp_path):
+    yield from _pg_authority(tmp_path)
+
+
+@pytest.fixture()
+def pg_single(tmp_path):
+    """A second PostgreSQL authority, settling every change on its own."""
+    for ctx in _pg_authority(tmp_path / "single"):
+        ctx.authority_svc._bulk = False
+        yield ctx
+
+
+def _pg_authority(tmp_path):
     name = f"civex_{uuid.uuid4().hex[:12]}"
     admin = create_engine(_SERVER, isolation_level="AUTOCOMMIT")
     with admin.connect() as conn:
@@ -48,6 +60,29 @@ def pg_authority(tmp_path):
     with admin.connect() as conn:
         conn.execute(text(f'DROP DATABASE "{name}" WITH (FORCE)'))
     admin.dispose()
+
+
+def test_a_batch_written_in_bulk_is_what_one_at_a_time_writes(
+    project, pg_authority, pg_single
+):
+    from .test_bulk_push import mixed, rows, send
+
+    b, first, batch = mixed(project)
+    for authority in (pg_authority, pg_single):
+        send(authority, b.structure + first)
+    answers = [send(a, batch) for a in (pg_authority, pg_single)]
+    assert answers[0] == answers[1]
+    assert [r[1] for r in answers[0][0]] == [
+        "applied",
+        "applied",
+        "applied",
+        "conflict",
+        "applied",
+        "rejected",
+        "conflict",
+    ]
+    assert rows(pg_authority) == rows(pg_single)
+    assert rows(pg_authority)["file_references"]
 
 
 def test_history_on_postgresql_is_numbered_in_write_order_and_stored_as_deltas(
@@ -135,3 +170,35 @@ def test_scoped_catch_up_and_trails_on_postgresql(project, pg_authority):
     study.sync(study.limited, study.full)
     assert held(study.limited, "record") == held(study.full, "record")
     assert held(study.limited, "note") == held(study.full, "note")
+
+
+def test_the_unsettled_and_action_queries_can_use_their_partial_indexes(pg_authority):
+    """PostgreSQL has to be able to prove each partial index covers the
+    queries (with sequential scans off, the plan must name the index)."""
+    from sqlalchemy import event
+
+    repo = pg_authority.sync_repo
+    session = repo._s
+    engine = session.get_bind()
+    seen: list[tuple[str, object]] = []
+
+    def capture(conn, cursor, statement, parameters, context, many):
+        if "audit_log" in statement and not statement.startswith("EXPLAIN"):
+            seen.append((statement, parameters))
+
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        repo.arriving_action()
+        repo.arriving_entries(str(uuid.uuid4()), 0, 500)
+        repo.arriving_entries(str(uuid.uuid4()), 0, 500, state="settling", upto=9)
+        repo.held_entries()
+        repo.set_arriving(str(uuid.uuid4()), ("arriving",), "held")
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+    conn = session.connection()
+    conn.exec_driver_sql("SET LOCAL enable_seqscan = off")
+    for statement, parameters in seen[-5:]:
+        rows = conn.exec_driver_sql("EXPLAIN " + statement, parameters).fetchall()
+        plan = " | ".join(r[0] for r in rows)
+        # (audit_log is partitioned: each partition's copy has a generated name)
+        assert "hub_seq_idx1" in plan or "op_id_hub_seq_idx" in plan, plan

@@ -33,7 +33,7 @@ import { useToast } from './ui/ToastProvider'
 import { Button } from './ui/Button'
 import { IconButton } from './ui/IconButton'
 import { Menu as Dropdown } from './ui/Menu'
-import { basePath, brand, isEmbedded } from '../utils/host'
+import { basePath, brand, isEmbedded, isMounted } from '../utils/host'
 import { useNavigationEvents } from '../hooks/useNavigationEvents'
 import { Slot } from './host/Slot'
 import { HostProject } from './host/HostProject'
@@ -131,7 +131,12 @@ const navGroups: NavGroupDef[] = [
       { to: '/collections', label: 'Collections', icon: LayoutGrid },
       // Every record with a thread not yet resolved: All records, filtered.
       { to: '/exports', label: 'Exports', icon: FolderTree },
-      { to: '/releases', label: 'Releases', icon: BookMarked },
+      {
+        to: '/releases',
+        label: 'Releases',
+        icon: BookMarked,
+        feature: 'releases',
+      },
       { to: '/activity', label: 'Activity', icon: History },
     ],
   },
@@ -367,6 +372,8 @@ export default function Layout({ children }: { children: ReactNode }) {
   const toast = useToast()
   // A host that draws its own chrome (`utils/host`) leaves civex the page.
   const embedded = isEmbedded()
+  // Mounted in a host's page (`embed.tsx`): the page scrolls, not the app.
+  const mounted = isMounted()
   const { name: brandName, logo_url: brandLogo } = brand()
   const location = useLocation()
 
@@ -418,7 +425,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="h-screen flex flex-col">
+    <div className={mounted ? 'flex flex-col' : 'h-screen flex flex-col'}>
       {/* The host's own header and tabs, when it registered any. */}
       <Slot
         name="app.header"
@@ -621,7 +628,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                   visually hidden input, say), so it lengthens this area, never
                   the window, which must not scroll. */}
               <main className="relative flex-1 min-h-0 overflow-y-auto">
-                <div className="max-w-[1600px] mx-auto px-6 py-6">
+                <div className="max-w-[var(--content-max,1600px)] mx-auto px-[var(--content-pad,1.5rem)] py-6">
                   {children}
                 </div>
               </main>
@@ -637,8 +644,12 @@ export default function Layout({ children }: { children: ReactNode }) {
             </Panel>
           </Group>
         ) : (
-          <main className="relative flex-1 min-w-0 overflow-y-auto">
-            <div className="max-w-[1600px] mx-auto px-6 py-6">{children}</div>
+          <main
+            className={`relative flex-1 min-w-0 ${mounted ? '' : 'overflow-y-auto'}`}
+          >
+            <div className="max-w-[var(--content-max,1600px)] mx-auto px-[var(--content-pad,1.5rem)] py-6">
+              {children}
+            </div>
           </main>
         )}
       </div>

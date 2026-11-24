@@ -368,7 +368,9 @@ def test_getting_there_counts_whatever_uv_said(
 
 def _metadata(home: Path, version: str) -> None:
     site = launcher.tool_python(home).parent.parent / (
-        "Lib/site-packages" if sys.platform == "win32" else "lib/python3.13/site-packages"
+        "Lib/site-packages"
+        if sys.platform == "win32"
+        else "lib/python3.13/site-packages"
     )
     info = site / f"civex-{version}.dist-info"
     info.mkdir(parents=True)

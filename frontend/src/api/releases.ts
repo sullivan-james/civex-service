@@ -7,7 +7,7 @@ import {
   type FilePlanSummary,
   type GatherResult,
 } from './fileAccess'
-import { apiUrl } from '../utils/host'
+import { apiUrl, hostFetch } from '../utils/host'
 
 /** What a release covers: the whole project (`{}`), some collections, the
  * records a query lists, or chosen records (each with the records above it). */
@@ -225,7 +225,7 @@ export const releasesApi = {
     allowPartial: boolean,
     progressId?: string,
   ) => {
-    const res = await fetch(
+    const res = await hostFetch(
       apiUrl(`${at(name)}/files/zip?allow_partial=${allowPartial}`),
       { method: 'POST', headers: progressHeaders(progressId) },
     )

@@ -86,9 +86,7 @@ def test_existing_history_is_left_as_it_is_and_new_entries_are_numbered(
             ).all()
         )
         assert seq[first] is not None and seq[second] > seq[first]
-        assert (
-            conn.execute(text("SELECT feed_floor FROM sync_meta")).scalar_one() == 0
-        )
+        assert conn.execute(text("SELECT feed_floor FROM sync_meta")).scalar_one() == 0
 
         command.downgrade(cfg, _PRE)
         conn.commit()

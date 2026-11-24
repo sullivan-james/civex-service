@@ -249,6 +249,15 @@ body {
   line-height: var(--text-base--line-height);
 }
 
+/* A mounted app (`embed.tsx`) has no <body>: its root takes the text settings,
+   and the page behind it (the host's) stays what shows through. */
+.civex-embed-root {
+  font-family: var(--font-sans);
+  color: var(--color-fg);
+  font-size: var(--text-base);
+  line-height: var(--text-base--line-height);
+}
+
 * {
   box-sizing: border-box;
 }

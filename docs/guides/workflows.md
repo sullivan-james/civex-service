@@ -1,7 +1,7 @@
 # Workflows
 
 A workflow is a YAML file in `_civex/workflows/` whose steps each run a
-[plugin](../reference/plugins/get_field.md). It runs when a record changes, or
+[step](../reference/plugins/value_from_filename.md). It runs when a record changes, or
 when you start it. Runs are covered in [Automation](automation.md).
 
 ## A complete example
@@ -17,7 +17,7 @@ triggers:
 
 steps:
   - id: extract
-    plugin: civex.extract_from_filename
+    plugin: civex.value_from_filename@1
     config:
       field: reading
       pattern: '(\d{8}[-_]\d{6})'
@@ -25,7 +25,7 @@ steps:
       date_format: 'YYYYMMDD[-_]HHmmSS'
 
   - id: save
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config:
       field: taken_at
     inputs:
@@ -45,12 +45,12 @@ walks through it.
 | `enabled` | | `false` switches its triggers off: it runs only when someone starts or tries it. Missing means on |
 | `triggers` | | When it runs by itself (below) |
 | `record_schema` | | Manual runs only on records of this schema |
-| `inputs` | | What a manual run asks for (below) |
+| `inputs` | | Plain values a manual run asks for (below). Files are asked for by a Files step |
 | `steps` | yes | `id`, `plugin`, `config` (the plugin's settings), `inputs` (other steps' outputs) |
 
 Steps run in dependency order: a step that takes `extract.value` runs after
 `extract`. Each plugin's settings, inputs and outputs are in the
-[plugin reference](../reference/plugins/get_field.md), and `civex plugin list`
+[step reference](../reference/plugins/value_from_filename.md), and `civex plugin list`
 shows what's installed here.
 
 ## Triggers
@@ -77,24 +77,27 @@ workflows triggering each other stops after 10 hops. See
 ```yaml
 name: load-samples
 record_schema: visit
-inputs:
-  files:
-    type: files                # or: value, a single string or number
-    label: CSV files
 
 steps:
+  - id: readings
+    plugin: civex.files@1
+    config:
+      source: run              # chosen each time it is run
+      label: CSV files         # what the person is asked for
+
   - id: insert
-    plugin: civex.create_records_from_files
+    plugin: civex.save_records@1
     config:
       schema: sample
+      if_exists: add_new
       file_field: reading
     inputs:
-      files: __input__.files   # the run's input
+      files: readings.files
 ```
 
 ```bash
 civex workflow list
-civex workflow run load-samples --record 2d69dc46 --input "files=readings/*.csv"
+civex workflow run load-samples --record 2d69dc46 --input "readings=readings/*.csv"
 ```
 
 ```text
@@ -108,8 +111,48 @@ Each new sample triggered `read-sample-time`, so the times were filled
 in as well.
 
 **In the app:** a record's header has **Run …** for the workflows that fit it. A
-workflow with `files` inputs asks for them first, and others start at once. To
+workflow with a Files step set to be chosen when it is run asks for them first
+(drop files in, or, on your own computer, choose a folder: nothing is uploaded and
+it is faster for many files), and others start at once. To
 run on many records, tick them in a list and choose **Run workflow on N**.
+
+## The built-in steps
+
+Three groups, as the app shows them:
+
+- **Bring in**: [Files](../reference/plugins/files.md) (chosen when run, a folder on
+  this computer, or a field of the record) and [Table](../reference/plugins/table.md)
+  (CSV, TSV or Excel).
+- **Work out**: [Value from the file name](../reference/plugins/value_from_filename.md).
+- **Save**: [Save as records](../reference/plugins/save_records.md) (rows or files;
+  update, skip or add another when a matching record exists) and
+  [Set fields on this record](../reference/plugins/set_fields.md).
+
+Any setting of any step may take its value from a field of the record the workflow
+runs on, written `{from_field: name}`.
+
+## Step versions and upgrades
+
+A workflow names a built-in step with its version: `civex.save_records@1`. A step
+written without one (`civex.rows_to_records`) is **version 0**: the steps civex had
+before steps were versioned. A step's version changes only when what a workflow can
+say to it changes (its settings, inputs or outputs), never for a better label or a
+bug fix.
+
+When civex loads a workflow file written for older steps, it **rewrites the file for
+the newer ones** and logs what it did. The old file is kept next to it as
+`<name>.yaml.bak` (never overwritten; a second upgrade makes `.bak2`); backups are
+not workflows, and are not shared or synced. A workflow you paste, import or save is
+upgraded the same way. An upgrade can turn a step into different steps: `civex.load_file`
+and `civex.parse_table` become one **Table** step, `inputs: {x: {type: files}}`
+becomes a **Files** step named `x`, and the later steps are rewired. Comments in
+the file are not kept in the rewrite (the `.bak` has them). A workflow whose old
+steps can't be mapped (for example a step of your own reading `civex.load_file`'s
+`filename`) is left exactly as it was, with a message saying which step to edit.
+
+A workflow naming a step version this civex doesn't know (it came from a computer
+with a newer civex) is **refused**: "needs a newer civex". It is not run, and not
+touched, until civex is updated.
 
 ## Editing
 

@@ -94,7 +94,9 @@ def test_a_legacy_delta_claiming_the_old_collection_is_not_sent(study: Study):
         entity_id=seen.id,
         old_data={"id": str(seen.id), "dataset_id": str(study.open.id)},
         new_data={"id": str(seen.id), "dataset_id": str(study.open.id)},
-        delta={f"data.{key}": {"before": base["data"][key], "after": f"{SECRET}-LDELTA"}},
+        delta={
+            f"data.{key}": {"before": base["data"][key], "after": f"{SECRET}-LDELTA"}
+        },
         timestamp="2026-01-02T00:00:00+00:00",
     )
     repo = authority.sync_repo

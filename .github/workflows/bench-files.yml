@@ -1,0 +1,112 @@
+name: File upload benchmark
+
+# How fast files go to an authority, before and after the bulk-upload change:
+# many 0.3 MB files and a few big ones, to an authority in its own process with
+# PostgreSQL for its tables, files on its drive or in a bucket (moto standing in
+# for S3, so files go direct). Only the upload is timed. Numbers are MB/s of file
+# bytes on a shared runner's loopback: compare the before and after rows of one
+# run, not runs with each other. Manual only.
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/bench-files.yml"
+      - "benchmarks/bench_bulk_files.py"
+      - "src/civex/services/sync_service.py"
+      - "src/civex/services/sync_transport.py"
+      - "src/civex/services/file_service.py"
+      - "src/civex/server/routers/sync_peer.py"
+      - "src/civex/repositories/local/file_store.py"
+      - "src/civex/repositories/s3/store.py"
+  workflow_dispatch:
+    inputs:
+      before_ref:
+        description: "Branch holding the old upload path"
+        default: agent/upload-speed
+      small_gb:
+        description: "GB of 0.3 MB files"
+        default: "5"
+      huge_count:
+        description: "Number of big files"
+        default: "5"
+      huge_gb:
+        description: "GB per big file"
+        default: "1"
+      s3_gb:
+        description: "GB for each bucket run (moto is slow)"
+        default: "1"
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: bench
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      PG_URL: postgresql+psycopg2://postgres:bench@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Where things go
+        run: echo "CIVEX_USER_STATE=$RUNNER_TEMP/user-state.json" >> "$GITHUB_ENV"
+
+      - name: Install
+        run: |
+          uv sync --extra server --extra postgres --extra dev
+          uv venv "$RUNNER_TEMP/moto"
+          uv pip install --python "$RUNNER_TEMP/moto/bin/python" 'moto[server]'
+          echo "MOTO_SERVER=$RUNNER_TEMP/moto/bin/moto_server" >> "$GITHUB_ENV"
+
+      - name: The old upload path
+        run: git worktree add "$RUNNER_TEMP/before" "origin/${{ inputs.before_ref || github.base_ref }}"
+
+      - name: Run
+        run: |
+          set -u
+          : > "$RUNNER_TEMP/results.jsonl"
+          bench() { # <label> <source tree> <args...>
+            label=$1; tree=$2; shift 2
+            (cd "$tree" && PYTHONPATH="$tree/src" uv run --project "$GITHUB_WORKSPACE" \
+              python "$GITHUB_WORKSPACE/benchmarks/bench_bulk_files.py" \
+              --work "$RUNNER_TEMP/bench-data" --label "$label" "$@" \
+              | tail -1 >> "$RUNNER_TEMP/results.jsonl")
+          }
+          for side in before after; do
+            tree=$GITHUB_WORKSPACE
+            [ "$side" = before ] && tree=$RUNNER_TEMP/before
+            bench "$side fs small" "$tree" --shape small --gb "${{ inputs.small_gb || '5' }}" --store fs
+            bench "$side fs huge" "$tree" --shape huge --big-count "${{ inputs.huge_count || '5' }}" --big-gb "${{ inputs.huge_gb || '1' }}" --store fs
+            bench "$side fs huge, 25 MB/s per connection" "$tree" --shape huge --big-count 2 --big-gb 1 --store fs --per-conn-mb 25
+            bench "$side s3 small" "$tree" --shape small --gb "${{ inputs.s3_gb || '1' }}" --store s3
+            bench "$side s3 huge" "$tree" --shape huge --big-count 2 --big-gb "$(python3 -c 'print(${{ inputs.s3_gb || '1' }}/2)')" --store s3
+          done
+
+      - name: Summary
+        if: always()
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, os
+          print("| run | files | GB | seconds | MB/s |\n|---|---|---|---|---|")
+          for line in open(os.environ["RUNNER_TEMP"] + "/results.jsonl"):
+              try:
+                  r = json.loads(line)
+              except ValueError:
+                  continue
+              print(f"| {r['label']} | {r['files']} | {r['bytes']/1e9:.1f} | {r['seconds']} | {r['MB_per_s']} |")
+          PY

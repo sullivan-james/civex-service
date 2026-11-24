@@ -17,11 +17,11 @@ triggers:
     schema: doc
 steps:
   - id: read
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config:
       field: subject
   - id: save
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config:
       field: title
     inputs:

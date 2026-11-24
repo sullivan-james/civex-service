@@ -44,21 +44,20 @@ def test_list_plugins_returns_the_full_declared_contract(client: TestClient) -> 
     the service already returned them."""
     resp = client.get("/api/plugins")
     plugins = {p["id"]: p for p in resp.json()}
-    get_field = plugins["civex.get_field"]
-    assert get_field["name"] == "Read a field"
-    assert get_field["category"] == "data-access"
-    assert get_field["outputs"] == [
-        {
-            "name": "value",
-            "type": "any",
-            "required": True,
-            "description": "The field's value; empty when it isn't set.",
-        }
-    ]
-    assert get_field["config_schema"]["properties"]["field"]["type"] == "string"
+    value = plugins["civex.value_from_filename@1"]
+    assert value["name"] == "Value from the file name"
+    assert value["category"] == "work-out"
+    assert [o["name"] for o in value["outputs"]] == ["value", "filename", "extracted"]
+    assert value["outputs"][0] == {
+        "name": "value",
+        "type": "any",
+        "required": True,
+        "description": "The value it took from the name: text, a number or a date.",
+    }
+    assert value["config_schema"]["properties"]["field"]["type"] == "string"
 
-    save_field = plugins["civex.save_field"]
-    assert save_field["capabilities"] == ["read", "write_records"]
+    set_fields = plugins["civex.set_fields@1"]
+    assert set_fields["capabilities"] == ["read", "write_records"]
 
 
 def test_list_plugin_load_errors_empty_by_default(client: TestClient) -> None:

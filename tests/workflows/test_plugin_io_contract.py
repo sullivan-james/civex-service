@@ -32,7 +32,7 @@ from civex.workflows.definition import WorkflowDef
 def test_table_data_crosses_a_builtin_to_builtin_chain_as_records_not_a_dataframe(
     ctx, make_collection, make_schema, make_record
 ):
-    """civex.parse_table -> civex.rows_to_records, both BUILTIN-tier -- proves
+    """civex.table -> civex.save_records, both BUILTIN-tier -- proves
     the dataflow between two in-process steps is genuinely list[dict]
     records, the same shape a subprocess/container-tier step downstream
     would receive, rather than a raw DataFrame that only happens to work
@@ -46,30 +46,34 @@ def test_table_data_crosses_a_builtin_to_builtin_chain_as_records_not_a_datafram
     wf = WorkflowDef.model_validate(
         yaml.safe_load("""
 name: csv-to-records
-inputs:
-  bytes: {type: bytes}
 steps:
+  - id: csv
+    plugin: civex.files@1
+    config: {source: run}
   - id: parse
-    plugin: civex.parse_table
-    inputs: {bytes: __input__.bytes}
+    plugin: civex.table@1
+    inputs: {files: csv.files}
   - id: create
-    plugin: civex.rows_to_records
+    plugin: civex.save_records@1
     config: {schema: item}
-    inputs: {table: parse.table}
+    inputs: {rows: parse.table}
 """)
     )
 
-    csv_bytes = b"name,age\nAlice,30\nBob,25\n"
+    csv = ctx.file_svc.store_bytes(b"name,age\nAlice,30\nBob,25\n", "t.csv")
     step_executions = executor.run(
-        wf, wf_ctx, all_plugins(), initial_outputs={"__input__": {"bytes": csv_bytes}}
+        wf,
+        wf_ctx,
+        all_plugins(),
+        initial_outputs={"__input__": {"csv": [csv.to_dict()]}},
     )
 
-    parse_outputs = step_executions[0]["outputs"]
+    parse_outputs = step_executions[1]["outputs"]
     # A raw DataFrame would persist as executor._json_safe's summary dict
     # ({"rows": ..., "columns": [...]}), never as this columnar/typed
     # envelope -- so this also proves the *actual* step_outputs value
     # threaded into "create" was already the wire form, not just that
-    # display serialization tolerated it. "create" (civex.rows_to_records)
+    # display serialization tolerated it. "create" (civex.save_records)
     # still reconstructs a real DataFrame from this and calls df.iterrows()
     # -- proven by the record-creation assertion below succeeding at all.
     assert parse_outputs["table"] == {
@@ -122,8 +126,8 @@ if __name__ == "__main__":
 def test_a_table_crosses_from_a_builtin_step_into_a_real_subprocess_step(
     ctx, make_collection, make_schema, make_record, tmp_path: Path
 ):
-    """Regression: civex.parse_table (BUILTIN) -> a real Tier 1 `uv run`
-    plugin -> civex.upsert_records (BUILTIN).
+    """Regression: civex.table (BUILTIN) -> a real Tier 1 `uv run`
+    plugin -> civex.save_records (BUILTIN).
 
     The crossing is the whole point. A BUILTIN step's raw pandas DataFrame
     used to be threaded straight into the subprocess step's RunRequest, where
@@ -145,33 +149,34 @@ def test_a_table_crosses_from_a_builtin_step_into_a_real_subprocess_step(
     wf = WorkflowDef.model_validate(
         yaml.safe_load("""
 name: csv-through-a-subprocess
-inputs:
-  bytes: {type: bytes}
 steps:
+  - id: csv
+    plugin: civex.files@1
+    config: {source: run}
   - id: parse
-    plugin: civex.parse_table
-    inputs: {bytes: __input__.bytes}
+    plugin: civex.table@1
+    inputs: {files: csv.files}
   - id: rename
     plugin: project.rename_columns
     inputs: {table: parse.table}
   - id: upsert
-    plugin: civex.upsert_records
-    config: {schema: item, key_field: label}
-    inputs: {table: rename.table}
+    plugin: civex.save_records@1
+    config: {schema: item, match_on: [label]}
+    inputs: {rows: rename.table}
 """)
     )
 
-    csv_bytes = b"name,age\nAlice,30\nBob,25\n"
+    csv = ctx.file_svc.store_bytes(b"name,age\nAlice,30\nBob,25\n", "t.csv")
     step_executions = executor.run(
         wf,
         wf_ctx,
         all_plugins(),
-        initial_outputs={"__input__": {"bytes": csv_bytes}},
+        initial_outputs={"__input__": {"csv": [csv.to_dict()]}},
         default_timeout_seconds=120.0,
     )
 
-    assert [s["status"] for s in step_executions] == ["success"] * 3
-    assert step_executions[2]["outputs"] == {
+    assert [s["status"] for s in step_executions] == ["success"] * 4
+    assert step_executions[3]["outputs"] == {
         "created": 2,
         "updated": 0,
         "unchanged": 0,

@@ -14,11 +14,14 @@ point leaves the project as it was or one step further, never between.
 from __future__ import annotations
 
 import logging
+import functools
+import threading
 
 import time
 import urllib.parse
 import uuid
 from collections.abc import Callable, Iterator
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, BinaryIO, TypeVar
@@ -51,12 +54,16 @@ from civex.domain.file_refs import without_file_locations
 from civex.domain.hosts import is_loopback
 from civex.domain.dtos import MissingFileGroupDTO, MissingFilesRemovalDTO
 from civex.domain.sync import (
+    PUSH_BUDGET_BYTES,
     REFUSAL_PERMISSION,
+    batch_by_budget,
     is_lock_contention,
     Joined,
     LoginStarted,
     DEFERRED,
+    FOLLOWED,
     ENTITY_ORDER,
+    NOT_SYNCED_KINDS,
     PROTOCOL_MAX,
     COPYING,
     DeviceCredentials,
@@ -89,9 +96,33 @@ from civex.services.sync_applier import SyncApplier
 from civex.services.sync_lock import sync_lock, sync_running
 from civex.services import ssh_tunnel
 
-PUSH_BATCH = 100
+# Changes per push. The authority settles at most 500 in one request
+# (`sync_authority.PUSH_MAX`), so a batch never goes over that. Measured on
+# PostgreSQL the authority's cost per change grows with the batch, so this
+# sits between 100 and that limit.
+PUSH_BATCH = 250
 # How many referenced files are checked against the authority per request.
 FILE_CHECK_PAGE = 1000
+# A file above this many bytes is sent alone, one at a time, and confirmed and
+# committed as soon as it arrives: it never shares memory or bandwidth with
+# another upload, and its arrival is never lost to a later failure.
+LARGE_FILE_BYTES = 8 * 1024 * 1024
+# Smaller files go several at a time (where the transport allows it:
+# `upload_threads`), and are confirmed and committed in groups: after this many
+# files, or this many seconds, whichever comes first.
+SMALL_FILE_GROUP = 50
+SMALL_FILE_GROUP_SECONDS = 2.0
+# Where the authority takes packs (`file_packs`), small files go many to a
+# request: a pack is closed at this many bytes or files, whichever comes
+# first, and this many are on their way at once. (Each open file is a handle,
+# so the files held at once are at most PACKS_IN_FLIGHT + 1 packs' worth.)
+PACK_BYTES = 32 * 1024 * 1024
+PACK_FILES = 100
+PACKS_IN_FLIGHT = 4
+# The slice asked about at a time when sending in packs: a slice is settled
+# before the next is read, so a bigger one means fewer pauses for the packs
+# still on their way (the authority answers up to 5000 per request).
+PACKED_CHECK_PAGE = 4000
 FEED_PAGE = 200
 SNAPSHOT_PAGE = 200
 
@@ -307,6 +338,26 @@ class FilesWaiting:
     ignored: int = 0
 
 
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _closes_transports(fn: _F) -> _F:
+    """A pass that ends, however it ends, closes the connections it opened."""
+
+    @functools.wraps(fn)
+    def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+        depth = self.__dict__.setdefault("_pass_depth", threading.local())
+        depth.n = getattr(depth, "n", 0) + 1
+        try:
+            return fn(self, *args, **kwargs)
+        finally:
+            depth.n -= 1
+            if depth.n == 0:  # not while an outer pass still uses them
+                self._close_transports()
+
+    return wrapper  # type: ignore[return-value]
+
+
 class SyncService:
     def __init__(
         self,
@@ -342,6 +393,7 @@ class SyncService:
     def configured(self) -> bool:
         return bool(self._config.sync.remote)
 
+    @_closes_transports
     def identity(self, *, ask: bool = True) -> DeviceIdentity:
         """This computer's standing with the authority. `ask` lets it say its
         name for the device (one request); an authority that can't be reached
@@ -352,11 +404,7 @@ class SyncService:
         name: str | None = None
         if ask and joined and remote:
             try:
-                name = (
-                    self._make_transport(remote, self._credentials(remote))
-                    .hello()
-                    .device_name
-                )
+                name = self._made(remote).hello().device_name
             except (SyncError, OSError):
                 name = None
         return DeviceIdentity(
@@ -381,7 +429,11 @@ class SyncService:
             project_id=str(meta.project_id),
             paused=self._config.sync.paused,
             pending=self._repo.count_pending() if self.configured else 0,
-            seeding=self._repo.count_seeding() if self.configured else 0,
+            seeding=(
+                (self._repo.count_seeding() or int(self._repo.seed_open()))
+                if self.configured
+                else 0
+            ),
             open_conflicts=self._repo.count_conflicts("open"),
             cursor=meta.cursor,
             last_synced_at=meta.last_synced_at,
@@ -495,6 +547,7 @@ class SyncService:
             self._commit()
         return ignored - found
 
+    @_closes_transports
     def missing_files(
         self, include_ignored: bool = False, with_groups: bool = True
     ) -> MissingFilesReport:
@@ -777,6 +830,7 @@ class SyncService:
         url = url.strip().rstrip("/")
         return not (invite and invite.strip()) and not user_state.authority_for(url)
 
+    @_closes_transports
     def request_login(self, url: str) -> LoginStarted:
         """Ask the authority at `url` to let this computer join without an
         invite. The answer's `user_code` is for a person to approve there;
@@ -784,8 +838,9 @@ class SyncService:
         url = url.strip().rstrip("/")
         self._refuse_following_while_serving()
         _check_address(url)
-        return self._make_transport(url, self._credentials(url)).request_login()
+        return self._made(url).request_login()
 
+    @_closes_transports
     def check_connect(self, url: str, invite: str | None) -> str:
         """What connecting to this authority would do, found out without doing
         it: the address is read, the protocol accepted, and who holds data
@@ -816,11 +871,11 @@ class SyncService:
         url = url.strip().rstrip("/")
         self._refuse_following_while_serving()
         _check_address(url)
-        probe = self._make_transport(url, self._credentials(url))
+        probe = self._made(url)
         if invite and invite.strip():
             joined = probe.join(invite.strip())
             user_state.save_authority(url, joined.authority_key)
-        elif not user_state.authority_for(url):
+        elif not self._is_a_device(probe, url):
             # Never joined and no invite: ask to join, show the code (or take a
             # request already made), and wait for a person to approve it.
             if login is None and on_code is None:
@@ -848,7 +903,9 @@ class SyncService:
             # (A pull that moved the cursor on does not hide it: entries
             # still `seeding` mean the first upload is not done.)
             unfinished = hello.seeded_by == mine and (
-                meta.cursor == 0 or self._repo.count_seeding() > 0
+                meta.cursor == 0
+                or self._repo.count_seeding() > 0
+                or self._repo.seed_open()
             )
             if meta.cursor == JOINING or (local_empty and not hello.empty):
                 mode = "joined"
@@ -871,6 +928,22 @@ class SyncService:
             )
         return mode, hello, url
 
+    def _is_a_device(self, probe: SyncTransport, url: str) -> bool:
+        """Whether the authority at `url` knows THIS device. Asked, not
+        guessed: this computer may have joined that address for another project
+        (each project is its own device), or this device may have been revoked.
+        Only a refusal that says so (`not_a_device`) means sign in again; any
+        other (a bad signature, a clock) keeps its own message."""
+        if not user_state.authority_for(url):
+            return False
+        try:
+            probe.hello()  # signs in
+        except SyncError as e:
+            if e.code == "not_a_device":
+                return False
+            raise
+        return True
+
     def _await_approval(self, probe: SyncTransport, login: LoginStarted) -> Joined:
         """Poll until a person approves the request, it is denied, or it
         expires (the authority answers the last two with a refusal)."""
@@ -888,6 +961,7 @@ class SyncService:
     # How waiting is done; a test makes it instant.
     _sleep: Callable[[float], None] = staticmethod(time.sleep)
 
+    @_closes_transports
     def connect(
         self,
         url: str,
@@ -926,7 +1000,7 @@ class SyncService:
             self._repo.forget_numbers()
             self._repo.resolve_conflicts(
                 [c.id for c in self._repo.find_open_conflicts()],
-                "followed another server",
+                FOLLOWED,
             )
             self._commit()
         self._config.sync.remote = url
@@ -1065,7 +1139,16 @@ class SyncService:
     def transport(self) -> SyncTransport:
         """A connection to the authority this project follows, signed in as
         this device (for the library, which is not part of syncing)."""
-        return self._transport()
+        transport = self._transport()
+        # The caller's to close: not closed when a pass of ours ends.
+        self._opened().remove(transport)
+        return transport
+
+    def _made(self, url: str) -> SyncTransport:
+        """A transport for `url` that the pass in hand closes when it ends."""
+        transport = self._make_transport(url, self._credentials(url))
+        self._opened().append(transport)
+        return transport
 
     def _transport(self) -> SyncTransport:
         remote = self._config.sync.remote
@@ -1080,7 +1163,23 @@ class SyncService:
                 f"This computer hasn't joined {remote}: connect again with an invite.",
                 retryable=False,
             )
-        return self._make_transport(remote, self._credentials(remote))
+        return self._made(remote)
+
+    def _opened(self) -> list[Any]:
+        """The transports this thread has made since it last closed them."""
+        local = self.__dict__.setdefault("_transports", threading.local())
+        if not hasattr(local, "list"):
+            local.list = []
+        return local.list  # type: ignore[no-any-return]
+
+    def _close_transports(self) -> None:
+        """Close the connections of every transport this thread opened: a pass
+        leaves no socket behind."""
+        opened, self._opened()[:] = list(self._opened()), []
+        for transport in opened:
+            close = getattr(transport, "close", None)
+            if close is not None:
+                close()
 
     # ------------------------------------------------------------------
     # Syncing
@@ -1169,6 +1268,7 @@ class SyncService:
         except Exception:  # noqa: BLE001 - nothing to save; the error matters more
             pass
 
+    @_closes_transports
     def _sync(self) -> SyncReport:
         progress = self._sync_progress
         if problem := self._one_role():
@@ -1191,12 +1291,25 @@ class SyncService:
             server_version=hello.server_version,
             notice=retiring_notice(hello.protocol_retiring, hello.protocol_version),
         )
+        if hello.head_seq < meta.cursor:
+            # Not an error, but "sent 0" would hide that it is not the server
+            # this copy followed (a pull only asks for what follows the cursor).
+            where = (
+                f"The server is at change {hello.head_seq} but this copy had "
+                f"followed it to {meta.cursor}: it may be a different server, or "
+                "one restored from a backup."
+            )
+            log.warning("sync with %s: %s", self._config.sync.remote, where)
+            report.notice = " ".join(filter(None, [report.notice, where]))
         # A first upload that never finished (the process stopped, or the
         # connection dropped) goes first, whatever the cursor says: a pull
         # would only bring back what of it had gone, and the rest would stay
         # `seeding`, sent by nothing. It is safe to run again (see `_seed`).
-        if self._repo.count_seeding():
-            if hello.seeded_by == str(user_state.device_id_for(meta.project_id)):
+        # (`seed_open` says so even when the seed set nothing aside: a history
+        # all settled with another authority has nothing to set aside.)
+        if self._repo.count_seeding() or self._repo.seed_open():
+            mine = str(user_state.device_id_for(meta.project_id))
+            if hello.seeded_by == mine or (hello.seeded_by is None and hello.empty):
                 log.info(
                     "sync with %s: finishing the first upload",
                     self._config.sync.remote,
@@ -1205,12 +1318,20 @@ class SyncService:
                 # the authority already holds it answers from its record),
                 # except what it already numbered a change of. The cursor
                 # stays: the pull below brings in whatever others did.
+                restarted = hello.empty
+                if restarted:
+                    # An empty server holds none of what was numbered before
+                    # (reset, or restored from before the upload): all goes
+                    # again, and it is followed from the start.
+                    self._repo.forget_numbers()
+                    self._repo.set_cursor(0)
+                    self._commit()
                 self._seed(
                     transport,
                     progress,
                     hello.protocol_version,
-                    advance=False,
-                    skip=self._repo.already_sent_entities(),
+                    advance=restarted,
+                    skip=None if restarted else self._repo.already_sent_entities(),
                 )
                 meta = self._repo.meta()
             else:
@@ -1285,6 +1406,7 @@ class SyncService:
             self._commit()
         return sent
 
+    @_closes_transports
     def pull(self) -> int:
         with sync_lock(self._config.civex_dir):
             return self._pull(self._transport())
@@ -1295,26 +1417,60 @@ class SyncService:
         dirty = self._catch_up()
         cursor = self._repo.meta().cursor
         applied = 0
+        # An action cut across pages is kept on disk as it arrives (state
+        # `arriving`, or `arrhold` once any entry of it must wait), and the
+        # cursor goes past it: nothing is held in memory, and a stop picks up
+        # where it was. Its fate (applied whole, or held whole) is decided when
+        # its last entry has arrived.
+        arriving, to_hold = self._repo.arriving_action()
+        start = cursor  # what was staged before this pass is at or below it
         while True:
             page = transport.feed(cursor, FEED_PAGE)
+            entries = list(page.entries)
+            # The trailing run of one action, when the page may end inside it.
+            tail = len(entries)
+            if page.more and entries and entries[-1].op:
+                while tail > 0 and entries[tail - 1].op == entries[-1].op:
+                    tail -= 1
+            if page.more and not entries and not (page.through or 0) > cursor:
+                return applied  # no progress: asking again would repeat itself
             # An action is taken whole or held whole: if one of its entries
             # must wait for a push of this device's own, every entry of it
             # waits with that one (a tree moved to another collection can't
             # be half moved: a child's collection is its parent's).
             above = self._above_dirty(dirty)
             waiting = {
-                e.op for e in page.entries if e.op and self._waits(e, dirty, above)
+                e.op
+                for i, e in enumerate(entries)
+                if e.op
+                and i < tail
+                and e.op != arriving
+                and self._waits(e, dirty, above)
             }
             touched: list[uuid.UUID] = []
+            settled = False
             try:
                 with self._repo.savepoint():
-                    for entry in page.entries:
+                    for i, entry in enumerate(entries):
                         if entry.hub_seq is None:
                             raise SyncError("The server sent a change without a number")
-                        if self._repo.has_entry(entry.id):
+                        if arriving is not None and entry.op != arriving:
+                            self._settle_arriving(arriving, to_hold, dirty, start)
+                            arriving, to_hold = None, False
+                            settled = True
+                        if entry.entity_type in NOT_SYNCED_KINDS:
+                            # An authority on protocol 5 or older still feeds
+                            # releases: they are never taken (published on a
+                            # host), only read past.
+                            pass
+                        elif self._repo.has_entry(entry.id):
                             # Ours, now numbered, and stamped with the device
                             # it came through.
                             self._repo.mark_seq(entry.id, entry.hub_seq, entry.device)
+                        elif entry.op and (entry.op == arriving or i >= tail):
+                            arriving = entry.op
+                            to_hold = self._stage(entry, dirty, above, to_hold)
+                            applied += 1
                         else:
                             self._take(
                                 entry,
@@ -1326,6 +1482,10 @@ class SyncService:
                             if entry.entity_type == "record":
                                 touched.append(entry.entity_id)
                         cursor = entry.hub_seq
+                    if arriving is not None and not page.more:
+                        self._settle_arriving(arriving, to_hold, dirty, start)
+                        arriving, to_hold = None, False
+                        settled = True
                     # The server may have looked past changes it did not send
                     # (ones this device may not see): the cursor goes where it
                     # got to, or they would be read again at every sync.
@@ -1335,7 +1495,7 @@ class SyncService:
                     # holds: it is not read again when the next hello lists it.
                     born = {
                         str(e.entity_id)
-                        for e in page.entries
+                        for e in entries
                         if e.entity_type == "dataset" and e.action == "create"
                     }
                     known = self._repo.readable() if born else None
@@ -1347,7 +1507,7 @@ class SyncService:
                     # the child now settled by this page): it goes in with the
                     # page, in the same transaction, since a child in another
                     # collection than its parent is refused at commit.
-                    if touched:
+                    if touched or settled:
                         self._replay_held(dirty)
                     if (
                         not page.more
@@ -1367,6 +1527,98 @@ class SyncService:
             self._commit()
             if not page.more:
                 return applied
+
+    def _stage(
+        self,
+        entry: SyncEntry,
+        dirty: set[tuple[str, uuid.UUID]],
+        above: set[uuid.UUID],
+        to_hold: bool,
+    ) -> bool:
+        """Keep an entry of an action that is still arriving, on disk and not
+        applied. The first entry that must wait for a push of this device's
+        own turns the whole action (what has arrived, and what will) to
+        `arrhold`. Answers whether the action is to be held."""
+        assert entry.op
+        if not to_hold and not entry.superseded and self._waits(entry, dirty, above):
+            self._repo.set_arriving(entry.op, ("arriving",), "arrhold")
+            to_hold = True
+        state = (
+            "superseded" if entry.superseded else "arrhold" if to_hold else "arriving"
+        )
+        self._repo.insert_entry(entry, hub_seq=entry.hub_seq, apply_state=state)
+        return to_hold
+
+    def _arriving_waits(
+        self, op: str, dirty: set[tuple[str, uuid.UUID]], start: int
+    ) -> bool:
+        """Whether an entry of an arriving action that an earlier pass kept (up
+        to number `start`) must wait for a push of this device's own *now*: the
+        person may have edited since, and a pass pulls before it pushes.
+        (What this pass staged was checked as it came in.)"""
+        above = self._above_dirty(dirty)
+        after = 0
+        while chunk := self._repo.arriving_entries(op, after, 500, upto=start):
+            if any(self._waits(e, dirty, above) for e in chunk if not e.superseded):
+                return True
+            after = chunk[-1].hub_seq or after
+        return False
+
+    def _settle_arriving(
+        self,
+        op: str,
+        to_hold: bool,
+        dirty: set[tuple[str, uuid.UUID]],
+        start: int,
+    ) -> None:
+        """An action's last entry has arrived: hold it whole (it stays in the
+        held store, `_replay_held` applies it once nothing of this device's own
+        keeps it waiting) or apply it whole, a chunk of entries at a time from
+        disk. One transaction: a child in another collection than its parent is
+        refused at commit, so it can't be applied in steps that commit."""
+        if to_hold:
+            self._repo.set_arriving(op, ("arrhold",), "held")
+            return
+        if self._arriving_waits(op, dirty, start):
+            self._repo.set_arriving(op, ("arriving",), "held")
+            return
+        try:
+            with self._repo.savepoint():
+                # `settling`: now steps, which `arriving` rows are not.
+                self._repo.set_arriving(op, ("arriving",), "settling")
+                after = 0
+                while chunk := self._repo.arriving_entries(
+                    op, after, 500, state="settling"
+                ):
+                    self._apply_chunk(chunk)
+                    after = chunk[-1].hub_seq or after
+                after = 0
+                while chunk := self._repo.arriving_entries(
+                    op, after, 500, state="settling"
+                ):
+                    ids = [e.entity_id for e in chunk if e.entity_type == "record"]
+                    if ids and self._records.placement_mismatches(ids):
+                        raise _NotYet()
+                    after = chunk[-1].hub_seq or after
+                self._repo.set_arriving(op, ("settling",), "applied")
+        except _NotYet:
+            self._repo.set_arriving(op, ("arriving",), "held")
+
+    def _apply_chunk(self, chunk: list[SyncEntry]) -> None:
+        """Apply a chunk of an action's entries under one savepoint (a savepoint
+        for each entry would pile up thousands in one transaction). If one of
+        them can't be applied, the chunk is undone and done again an entry at a
+        time, each with its own savepoint and its refusal recorded as a
+        conflict: the action stays whole either way."""
+        try:
+            with self._repo.savepoint():
+                for e in chunk:
+                    self._replay(
+                        (e.entity_type, e.entity_id), e.hub_seq or 0, isolate=False
+                    )
+        except ValidationError:
+            for e in chunk:
+                self._replay((e.entity_type, e.entity_id), e.hub_seq or 0)
 
     def _above_dirty(self, dirty: set[tuple[str, uuid.UUID]]) -> set[uuid.UUID]:
         """Every record here that an unsent change is to or beneath: those
@@ -1463,7 +1715,9 @@ class SyncService:
         if state == "applied":
             self._replay(thing, entry.hub_seq or 0)
 
-    def _replay(self, thing: tuple[str, uuid.UUID], from_seq: int) -> None:
+    def _replay(
+        self, thing: tuple[str, uuid.UUID], from_seq: int, isolate: bool = True
+    ) -> None:
         """Bring a thing to where the authority's numbered changes leave it,
         from `from_seq` on: each in turn, in the authority's order. Every
         numbered change it did not supersede is a step the authority took (an
@@ -1473,9 +1727,14 @@ class SyncService:
         they are taken again after the one arriving now, since that is their
         order; taking a step twice is harmless."""
         for step in self._repo.numbered_entries(thing[0], thing[1], from_seq):
-            self._apply(step)
+            self._apply(step, isolate)
 
-    def _apply(self, entry: SyncEntry) -> None:
+    def _apply(self, entry: SyncEntry, isolate: bool = True) -> None:
+        if not isolate:
+            # The caller's savepoint covers it: a refusal undoes all of that.
+            self._applier.apply_entry(entry)
+            self._recheck_cited_lacks(entry)
+            return
         try:
             with self._repo.savepoint():
                 self._applier.apply_entry(entry)
@@ -1545,14 +1804,24 @@ class SyncService:
 
     def _push(self, transport: SyncTransport, report: SyncReport) -> int:
         total = 0
+        last_first: uuid.UUID | None = None
         while True:
             pending = self._repo.pending_entries(PUSH_BATCH)
             if not pending:
                 return total
+            if pending[0].id == last_first:
+                # The same change is still first: the last answer took nothing
+                # off the queue, and asking again would only repeat it.
+                report.waiting += len(pending)
+                return total
+            last_first = pending[0].id
             ready, folded = self._send_whole(pending)
             if not ready:
                 report.waiting += len(pending)
                 return total
+            # By entries and bytes, whole actions only: how much one request
+            # carries doesn't depend on how wide the records are.
+            ready = batch_by_budget(ready, PUSH_BATCH, PUSH_BUDGET_BYTES)
             result = transport.push(ready)
             sent = {e.id: e for e in ready}
             self._repo.mark_sent(result.results)
@@ -1565,9 +1834,16 @@ class SyncService:
             held = self._note(result.results, sent, report, set(folded))
             self._commit()
             total += len(result.results) - held
-            if held or len(result.results) < len(ready) or len(ready) < len(pending):
+            if held:
                 report.waiting += held + (len(pending) - len(result.results))
                 return total
+            if not result.results:
+                # A short answer that settled nothing: going round again would
+                # ask the same question.
+                report.waiting += len(pending)
+                return total
+            # Anything the answer left (it may answer fewer than were sent, to
+            # keep its own request short) is sent in the next round.
 
     def _send_whole(
         self, pending: list[SyncEntry]
@@ -1615,12 +1891,14 @@ class SyncService:
                 self._repo.mark_folded(entries, "synced")
         return ready, {k: v for k, v in folded.items() if any(e.id == k for e in ready)}
 
+    @_closes_transports
     def send_files(
         self,
         everything: bool = False,
         seconds: float | None = None,
         progress: ProgressFn | None = None,
         after: str = "",
+        should_stop: Callable[[], bool] | None = None,
     ) -> FileSendReport:
         """Make the authority hold every file a live record here cites and this
         computer can read. Apart from syncing: the records citing them went
@@ -1631,7 +1909,8 @@ class SyncService:
         found. Without `everything`, only files the authority hasn't yet said
         it holds are asked about (no request at all when there are none); with
         it, every file is asked about again, in case one it held has gone.
-        `seconds` stops a background pass between files; a file that can't be
+        `seconds` stops a background pass between files, and `should_stop`
+        (a pause, a shutdown) is asked between slices; a file that can't be
         read is counted in `owed` and left for next time. Raises `SyncError`
         when the authority can't be reached. Takes no sync lock: uploading
         changes no record, and the same file sent twice is stored once."""
@@ -1639,15 +1918,21 @@ class SyncService:
         if not self.fetches_files:
             return report
         self._forget_found()
-        shas: list[str] = []
-        while page := self._repo.referenced_shas(
+        first = self._repo.referenced_shas(
             after, FILE_CHECK_PAGE, unconfirmed=not everything
-        ):
-            shas.extend(page)
-            after = page[-1]
-        if not shas:
+        )
+        if not first:
             return report
-        self._send_files(self._transport(), shas, report, progress, seconds)
+        self._send_files(
+            self._transport(),
+            first,
+            report,
+            progress,
+            seconds,
+            after,
+            everything,
+            should_stop,
+        )
         self._commit()
         if report.owed:
             self._log_owed(report)
@@ -1680,108 +1965,372 @@ class SyncService:
     def _send_files(
         self,
         transport: SyncTransport,
-        shas: list[str],
+        page: list[str],
         report: FileSendReport,
         progress: ProgressFn | None = None,
         seconds: float | None = None,
+        after: str = "",
+        everything: bool = False,
+        should_stop: Callable[[], bool] | None = None,
     ) -> None:
-        """The one way files go to the authority: it is asked which of `shas`
-        it lacks, the rest are noted as on the server, and each it lacks that
-        can be read here is uploaded and noted, with `progress` told how far
-        along it is (files, and bytes as they go). Stops between files once
-        `seconds` are spent."""
-        started = time.monotonic()
-        # The clock covers asking and uploading together, but is only ever
-        # acted on once a file has been tried: asking about a great many files
-        # (tens of thousands take over a minute) must not use up a pass before
-        # it uploads anything, or every pass would ask again and never send.
-        # What each page's answer found is kept as it comes (`server_files`),
-        # so a next pass starts after the pages already settled.
+        """The one way files go to the authority: starting from `page` (the
+        first slice of hashes after `after`), the authority is asked which of
+        a slice it lacks, the rest are noted as on the server, and each it
+        lacks that can be read here is uploaded and noted, then the next slice
+        is read and asked about, so it is only ever asked about the slice about
+        to go (not about every file still owed, on every pass). `progress` is
+        told how far along it is: files and bytes settled (sent, found on the
+        server already) of everything still to settle (a file that can't be read
+        here is counted apart, as `owed`, never as sent),
+        counted from the inventory in one query before the first file, so the
+        total is known from the start and does not grow as slices are asked
+        about. Stops between files once `seconds` of uploading are spent;
+        asking is not charged to it."""
         rate = RateWindow()
-        done = sent_bytes = found = total_bytes = tried = 0
+        # Of what is still unconfirmed after `after`: the files, and their bytes
+        # where this computer holds a copy (the size the bar goes by).
+        total_files, total_bytes = (
+            self._repo.unconfirmed_totals(after, self._files.volume_names())
+            if progress
+            else (0, 0)
+        )
+        done = settled_bytes = inflight = sent_bytes = tried = unread = 0
+        spent = 0.0  # time uploading: the clock `seconds` is measured on
         said = 0.0
 
+        started = time.monotonic()
+
         def over() -> bool:
-            return (
-                seconds is not None
-                and tried > 0
-                and time.monotonic() - started >= seconds
+            if seconds is None:
+                return False
+            # Asking isn't charged to the upload budget, but a pass that has
+            # only asked (nothing to send) still yields now and then.
+            now = time.monotonic()
+            charged = spent + (now - group_began[0] if group_began else 0.0)
+            return (tried > 0 and charged >= seconds) or (
+                now - started >= max(seconds * 2, 1.0)
             )
 
         def say(force: bool = False) -> None:
-            nonlocal said
+            nonlocal said, total_files, total_bytes
             now = time.monotonic()
-            if progress and found and (force or now - said >= 0.25):
+            if progress and total_files and (force or now - said >= 0.25):
                 said = now
+                # Grows only when a file is cited after the total was counted
+                # (a record edited mid-run): it is then really more to send.
+                total_files = max(total_files, done + unread)
+                total_bytes = max(total_bytes, settled_bytes + inflight)
                 progress(
                     SyncProgress(
                         SENDING,
                         done,
-                        found,
-                        bytes_done=sent_bytes,
+                        total_files,
+                        owed=unread,
+                        bytes_done=settled_bytes + inflight,
                         bytes_total=total_bytes,
                         rate=rate.add(now, sent_bytes),
                     )
                 )
 
+        bytes_lock = threading.Lock()
+
         def went(n: int) -> None:
-            nonlocal sent_bytes
-            sent_bytes += n
+            nonlocal sent_bytes, inflight
+            with bytes_lock:
+                sent_bytes += n
+                inflight += n
             say()
 
-        for at in range(0, len(shas), FILE_CHECK_PAGE):
-            if over():
-                report.stopped = True
-                return
-            page = shas[at : at + FILE_CHECK_PAGE]
-            missing = set(transport.missing_files(page))
-            self._repo.confirm_on_server(set(page) - missing)
-            self._repo.note_server_lacks(missing, backoff=False)
-            lacking = [sha for sha in page if sha in missing]
-            if not lacking:
-                self._commit()
-                report.resume_after = page[-1]
-                continue
-            # How much is to go, from the inventory (one lookup); a file it
-            # doesn't know the size of is counted when it is read.
-            sizes = {
-                sha: rows[0][1]
-                for sha, rows in self._files.copies(lacking).items()
-                if rows
-            }
-            total_bytes += sum(sizes.get(sha, 0) for sha in lacking)
-            found += len(lacking)
+        def went_in_pool(n: int) -> None:
+            # From an upload thread: counted only. The progress line is said
+            # by the sending thread (`drain` while it waits).
+            nonlocal sent_bytes, inflight
+            with bytes_lock:
+                sent_bytes += n
+                inflight += n
+
+        def settle(sha: str, why: str | None) -> None:
+            """A file is settled: sent (`why` None) or not (`why` says why)."""
+            nonlocal done, settled_bytes, unread, inflight, total_bytes
+            if why is None:
+                done += 1
+                settled_bytes += sizes.get(sha, inflight)
+                if sha in sizes:  # others in flight keep the bytes they sent
+                    with bytes_lock:
+                        inflight = max(0, inflight - sizes[sha])
+                else:
+                    inflight = 0
+            else:
+                if sha not in report.owed:
+                    report.owed.append(sha)
+                log.debug("file %s not sent: %s", sha[:12], why)
+                unread += 1  # not sent: counted apart, no bytes claimed
+                # Its bytes can never be sent from here: the byte total is
+                # of what can be read (known once it was tried).
+                total_bytes = max(settled_bytes, total_bytes - sizes.get(sha, 0))
+            if why is not None:
+                inflight = 0
+            report.resume_after = sha  # settled: the next pass starts after
             say(force=True)
-            for sha in lacking:
-                if over():
+
+        # Small files go through `add`: opened here (the store's session is not
+        # for other threads), sent by the pool where the transport allows it
+        # (many to a request where it takes packs), and confirmed and committed
+        # together as they arrive. Large ones never do.
+        threads = max(1, int(getattr(transport, "upload_threads", 1)))
+        pool = ThreadPoolExecutor(threads) if threads > 1 else None
+        accepts = getattr(transport, "accepts_packs", None)
+        packing = pool is not None and callable(accepts) and bool(accepts())
+        arrived: list[str] = []
+        # What is on its way: the hashes sent together, and the answer to come
+        # (per hash: None when stored, else why not; a hash missing from it was
+        # not answered and is simply left for the next pass).
+        flying: list[tuple[list[str], Future[dict[str, str | None]]]] = []
+        pack: list[tuple[str, BinaryIO, int]] = []
+        pack_bytes = 0
+        failed = threading.Event()
+        unreadable: list[tuple[str, str]] = []
+        group_began: list[float] = []
+
+        def run(f: BinaryIO, sha: str, size: int) -> dict[str, str | None]:
+            try:
+                if failed.is_set():
+                    return {}  # a file before it failed: nothing more goes
+                transport.upload_file(sha, _Counting(f, went_in_pool), size)  # type: ignore[arg-type]
+                return {sha: None}
+            except BaseException:
+                failed.set()
+                raise
+            finally:
+                f.close()
+
+        def run_pack(items: list[tuple[str, BinaryIO, int]]) -> dict[str, str | None]:
+            try:
+                if failed.is_set():
+                    return {}
+                counted = [
+                    (sha, _Counting(f, went_in_pool), size) for sha, f, size in items
+                ]
+                return transport.upload_pack(counted)  # type: ignore[attr-defined,arg-type]
+            except BaseException:
+                failed.set()
+                raise
+            finally:
+                for _, f, _ in items:
+                    f.close()
+
+        def keep(shas: list[str], answer: dict[str, str | None]) -> None:
+            for sha in shas:
+                if sha not in answer:
+                    continue
+                if answer[sha] is None:
+                    arrived.append(sha)
+                else:
+                    unreadable.append((sha, f"the server refused it: {answer[sha]}"))
+
+        def record() -> None:
+            """What arrived is confirmed and committed together."""
+            if not arrived:
+                return
+            self._repo.confirm_on_server(arrived)
+            self._commit()
+            report.sent += len(arrived)
+            for sha in arrived:
+                log.debug("sent file %s", sha[:12])
+                settle(sha, None)
+            arrived.clear()
+
+        def send_pack() -> None:
+            nonlocal pack_bytes
+            items = list(pack)
+            pack.clear()
+            pack_bytes = 0
+            while pool is not None and len(flying) >= PACKS_IN_FLIGHT:
+                reap()
+            assert pool is not None
+            flying.append(([s for s, _, _ in items], pool.submit(run_pack, items)))
+
+        def reap() -> None:
+            """Wait for the oldest pack on its way and keep what arrived (so
+            settling goes in the order sent). If it failed, everything on its
+            way is waited for and the failure is raised."""
+            shas, fut = flying[0]
+            wait([fut])
+            if fut.exception() is not None:
+                drain()  # raises it, after keeping what arrived
+            flying.pop(0)
+            keep(shas, fut.result())
+            record()
+
+        def drain(quiet: bool = False) -> None:
+            """Wait for the small files in flight, then keep every one that
+            arrived (confirmed and committed together), whatever happened to
+            the others. The first failure is raised once that is done."""
+            nonlocal spent, pack_bytes, inflight
+            error: BaseException | None = None
+            if pack:
+                if quiet:
+                    for _, f, _ in pack:
+                        f.close()
+                    pack.clear()
+                    pack_bytes = 0
+                else:
+                    send_pack()
+            if flying:
+                pending_uploads = {f for _, f in flying}
+                while pending_uploads:
+                    _done, pending_uploads = wait(pending_uploads, timeout=0.25)
+                    say()  # bytes move while the small files go
+            for shas, fut in flying:
+                try:
+                    keep(shas, fut.result())
+                except BaseException as e:
+                    error = error or e
+            flying.clear()
+            failed.clear()
+            inflight = 0  # the group is settled (or failed): nothing in flight
+            record()
+            if group_began:
+                spent += time.monotonic() - group_began.pop()
+            if error is None:
+                # Settled after the group's files, so the point to go on from
+                # never passes a file that did not arrive.
+                for sha, why in unreadable:
+                    settle(sha, why)
+            unreadable.clear()
+            if error is not None and not quiet:
+                raise error
+
+        def add(sha: str, size: int) -> None:
+            nonlocal tried, inflight, pack_bytes
+            tried += 1
+            if not group_began:
+                group_began.append(time.monotonic())
+            try:
+                f = self._files.open(sha)
+            except VolumeUnavailableError as e:
+                unreadable.append((sha, str(e)))
+                return
+            except (FileNotFoundError, OSError):
+                # (Too many files open at once is an OSError too: that one
+                # waits for the next pass, as a file that can't be read does.)
+                unreadable.append((sha, "its copy here couldn't be read"))
+                return
+            if packing:
+                if f.seek(0, 2) != size:  # shorter or longer than recorded
+                    f.close()
+                    unreadable.append((sha, "its copy here is not the size recorded"))
+                    return
+                f.seek(0)
+                pack.append((sha, f, size))
+                pack_bytes += size
+                if pack_bytes >= PACK_BYTES or len(pack) >= PACK_FILES:
+                    send_pack()
+                return
+            if pool is not None:
+                flying.append(([sha], pool.submit(run, f, sha, size)))
+            else:
+                try:
+                    transport.upload_file(sha, _Counting(f, went), size)
+                finally:
+                    f.close()
+                    inflight = 0  # counted as settled when it is confirmed
+                arrived.append(sha)
+            if (
+                len(arrived) + len(flying) >= SMALL_FILE_GROUP
+                or time.monotonic() - group_began[0] >= SMALL_FILE_GROUP_SECONDS
+            ):
+                drain()
+
+        sizes: dict[str, int] = {}
+        say(force=True)
+        try:
+            while page:
+                if over() or (should_stop is not None and should_stop()):
                     report.stopped = True
                     return
-                tried += 1
-                why = self._upload(transport, sha, went)
-                if why is None:
-                    self._repo.confirm_on_server([sha])
-                    self._commit()  # each file's arrival is kept, whatever follows
-                    report.sent += 1
-                    log.debug("sent file %s", sha[:12])
-                else:
-                    if sha not in report.owed:
-                        report.owed.append(sha)
-                    log.debug("file %s not sent: %s", sha[:12], why)
-                done += 1
-                report.resume_after = sha  # settled: the next pass starts after
-                say(force=True)
-            report.resume_after = page[-1]
+                # Which of these the authority hasn't confirmed yet: the ones the
+                # total counted. (A confirmed file found lost on an `everything`
+                # pass is new work, so the total grows by it.)
+                pending = self._repo.unconfirmed_of(set(page)) if progress else set()
+                missing = set(transport.missing_files(page))
+                self._repo.confirm_on_server(set(page) - missing)
+                self._repo.note_server_lacks(missing, backoff=False)
+                lacking = [sha for sha in page if sha in missing]
+                if not lacking:
+                    self._commit()
+                # Where each is and how big, for the whole slice in one go.
+                skipped = pending - missing
+                sizes = {
+                    sha: max(size for _v, size in rows)
+                    for sha, rows in self._files.copies(
+                        list(skipped | set(lacking))
+                    ).items()
+                    if rows
+                }
+                if progress:
+                    done += len(skipped)
+                    settled_bytes += sum(sizes.get(sha, 0) for sha in skipped)
+                    lost = [sha for sha in lacking if sha not in pending]
+                    total_files += len(lost)
+                    total_bytes += sum(sizes.get(sha, 0) for sha in lost)
+                    say(force=True)
+                for sha in lacking:
+                    if over():
+                        drain()
+                        report.stopped = True
+                        return
+                    size = sizes.get(sha)
+                    if size is not None and size <= LARGE_FILE_BYTES:
+                        add(sha, size)
+                        continue
+                    # Large (or with no copy here, which says why): alone, after
+                    # everything before it is confirmed, and confirmed and
+                    # committed the moment it arrives.
+                    drain()
+                    tried += 1
+                    inflight = 0
+                    began = time.monotonic()
+                    why = self._upload(transport, sha, went, size)
+                    spent += time.monotonic() - began
+                    if why is None:
+                        self._repo.confirm_on_server([sha])
+                        self._commit()  # each file's arrival is kept, whatever follows
+                        report.sent += 1
+                        log.debug("sent file %s", sha[:12])
+                    settle(sha, why)
+                drain()
+                report.resume_after = page[-1]
+                page = self._repo.referenced_shas(
+                    page[-1],
+                    PACKED_CHECK_PAGE if packing else FILE_CHECK_PAGE,
+                    unconfirmed=not everything,
+                )
+        finally:
+            try:
+                try:
+                    drain(quiet=True)  # what arrived is kept, even on the way out
+                except Exception:
+                    log.warning(
+                        "could not record the files that arrived", exc_info=True
+                    )
+            finally:
+                if pool is not None:
+                    pool.shutdown(wait=True)
 
     def _upload(
         self,
         transport: SyncTransport,
         sha: str,
         on_bytes: Callable[[int], None] | None = None,
+        size: int | None = None,
     ) -> str | None:
         """Upload one file: None once it is sent, else why no copy here could
-        be read (a failure of the upload itself raises)."""
+        be read (a failure of the upload itself raises). `size` is the size
+        already looked up, if it was."""
         try:
-            size = self._files.size_of(sha)
+            if size is None:
+                size = self._files.size_of(sha)
             if size is None:
                 return "it isn't on this computer"
             with self._files.open(sha) as f:
@@ -1806,6 +2355,11 @@ class SyncService:
         goes in as a whole (`whole`), its refusal is settled by that. Returns
         how many changes it held back."""
         held = 0
+        # Which things have a refusal waiting: asked once, not of each (almost
+        # none do), and kept up as refusals are added below.
+        refused = self._repo.with_open_refusals(
+            e.entity_id for r in results if (e := sent.get(r.op_id)) is not None
+        )
         for result in results:
             entry = sent.get(result.op_id)
             if entry is None:
@@ -1813,13 +2367,17 @@ class SyncService:
             if result.status == DEFERRED:
                 held += 1
                 continue
-            waiting = [
-                c
-                for c in self._repo.find_open_conflicts(
-                    kind="rejected", entity_id=entry.entity_id
-                )
-                if c.op_id != result.op_id
-            ]
+            waiting = (
+                [
+                    c
+                    for c in self._repo.find_open_conflicts(
+                        kind="rejected", entity_id=entry.entity_id
+                    )
+                    if c.op_id != result.op_id
+                ]
+                if entry.entity_id in refused
+                else []
+            )
             retried: list[uuid.UUID] = []
             if result.status == REJECTED:
                 if waiting:
@@ -1884,6 +2442,8 @@ class SyncService:
                     message=problem.get("message"),
                     code=problem.get("code") if kind == "rejected" else None,
                 )
+                if kind == "rejected":
+                    refused.add(entry.entity_id)
         return held
 
     # ------------------------------------------------------------------
@@ -1902,6 +2462,7 @@ class SyncService:
         here while joining is a change of this device's own and is sent like any
         other. The history from before is not read here: the copy is usable
         without it, and `fetch_history` brings it after."""
+        self._repo.finish_seed()  # a copy has no first upload to finish
         # What this project recorded before it joined is about nothing the copy
         # holds (a joining project is empty), so there is nothing to send. Until
         # the copy is whole the cursor says so (JOINING): syncing is refused and
@@ -2097,6 +2658,7 @@ class SyncService:
             self._repo.set_readable({c["id"] for c in hello.readable})
         self._commit()
 
+    @_closes_transports
     def fetch_history(
         self, progress: ProgressFn | None = None, pages: int | None = None
     ) -> bool:
@@ -2291,6 +2853,7 @@ class SyncService:
                 "else to come from: they can't be removed to free space."
             )
 
+    @_closes_transports
     def _free(
         self, here: dict[str, int], kept: set[uuid.UUID], dry_run: bool
     ) -> FreeUpReport:
@@ -2347,6 +2910,7 @@ class SyncService:
             sha256
         )
 
+    @_closes_transports
     def fetch_files(
         self,
         shas: list[str] | None = None,
@@ -2437,12 +3001,17 @@ class SyncService:
             present.add(item["id"])
             ready.extend(waiting.pop(item["id"], ()))
 
-    def _seed_snapshots(self, kind: str) -> Iterator[dict[str, Any]]:
+    def _seed_snapshots(
+        self, kind: str, leave: Callable[[str], bool] | None = None
+    ) -> Iterator[dict[str, Any]]:
         """What to send for `kind`, in an order the authority can accept: a
         record only after the one it sits under and the ones it refers to, since
-        the authority checks both and remembers a refusal for good."""
+        the authority checks both and remembers a refusal for good. Things
+        `leave` names (by id) are not read at all."""
         if kind == "record":
             order = self._repo.record_seed_order()
+            if leave:
+                order = [i for i in order if not leave(i)]
             for start in range(0, len(order), SNAPSHOT_PAGE):
                 yield from self._repo.record_snapshots(
                     order[start : start + SNAPSHOT_PAGE]
@@ -2485,6 +3054,30 @@ class SyncService:
         head = 0
         report = SyncReport()
         batch: list[SyncEntry] = []
+        # What the authority answered of this seed before it was interrupted:
+        # not sent again (the ids are the same every run, so what is left goes
+        # as it would have).
+        acked = self._repo.seed_acked()
+        if acked:
+            hello = transport.hello()
+            if hello.empty or hello.head_seq < self._repo.seed_acked_head():
+                # The authority holds nothing now, or is behind where it was
+                # when it answered (reset, or restored from a backup taken
+                # mid-seed): what it once answered is no longer there.
+                self._repo.forget_seed_acks()
+                self._commit()
+                acked = set()
+        resumed = bool(acked)
+
+        def answered(kind: str) -> Callable[[str], bool]:
+            return lambda thing: str(entry_id(kind, thing)) in acked
+
+        def entry_id(kind: str, thing: str) -> uuid.UUID:
+            return uuid.uuid5(
+                meta.project_id,
+                f"seed:{salt}:{kind}:{thing}" if salt else f"seed:{kind}:{thing}",
+            )
+
         total = self._repo.entity_count() or None
         sent = 0
 
@@ -2504,27 +3097,44 @@ class SyncService:
             # A refusal is kept for review, like any other (the person keeps what
             # they made and can fix it and retry); it doesn't stop the rest.
             self._note(result.results, {e.id: e for e in batch}, report)
+            # What it took it holds now, whatever refused it before (another
+            # server, or this one before a fix): an edit of it goes as an edit.
+            # (Refused again, by one taken before and since reset, it is
+            # missing there again.)
+            things = {e.id: e.entity_id for e in batch}
+            answers = [
+                (things[r.op_id], r.status) for r in result.results if r.op_id in things
+            ]
+            self._repo.forget_refusals(
+                {i for i, status in answers if status not in (REJECTED, DEFERRED)},
+                {i for i, status in answers if status == REJECTED},
+            )
             sent += len(batch)
+            # Kept at once, so a restart goes on from here.
+            self._repo.note_seed_acked([e.id for e in batch], head)
+            self._commit()
             if progress:
                 kind = batch[-1].entity_type
                 progress(SyncProgress(FILLING, sent, total and max(total, sent), kind))
             batch = []
 
+        last_stamp = self._repo.latest_hlc()
+
         # Only the kinds the authority reads (one on an older protocol has no
         # Analytics page to take, say).
         for kind in kinds_for(protocol):
-            for snap in self._seed_snapshots(kind):
+            for snap in self._seed_snapshots(kind, answered(kind) if acked else None):
                 if skip and (kind, str(snap["id"])) in skip:
                     continue  # a resumed upload leaves other devices' things
+                if str(entry_id(kind, str(snap["id"]))) in acked:
+                    continue  # the authority has answered it already
                 now = datetime.now(timezone.utc)
+                # Each stamp follows the last (a seed adds nothing to the log
+                # here, so the newest stamp is read once, not per entry).
+                last_stamp = stamp = hlc.tick(last_stamp, int(now.timestamp() * 1000))
                 batch.append(
                     SyncEntry(
-                        id=uuid.uuid5(
-                            meta.project_id,
-                            f"seed:{salt}:{kind}:{snap['id']}"
-                            if salt
-                            else f"seed:{kind}:{snap['id']}",
-                        ),
+                        id=entry_id(kind, str(snap["id"])),
                         action="create",
                         entity_type=kind,
                         entity_id=uuid.UUID(snap["id"]),
@@ -2533,9 +3143,7 @@ class SyncService:
                         timestamp=now.isoformat(),
                         actor=actor,
                         device_id=device_id,
-                        hlc=hlc.tick(
-                            self._repo.latest_hlc(), int(now.timestamp() * 1000)
-                        ),
+                        hlc=stamp,
                     )
                 )
                 if len(batch) >= PUSH_BATCH:
@@ -2546,6 +3154,9 @@ class SyncService:
                 "seeding the server: it refused %d thing(s); they are kept for review",
                 report.rejected,
             )
+        if resumed and not head and not skip:
+            # Everything had been answered before: the head is still needed.
+            head = transport.hello().head_seq
         self._repo.finish_seed()
         # Only a first seed (connect) moves the cursor to the head: a resumed one may
         # follow a pull, and other devices may have written since.

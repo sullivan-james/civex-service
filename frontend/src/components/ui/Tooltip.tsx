@@ -93,7 +93,13 @@ export function InfoTip({
       if (e.key === 'Escape') setPinned(false)
     }
     const onDown = (e: PointerEvent) => {
-      if (!(e.target as Element | null)?.closest(`[data-infotip="${id}"]`))
+      if (
+        !e
+          .composedPath()
+          .some(
+            (n) => n instanceof Element && n.matches(`[data-infotip="${id}"]`),
+          )
+      )
         setPinned(false)
     }
     document.addEventListener('keydown', onKey)

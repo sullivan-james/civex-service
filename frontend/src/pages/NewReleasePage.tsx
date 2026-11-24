@@ -144,7 +144,7 @@ export default function NewReleasePage() {
       .filter(Boolean),
   }
   const create = useCreateRelease()
-  const allowed = can('change_structure')
+  const allowed = can('release')
   const citationReady = !!name.trim() && !!title.trim()
 
   function make() {
@@ -253,7 +253,7 @@ export default function NewReleasePage() {
                 create.isPending ||
                 (plan.data?.unsent ?? 0) > 0
               }
-              title={allowed ? undefined : why('change_structure')}
+              title={allowed ? undefined : why('release')}
               onClick={make}
             >
               {create.isPending ? 'Making…' : 'Make release'}

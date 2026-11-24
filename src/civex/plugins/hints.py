@@ -17,9 +17,13 @@ hint(...)` on its pydantic `Field`). Kinds:
   `keys: true` that the value is matched against records, so two names giving
   the same key is a problem.
 - `date_format`: a token format (`YYYYMMDD-HHmmSS`) for a date in a name.
-- `choice`: one of `choices` (a list of `{value, label}`).
+- `choice`: one of `choices` (a list of `{value, label}`; a choice may carry
+  `feature`, the server feature it needs, and is left out where the server
+  lacks it).
+- `folder`: a folder on the computer civex runs on (a folder chooser).
 
-`advanced: true` puts a setting under "More settings".
+`advanced: true` puts a setting under "More settings". `when: {setting, is}`
+shows a setting only while another setting holds one of the values `is`.
 
 The settings model as a whole may carry `{"x-civex-says": "..."}`
 (`model_config = ConfigDict(json_schema_extra=says(...))`): one sentence of
@@ -42,6 +46,18 @@ def hint(kind: str, **more: Any) -> dict[str, Any]:
 
 def choices(*pairs: tuple[str, str]) -> dict[str, Any]:
     return hint("choice", choices=[{"value": v, "label": label} for v, label in pairs])
+
+
+def when(
+    setting: str, *values: str, extra: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """`extra` (a hint) shown only while `setting` is one of `values`."""
+    out = dict(extra or {"x-civex": {}})
+    out["x-civex"] = {
+        **out["x-civex"],
+        "when": {"setting": setting, "is": list(values)},
+    }
+    return out
 
 
 def advanced(extra: dict[str, Any] | None = None, **more: Any) -> dict[str, Any]:

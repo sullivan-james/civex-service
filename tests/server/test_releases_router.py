@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 import io
+import json
 import zipfile
 
+import pytest
 from fastapi.testclient import TestClient
+
+
+@pytest.fixture()
+def client(releases_client: TestClient) -> TestClient:
+    return releases_client
 
 
 def _study(client: TestClient) -> None:
@@ -77,11 +84,17 @@ def test_plan_make_read_cite_verify_and_download(client: TestClient):
     deep = client.post("/api/releases/v1/verify?deep=true").json()
     assert deep["matches"] is True and deep["files_read"] == 1
 
-    bundle = client.get("/api/releases/v1/bundle", follow_redirects=False)
-    assert bundle.status_code == 307
-    assert bundle.headers["location"].startswith(f"../../files/{body['bundle_sha256']}")
     download = client.get("/api/releases/v1/bundle")
     assert download.status_code == 200 and download.content[:2] == b"PK"
+    assert "v1" in download.headers["content-disposition"]
+    with zipfile.ZipFile(io.BytesIO(download.content)) as zf:
+        names = zf.namelist()
+        manifest = json.loads(zf.read("bundle.json"))
+    # The records, the citation, and the files the records cite.
+    assert "records.jsonl" in names and "CITATION.cff" in names
+    assert manifest["files"]["included"] is True and manifest["files"]["count"] == 1
+    (file_member,) = [n for n in names if n.startswith("files/")]
+    assert file_member.startswith("files/")
 
 
 def test_the_files_come_out_as_a_folder_or_a_small_zip(client: TestClient):
@@ -192,3 +205,42 @@ def test_a_release_is_written_straight_into_a_folder(client: TestClient, tmp_pat
         ).status_code
         == 404
     )
+
+
+def test_the_bundle_lists_a_file_it_cannot_read_and_keeps_an_empty_one(
+    client: TestClient,
+):
+    from civex.config import load_config
+    from civex.context import build_local_context
+
+    client.post("/api/schemas", json={"name": "sample"})
+    client.post("/api/schemas/sample/fields", json={"name": "a", "type": "file"})
+    client.post("/api/schemas/sample/fields", json={"name": "b", "type": "file"})
+    gone = client.put(
+        "/api/files/stream?filename=g.bin",
+        content=b"gone",
+        headers={"content-length": "4"},
+    ).json()
+    empty = client.put(
+        "/api/files/stream?filename=e.bin",
+        content=b"",
+        headers={"content-length": "0"},
+    ).json()
+    client.post("/api/collections", json={"name": "c"})
+    client.post(
+        "/api/collections/c/records",
+        json={"schema_name": "sample", "data": {"a": gone, "b": empty}},
+    )
+    made = client.post("/api/releases", json={"name": "v1", "title": "T"})
+    assert made.status_code == 201
+    ctx = build_local_context(load_config())
+    ctx.file_svc.discard(gone["sha256"])
+    ctx.commit()
+    ctx.close()
+    answer = client.get("/api/releases/v1/bundle")
+    assert answer.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(answer.content)) as zf:
+        manifest = json.loads(zf.read("bundle.json"))
+        names = zf.namelist()
+    assert manifest["files"]["missing"] == [gone["sha256"]]
+    assert f"files/{empty['sha256']}" in names

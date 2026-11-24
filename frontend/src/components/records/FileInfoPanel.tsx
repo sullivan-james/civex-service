@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { useFileInfo } from '../../hooks/useFiles'
+import { useHasFeature } from '../../hooks/useFeatures'
 import { Badge, Button, Skeleton } from '../ui'
 import { Network } from '../ui/icons'
 import { errorMessage } from '../../lib/errors'
@@ -159,19 +160,27 @@ export function FileInfoPanel({ sha256 }: { sha256: string }) {
  * use it, since they don't count until they are restored. */
 /** The releases that keep a file: it stays while any of them does. */
 export function ReleaseKeepers({ names }: { names?: string[] }) {
+  const hasFeature = useHasFeature()
   if (!names?.length) return null
+  // Releases are shown only where a host offers them: elsewhere the name is
+  // text, never a link to a page that isn't there.
+  const linked = hasFeature('releases')
   return (
     <p className="text-xs text-fg-subtle">
       Kept by {names.length === 1 ? 'release' : 'releases'}{' '}
       {names.map((n, i) => (
         <span key={n}>
           {i > 0 && ', '}
-          <Link
-            to={`/releases/${encodeURIComponent(n)}`}
-            className="text-accent hover:underline"
-          >
-            {n}
-          </Link>
+          {linked ? (
+            <Link
+              to={`/releases/${encodeURIComponent(n)}`}
+              className="text-accent hover:underline"
+            >
+              {n}
+            </Link>
+          ) : (
+            n
+          )}
         </span>
       ))}
       ; yanking {names.length === 1 ? 'it' : 'them'} gives it up.

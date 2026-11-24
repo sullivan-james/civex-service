@@ -105,9 +105,7 @@ def test_a_release_from_before_kinds_had_charts_reads_as_having_none():
     none = {"schemas": [STRUCTURE["schemas"][0] | {"charts": None}]}
     assert rules.structure_changes(STRUCTURE, none) == []
     some = {"schemas": [STRUCTURE["schemas"][0] | {"charts": [{"id": "a"}]}]}
-    assert [c["what"] for c in rules.structure_changes(STRUCTURE, some)] == [
-        ["charts"]
-    ]
+    assert [c["what"] for c in rules.structure_changes(STRUCTURE, some)] == [["charts"]]
 
 
 def test_the_hash_ignores_times_order_and_what_a_read_adds():

@@ -1,6 +1,10 @@
 """Releases: frozen, citable copies of the data (`civex.domain.release`).
 
-One rule for `civex release ...`, `/releases` and the app.
+One rule for `/releases` and the app. **A release is
+published on a host (a hub), never made on a personal device, and never
+synced**: `features.RELEASES` gates the routes and the app's views, the
+`RELEASE` permission (implied by `change_structure`) gates making, correcting,
+withdrawing and yanking, and sync carries no release entries (protocol 6).
 
 **Files are referenced, never copied.** Making a release writes a small
 bundle of its records with `BundleService.export` (no files), adds its
@@ -19,7 +23,7 @@ it may be withdrawn with a reason (both keep everything), or **yanked**: its
 data is given up (it owns nothing any more, and clean-up then removes what
 nothing else uses), leaving a tombstone that still answers a citation. Each is
 a history entry. Making, correcting, withdrawing and yanking need
-`change_structure`.
+`release`.
 
 **Getting the data out** goes through `FileAccessService` reading the
 release's frozen records (`release_records.FrozenRecords`): the same path
@@ -42,6 +46,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import shutil
 import tempfile
 import uuid
 import zipfile
@@ -54,7 +59,8 @@ from typing import Any, Callable, Iterator
 from civex import __version__
 from civex.domain import permissions
 from civex.domain import release as rules
-from civex.domain.bundle import EXTENSION, ExportOptions
+from civex.domain import bundle as spec
+from civex.domain.bundle import EXTENSION, BundleFiles, ExportOptions, Manifest
 from civex.domain.dtos import ReleaseDTO
 from civex.domain.exceptions import (
     AlreadyExistsError,
@@ -312,9 +318,7 @@ class ReleaseService:
         # Fetch a file from the authority (a bundle made on another copy).
         self.fetch: Callable[[str], bool] | None = None
         # Whether this copy keeps everyone's files (it serves devices, or
-        # syncs with nobody): only then does a release made elsewhere own the
-        # files it cites here. A device owns only the bundle; the authority
-        # keeps the files. Injected from sync.
+        # syncs with nobody). Injected from sync.
         self.keeps_files: Callable[[], bool] = lambda: True
         # FileAccessService, to lay a release's files out; and where a file is
         # for an owner that isn't a record (`RecordService.locate_pointed`).
@@ -440,7 +444,7 @@ class ReleaseService:
         """Freeze `scope` as a release named `name`: write the bundle of its
         records, hash it, keep it in the object store, record the manifest and
         own the files the records cite. No drive is asked for a file."""
-        self._permissions.require(permissions.CHANGE_STRUCTURE)
+        self._permissions.require(permissions.RELEASE)
         name = rules.check_name(name)
         meta = rules.check_metadata(
             {
@@ -543,7 +547,7 @@ class ReleaseService:
         """Correct a release's citation metadata (title, description, authors,
         licence, DOI, keywords). Its content never changes; the correction is
         in history."""
-        self._permissions.require(permissions.CHANGE_STRUCTURE)
+        self._permissions.require(permissions.RELEASE)
         release = self.get(name)
         self._not_yanked(release)
         unknown = set(values) - set(rules.METADATA_FIELDS)
@@ -569,7 +573,7 @@ class ReleaseService:
         """Mark a release withdrawn, saying why. It keeps its data (a paper
         that cited it can still be checked), and it says it was withdrawn
         wherever it is shown. To give the data up, yank it."""
-        self._permissions.require(permissions.CHANGE_STRUCTURE)
+        self._permissions.require(permissions.RELEASE)
         release = self.get(name)
         text = _reason(reason, "withdrawn")
         if release.withdrawn_at is not None:
@@ -641,7 +645,7 @@ class ReleaseService:
         is a tombstone (name, hash, title, citation, who yanked it, when and
         why) so a citation still finds it. It is withdrawn too. Can't be
         undone."""
-        self._permissions.require(permissions.CHANGE_STRUCTURE)
+        self._permissions.require(permissions.RELEASE)
         release = self.get(name)
         self._not_yanked(release)
         text = _reason(reason, "yanked")
@@ -756,12 +760,30 @@ class ReleaseService:
     def write_copy(self, name: str, path: Path) -> ReleaseDTO:
         """Write the release's bundle of records to `path` (fetched from the
         server first on a copy that hasn't got it)."""
-        import shutil
-
         with self.open_bundle(name) as (release, source):
             with open(path, "wb") as out:
                 shutil.copyfileobj(source, out)
         return release
+
+    def full_bundle(self, name: str) -> FullBundle:
+        """The release as one bundle that carries its files too: its records,
+        structure, citation and hashes as it holds them, plus every file they
+        cite (`files/<sha256>`, as any bundle writes them). Iterate it for the
+        zip's bytes, produced as they are read (stored files are not held,
+        compressed or copied anywhere), so a host can send the first byte at
+        once and a large release costs memory for one chunk. A file that can't
+        be read here is named in `bundle.json` (`missing`, known once the
+        iteration is done) and left out, as in any bundle. Raises before
+        anything is produced if the release can't be had."""
+        release, here = self.bundle_here(name)
+        if not here:  # (a yanked release has no bundle to give)
+            raise FileNotFoundError(release.bundle_sha256)
+        cited = [
+            s
+            for s in self._repo.owned_pointers(release.id)
+            if s != release.bundle_sha256
+        ]
+        return FullBundle(self, release, cited)
 
     def bundle_here(self, name: str) -> tuple[ReleaseDTO, bool]:
         """The release, and whether its bundle is on this computer (fetched
@@ -1079,54 +1101,6 @@ class ReleaseService:
             return {}
         return self._refs.releases_keeping(record_ids)
 
-    # -- for sync --------------------------------------------------------------
-
-    def check_incoming(
-        self, state: dict[str, Any], head: dict[str, Any] | None
-    ) -> None:
-        """A release another device sent: its words must be ones a person's
-        could have, its name free, once made its content can't change, and a
-        yank can't be taken back."""
-        rules.check_name(state.get("name"))
-        rules.check_metadata({k: state.get(k) for k in rules.METADATA_FIELDS})
-        if not state.get("content_hash") or not state.get("bundle_sha256"):
-            raise ValidationError("A release names its content hash and bundle")
-        if head is None:
-            taken = self._repo.get_by_name(str(state["name"]))
-            if taken is not None and str(taken.id) != str(state.get("id")):
-                raise ValidationError(
-                    f"A release named '{state['name']}' already exists"
-                )
-            return
-        changed = sorted(
-            k for k in rules.CONTENT_FIELDS if k in head and head.get(k) != state.get(k)
-        )
-        if changed:
-            raise ValidationError(
-                f"A release's content never changes once made ({', '.join(changed)})"
-            )
-        if head.get("yanked_at") and not state.get("yanked_at"):
-            raise ValidationError("A yanked release can't be brought back")
-
-    def index_waiting(self, bundle_sha256: str | None = None) -> int:
-        """Own the files releases made elsewhere cite, once their bundle is
-        here (read for its records; no file is read), on a copy that keeps
-        everyone's files. Called when a file arrives at the authority. Returns
-        how many releases were indexed."""
-        if not self.keeps_files():
-            return 0
-        done = 0
-        for release in self._repo.waiting_index(bundle_sha256):
-            if not self._store.exists(release.bundle_sha256):
-                continue
-            with self._store.open(release.bundle_sha256) as f:
-                with zipfile.ZipFile(f) as zf:
-                    cited = rules.hash_bundle(zf).cited
-            self._repo.own(release.id, [release.bundle_sha256, *cited])
-            self._repo.mark_indexed(release.id)
-            done += 1
-        return done
-
     # -- helpers ---------------------------------------------------------------
 
     def _owners(
@@ -1200,3 +1174,87 @@ def _unreadable(e: Exception) -> str:
             "either (or can't be reached)"
         )
     return "The bundle is not a readable zip"
+
+
+class _Sink:
+    """What a zip is written to when it is streamed: it keeps what was written
+    since it was last drained, and cannot seek (so every entry carries its size
+    after it, and nothing is rewritten)."""
+
+    def __init__(self) -> None:
+        self._parts: list[bytes] = []
+        self._at = 0
+
+    def write(self, data: bytes) -> int:
+        self._parts.append(bytes(data))
+        self._at += len(data)
+        return len(data)
+
+    def flush(self) -> None:
+        pass
+
+    def tell(self) -> int:
+        return self._at
+
+    def drain(self) -> bytes:
+        out = b"".join(self._parts)
+        self._parts.clear()
+        return out
+
+
+class FullBundle:
+    """A release's records and its files as one zip, produced as a stream of
+    bytes (`ReleaseService.full_bundle`). `missing` is the files that could not
+    be read, complete once iterated."""
+
+    def __init__(self, svc: ReleaseService, release: ReleaseDTO, cited: list[str]):
+        self.release = release
+        self.missing: list[str] = []
+        self._svc = svc
+        self._cited = cited
+
+    def __iter__(self) -> Iterator[bytes]:
+        svc = self._svc
+        sink = _Sink()
+        count = size = 0
+        with svc._store.open(self.release.bundle_sha256) as source:
+            with zipfile.ZipFile(source) as src:
+                cited = sorted(self._cited) or sorted(rules.hash_bundle(src).cited)
+                with zipfile.ZipFile(sink, "w", zipfile.ZIP_DEFLATED) as out:  # type: ignore[call-overload]
+                    for info in src.infolist():
+                        if info.filename == spec.MANIFEST:
+                            continue
+                        entry = zipfile.ZipInfo(info.filename, info.date_time)
+                        entry.compress_type = zipfile.ZIP_DEFLATED
+                        with (
+                            src.open(info) as member,
+                            out.open(entry, "w", force_zip64=True) as target,
+                        ):
+                            while chunk := member.read(_STREAM_CHUNK):
+                                target.write(chunk)
+                                if data := sink.drain():
+                                    yield data
+                    for sha in cited:
+                        chunks = svc._bundles.stream_file(sha)
+                        if chunks is None:
+                            self.missing.append(sha)
+                            continue
+                        entry = zipfile.ZipInfo(spec.FILES_DIR + sha)
+                        entry.compress_type = zipfile.ZIP_STORED
+                        with out.open(entry, "w", force_zip64=True) as target:
+                            for chunk in chunks:
+                                target.write(chunk)
+                                size += len(chunk)
+                                if data := sink.drain():
+                                    yield data
+                        count += 1
+                    manifest = Manifest.from_dict(json.loads(src.read(spec.MANIFEST)))
+                    manifest.files = BundleFiles(
+                        included=True, count=count, bytes=size, missing=self.missing
+                    )
+                    out.writestr(spec.MANIFEST, json.dumps(manifest.to_dict()))
+        if data := sink.drain():
+            yield data
+
+
+_STREAM_CHUNK = 1024 * 1024

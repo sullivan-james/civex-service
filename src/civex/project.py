@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 from civex.config import Config, ConfigStore, FileConfigStore
 from civex.domain.accounts import Account
 from civex.domain.features import LOCAL_FEATURES
-from civex.domain.permissions import EVERYTHING, Permissions
+from civex.domain.permissions import EVERYTHING, READ, Permissions
 from civex.domain.sync import PushAccepted
 
 if TYPE_CHECKING:
@@ -78,6 +78,11 @@ class Project:
             config_store=FileConfigStore(config.project_root),
             actor=local_actor(config.identity.name),
             features=local_features(config),
+            # A copy marked read-only (`[project] read_only`) may be read, not
+            # changed: the same rule a host's reader is held to.
+            permissions=Permissions.of(READ)
+            if config.project.read_only
+            else EVERYTHING,
         )
 
 

@@ -1,9 +1,9 @@
 /**
  * Filename pattern extraction — the frontend counterpart to the token-based
  * date format parsed server-side by `civex/domain/filename_extract.py`
- * (`parse_by_format`, which the `civex.extract_from_filename` plugin and the
+ * (`parse_by_format`, which the `civex.value_from_filename` plugin and the
  * `from_filename` field rule both use), and the plain-regex capture-group
- * extraction in `civex/plugins/builtins/match_files_to_records.py`.
+ * extraction in `civex/plugins/builtins/_file_rows.py`.
  *
  * Keeping this logic in JS (rather than round-tripping every keystroke to
  * the server) is what makes a live preview against real filenames possible.
@@ -23,7 +23,7 @@ const TOKEN_MAP: Record<string, { re: string; key: string }> = {
 
 /**
  * Parse `str` according to a token format like 'YYYYMMDD-HHmmSS' — mirrors
- * `_parse_by_format` in `civex.extract_from_filename` exactly, down to
+ * `_parse_by_format` in `civex.value_from_filename` exactly, down to
  * leaving non-token characters as raw (unescaped) regex, so e.g.
  * 'YYYYMMDD[-_]HHmmSS' matches both dashes and underscores. Returns an ISO
  * date (`YYYY-MM-DD`) or naive datetime (`YYYY-MM-DDTHH:mm:SS`) string, or
@@ -65,8 +65,8 @@ export interface CaptureResult {
 /**
  * Apply `pattern` to `filename` and return the first capture group (or the
  * whole match if the pattern has no group) — mirrors
- * `civex.match_files_to_records`'s `re.search(pattern, filename)` /
- * `m.group(1)` and `civex.extract_from_filename`'s equivalent.
+ * `civex.save_records (files)`'s `re.search(pattern, filename)` /
+ * `m.group(1)` and `civex.value_from_filename`'s equivalent.
  */
 export function extractCaptureGroup(
   filename: string,
@@ -84,7 +84,7 @@ export function extractCaptureGroup(
 }
 
 /**
- * Normalise a numeric capture the same way `civex.match_files_to_records`
+ * Normalise a numeric capture the same way `civex.save_records (files)`
  * does — "01" -> "1" — so a zero-padded filename key matches an integer
  * field. Non-integer-looking strings pass through unchanged (mirrors
  * Python's `int(key_value)` raising and being caught).

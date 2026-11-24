@@ -31,11 +31,13 @@ import {
 import { SettingControl, type SettingContext } from './SettingControl'
 import { StepSays } from './StepSays'
 
+/** The groups of built-in steps, in the order they are offered. */
 const CATEGORY_LABELS: Record<string, string> = {
-  'data-sources': 'Read',
-  'data-access': 'Read',
-  outputs: 'Save and make records',
+  'bring-in': 'Bring in',
+  'work-out': 'Work out',
+  save: 'Save',
 }
+const GROUP_ORDER = [...Object.values(CATEGORY_LABELS), 'Other', 'Your plugins']
 
 /** The actions to choose from, grouped by what they do, each by its name. */
 export function ActionSelect({
@@ -71,15 +73,17 @@ export function ActionSelect({
       {value && !plugins.some((p) => p.id === value) && (
         <option value={value}>{value} (not installed)</option>
       )}
-      {[...groups].map(([group, items]) => (
-        <optgroup key={group} label={group}>
-          {items.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </optgroup>
-      ))}
+      {[...groups]
+        .sort((a, b) => GROUP_ORDER.indexOf(a[0]) - GROUP_ORDER.indexOf(b[0]))
+        .map(([group, items]) => (
+          <optgroup key={group} label={group}>
+            {items.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </optgroup>
+        ))}
     </Select>
   )
 }
@@ -313,8 +317,17 @@ export function StepCard(props: Props) {
   const setSome = (values: Record<string, unknown>) =>
     onChange({ ...step, config: { ...step.config, ...values } })
   const setConfig = (key: string, value: unknown) => setSome({ [key]: value })
-  const basic = settings.filter((s) => !s.hint.advanced)
-  const advanced = settings.filter((s) => s.hint.advanced)
+  // A setting that depends on another (the folder, once "A folder" is chosen)
+  // is shown only then.
+  const shown = settings.filter((s) => {
+    const when = s.hint.when
+    if (!when) return true
+    const governing = settings.find((o) => o.key === when.setting)
+    const current = step.config[when.setting] ?? governing?.default
+    return when.is.includes(String(current ?? ''))
+  })
+  const basic = shown.filter((s) => !s.hint.advanced)
+  const advanced = shown.filter((s) => s.hint.advanced)
   const control = (s: (typeof settings)[number]) => (
     <SettingControl
       key={s.key}
