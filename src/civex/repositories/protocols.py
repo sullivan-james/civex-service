@@ -544,6 +544,11 @@ class RecordRepository(Protocol):
         """When each of these records that exists was deleted (None if live)."""
         ...
 
+    def count_deleted_with(self, parent_ids: list[uuid.UUID]) -> int:
+        """How many records sit directly under these and were deleted with
+        them, counted without reading them."""
+        ...
+
     def deleted_with(
         self, parent_ids: list[uuid.UUID]
     ) -> list[tuple[uuid.UUID, uuid.UUID]]:

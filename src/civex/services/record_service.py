@@ -4063,7 +4063,11 @@ class RecordService:
         )
 
     def apply_changes(
-        self, changes: RecordChangesDTO, *, force: bool = False
+        self,
+        changes: RecordChangesDTO,
+        *,
+        force: bool = False,
+        dry_run: bool = False,
     ) -> RecordChangesResultDTO:
         """The one way a set of record changes is applied, whatever its size:
         bulk delete, bulk edit's undo, restore and the undo of any bulk action
@@ -4074,7 +4078,9 @@ class RecordService:
         it, in the order the changes must be applied, as one batch (the
         caller's) and one action. Permissions are checked for every collection
         touched before that part is written. What can't be applied is left as
-        it is and reported."""
+        it is and reported; a record already as wanted (restored, or deleted)
+        is counted as `unchanged`. With `dry_run` the restore and delete parts
+        are planned and counted, nothing is written."""
         out = RecordChangesResultDTO()
 
         def leave(record_id: uuid.UUID, reason: str) -> None:
@@ -4084,15 +4090,18 @@ class RecordService:
 
         with self._audit.operation() if self._audit else nullcontext():
             if changes.restore:
-                done = self.restore_set(changes.restore)
+                done = self.restore_set(changes.restore, dry_run=dry_run)
                 out.restored, out.came_back = done.restored, done.came_back
+                self._note_absent(
+                    [uuid.UUID(r) for r in done.absent], out, leave, "already back"
+                )
                 for raw in done.left:
                     leave(
                         uuid.UUID(raw),
                         "Something it belongs to is still deleted, or its unique "
                         "values were taken meanwhile.",
                     )
-            if changes.update:
+            if changes.update and not dry_run:
                 chunk = self._update_chunk(changes.update, unset=True)
                 out.updated, out.runs = chunk.changing, chunk.runs
                 for record_id in chunk.gone:
@@ -4100,8 +4109,46 @@ class RecordService:
                 for record_id, reason in chunk.failed.items():
                     leave(record_id, reason)
             if changes.delete:
-                out.deleted = self._delete_records(changes.delete, force)
+                states = self._records.deleted_at_of(changes.delete)
+                live = [
+                    i for i in dict.fromkeys(changes.delete) if states.get(i, 1) is None
+                ]
+                self._note_absent(
+                    [
+                        i
+                        for i in dict.fromkeys(changes.delete)
+                        if states.get(i, 1) is not None
+                    ],
+                    out,
+                    leave,
+                    "already deleted",
+                    states=states,
+                )
+                out.deleted_asked = len(live)
+                if live and not dry_run:
+                    out.deleted = self._delete_records(live, force)
         return out
+
+    def _note_absent(
+        self,
+        ids: list[uuid.UUID],
+        out: RecordChangesResultDTO,
+        leave: Callable[[uuid.UUID, str], None],
+        why: str,
+        states: dict[uuid.UUID, Any] | None = None,
+    ) -> None:
+        """Records asked to change that were not in the state the change starts
+        from: counted as unchanged when they exist (already as wanted: `why`),
+        left when they are gone altogether."""
+        if not ids:
+            return
+        if states is None:
+            states = self._records.deleted_at_of(ids)
+        for rid in ids:
+            if rid in states:
+                out.unchanged += 1
+            else:
+                leave(rid, "This record no longer exists.")
 
     def _delete_records(self, ids: list[uuid.UUID], force: bool) -> int:
         """Delete `ids` and everything beneath them. Returns how many of `ids`
@@ -5533,8 +5580,12 @@ class RecordService:
                 wanted.append(uuid.UUID(str(raw)))
             except ValueError:
                 continue
+        wanted = list(dict.fromkeys(wanted))
         found = self._records.restore_rows(wanted, deleted_only=True)
         plan = RestoreSetDTO()
+        if len(found) < len(wanted):
+            there = {r.id for r in found}
+            plan.absent = [i for i in wanted if i not in there]
         if not found:
             return plan
         rows = {r.id: r for r in found}
@@ -5558,6 +5609,19 @@ class RecordService:
         children: dict[uuid.UUID, list[uuid.UUID]] = {}
         level = [] if exact else list(chosen)
         seen = set(chosen)
+        if level:
+            # Usually a bulk delete is chosen whole, and what was deleted with
+            # each is chosen too: a count says so without reading it again.
+            inside = [
+                (r.parent_record_id, r.id)
+                for r in found
+                if r.parent_record_id in seen
+                and rows[r.parent_record_id].deleted_at == r.deleted_at
+            ]
+            if self._records.count_deleted_with(level) == len(inside):
+                for parent_id, child_id in inside:
+                    children.setdefault(parent_id, []).append(child_id)
+                level = []
         while level:
             below = self._records.deleted_with(level)
             for child_id, parent_id in below:
@@ -5656,19 +5720,22 @@ class RecordService:
                 current = above.id
         return tainted
 
-    def restore_set(self, ids: Iterable[str | uuid.UUID]) -> RestoreSetResultDTO:
+    def restore_set(
+        self, ids: Iterable[str | uuid.UUID], *, dry_run: bool = False
+    ) -> RestoreSetResultDTO:
         """Restore every one of these deleted records that nothing deleted holds
         back, each with what was deleted with it, as one action in history:
         the update and the history entries are written a chunk at a time, so it
         is a few dozen statements however many records there are. Those held
         back are returned in `left`."""
         plan = self.plan_restore_set([str(i) for i in ids])
-        if plan.coming:
+        if plan.coming and not dry_run:
             self._restore_write(plan.coming, plan.rows)
         return RestoreSetResultDTO(
             restored=plan.restored,
             came_back=len(plan.coming),
             left=[str(i) for i in plan.blocked],
+            absent=[str(i) for i in plan.absent],
         )
 
     def _restore_write(

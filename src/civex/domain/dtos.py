@@ -1277,6 +1277,8 @@ class RestoreSetDTO:
     blocked: list[uuid.UUID] = field(default_factory=list)
     # What `coming` is, by record (the columns the history entries are made of).
     rows: dict[uuid.UUID, RestoreRow] = field(default_factory=dict)
+    # Asked for, but not deleted: already live, or gone altogether.
+    absent: list[uuid.UUID] = field(default_factory=list)
 
 
 @dataclass
@@ -1301,6 +1303,8 @@ class RecordChangesResultDTO:
     # What was not applied and why, at most the first few (the count is exact).
     left: dict[uuid.UUID, str] = field(default_factory=dict)
     left_count: int = 0
+    deleted_asked: int = 0  # of the records asked to delete, those live
+    unchanged: int = 0  # asked, but already as wanted (restored, or deleted)
 
 
 @dataclass
@@ -1461,6 +1465,8 @@ class RestoreSetResultDTO:
     restored: int  # records restored in their own right
     came_back: int  # records live again in all, with what went with them
     left: list[str]  # chosen records still held back, as ids
+    # asked for, but not deleted (already live, or gone altogether), as ids
+    absent: list[str] = field(default_factory=list)
 
 
 @dataclass

@@ -238,9 +238,9 @@ from the next tag forward.
   are exactly what happens. An undo is one action in one batch in history, so
   sync carries it as one action. The History restore dialog shows the true
   count and a busy state. `GET /audit/restore-all` no longer has a `truncated`
-  field. Measured on PostgreSQL with 69,572 records: restore 11 s on a quiet
-  server; the delete, undo and redo round trip took 20 s, 26 s and 32 s with
-  other work on the same server.
+  field. History entries go in with COPY on PostgreSQL (about 30k rows/s through the
+  driver, against 5k/s before). Measured on PostgreSQL with 69,572 records:
+  delete 10 s, undo preview 3.6 s, undo 8 s, redo 13.5 s.
 
 - **Faster pushes to an authority.** A push of 100 changes ran about 17
   statements per change (20 for edits), all under the feed's lock; it now runs

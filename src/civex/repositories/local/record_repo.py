@@ -1407,6 +1407,24 @@ class LocalRecordRepository:
             )
         }
 
+    def count_deleted_with(self, parent_ids: list[uuid.UUID]) -> int:
+        """How many records sit directly under these and were deleted with them
+        (`deleted_with`), counted in the database: no rows come back."""
+        above = aliased(Record)
+        return sum(
+            self._s.scalar(
+                select(func.count(Record.id))
+                .join(above, above.id == Record.parent_record_id)
+                .where(
+                    Record.parent_record_id.in_(chunk),
+                    Record.deleted_at.is_not(None),
+                    Record.deleted_at == above.deleted_at,
+                )
+            )
+            or 0
+            for chunk in _bulk_chunks(self._s, parent_ids)
+        )
+
     def deleted_with(
         self, parent_ids: list[uuid.UUID]
     ) -> list[tuple[uuid.UUID, uuid.UUID]]:

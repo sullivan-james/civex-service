@@ -721,36 +721,16 @@ class AuditService:
         label = f"Undo {batch.label}" if batch.label else f"Undo a bulk {batch.kind}"
         with self.batch(_UNDO_KIND[batch.kind], label):
             if undelete or delete:
-                now = self._records.records_repo.deleted_at_of([*undelete, *delete])
-                restore_ids: list[uuid.UUID] = []
-                for rid in undelete:
-                    if rid not in now:
-                        leave(rid, "This record no longer exists.")
-                    elif now[rid] is None:
-                        result.same += 1  # already back
-                    else:
-                        restore_ids.append(rid)
-                delete_ids: list[uuid.UUID] = []
-                for rid in delete:
-                    if rid not in now:
-                        leave(rid, "This record no longer exists.")
-                    elif now[rid] is not None:
-                        result.same += 1  # already gone
-                    else:
-                        delete_ids.append(rid)
-                if dry_run:
-                    would = self._records.plan_restore_set(
-                        [str(i) for i in restore_ids]
-                    )
-                    result.applied += would.restored + len(delete_ids)
-                    for rid in would.blocked:
-                        leave(rid, "Something it belongs to is still deleted.")
-                else:
-                    done = self._records.apply_changes(
-                        RecordChangesDTO(restore=restore_ids, delete=delete_ids)
-                    )
-                    result.applied += done.restored + len(delete_ids)
-                    left_by(done)
+                # Restore what was deleted, delete what was restored: the
+                # inverse set, through the one core. What is already as wanted
+                # is `same`; what is gone altogether is left.
+                done = self._records.apply_changes(
+                    RecordChangesDTO(restore=undelete, delete=delete),
+                    dry_run=dry_run,
+                )
+                result.applied += done.restored + done.deleted_asked
+                result.same += done.unchanged
+                left_by(done)
                 yield result
 
             # Changes to put fields back, waiting to be saved as one set.

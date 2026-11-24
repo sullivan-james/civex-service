@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import io
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -193,6 +195,48 @@ _ID_CHUNK = 500
 _AUDIT_TABLE: Table = AuditLog.__table__  # type: ignore[assignment]
 # History entries written to the database in one statement.
 _LOG_CHUNK = 2000
+_COPY_CHUNK = 20000
+_COPY_COLUMNS = (
+    "id",
+    "action",
+    "entity_type",
+    "entity_id",
+    "old_data",
+    "new_data",
+    "delta",
+    "format",
+    "op_id",
+    "timestamp",
+    "batch_id",
+    "actor",
+    "device_id",
+    "hlc",
+)
+_COPY_JSON = frozenset({"old_data", "new_data", "delta"})
+
+
+_COPY_ESCAPES = str.maketrans({"\\": "\\\\", "\t": "\\t", "\n": "\\n", "\r": "\\r"})
+
+
+def _copy_json(value: Any) -> str:
+    """A stored document as COPY text (None is the JSON null, as an insert
+    stores it)."""
+    return json.dumps(value, default=str).translate(_COPY_ESCAPES)
+
+
+def _copy_value(column: str, value: Any) -> str:
+    """One value as a line of COPY text takes it: NULL as \\N, a stored
+    document as JSON (None is the JSON null, as an insert stores it), a tab, a
+    newline or a backslash escaped."""
+    if column in _COPY_JSON:
+        text_ = json.dumps(value, default=str)
+    elif value is None:
+        return "\\N"
+    elif isinstance(value, datetime):
+        text_ = value.isoformat()
+    else:
+        text_ = str(value)
+    return text_.translate(_COPY_ESCAPES)
 
 
 class LocalAuditRepository:
@@ -395,14 +439,13 @@ class LocalAuditRepository:
         when = timestamp or datetime.now(timezone.utc)
         batch_id = self._current_batch()
         op_id = op or self._op_id
+        copy = self._s.get_bind().dialect.name == "postgresql"
+        if copy:
+            return self._copy_changes(
+                action, entity_type, changes, when, batch_id, op_id, ops
+            )
         total = 0
         rows: list[dict[str, Any]] = []
-
-        def flush() -> None:
-            if rows:
-                self._s.execute(insert(_AUDIT_TABLE), rows)
-                rows.clear()
-
         for entity_id, old_data, new_data in changes:
             old_data, new_data, delta, form = stored_form(old_data, new_data)
             rows.append(
@@ -425,9 +468,79 @@ class LocalAuditRepository:
             )
             total += 1
             if len(rows) >= _LOG_CHUNK:
-                flush()
-        flush()
+                self._s.execute(insert(_AUDIT_TABLE), rows)
+                rows.clear()
+        if rows:
+            self._s.execute(insert(_AUDIT_TABLE), rows)
         return total
+
+    def _copy_changes(
+        self,
+        action: str,
+        entity_type: str,
+        changes: Iterable[
+            tuple[uuid.UUID, dict[str, Any] | None, dict[str, Any] | None]
+        ],
+        when: datetime,
+        batch_id: uuid.UUID | None,
+        op_id: uuid.UUID | None,
+        ops: Mapping[uuid.UUID, uuid.UUID] | None,
+    ) -> int:
+        """`log_changes` on PostgreSQL: each entry is made straight into a line
+        of COPY text (the parts every entry shares are escaped once) and the
+        lines go in a chunk at a time: the fastest way in, several times a
+        multi-row INSERT's rate. Same rows, same defaults (every column left
+        out has one), in the transaction the session is in."""
+        fixed = {
+            name: _copy_value(name, value)
+            for name, value in (
+                ("action", action),
+                ("entity_type", entity_type),
+                ("timestamp", when),
+                ("batch_id", batch_id),
+                ("actor", self._actor),
+                ("device_id", self._device_id),
+            )
+        }
+        shared_op = _copy_value("op_id", op_id)
+        head = f"{fixed['action']}\t{fixed['entity_type']}\t"
+        tail = (
+            f"\t{fixed['timestamp']}\t{fixed['batch_id']}\t{fixed['actor']}\t"
+            f"{fixed['device_id']}\t"
+        )
+        total = 0
+        lines: list[str] = []
+        for entity_id, old_data, new_data in changes:
+            old_data, new_data, delta, form = stored_form(old_data, new_data)
+            op_text = (
+                _copy_value("op_id", ops[entity_id])
+                if ops and entity_id in ops
+                else shared_op
+            )
+            hlc = _copy_value("hlc", self._next_hlc())
+            lines.append(
+                f"{row_id()}\t{head}{entity_id}\t{_copy_json(old_data)}\t"
+                f"{_copy_json(new_data)}\t{_copy_json(delta)}\t{form}\t{op_text}"
+                f"{tail}{hlc}\n"
+            )
+            total += 1
+            if len(lines) >= _COPY_CHUNK:
+                self._copy(lines)
+                lines.clear()
+        if lines:
+            self._copy(lines)
+        return total
+
+    def _copy(self, lines: list[str]) -> None:
+        """Send these lines of COPY text (columns in `_COPY_COLUMNS` order)."""
+        cursor = self._s.connection().connection.cursor()
+        try:
+            cursor.copy_expert(
+                f"COPY {AuditLog.__tablename__} ({', '.join(_COPY_COLUMNS)}) FROM STDIN",
+                io.StringIO("".join(lines)),
+            )
+        finally:
+            cursor.close()
 
     def event_counts_by_period(
         self,

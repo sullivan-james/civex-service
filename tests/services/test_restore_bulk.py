@@ -335,3 +335,28 @@ def test_unique_key_clashes_of_a_restore_are_asked_a_chunk_at_a_time(
     ctx.commit()
     assert seen < 60  # not a lookup per record
     assert _count(ctx, Record.deleted_at.is_(None)) == 600  # 599 back + the new one
+
+
+def test_bulk_written_entries_keep_awkward_text_exactly(world: AppContext):
+    """Tabs, newlines, backslashes and quotes in a stored value or an actor's
+    name survive the bulk writer (on PostgreSQL it is COPY text, which escapes
+    them) and equal what `log_change` stores."""
+    ctx = world
+    repo = ctx.record_svc._audit
+    repo._actor = 'a\tb\\c\nd "e"'
+    awkward = {"id": "x\ty\\z\nq\ré \\N", "deleted_at": None}
+    one, two = uuid.uuid4(), uuid.uuid4()
+    repo.log_change("delete", "record", one, awkward, None)
+    repo.log_changes("delete", "record", [(two, awkward, None)])
+    ctx.commit()
+    rows = {
+        r.entity_id: r
+        for r in ctx._session.scalars(
+            select(AuditLog).where(AuditLog.entity_id.in_([one, two]))
+        )
+    }
+    a, b = rows[one], rows[two]
+    for column in ("old_data", "new_data", "delta", "format", "actor", "action"):
+        assert getattr(a, column) == getattr(b, column)
+    assert b.old_data == awkward and b.actor == 'a\tb\\c\nd "e"'
+    assert b.timestamp is not None and b.sync_state == a.sync_state
