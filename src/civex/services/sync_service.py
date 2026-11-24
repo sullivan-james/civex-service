@@ -3099,13 +3099,15 @@ class SyncService:
             self._note(result.results, {e.id: e for e in batch}, report)
             # What it took it holds now, whatever refused it before (another
             # server, or this one before a fix): an edit of it goes as an edit.
+            # (Refused again, by one taken before and since reset, it is
+            # missing there again.)
             things = {e.id: e.entity_id for e in batch}
+            answers = [
+                (things[r.op_id], r.status) for r in result.results if r.op_id in things
+            ]
             self._repo.forget_refusals(
-                {
-                    things[r.op_id]
-                    for r in result.results
-                    if r.op_id in things and r.status not in (REJECTED, DEFERRED)
-                }
+                {i for i, status in answers if status not in (REJECTED, DEFERRED)},
+                {i for i, status in answers if status == REJECTED},
             )
             sent += len(batch)
             # Kept at once, so a restart goes on from here.

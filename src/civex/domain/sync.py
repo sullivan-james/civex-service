@@ -336,12 +336,9 @@ DUPLICATE = "duplicate"  # seen before; nothing done
 REJECTED = "rejected"  # can never be accepted (it breaks a rule); say why
 DEFERRED = "deferred"  # not yet (a file hasn't arrived); send it again later
 
-# How a conflict is settled by sync itself (the column holds at most 10 chars):
-# a refusal of a thing's create, once the authority takes the thing after all
-# (filling it sent it), so it no longer says the thing is missing there; and
-# what was waiting for review when the project moves to another server (that
-# server's answers were about it, not the new one).
-TAKEN = "taken"
+# How sync itself settles what was waiting for review when the project moves
+# to another server (that server's answers were about it, not the new one).
+# The column holds at most 10 chars.
 FOLLOWED = "followed"
 
 RETRY_STATUSES = frozenset({DEFERRED})

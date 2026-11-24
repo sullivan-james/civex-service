@@ -65,7 +65,6 @@ from civex.domain.merge import value_at
 from civex.domain.sync_page import ACTION_ENTRIES_MAX, budget, take
 from civex.domain.sync import (
     NOT_SYNCED_KINDS,
-    TAKEN,
     LoginRequestDTO,
     OpResult,
     SyncBatchInfo,
@@ -2004,14 +2003,6 @@ class LocalSyncRepository:
             .values(hub_seq=None)
             .execution_options(synchronize_session=False)
         )
-        # And what it refused: the one followed now says for itself (filling
-        # it sends everything again).
-        self._s.execute(
-            update(AuditLog)
-            .where(AuditLog.action == "create", AuditLog.sync_state == "rejected")
-            .values(sync_state="synced")
-            .execution_options(synchronize_session=False)
-        )
         # And which files it said it holds or lacks: the new one is asked afresh.
         self._s.execute(delete(ServerFile))
         self._s.execute(delete(SeedAck))
@@ -2019,35 +2010,42 @@ class LocalSyncRepository:
         self._s.execute(delete(ServerLack))
         self._s.expire_all()
 
-    def forget_refusals(self, entity_ids: set[uuid.UUID]) -> None:
-        """The authority has taken these things (filling it sent them, and it
-        took them): a refusal of their create, by it or by one followed
-        before, no longer says it lacks them (see `never_taken`)."""
-        ids = list(entity_ids)
-        for start in range(0, len(ids), _ID_CHUNK):
-            chunk = ids[start : start + _ID_CHUNK]
-            self._s.execute(
-                update(AuditLog)
-                .where(
-                    AuditLog.entity_id.in_(chunk),
-                    AuditLog.action == "create",
-                    AuditLog.sync_state == "rejected",
+    def forget_refusals(self, taken: set[uuid.UUID], refused: set[uuid.UUID]) -> None:
+        """Filling the authority sent these things: it took those in `taken`,
+        so a refusal of their create, by it or by one followed before, no
+        longer says it lacks them (see `never_taken`); it refused those in
+        `refused`, so one it had taken before (filled again after a reset) says
+        so again. How a person settled a refusal is left as it is."""
+        for ids, state, when in (
+            (taken, "synced", datetime.now(timezone.utc)),
+            (refused, None, None),
+        ):
+            chunks = list(ids)
+            for start in range(0, len(chunks), _ID_CHUNK):
+                chunk = chunks[start : start + _ID_CHUNK]
+                if state:
+                    self._s.execute(
+                        update(AuditLog)
+                        .where(
+                            AuditLog.entity_id.in_(chunk),
+                            AuditLog.action == "create",
+                            AuditLog.sync_state == "rejected",
+                        )
+                        .values(sync_state=state)
+                        .execution_options(synchronize_session=False)
+                    )
+                self._s.execute(
+                    update(SyncConflict)
+                    .where(
+                        SyncConflict.entity_id.in_(chunk),
+                        SyncConflict.kind == "rejected",
+                        SyncConflict.taken_at.is_(None)
+                        if when
+                        else SyncConflict.taken_at.is_not(None),
+                    )
+                    .values(taken_at=when)
+                    .execution_options(synchronize_session=False)
                 )
-                .values(sync_state="synced")
-                .execution_options(synchronize_session=False)
-            )
-            self._s.query(SyncConflict).filter(
-                SyncConflict.entity_id.in_(chunk),
-                SyncConflict.kind == "rejected",
-                SyncConflict.resolution.is_distinct_from(TAKEN),
-            ).update(
-                {
-                    "status": "resolved",
-                    "resolution": TAKEN,
-                    "resolved_at": datetime.now(timezone.utc),
-                },
-                synchronize_session=False,
-            )
         self._s.flush()
         self._s.expire_all()
 
@@ -2058,8 +2056,7 @@ class LocalSyncRepository:
         has been numbered since (a delete of something it never had is numbered
         but takes nothing). An edit to one can't go as an edit. A refusal is
         forgotten once the authority takes the thing after all (`forget_refusals`,
-        when filling it sends the thing) or this project follows another one
-        (`forget_numbers`)."""
+        when filling it sends the thing: following another one fills it)."""
         if not things:
             return set()
         ids = {i for _, i in things}
@@ -2079,7 +2076,7 @@ class LocalSyncRepository:
             for c in self._s.query(SyncConflict).filter(
                 SyncConflict.entity_id.in_(ids),
                 SyncConflict.kind == "rejected",
-                SyncConflict.resolution.is_distinct_from(TAKEN),
+                SyncConflict.taken_at.is_(None),
             )
             if c.op_id is not None and c.op_id not in held  # a seed's refusal
         }

@@ -111,3 +111,129 @@ def test_a_never_taken_record_deleted_and_restored_here_still_goes_whole(
 
     assert authority.record_svc.get(str(call.id)).data["annotation"] == "M"
     assert [c.kind for c in _open(laptop)] == []
+
+
+def _refused_when_filling(project, authority):
+    """A laptop whose call the server refused when the laptop filled it (the
+    laptop's own field did not allow the value), then opened up again here."""
+    laptop = device(project, authority, "laptop")
+    laptop.schema_svc.create("call")
+    laptop.schema_svc.add_field("call", "annotation", "string")
+    laptop.dataset_svc.create("survey")
+    laptop.commit()
+    call = laptop.record_svc.add("survey", "call", {"annotation": "M (bold)"})
+    laptop.schema_svc.update_field(
+        "call", "annotation", restrictions={"choices": ["Y", "M", "N"]}
+    )
+    laptop.commit()
+    assert connect(laptop) == "seeded"
+    assert authority.sync_repo.snapshot("record", call.id) is None
+    [refusal] = [c for c in _open(laptop) if c.kind == "rejected"]
+    return laptop, call, refusal
+
+
+def _delete_there_and_restore_here(laptop, server, call) -> None:
+    server.record_svc.delete_many([str(call.id)])
+    server.commit()
+    laptop.sync_svc.sync()
+    laptop.history_svc.restore_all()
+    laptop.commit()
+    laptop.sync_svc.sync()
+
+
+def test_a_refusal_a_person_let_go_stays_theirs_after_a_fill(project, authority):
+    """Settling a refusal is a person's: a later fill that takes the thing
+    leaves it settled as they did (so it can still be undone), and the restore
+    still goes in as one."""
+    laptop, call, refusal = _refused_when_filling(project, authority)
+    laptop.sync_svc.resolve_conflict(refusal.id, "theirs")
+    laptop.commit()
+    [settled] = [c for c in laptop.sync_svc.conflicts(None) if c.id == refusal.id]
+    assert (settled.status, settled.resolution) == ("resolved", "theirs")
+
+    laptop.schema_svc.update_field("call", "annotation", restrictions={})
+    laptop.commit()
+    laptop.sync_svc.sync()
+    server = project("server")
+    follow(laptop, server, "laptop")
+    assert connect(laptop, "https://server.test") == "seeded"
+    assert server.sync_repo.snapshot("record", call.id) is not None
+
+    [after] = [c for c in laptop.sync_svc.conflicts(None) if c.id == refusal.id]
+    assert (after.status, after.resolution) == ("resolved", "theirs")
+    assert after.resolved_at == settled.resolved_at
+    assert laptop.sync_repo.never_taken({("record", call.id)}) == set()
+
+    _delete_there_and_restore_here(laptop, server, call)
+    assert len(server.record_svc.find("survey", "call")) == 1
+    assert [c.kind for c in _open(laptop)] == []
+    assert laptop.sync_svc.reopen_conflicts([refusal.id]) == 1
+
+
+def _a_reset_server(project, laptop, name):
+    """The server this laptop fills, emptied (reset, or restored from before the
+    upload): the same project, holding nothing. The laptop finds it so when it
+    next syncs, as `sync` does after a first upload broke off."""
+    server = project(name)
+    server.sync_repo.set_project_id(laptop.sync_repo.meta().project_id)
+    server.commit()
+    follow(laptop, server, "laptop")
+    return server
+
+
+@pytest.mark.parametrize("again", ["taken", "refused"])
+def test_filling_the_same_server_again_after_a_reset(
+    project, authority, monkeypatch, again
+):
+    """The laptop fills the server it follows again once that server is reset
+    (no other server followed, so each thing goes under the same id as before).
+    Taken this time, the call is the server's: a restore goes in as one.
+    Refused again after a fill had taken it, it is missing there again."""
+    from civex.services import sync_service
+
+    laptop, call, refusal = _refused_when_filling(project, authority)
+    laptop.schema_svc.update_field("call", "annotation", restrictions={})
+    laptop.commit()
+
+    def fill_after_reset(name):
+        server = _a_reset_server(project, laptop, name)
+        # The fill breaks off before anything goes; the next sync finds the
+        # server empty and fills it from the start.
+        original = sync_service.SyncService._seed
+
+        def broken(self, transport, *rest, **kw):
+            def push(entries):
+                raise sync_service.SyncError("connection lost", retryable=True)
+
+            transport.push = push
+            try:
+                return original(self, transport, *rest, **kw)
+            finally:
+                del transport.push
+
+        monkeypatch.setattr(sync_service.SyncService, "_seed", broken)
+        with pytest.raises(sync_service.SyncError):
+            connect(laptop, f"https://{name}.test")
+        monkeypatch.setattr(sync_service.SyncService, "_seed", original)
+        laptop.sync_svc.sync()
+        return server
+
+    server = fill_after_reset("server")
+    assert server.sync_repo.snapshot("record", call.id) is not None
+    assert laptop.sync_repo.never_taken({("record", call.id)}) == set()
+    [seen] = [c for c in laptop.sync_svc.conflicts(None) if c.id == refusal.id]
+    assert seen.status == "open"  # a person's to settle, as before
+
+    if again == "taken":
+        _delete_there_and_restore_here(laptop, server, call)
+        assert len(server.record_svc.find("survey", "call")) == 1
+        return
+
+    laptop.schema_svc.update_field(
+        "call", "annotation", restrictions={"choices": ["Y", "M", "N"]}
+    )
+    laptop.commit()
+    server = fill_after_reset("server2")
+    assert server.sync_repo.snapshot("record", call.id) is None
+    assert laptop.sync_repo.never_taken({("record", call.id)}) == {call.id}
+    assert any(c.kind == "rejected" and c.entity_id == call.id for c in _open(laptop))
