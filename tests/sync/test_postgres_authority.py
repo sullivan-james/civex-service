@@ -170,3 +170,35 @@ def test_scoped_catch_up_and_trails_on_postgresql(project, pg_authority):
     study.sync(study.limited, study.full)
     assert held(study.limited, "record") == held(study.full, "record")
     assert held(study.limited, "note") == held(study.full, "note")
+
+
+def test_the_unsettled_and_action_queries_can_use_their_partial_indexes(pg_authority):
+    """PostgreSQL has to be able to prove each partial index covers the
+    queries (with sequential scans off, the plan must name the index)."""
+    from sqlalchemy import event
+
+    repo = pg_authority.sync_repo
+    session = repo._s
+    engine = session.get_bind()
+    seen: list[tuple[str, object]] = []
+
+    def capture(conn, cursor, statement, parameters, context, many):
+        if "audit_log" in statement and not statement.startswith("EXPLAIN"):
+            seen.append((statement, parameters))
+
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        repo.arriving_action()
+        repo.arriving_entries(str(uuid.uuid4()), 0, 500)
+        repo.arriving_entries(str(uuid.uuid4()), 0, 500, state="settling", upto=9)
+        repo.held_entries()
+        repo.set_arriving(str(uuid.uuid4()), ("arriving",), "held")
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+    conn = session.connection()
+    conn.exec_driver_sql("SET LOCAL enable_seqscan = off")
+    for statement, parameters in seen[-5:]:
+        rows = conn.exec_driver_sql("EXPLAIN " + statement, parameters).fetchall()
+        plan = " | ".join(r[0] for r in rows)
+        # (audit_log is partitioned: each partition's copy has a generated name)
+        assert "hub_seq_idx1" in plan or "op_id_hub_seq_idx" in plan, plan

@@ -1422,6 +1422,7 @@ class SyncService:
         # where it was. Its fate (applied whole, or held whole) is decided when
         # its last entry has arrived.
         arriving, to_hold = self._repo.arriving_action()
+        start = cursor  # what was staged before this pass is at or below it
         while True:
             page = transport.feed(cursor, FEED_PAGE)
             entries = list(page.entries)
@@ -1453,7 +1454,7 @@ class SyncService:
                         if entry.hub_seq is None:
                             raise SyncError("The server sent a change without a number")
                         if arriving is not None and entry.op != arriving:
-                            self._settle_arriving(arriving, to_hold)
+                            self._settle_arriving(arriving, to_hold, dirty, start)
                             arriving, to_hold = None, False
                             settled = True
                         if entry.entity_type in NOT_SYNCED_KINDS:
@@ -1481,7 +1482,7 @@ class SyncService:
                                 touched.append(entry.entity_id)
                         cursor = entry.hub_seq
                     if arriving is not None and not page.more:
-                        self._settle_arriving(arriving, to_hold)
+                        self._settle_arriving(arriving, to_hold, dirty, start)
                         arriving, to_hold = None, False
                         settled = True
                     # The server may have looked past changes it did not send
@@ -1547,7 +1548,28 @@ class SyncService:
         self._repo.insert_entry(entry, hub_seq=entry.hub_seq, apply_state=state)
         return to_hold
 
-    def _settle_arriving(self, op: str, to_hold: bool) -> None:
+    def _arriving_waits(
+        self, op: str, dirty: set[tuple[str, uuid.UUID]], start: int
+    ) -> bool:
+        """Whether an entry of an arriving action that an earlier pass kept (up
+        to number `start`) must wait for a push of this device's own *now*: the
+        person may have edited since, and a pass pulls before it pushes.
+        (What this pass staged was checked as it came in.)"""
+        above = self._above_dirty(dirty)
+        after = 0
+        while chunk := self._repo.arriving_entries(op, after, 500, upto=start):
+            if any(self._waits(e, dirty, above) for e in chunk if not e.superseded):
+                return True
+            after = chunk[-1].hub_seq or after
+        return False
+
+    def _settle_arriving(
+        self,
+        op: str,
+        to_hold: bool,
+        dirty: set[tuple[str, uuid.UUID]],
+        start: int,
+    ) -> None:
         """An action's last entry has arrived: hold it whole (it stays in the
         held store, `_replay_held` applies it once nothing of this device's own
         keeps it waiting) or apply it whole, a chunk of entries at a time from
@@ -1556,22 +1578,46 @@ class SyncService:
         if to_hold:
             self._repo.set_arriving(op, ("arrhold",), "held")
             return
+        if self._arriving_waits(op, dirty, start):
+            self._repo.set_arriving(op, ("arriving",), "held")
+            return
         try:
             with self._repo.savepoint():
+                # `settling`: now steps, which `arriving` rows are not.
+                self._repo.set_arriving(op, ("arriving",), "settling")
                 after = 0
-                while chunk := self._repo.arriving_entries(op, after, 500):
-                    for e in chunk:
-                        self._replay((e.entity_type, e.entity_id), e.hub_seq or 0)
+                while chunk := self._repo.arriving_entries(
+                    op, after, 500, state="settling"
+                ):
+                    self._apply_chunk(chunk)
                     after = chunk[-1].hub_seq or after
                 after = 0
-                while chunk := self._repo.arriving_entries(op, after, 500):
+                while chunk := self._repo.arriving_entries(
+                    op, after, 500, state="settling"
+                ):
                     ids = [e.entity_id for e in chunk if e.entity_type == "record"]
                     if ids and self._records.placement_mismatches(ids):
                         raise _NotYet()
                     after = chunk[-1].hub_seq or after
-                self._repo.set_arriving(op, ("arriving",), "applied")
+                self._repo.set_arriving(op, ("settling",), "applied")
         except _NotYet:
             self._repo.set_arriving(op, ("arriving",), "held")
+
+    def _apply_chunk(self, chunk: list[SyncEntry]) -> None:
+        """Apply a chunk of an action's entries under one savepoint (a savepoint
+        for each entry would pile up thousands in one transaction). If one of
+        them can't be applied, the chunk is undone and done again an entry at a
+        time, each with its own savepoint and its refusal recorded as a
+        conflict: the action stays whole either way."""
+        try:
+            with self._repo.savepoint():
+                for e in chunk:
+                    self._replay(
+                        (e.entity_type, e.entity_id), e.hub_seq or 0, isolate=False
+                    )
+        except ValidationError:
+            for e in chunk:
+                self._replay((e.entity_type, e.entity_id), e.hub_seq or 0)
 
     def _above_dirty(self, dirty: set[tuple[str, uuid.UUID]]) -> set[uuid.UUID]:
         """Every record here that an unsent change is to or beneath: those
@@ -1668,7 +1714,9 @@ class SyncService:
         if state == "applied":
             self._replay(thing, entry.hub_seq or 0)
 
-    def _replay(self, thing: tuple[str, uuid.UUID], from_seq: int) -> None:
+    def _replay(
+        self, thing: tuple[str, uuid.UUID], from_seq: int, isolate: bool = True
+    ) -> None:
         """Bring a thing to where the authority's numbered changes leave it,
         from `from_seq` on: each in turn, in the authority's order. Every
         numbered change it did not supersede is a step the authority took (an
@@ -1678,9 +1726,14 @@ class SyncService:
         they are taken again after the one arriving now, since that is their
         order; taking a step twice is harmless."""
         for step in self._repo.numbered_entries(thing[0], thing[1], from_seq):
-            self._apply(step)
+            self._apply(step, isolate)
 
-    def _apply(self, entry: SyncEntry) -> None:
+    def _apply(self, entry: SyncEntry, isolate: bool = True) -> None:
+        if not isolate:
+            # The caller's savepoint covers it: a refusal undoes all of that.
+            self._applier.apply_entry(entry)
+            self._recheck_cited_lacks(entry)
+            return
         try:
             with self._repo.savepoint():
                 self._applier.apply_entry(entry)

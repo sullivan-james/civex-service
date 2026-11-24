@@ -147,6 +147,12 @@ def lack_wait(misses: int) -> timedelta:
     return min(LACK_RETRY_FIRST * 2 ** min(max(misses, 1) - 1, 12), LACK_RETRY_MAX)
 
 
+# The same text as the WHERE of `ix_audit_log_unsettled` (db/models.py), so the
+# database can see that the index covers a query (SQLite only recognises a
+# partial index whose condition is written out in the query, not bound).
+_UNSETTLED = text("audit_log.apply_state NOT IN ('applied', 'superseded')")
+
+
 class LocalSyncRepository:
     def __init__(self, session: Session) -> None:
         self._s = session
@@ -2209,7 +2215,7 @@ class LocalSyncRepository:
         """Changes from the authority kept but not applied yet, oldest first."""
         rows = (
             self._s.query(AuditLog)
-            .filter(AuditLog.apply_state == "held")
+            .filter(_UNSETTLED, AuditLog.apply_state == "held")
             .order_by(AuditLog.hub_seq)
             .all()
         )
@@ -2224,7 +2230,7 @@ class LocalSyncRepository:
         or (None, False). A lookup, not a scan: see `ix_audit_log_unsettled`."""
         row = (
             self._s.query(AuditLog.op_id, AuditLog.apply_state)
-            .filter(AuditLog.apply_state.in_(("arriving", "arrhold")))
+            .filter(_UNSETTLED, AuditLog.apply_state.in_(("arriving", "arrhold")))
             .limit(1)
             .first()
         )
@@ -2232,27 +2238,35 @@ class LocalSyncRepository:
             return None, False
         return str(row[0]), row[1] == "arrhold"
 
-    def arriving_entries(self, op: str, after: int, limit: int) -> list[SyncEntry]:
-        """The next `limit` entries of an arriving action past number `after`."""
-        rows = (
-            self._s.query(AuditLog)
-            .filter(
-                AuditLog.op_id == uuid.UUID(op),
-                AuditLog.apply_state == "arriving",
-                AuditLog.hub_seq > after,
-            )
-            .order_by(AuditLog.hub_seq)
-            .limit(limit)
-            .all()
+    def arriving_entries(
+        self,
+        op: str,
+        after: int,
+        limit: int,
+        state: str = "arriving",
+        upto: int | None = None,
+    ) -> list[SyncEntry]:
+        """The next `limit` entries of an action (in `state`) past number
+        `after`, and no later than `upto` when given."""
+        query = self._s.query(AuditLog).filter(
+            _UNSETTLED,
+            AuditLog.op_id == uuid.UUID(op),
+            AuditLog.apply_state == state,
+            AuditLog.hub_seq > after,
         )
-        entries = self._entries(rows)
-        return entries
+        if upto is not None:
+            query = query.filter(AuditLog.hub_seq <= upto)
+        return self._entries(query.order_by(AuditLog.hub_seq).limit(limit).all())
 
     def set_arriving(self, op: str, was: tuple[str, ...], now: str) -> None:
         """Move every entry of an arriving action from state `was` to `now`."""
         self._s.execute(
             update(AuditLog)
-            .where(AuditLog.op_id == uuid.UUID(op), AuditLog.apply_state.in_(was))
+            .where(
+                _UNSETTLED,
+                AuditLog.op_id == uuid.UUID(op),
+                AuditLog.apply_state.in_(was),
+            )
             .values(apply_state=now)
             .execution_options(synchronize_session=False)
         )
@@ -2290,7 +2304,9 @@ class LocalSyncRepository:
                 AuditLog.entity_type == kind,
                 AuditLog.entity_id == entity_id,
                 AuditLog.hub_seq >= from_seq,
-                AuditLog.apply_state != "superseded",
+                # Never a step of an action that has not all arrived: it is
+                # applied (or held) whole, when its last entry is in.
+                AuditLog.apply_state.notin_(("superseded", "arriving", "arrhold")),
             )
             .order_by(AuditLog.hub_seq)
             .all()

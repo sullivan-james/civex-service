@@ -568,12 +568,22 @@ class AuditLog(Base):
         ),
         # The changes from the authority not settled yet (held for a push, or
         # an action still arriving): almost always none, so asking is a lookup
-        # (migration e8c1b4d7a925).
+        # (migration e8c1b4d7a925). A query uses it by repeating this condition
+        # (`sync_repo._UNSETTLED`).
         Index(
             "ix_audit_log_unsettled",
             "hub_seq",
-            postgresql_where=text("apply_state IN ('held', 'arriving', 'arrhold')"),
-            sqlite_where=text("apply_state IN ('held', 'arriving', 'arrhold')"),
+            postgresql_where=text("apply_state NOT IN ('applied', 'superseded')"),
+            sqlite_where=text("apply_state NOT IN ('applied', 'superseded')"),
+        ),
+        # An action's entries in order: settling a big one reads them in
+        # chunks (migration e8c1b4d7a925). Most rows have no action.
+        Index(
+            "ix_audit_log_op",
+            "op_id",
+            "hub_seq",
+            postgresql_where=text("op_id IS NOT NULL"),
+            sqlite_where=text("op_id IS NOT NULL"),
         ),
         # `max(hlc)`: the newest stamp, read whenever a change is stamped
         # (migration d7a3c9e5f2b8).
@@ -633,7 +643,10 @@ class AuditLog(Base):
     # because this device had its own unsent change to the same thing; applied
     # later if it is still the latest, see SyncService._catch_up) or
     # `superseded` (the authority settled on something else, carried by a later
-    # entry, so this one's state is never applied).
+    # entry, so this one's state is never applied). An action cut across feed
+    # pages is kept as it arrives: `arriving` (nothing seen to hold it so far)
+    # or `arrhold` (an entry of it must wait), then applied or held whole when
+    # its last entry is in (`settling` is only seen inside that transaction).
     apply_state: Mapped[str] = mapped_column(
         String(10), nullable=False, default="applied", server_default="applied"
     )

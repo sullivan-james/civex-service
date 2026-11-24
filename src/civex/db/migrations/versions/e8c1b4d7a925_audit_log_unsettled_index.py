@@ -1,4 +1,4 @@
-"""audit_log: an index on the changes from the authority not settled yet
+"""audit_log: indexes on the changes from the authority not settled yet, and on an action
 
 Revision ID: e8c1b4d7a925
 Revises: c5e2a8d7f1b9
@@ -22,7 +22,8 @@ down_revision: Union[str, None] = "c5e2a8d7f1b9"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-_WHERE = sa.text("apply_state IN ('held', 'arriving', 'arrhold')")
+_UNSETTLED = sa.text("apply_state NOT IN ('applied', 'superseded')")
+_HAS_OP = sa.text("op_id IS NOT NULL")
 
 
 def upgrade() -> None:
@@ -32,10 +33,19 @@ def upgrade() -> None:
             "ix_audit_log_unsettled",
             "audit_log",
             ["hub_seq"],
-            postgresql_where=_WHERE,
-            sqlite_where=_WHERE,
+            postgresql_where=_UNSETTLED,
+            sqlite_where=_UNSETTLED,
+        )
+    if "ix_audit_log_op" not in indexes:
+        op.create_index(
+            "ix_audit_log_op",
+            "audit_log",
+            ["op_id", "hub_seq"],
+            postgresql_where=_HAS_OP,
+            sqlite_where=_HAS_OP,
         )
 
 
 def downgrade() -> None:
+    op.drop_index("ix_audit_log_op", table_name="audit_log")
     op.drop_index("ix_audit_log_unsettled", table_name="audit_log")

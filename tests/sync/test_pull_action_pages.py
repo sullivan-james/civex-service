@@ -164,19 +164,19 @@ def test_a_six_thousand_entry_action_is_applied_whole_from_disk_in_bounded_memor
     _serve(phone, entries, base)
     svc = object.__getattribute__(phone.sync_svc, "_svc")
     steps: list[int] = []
-    svc._replay = lambda thing, seq: steps.append(seq)
+    svc._replay = lambda thing, seq, isolate=True: steps.append(seq)
     states_seen: list[int] = []
     repo_cls = type(phone.sync_repo)
     real = repo_cls.arriving_entries
 
-    def watching(self, op, after, limit):
+    def watching(self, op, after, limit, **kwargs):
         if not states_seen:  # the first read: every entry is on disk by now
             states_seen.append(
                 self._s.query(AuditLog)
                 .filter(AuditLog.apply_state == "arriving")
                 .count()
             )
-        return real(self, op, after, limit)
+        return real(self, op, after, limit, **kwargs)
 
     repo_cls.arriving_entries = watching  # type: ignore[method-assign]
     tracemalloc.start()
@@ -251,4 +251,242 @@ def test_an_entry_on_the_last_page_holds_the_whole_action_on_disk(pair, authorit
     held = phone.sync_repo.held_entries()
     assert len(held) >= 2_499 and {e.op for e in held} == {entries[0].op}
     assert phone.sync_repo.arriving_action() == (None, False)
+    from civex.db.models import AuditLog
+
+    applied = (
+        phone.sync_repo._s.query(AuditLog)
+        .filter(
+            AuditLog.op_id == uuid.UUID(entries[0].op),
+            AuditLog.apply_state == "applied",
+        )
+        .count()
+    )
+    assert applied == 0  # nothing of the action was applied
     assert Record is not None
+
+
+# -- the indexes are used -----------------------------------------------------
+
+
+def test_the_unsettled_and_action_queries_use_their_partial_indexes(pair, authority):
+    """On SQLite a partial index is used only when the query repeats its
+    condition: ask the database, with the statements the repository sends."""
+    from sqlalchemy import event
+
+    phone = pair[1]
+    repo = phone.sync_repo
+    engine = repo._s.get_bind()
+    seen: list[tuple[str, object]] = []
+
+    def capture(conn, cursor, statement, parameters, context, many):
+        if "audit_log" in statement and not statement.startswith("EXPLAIN"):
+            seen.append((statement, parameters))
+
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        repo.arriving_action()
+        repo.arriving_entries(str(uuid.uuid4()), 0, 500)
+        repo.arriving_entries(str(uuid.uuid4()), 0, 500, state="settling", upto=9)
+        repo.held_entries()
+        repo.set_arriving(str(uuid.uuid4()), ("arriving",), "held")
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+    assert len(seen) >= 5
+    plans = []
+    for statement, parameters in seen[-5:]:
+        rows = (
+            repo._s.connection()
+            .exec_driver_sql("EXPLAIN QUERY PLAN " + statement, parameters)
+            .fetchall()
+        )
+        plans.append(" | ".join(str(r[-1]) for r in rows))
+    for plan in plans:
+        assert "ix_audit_log_unsettled" in plan or "ix_audit_log_op" in plan, plan
+        assert "SCAN audit_log" not in plan.replace("SCAN audit_log USING", ""), plan
+
+
+# -- the half-applied action, a stale decision, and the edges ------------------
+
+
+def test_a_staged_entry_is_never_a_step_of_a_replay(pair, authority):
+    """`_replay` of a thing must not apply the entries of an action that has not
+    all arrived: not as `arriving`, not as `arrhold`."""
+    from civex.db.models import AuditLog
+
+    phone, entries, base = _fake_action(pair, authority, 1_200)
+    _serve(phone, entries, base, page=1_000, stop_after=1)
+    import pytest
+
+    from civex.domain.sync import SyncError
+
+    with pytest.raises(SyncError):
+        phone.sync_svc._pull(phone.sync_svc._transport())
+    phone.commit()
+    repo = phone.sync_repo
+    staged = entries[0]
+    assert repo.arriving_action()[0] == staged.op
+    assert repo.numbered_entries("record", staged.entity_id, 0) == []
+    repo._s.query(AuditLog).filter(AuditLog.hub_seq > base).update(
+        {"apply_state": "arrhold"}
+    )
+    repo._s.flush()
+    assert repo.numbered_entries("record", staged.entity_id, 0) == []
+
+
+def test_a_hold_is_decided_again_at_settle_after_the_person_edited(pair, authority):
+    """The first pass staged an action (nothing of the person's own in the way);
+    before the next pass they edited a record the action touches: a pass pulls
+    before it pushes, so the action must be held, and the edit kept."""
+    laptop, phone, _ = pair
+    phone, entries, base = _fake_action(pair, authority, 1_200)
+    mine = phone.record_svc.add("study", "encounter", {"site": "mine", "depth": 1.0})
+    phone.commit()
+    phone.sync_svc.sync()
+    from dataclasses import replace as _replace
+
+    # an entry on the first page changes `mine` (an update, as the authority has it)
+    base = authority.sync_repo.head_seq()
+    entries = [
+        _replace(e, hub_seq=e.hub_seq + (base - entries[0].hub_seq + 1))
+        for e in entries
+    ]
+    entries[5] = _replace(
+        entries[5], entity_id=mine.id, action="update", new_data={"id": str(mine.id)}
+    )
+    _serve(phone, entries, base, page=1_000, stop_after=1)
+    import pytest
+
+    from civex.domain.sync import SyncError
+
+    with pytest.raises(SyncError):
+        phone.sync_svc._pull(phone.sync_svc._transport())
+    phone.commit()
+    assert phone.sync_repo.arriving_action() == (entries[0].op, False)  # clean so far
+    phone.record_svc.update(str(mine.id), {"depth": 9.0})  # the person edits
+    phone.commit()
+    _serve(phone, entries, base, page=1_000)
+    phone.sync_svc._pull(phone.sync_svc._transport())
+    phone.commit()
+    assert phone.sync_repo.arriving_action() == (None, False)
+    held = phone.sync_repo.held_entries()
+    assert len(held) == 1_200 and {e.op for e in held} == {entries[0].op}
+    assert phone.record_svc.get(str(mine.id)).data["depth"] == 9.0
+
+
+def test_a_resume_with_a_hold_already_decided_holds_the_whole_action(pair, authority):
+    phone, entries, base = _fake_action(pair, authority, 1_200)
+    mine = phone.record_svc.add("study", "encounter", {"site": "mine", "depth": 1.0})
+    phone.commit()
+    phone.sync_svc.sync()
+    from dataclasses import replace as _replace
+
+    shift = authority.sync_repo.head_seq() - entries[0].hub_seq + 1
+    base = authority.sync_repo.head_seq()
+    entries = [_replace(e, hub_seq=e.hub_seq + shift) for e in entries]
+    # an entry on the FIRST page changes `mine`, which has an unsent edit
+    entries[5] = _replace(
+        entries[5], entity_id=mine.id, action="update", new_data={"id": str(mine.id)}
+    )
+    phone.record_svc.update(str(mine.id), {"depth": 9.0})
+    phone.commit()
+    _serve(phone, entries, base, page=1_000, stop_after=1)
+    import pytest
+
+    from civex.domain.sync import SyncError
+
+    with pytest.raises(SyncError):
+        phone.sync_svc._pull(phone.sync_svc._transport())
+    phone.commit()
+    assert phone.sync_repo.arriving_action() == (entries[0].op, True)  # arrhold
+    _serve(phone, entries, base, page=1_000)
+    phone.sync_svc._pull(phone.sync_svc._transport())
+    phone.commit()
+    assert phone.sync_repo.arriving_action() == (None, False)
+    assert len(phone.sync_repo.held_entries()) == 1_200
+    assert phone.record_svc.get(str(mine.id)).data["depth"] == 9.0
+
+
+def test_an_empty_more_page_with_no_progress_ends_the_pull(pair, authority):
+    from civex.domain.sync import FeedPage
+
+    phone, entries, base = _fake_action(pair, authority, 1_200)
+    _serve(phone, entries, base, page=1_000)
+    transport = phone.sync_svc._transport()
+    real = transport.feed
+    calls = {"n": 0}
+
+    def feed(after, limit):
+        calls["n"] += 1
+        assert calls["n"] < 10, "asked again and again"
+        if after >= base + 1_000:
+            return FeedPage([], base + 1_200, more=True, through=None)
+        return real(after, limit)
+
+    transport.feed = feed
+    phone.sync_svc._pull(transport)
+    phone.commit()
+    assert calls["n"] == 2
+    assert phone.sync_repo.arriving_action()[0] == entries[0].op  # still arriving
+    assert phone.sync_repo.meta().cursor == base + 1_000
+
+
+def test_a_page_that_ends_exactly_where_an_action_ends(pair, authority):
+    from dataclasses import replace as _replace
+
+    phone, entries, base = _fake_action(pair, authority, 300)
+    extra = [
+        _replace(
+            e,
+            id=uuid.uuid4(),
+            op=None,
+            hub_seq=base + 301 + i,
+            entity_id=uuid.UUID(int=i + 1),
+            new_data={**(e.new_data or {}), "id": str(uuid.UUID(int=i + 1))},
+        )
+        for i, e in enumerate(entries[:3])
+    ]
+    everything = entries + extra
+    _serve(phone, everything, base, page=300)  # page 1 = the whole action, more
+    phone.sync_svc._pull(phone.sync_svc._transport())
+    phone.commit()
+    assert phone.sync_repo.arriving_action() == (None, False)
+    assert phone.sync_repo.meta().cursor == base + 303
+    from civex.db.models import AuditLog
+
+    states = {
+        s
+        for (s,) in phone.sync_repo._s.query(AuditLog.apply_state)
+        .filter(AuditLog.hub_seq > base)
+        .distinct()
+    }
+    assert states == {"applied"}
+
+
+def test_server_hung_up_works_for_a_descriptor_past_1024():
+    import os
+    import socket
+    import sys
+
+    import pytest
+
+    if sys.platform == "win32":
+        pytest.skip("descriptors are not small integers on Windows")
+    import resource
+
+    from civex.services.http_wire import _server_hung_up
+
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    if hard != resource.RLIM_INFINITY and hard < 1_200:
+        pytest.skip("cannot raise the descriptor limit")
+    resource.setrlimit(resource.RLIMIT_NOFILE, (max(soft, 1_200), hard))
+    a, b = socket.socketpair()
+    high = os.dup2(a.fileno(), 1_100)
+    sock = socket.socket(fileno=high)
+    try:
+        assert sock.fileno() >= 1_024
+        assert _server_hung_up(sock) is False  # nothing to read: still good
+        b.close()  # the other side hangs up
+        assert _server_hung_up(sock) is True
+    finally:
+        sock.close()
+        a.close()
