@@ -20,6 +20,7 @@ from sqlalchemy import (
     and_,
     cast,
     delete,
+    exists,
     func,
     insert,
     or_,
@@ -2252,20 +2253,45 @@ class LocalSyncRepository:
 
     def sequence_local_entries(self) -> int:
         """Authority: number the changes made on this instance itself, in the
-        order they were made, so they join the feed. Returns how many."""
-        rows = (
-            self._s.query(AuditLog)
-            .filter(
-                AuditLog.hub_seq.is_(None), AuditLog.sync_state == "pending", _SYNCED
-            )
-            .order_by(*_WRITE_ORDER)
-            .all()
+        order they were made, so they join the feed. Returns how many.
+
+        The feed's counter is taken first, then the pending rows are counted:
+        a caller that waited for the lock finds the one before it already
+        numbered them and has nothing left to do (selecting first would have
+        every waiter number the same rows again). The numbering is one
+        statement in the database (`row_number()` over the write order), so no
+        row, and none of its JSON, is loaded and the counter moves once."""
+        pending = (
+            AuditLog.hub_seq.is_(None),
+            AuditLog.sync_state == "pending",
+            _SYNCED,
         )
-        for row in rows:
-            row.hub_seq = self.next_hub_seq()
-            row.sync_state = "synced"
         self._s.flush()
-        return len(rows)
+        if not self._s.query(exists().where(*pending)).scalar():
+            return 0  # the common case: nothing to number, nothing locked
+        self.lock_feed()
+        count = self._s.execute(
+            select(func.count()).select_from(AuditLog).where(*pending)
+        ).scalar_one()
+        if not count:
+            return 0
+        first = self.reserve_hub_seqs(count)
+        order = (
+            select(
+                AuditLog.id.label("id"),
+                func.row_number().over(order_by=_WRITE_ORDER).label("n"),
+            )
+            .where(*pending)
+            .subquery()
+        )
+        self._s.execute(
+            update(AuditLog)
+            .where(AuditLog.id == order.c.id)
+            .values(hub_seq=order.c.n + (first - 1), sync_state="synced")
+            .execution_options(synchronize_session=False)
+        )
+        self._s.expire_all()
+        return int(count)
 
     def entries_after(self, seq: int, limit: int) -> tuple[list[SyncEntry], bool]:
         """Numbered entries past `seq`, in order, and whether more follow. A
