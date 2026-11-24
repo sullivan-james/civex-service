@@ -6,6 +6,7 @@ of them (see civex.domain.query)."""
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import HTTPException, Query
@@ -79,6 +80,16 @@ def record_query(
         '{"and": [{"field": "status", "op": "eq", "value": "active"}, '
         '{"schema": "selection", "field": "selection_table", "op": "is_null"}]}',
     ),
+    created_after: Optional[datetime] = Query(
+        default=None,
+        description="Only records added at or after this instant (ISO 8601; "
+        "no offset means UTC).",
+    ),
+    created_before: Optional[datetime] = Query(
+        default=None,
+        description="Only records added before this instant (ISO 8601; no "
+        "offset means UTC).",
+    ),
     sort: list[str] = Query(
         default=[],
         description="Repeatable '[schema.]field[:asc|desc]'. Nulls sort last "
@@ -99,5 +110,7 @@ def record_query(
         search_fields=search_field or None,
         where=where,
         filter_tree=tree,
+        created_after=created_after,
+        created_before=created_before,
         sort=_parse_sort(sort),
     )

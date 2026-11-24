@@ -59,6 +59,7 @@ from typing import Any, Callable, Iterator
 from civex import __version__
 from civex.domain import permissions
 from civex.domain import release as rules
+from civex.domain.release import ReleaseScope
 from civex.domain import bundle as spec
 from civex.domain.bundle import EXTENSION, BundleFiles, ExportOptions, Manifest
 from civex.domain.dtos import ReleaseDTO
@@ -69,7 +70,6 @@ from civex.domain.exceptions import (
 )
 from civex.domain.file_access import FilePlan, FileSelection
 from civex.domain.permissions import EVERYTHING, Permissions
-from civex.domain.query import RecordQuery
 from civex.domain.transfers import KIND_FILES, MAX_TRANSFER_FILES, TransferSpec
 from civex.repositories.protocols import (
     AuditRepository,
@@ -81,84 +81,20 @@ from civex.services.bundle_service import BundleService
 from civex.services.progress import Progress
 
 # The RecordQuery fields a release's scope may hold (`sort` is not a scope).
-_QUERY_FIELDS = (
-    "dataset",
-    "schema",
-    "within",
-    "parent_record_id",
-    "filter_tree",
-    "where",
-    "search",
-    "search_fields",
-)
 # What a folder of a release's files carries beside them.
 BAG_MANIFEST = "manifest-sha256.txt"
 
 
-@dataclass
-class ReleaseScope:
-    """What a release covers: the whole project (none set), these collections
-    (by name), the records a query lists, or exactly these records (by id);
-    with the records above them, so it reads in whole, and with `below`
-    everything inside them too (a chosen Encounter with its Recordings). A
-    release made before `below` existed has none: it covers what it covered."""
-
-    collections: list[str] | None = None
-    query: RecordQuery | None = None
-    records: list[str] | None = None
-    below: bool = False
-
-    def __post_init__(self) -> None:
-        if self.collections is not None and not self.collections:
-            self.collections = None
-        if self.records is not None and not self.records:
-            raise ValidationError("Choose at least one record to release")
-        chosen = (self.collections, self.query, self.records)
-        if sum(x is not None for x in chosen) > 1:
-            raise ValidationError(
-                "A release covers some collections, a query's records or some "
-                "records: one of them"
-            )
-
-    def to_dict(self) -> dict[str, Any]:
-        if self.collections:
-            return {"collections": list(self.collections)}
-        inside = {"below": True} if self.below else {}
-        if self.records:
-            return {"records": list(self.records)} | inside
-        if self.query is not None:
-            return {
-                "query": {
-                    k: v
-                    for k in _QUERY_FIELDS
-                    if (v := getattr(self.query, k)) not in (None, [], "")
-                }
-            } | inside
-        return {}
-
-    @classmethod
-    def from_dict(cls, raw: dict[str, Any] | None) -> "ReleaseScope":
-        raw = raw or {}
-        if raw.get("collections"):
-            return cls(collections=[str(c) for c in raw["collections"]])
-        below = bool(raw.get("below"))
-        if raw.get("records"):
-            return cls(records=[str(r) for r in raw["records"]], below=below)
-        if isinstance(raw.get("query"), dict):
-            q = {k: v for k, v in raw["query"].items() if k in _QUERY_FIELDS}
-            return cls(query=RecordQuery(**q), below=below)
-        return cls()
-
-    def options(self, include_workflows: bool) -> ExportOptions:
-        return ExportOptions(
-            include_records=True,
-            include_files=False,
-            include_workflows=include_workflows,
-            collections=self.collections,
-            query=self.query,
-            record_ids=self.records,
-            below=self.below,
-        )
+def scope_options(scope: ReleaseScope, include_workflows: bool) -> ExportOptions:
+    return ExportOptions(
+        include_records=True,
+        include_files=False,
+        include_workflows=include_workflows,
+        collections=scope.collections,
+        query=scope.query,
+        record_ids=scope.records,
+        below=scope.below,
+    )
 
 
 @dataclass
@@ -358,7 +294,7 @@ class ReleaseService:
         count can't disagree with the release), from the catalog."""
         self._permissions.require_somewhere(permissions.READ)
         scope = scope or ReleaseScope()
-        counted = self._bundles.plan_export(scope.options(include_workflows))
+        counted = self._bundles.plan_export(scope_options(scope, include_workflows))
         collections, ids = self._owners(scope)
         names = self._collections()
         per = self._repo.records_per_collection(collections, ids)
@@ -472,7 +408,7 @@ class ReleaseService:
         with tempfile.TemporaryDirectory(prefix="civex-release-") as tmp:
             path = Path(tmp) / self.file_name_for(name)
             plan = self._bundles.export(
-                path, scope.options(include_workflows), progress
+                path, scope_options(scope, include_workflows), progress
             )
             written = self._bundles.written_ids
             structure = self.structure()
@@ -1115,7 +1051,7 @@ class ReleaseService:
                 raise NotFoundError(f"Collection '{missing[0]}' not found")
             return [names[n] for n in scope.collections], None
         if walk and (scope.query is not None or scope.records is not None):
-            self._bundles.plan_export(scope.options(False))
+            self._bundles.plan_export(scope_options(scope, False))
             return None, list(self._bundles.written_ids or [])
         return None, None
 

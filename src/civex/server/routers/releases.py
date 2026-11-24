@@ -33,7 +33,7 @@ from civex.domain.file_access import (
 from civex.domain.features import OPEN_FOLDER, SERVER_PATH_EXPORT
 from civex.server.deps import get_ctx, reads_whole_project, requires
 from civex.server.downloads import new_temp_dir, serve, temp_paths
-from civex.server.models import RecordQueryRequest
+from civex.server.models import ReleaseScopeRequest
 from civex.server.routers.file_access import (
     _from_this_machine,
     _unreachable,
@@ -42,45 +42,10 @@ from civex.server.routers.file_access import (
 from civex.services.archive import build_download
 from civex.services.progress import Progress
 from civex.services.record_service import MAX_ZIP_FILE_COUNT, MAX_ZIP_TOTAL_SIZE
-from civex.services.release_service import COMPARE_INLINE_MAX, ReleaseScope
+from civex.services.release_service import COMPARE_INLINE_MAX
 from civex.services.transfer_jobs import jobs
 
 router = APIRouter(tags=["releases"], dependencies=[reads_whole_project()])
-
-
-class ReleaseScopeRequest(BaseModel):
-    collections: list[str] | None = Field(
-        default=None,
-        description="Only these collections (by name). Leave out, with no query, for the whole project.",
-    )
-    query: RecordQueryRequest | None = Field(
-        default=None,
-        description="Only the records this query lists, and the records above them.",
-    )
-    records: list[str] | None = Field(
-        default=None,
-        description="Exactly these records (by id), and the records above them.",
-    )
-    below: bool = Field(
-        default=True,
-        description="With `query` or `records`: also every record inside the "
-        "ones chosen (an encounter with its recordings). False takes only the "
-        "records chosen and those above them.",
-    )
-    include_workflows: bool = Field(
-        default=False,
-        description="Also carry the project's workflows and plugins (their "
-        "code). Left out unless asked for: a release is of the data, and code "
-        "may not be yours to publish.",
-    )
-
-    def scope(self) -> ReleaseScope:
-        return ReleaseScope(
-            collections=self.collections or None,
-            query=self.query.to_query() if self.query else None,
-            records=self.records or None,
-            below=self.below and bool(self.query or self.records),
-        )
 
 
 class AuthorModel(BaseModel):

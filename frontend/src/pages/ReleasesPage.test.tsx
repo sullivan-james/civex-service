@@ -1,13 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { ToastProvider } from '../components/ui/ToastProvider'
-import { fakeServer, json } from '../components/files/testSupport'
+import { fakeServer } from '../components/files/testSupport'
 import type { Release } from '../api/releases'
 import ReleasesPage from './ReleasesPage'
 import ReleasePage from './ReleasePage'
-import NewReleasePage from './NewReleasePage'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -41,20 +40,6 @@ const RELEASE: Release = {
   compare_in_background: false,
 }
 
-const PLAN = {
-  schemas: 2,
-  collections: { north: 12 },
-  records: 12,
-  files: 3,
-  file_bytes: 1024,
-  by_drive: [{ volume: 'default', files: 3, bytes: 1024 }],
-  workflows: 0,
-  plugins: 0,
-  feed_seq: null,
-  local_seq: 40,
-  unsent: 0,
-}
-
 const CITATION = {
   text: 'Ada Lovelace (2026). Seal survey (Version v1) [Data set].',
   bibtex: '@misc{Lovelace2026v1}',
@@ -70,7 +55,6 @@ function renderAt(url: string, routes: Record<string, unknown>) {
         <MemoryRouter initialEntries={[url]}>
           <Routes>
             <Route path="/releases" element={<ReleasesPage />} />
-            <Route path="/releases/new" element={<NewReleasePage />} />
             <Route path="/releases/:name" element={<ReleasePage />} />
           </Routes>
         </MemoryRouter>
@@ -81,67 +65,10 @@ function renderAt(url: string, routes: Record<string, unknown>) {
 }
 
 describe('the Releases page', () => {
-  it('lists releases and links to a page that makes one', async () => {
+  it('lists releases and offers no way to make one', async () => {
     renderAt('/releases', { '/api/releases': [RELEASE] })
     expect(await screen.findByText('Seal survey')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'New release' })).toHaveAttribute(
-      'href',
-      '/releases/new',
-    )
-  })
-})
-
-describe('making a release', () => {
-  it('plans what it covers, previews the citation, then makes it', async () => {
-    const calls = renderAt('/releases/new?records=r1,r2', {
-      '/api/releases/plan': PLAN,
-      '/api/releases/citation-preview': CITATION,
-      '/api/releases': (_b: unknown, method: string) =>
-        json(method === 'POST' ? RELEASE : [RELEASE]),
-      '/api/collections': [],
-    })
-    // The explorer's ticked records are what it covers.
-    expect(await screen.findByTestId('release-plan')).toHaveTextContent(
-      '12 records',
-    )
-    expect(
-      calls.find((c) => c.path === '/api/releases/plan')?.body.records,
-    ).toEqual(['r1', 'r2'])
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
-
-    const next = screen.getByRole('button', { name: 'Next' })
-    expect(next).toBeDisabled()
-    fireEvent.change(screen.getByPlaceholderText('v1'), {
-      target: { value: 'v2' },
-    })
-    fireEvent.change(screen.getByLabelText(/Title/), {
-      target: { value: 'Second' },
-    })
-    fireEvent.change(screen.getByPlaceholderText('Ada Lovelace'), {
-      target: { value: 'Bo Li' },
-    })
-    await waitFor(
-      () =>
-        expect(screen.getByTestId('citation-preview')).toHaveTextContent(
-          'Seal survey (Version v1)',
-        ),
-      { timeout: 2000 },
-    )
-    fireEvent.click(next)
-
-    expect(await screen.findByText(/Taken at history entry 40/)).toBeVisible()
-    fireEvent.click(screen.getByRole('button', { name: 'Make release' }))
-    await waitFor(() =>
-      expect(
-        calls.find((c) => c.path === '/api/releases' && c.method === 'POST')
-          ?.body,
-      ).toMatchObject({
-        name: 'v2',
-        title: 'Second',
-        records: ['r1', 'r2'],
-        authors: [{ name: 'Bo Li' }],
-      }),
-    )
+    expect(screen.queryByText('New release')).not.toBeInTheDocument()
   })
 })
 

@@ -73,25 +73,6 @@ export interface ReleaseMetadata {
   keywords?: string[]
 }
 
-/** What a release of a scope would hold, from the catalog (nothing is read
- * from a drive): records per collection, the files they cite by drive, and
- * the history position it would be taken at. */
-export interface ReleasePlan {
-  records: number
-  collections: Record<string, number>
-  schemas: number
-  files: number
-  file_bytes: number
-  /** Where the cited files are; `volume` null for ones not on this computer. */
-  by_drive: { volume: string | null; files: number; bytes: number }[]
-  workflows: number
-  plugins: number
-  feed_seq: number | null
-  local_seq: number
-  /** Changes the server hasn't got: a release can't be made while any wait. */
-  unsent: number
-}
-
 /** What yanking would give up, counted by the clean-up's own rule. */
 export interface YankPlan {
   name: string
@@ -104,11 +85,6 @@ export interface YankPlan {
 export interface ReleaseFilePlan extends FilePlanSummary {
   /** Small enough to download as one zip. */
   zip_allowed: boolean
-}
-
-export interface ReleaseCreateBody extends ReleaseScopeBody, ReleaseMetadata {
-  name: string
-  title: string
 }
 
 export interface ReleaseCitation {
@@ -178,13 +154,6 @@ const at = (name: string) => `/releases/${encodeURIComponent(name)}`
 export const releasesApi = {
   list: () => api.get<Release[]>('/releases'),
   get: (name: string) => api.get<Release>(at(name)),
-  plan: (body: ReleaseScopeBody) =>
-    api.post<ReleasePlan>('/releases/plan', body),
-  /** How a release with these details would be cited, before it is made. */
-  preview: (body: ReleaseMetadata & { name: string }) =>
-    api.post<ReleaseCitation>('/releases/citation-preview', body),
-  create: (body: ReleaseCreateBody, progressId?: string) =>
-    api.post<Release>('/releases', body, progressHeaders(progressId)),
   correct: (name: string, body: ReleaseMetadata) =>
     api.patch<Release>(at(name), body),
   withdraw: (name: string, reason: string) =>

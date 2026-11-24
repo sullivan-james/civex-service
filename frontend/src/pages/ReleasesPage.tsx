@@ -1,7 +1,6 @@
 import type { Release } from '../api/releases'
 import {
   Badge,
-  Button,
   DataTable,
   ListToolbar,
   Page,
@@ -9,7 +8,6 @@ import {
   type DataTableColumn,
 } from '../components/ui'
 import { useListParams } from '../hooks/useListParams'
-import { usePermissions } from '../hooks/useMe'
 import { useReleases } from '../hooks/useReleases'
 import { errorMessage } from '../lib/errors'
 
@@ -19,12 +17,11 @@ const stateOf = (r: Release) =>
 const releaseHref = (r: Pick<Release, 'name'>) =>
   `/releases/${encodeURIComponent(r.name)}`
 
-/** Every release, newest first, with a search held in the address; New
- * release opens its own page, which plans before it makes. */
+/** Every release, newest first, with a search held in the address. Making
+ * one is the host's to offer (`onRelease` of the embed). */
 export default function ReleasesPage() {
   const { data, isLoading, error } = useReleases()
   const list = useListParams('', ['state'])
-  const { can, why } = usePermissions()
 
   const wanted = list.q.trim().toLowerCase()
   const matching = (data ?? []).filter(
@@ -72,17 +69,6 @@ export default function ReleasesPage() {
     <Page
       title="Releases"
       info="A release freezes the records with a version, a citation and a content hash, and keeps the files they cite where they are, so a paper can say exactly which data it used and the data can be had back later, however the project has moved on."
-      action={
-        can('release') ? (
-          <Button variant="primary" to="/releases/new">
-            New release
-          </Button>
-        ) : (
-          <Button variant="primary" disabled title={why('release')}>
-            New release
-          </Button>
-        )
-      }
     >
       <div className="space-y-3">
         <ListToolbar
