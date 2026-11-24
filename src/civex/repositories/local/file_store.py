@@ -46,7 +46,11 @@ from typing import (
 
 from civex import file_modes, fs_locations
 from civex.repositories.local import inventory
-from civex.processes import pid_alive, process_start_token
+from civex.processes import (
+    pid_alive,
+    process_namespace,
+    process_start_token,
+)
 from civex.config import StoreConfig, VolumeConfig
 from civex.domain.dtos import (
     VOLUME_OFFLINE,
@@ -177,17 +181,23 @@ _OWNER: dict[int, str] = {}
 
 
 def _owner_string() -> str:
-    """Who holds a lock or marker: this process's id and start time."""
+    """Who holds a lock or marker: this process's id, its start time and the
+    namespace its id is in (`pid|start|namespace`)."""
     pid = os.getpid()
     if pid not in _OWNER:
-        _OWNER[pid] = f"{pid}:{process_start_token(pid) or ''}"
+        _OWNER[pid] = f"{pid}|{process_start_token(pid) or ''}|{process_namespace()}"
     return _OWNER[pid]
 
 
 def _owner_alive(owner: str) -> bool:
     """Whether the process `owner` names is still the one running: its id is in
-    use and, where its start time can be read, is the same one."""
-    pid_text, _, token = owner.partition(":")
+    use and, where its start time can be read, is the same one. An owner from
+    another pid namespace or host (containers sharing a volume) cannot be
+    judged from here: it counts as alive, and only the age cutoff frees it."""
+    pid_text, _, rest = owner.partition("|")
+    token, _, namespace = rest.partition("|")
+    if namespace and namespace != process_namespace():
+        return True
     try:
         pid = int(pid_text)
     except ValueError:

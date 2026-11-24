@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
+import time
 import threading
 from pathlib import Path
 
@@ -241,7 +243,7 @@ def test_a_lock_with_a_live_pid_but_another_start_time_is_stale(store):
 
     lock = store._upload_lock_path(SHA)
     lock.parent.mkdir(parents=True, exist_ok=True)
-    lock.write_text(f"{os.getpid()}:not-the-start-time-of-this-process")
+    lock.write_text(f"{os.getpid()}|not-the-start-time-of-this-process")
     assert store._upload_lock_abandoned(lock)
     with store._upload_lock(SHA):  # taken over, no wait
         pass
@@ -260,7 +262,7 @@ def test_a_lock_of_this_very_process_is_live(store):
 def test_waiters_taking_over_one_stale_lock_never_hold_it_together(store):
     lock = store._upload_lock_path(SHA)
     lock.parent.mkdir(parents=True, exist_ok=True)
-    lock.write_text("999999999:old")
+    lock.write_text("999999999|old")
     inside = {"now": 0, "max": 0, "done": 0}
     guard = threading.Lock()
 
@@ -281,3 +283,23 @@ def test_waiters_taking_over_one_stale_lock_never_hold_it_together(store):
         t.join(timeout=30)
     assert inside["done"] == 8 and inside["max"] == 1
     assert not lock.exists()
+
+
+def test_an_owner_in_another_pid_namespace_is_alive_until_the_age_cutoff(store):
+    """Containers sharing a volume all run pid 1: a lock naming pid 1 of
+    another namespace says nothing about this one's pid 1."""
+    from civex.processes import process_namespace
+    from civex.repositories.local.file_store import _owner_alive
+
+    assert _owner_alive("1|other-start|some-other-namespace")
+    assert _owner_alive("999999999||some-other-namespace")  # not judged from here
+    mine = process_namespace()
+    assert not _owner_alive(f"999999999||{mine}")  # this namespace: gone
+    assert not _owner_alive(f"{os.getpid()}|wrong-start|{mine}")
+    lock = store._upload_lock_path(SHA)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("1|x|some-other-namespace")
+    assert not store._upload_lock_abandoned(lock)  # young: left alone
+    old = time.time() - 7 * 3600
+    os.utime(lock, (old, old))
+    assert store._upload_lock_abandoned(lock)  # past the age cutoff

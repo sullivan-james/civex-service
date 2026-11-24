@@ -87,6 +87,23 @@ def process_start_token(pid: int) -> str | None:
         return None
 
 
+def process_namespace() -> str:
+    """Where process ids mean something: containers that share a volume each
+    have their own (all run pid 1), so a process id found in a lock on it says
+    nothing about a process of another. Linux: the pid namespace and the boot;
+    elsewhere the host name."""
+    try:
+        if sys.platform.startswith("linux"):
+            with open("/proc/sys/kernel/random/boot_id") as f:
+                boot = f.read().strip()
+            return f"{os.stat('/proc/self/ns/pid').st_ino}-{boot}"
+    except OSError:
+        pass
+    import socket
+
+    return socket.gethostname()
+
+
 def no_window_kwargs() -> dict[str, Any]:
     """`Popen` arguments that keep a console program from opening a window of
     its own on Windows. A program started from one with no console (the

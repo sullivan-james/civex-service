@@ -453,3 +453,68 @@ def test_postgres_numbering_runs_without_the_statement_timeout(tmp_path):
         assert seen == ["0"]
         shown = pg._session.execute(text("SHOW statement_timeout")).scalar_one()
         assert shown == "15s"
+
+
+def test_push_body_is_read_before_any_database_connection_is_used(serving, monkeypatch):
+    """A slow upload must not keep a connection idle in a transaction: the body
+    is read (still compressed) first, then the caller is authenticated, then
+    inflated."""
+    from civex.server import deps
+
+    client, headers = serving
+    events: list[str] = []
+    real_read = sync_policy._read_chunks
+    real_build = deps._build_context_with_recovery
+    real_inflate = sync_policy.inflate
+
+    async def reading(request):
+        events.append("body")
+        return await real_read(request)
+
+    def building(*a, **k):
+        events.append("connection")
+        return real_build(*a, **k)
+
+    def inflating(chunks, cap):
+        events.append("inflate")
+        return real_inflate(chunks, cap)
+
+    monkeypatch.setattr(sync_policy, "_read_chunks", reading)
+    monkeypatch.setattr(deps, "_build_context_with_recovery", building)
+    monkeypatch.setattr(sync_policy, "inflate", inflating)
+    reply = client.post(
+        "/api/sync/v1/push",
+        content=_gz({"entries": []}),
+        headers=headers
+        | {"Content-Encoding": "gzip", "Content-Type": "application/json"},
+    )
+    assert reply.status_code == 200
+    assert events == ["body", "connection", "inflate"], events
+
+
+@pytest.mark.skipif(not _PG, reason="CIVEX_TEST_POSTGRES_URL not set")
+def test_postgres_a_failed_numbering_reports_its_own_error(tmp_path):
+    """After the UPDATE failed the transaction is aborted: putting the timeout
+    back would raise "current transaction is aborted" over the real error (a
+    deadlock or lock timeout, which is a 503)."""
+    from sqlalchemy import event
+
+    from .test_postgres_authority import _pg_authority
+
+    for pg in _pg_authority(tmp_path):
+        pg.schema_svc.create("needs_a_number")
+        pg.commit()
+        engine = pg._session.get_bind()
+
+        def fail(conn, cursor, statement, parameters, context, executemany):
+            if statement.lstrip().upper().startswith("UPDATE AUDIT_LOG"):
+                cursor.execute("SELECT 1/0")
+
+        event.listen(engine, "before_cursor_execute", fail)
+        try:
+            with pytest.raises(Exception) as caught:
+                pg.sync_repo.sequence_local_entries()
+        finally:
+            event.remove(engine, "before_cursor_execute", fail)
+        assert "division by zero" in str(caught.value).lower()
+        pg._session.rollback()

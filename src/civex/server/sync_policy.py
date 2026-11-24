@@ -164,10 +164,8 @@ def _encoded(request: Request) -> bool:
     )
 
 
-async def read_json_body(request: Request) -> bytes | bytearray:
-    """The JSON body of a request that takes a gzip one, read by the route
-    itself, after the caller is authenticated (a dependency): the compressed
-    bytes are capped as they arrive, the inflating runs in a thread."""
+async def _read_chunks(request: Request) -> list[bytes]:
+    """The body as it arrives (still compressed), capped."""
     cap = max_request_bytes()
     chunks: list[bytes] = []
     size = 0
@@ -176,6 +174,29 @@ async def read_json_body(request: Request) -> bytes | bytearray:
         if size > cap:
             raise _too_large(cap)
         chunks.append(chunk)
+    return chunks
+
+
+async def prefetch_body(request: Request) -> None:
+    """Router-level dependency, the first of them: a route that takes a body
+    of its own (`push`) has it read here, before anything holds a database
+    connection, so a slow upload never keeps one idle in a transaction. The
+    bytes are read as they were sent (compressed): nothing is inflated, and
+    nothing is read for a caller nobody has authenticated yet beyond what the
+    server read of any request body before."""
+    route = request.scope.get("route")
+    if getattr(route, "name", "") in GZIP_BODY_ROUTES:
+        request.state.sync_body = await _read_chunks(request)
+
+
+async def read_json_body(request: Request) -> bytes | bytearray:
+    """The JSON body of a request that takes a gzip one (read by
+    `prefetch_body`), once the caller is authenticated: the inflating runs in
+    a thread, up to the cap."""
+    cap = max_request_bytes()
+    chunks = getattr(request.state, "sync_body", None)
+    if chunks is None:
+        chunks = await _read_chunks(request)
     if not _encoded(request):
         return b"".join(chunks)
     encoding = request.headers.get("content-encoding", "").strip().lower()

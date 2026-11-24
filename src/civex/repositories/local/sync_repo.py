@@ -2267,12 +2267,13 @@ class LocalSyncRepository:
             return
         was: str = self._s.execute(text("SHOW statement_timeout")).scalar_one()
         self._s.execute(text("SET LOCAL statement_timeout = 0"))
-        try:
-            yield
-        finally:
-            self._s.execute(
-                text("SELECT set_config('statement_timeout', :v, true)"), {"v": was}
-            )
+        yield
+        # Only when the statement went through: after a failure the transaction
+        # is aborted, and one more statement would hide the real error (a lock
+        # timeout, a deadlock) behind "current transaction is aborted".
+        self._s.execute(
+            text("SELECT set_config('statement_timeout', :v, true)"), {"v": was}
+        )
 
     def sequence_local_entries(self) -> int:
         """Authority: number the changes made on this instance itself, in the
