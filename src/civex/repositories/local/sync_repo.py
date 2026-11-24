@@ -2215,6 +2215,49 @@ class LocalSyncRepository:
         )
         return self._entries(rows)
 
+    # An action cut across feed pages is kept on disk as it arrives, in state
+    # `arriving` (nothing seen to hold it so far) or `arrhold` (some entry of it
+    # must wait for a push of this device's own), until its last entry has
+    # arrived and it is applied or held whole.
+    def arriving_action(self) -> tuple[str | None, bool]:
+        """The action still arriving (its `op`) and whether it is to be held,
+        or (None, False). A lookup, not a scan: see `ix_audit_log_unsettled`."""
+        row = (
+            self._s.query(AuditLog.op_id, AuditLog.apply_state)
+            .filter(AuditLog.apply_state.in_(("arriving", "arrhold")))
+            .limit(1)
+            .first()
+        )
+        if row is None or row[0] is None:
+            return None, False
+        return str(row[0]), row[1] == "arrhold"
+
+    def arriving_entries(self, op: str, after: int, limit: int) -> list[SyncEntry]:
+        """The next `limit` entries of an arriving action past number `after`."""
+        rows = (
+            self._s.query(AuditLog)
+            .filter(
+                AuditLog.op_id == uuid.UUID(op),
+                AuditLog.apply_state == "arriving",
+                AuditLog.hub_seq > after,
+            )
+            .order_by(AuditLog.hub_seq)
+            .limit(limit)
+            .all()
+        )
+        entries = self._entries(rows)
+        return entries
+
+    def set_arriving(self, op: str, was: tuple[str, ...], now: str) -> None:
+        """Move every entry of an arriving action from state `was` to `now`."""
+        self._s.execute(
+            update(AuditLog)
+            .where(AuditLog.op_id == uuid.UUID(op), AuditLog.apply_state.in_(was))
+            .values(apply_state=now)
+            .execution_options(synchronize_session=False)
+        )
+        self._s.expire_all()
+
     def mark_applied(self, entry_ids: list[uuid.UUID]) -> None:
         if entry_ids:
             self._s.execute(

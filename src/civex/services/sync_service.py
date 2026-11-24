@@ -1416,47 +1416,46 @@ class SyncService:
         dirty = self._catch_up()
         cursor = self._repo.meta().cursor
         applied = 0
-        # Where the next page is asked from, and the tail of an action the last
-        # page ended inside: not applied until the action's last entry has
-        # arrived and the decision to hold it or not is made for all of it
-        # (the stored cursor stays before it, so a stop re-reads it).
-        fetch_after = cursor
-        carried: list[SyncEntry] = []
+        # An action cut across pages is kept on disk as it arrives (state
+        # `arriving`, or `arrhold` once any entry of it must wait), and the
+        # cursor goes past it: nothing is held in memory, and a stop picks up
+        # where it was. Its fate (applied whole, or held whole) is decided when
+        # its last entry has arrived.
+        arriving, to_hold = self._repo.arriving_action()
         while True:
-            page = transport.feed(fetch_after, FEED_PAGE)
-            entries = carried + list(page.entries)
-            carried = []
-            if entries and entries[-1].hub_seq is None:
-                raise SyncError("The server sent a change without a number")
-            fetch_before = fetch_after
-            if entries:
-                fetch_after = entries[-1].hub_seq or fetch_after
+            page = transport.feed(cursor, FEED_PAGE)
+            entries = list(page.entries)
+            # The trailing run of one action, when the page may end inside it.
+            tail = len(entries)
             if page.more and entries and entries[-1].op:
-                op = entries[-1].op
-                cut = len(entries)
-                while cut > 0 and entries[cut - 1].op == op:
-                    cut -= 1
-                carried, entries = entries[cut:], entries[:cut]
-            if (
-                page.more
-                and fetch_after == fetch_before
-                and not (page.through or 0) > fetch_before
-            ):
+                while tail > 0 and entries[tail - 1].op == entries[-1].op:
+                    tail -= 1
+            if page.more and not entries and not (page.through or 0) > cursor:
                 return applied  # no progress: asking again would repeat itself
-            if not entries and carried:
-                continue  # one action still arriving: nothing to settle yet
             # An action is taken whole or held whole: if one of its entries
             # must wait for a push of this device's own, every entry of it
             # waits with that one (a tree moved to another collection can't
             # be half moved: a child's collection is its parent's).
             above = self._above_dirty(dirty)
-            waiting = {e.op for e in entries if e.op and self._waits(e, dirty, above)}
+            waiting = {
+                e.op
+                for i, e in enumerate(entries)
+                if e.op
+                and i < tail
+                and e.op != arriving
+                and self._waits(e, dirty, above)
+            }
             touched: list[uuid.UUID] = []
+            settled = False
             try:
                 with self._repo.savepoint():
-                    for entry in entries:
+                    for i, entry in enumerate(entries):
                         if entry.hub_seq is None:
                             raise SyncError("The server sent a change without a number")
+                        if arriving is not None and entry.op != arriving:
+                            self._settle_arriving(arriving, to_hold)
+                            arriving, to_hold = None, False
+                            settled = True
                         if entry.entity_type in NOT_SYNCED_KINDS:
                             # An authority on protocol 5 or older still feeds
                             # releases: they are never taken (published on a
@@ -1466,6 +1465,10 @@ class SyncService:
                             # Ours, now numbered, and stamped with the device
                             # it came through.
                             self._repo.mark_seq(entry.id, entry.hub_seq, entry.device)
+                        elif entry.op and (entry.op == arriving or i >= tail):
+                            arriving = entry.op
+                            to_hold = self._stage(entry, dirty, above, to_hold)
+                            applied += 1
                         else:
                             self._take(
                                 entry,
@@ -1477,14 +1480,14 @@ class SyncService:
                             if entry.entity_type == "record":
                                 touched.append(entry.entity_id)
                         cursor = entry.hub_seq
+                    if arriving is not None and not page.more:
+                        self._settle_arriving(arriving, to_hold)
+                        arriving, to_hold = None, False
+                        settled = True
                     # The server may have looked past changes it did not send
                     # (ones this device may not see): the cursor goes where it
                     # got to, or they would be read again at every sync.
-                    if (
-                        page.through is not None
-                        and page.through > cursor
-                        and not carried
-                    ):
+                    if page.through is not None and page.through > cursor:
                         cursor = page.through
                     # A collection that came in the feed is one this device
                     # holds: it is not read again when the next hello lists it.
@@ -1497,13 +1500,12 @@ class SyncService:
                     if known is not None:
                         self._repo.set_readable(known | born)
                     self._repo.set_cursor(cursor)
-                    fetch_after = max(fetch_after, cursor)
                     # What this page settled may have freed a held change (a
                     # parent's move held while a child's change was unsent,
                     # the child now settled by this page): it goes in with the
                     # page, in the same transaction, since a child in another
                     # collection than its parent is refused at commit.
-                    if touched:
+                    if touched or settled:
                         self._replay_held(dirty)
                     if (
                         not page.more
@@ -1523,6 +1525,53 @@ class SyncService:
             self._commit()
             if not page.more:
                 return applied
+
+    def _stage(
+        self,
+        entry: SyncEntry,
+        dirty: set[tuple[str, uuid.UUID]],
+        above: set[uuid.UUID],
+        to_hold: bool,
+    ) -> bool:
+        """Keep an entry of an action that is still arriving, on disk and not
+        applied. The first entry that must wait for a push of this device's
+        own turns the whole action (what has arrived, and what will) to
+        `arrhold`. Answers whether the action is to be held."""
+        assert entry.op
+        if not to_hold and not entry.superseded and self._waits(entry, dirty, above):
+            self._repo.set_arriving(entry.op, ("arriving",), "arrhold")
+            to_hold = True
+        state = (
+            "superseded" if entry.superseded else "arrhold" if to_hold else "arriving"
+        )
+        self._repo.insert_entry(entry, hub_seq=entry.hub_seq, apply_state=state)
+        return to_hold
+
+    def _settle_arriving(self, op: str, to_hold: bool) -> None:
+        """An action's last entry has arrived: hold it whole (it stays in the
+        held store, `_replay_held` applies it once nothing of this device's own
+        keeps it waiting) or apply it whole, a chunk of entries at a time from
+        disk. One transaction: a child in another collection than its parent is
+        refused at commit, so it can't be applied in steps that commit."""
+        if to_hold:
+            self._repo.set_arriving(op, ("arrhold",), "held")
+            return
+        try:
+            with self._repo.savepoint():
+                after = 0
+                while chunk := self._repo.arriving_entries(op, after, 500):
+                    for e in chunk:
+                        self._replay((e.entity_type, e.entity_id), e.hub_seq or 0)
+                    after = chunk[-1].hub_seq or after
+                after = 0
+                while chunk := self._repo.arriving_entries(op, after, 500):
+                    ids = [e.entity_id for e in chunk if e.entity_type == "record"]
+                    if ids and self._records.placement_mismatches(ids):
+                        raise _NotYet()
+                    after = chunk[-1].hub_seq or after
+                self._repo.set_arriving(op, ("arriving",), "applied")
+        except _NotYet:
+            self._repo.set_arriving(op, ("arriving",), "held")
 
     def _above_dirty(self, dirty: set[tuple[str, uuid.UUID]]) -> set[uuid.UUID]:
         """Every record here that an unsent change is to or beneath: those

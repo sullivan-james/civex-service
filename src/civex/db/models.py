@@ -566,6 +566,15 @@ class AuditLog(Base):
             postgresql_where=text("sync_state = 'seeding'"),
             sqlite_where=text("sync_state = 'seeding'"),
         ),
+        # The changes from the authority not settled yet (held for a push, or
+        # an action still arriving): almost always none, so asking is a lookup
+        # (migration e8c1b4d7a925).
+        Index(
+            "ix_audit_log_unsettled",
+            "hub_seq",
+            postgresql_where=text("apply_state IN ('held', 'arriving', 'arrhold')"),
+            sqlite_where=text("apply_state IN ('held', 'arriving', 'arrhold')"),
+        ),
         # `max(hlc)`: the newest stamp, read whenever a change is stamped
         # (migration d7a3c9e5f2b8).
         Index("ix_audit_log_hlc", "hlc"),

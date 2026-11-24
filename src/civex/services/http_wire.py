@@ -28,7 +28,7 @@ import gzip
 import http.client
 import json
 import random
-import select
+import selectors
 import socket
 import threading
 import time
@@ -611,10 +611,13 @@ def _server_hung_up(sock: Any) -> bool:
     """Whether an idle socket has something to read: for a connection with
     nothing in flight that is the server's close (or noise): not reusable."""
     try:
-        readable, _, _ = select.select([sock], [], [], 0)
+        # poll() has no limit on the descriptor number (select() fails from
+        # 1024 up); where there is none (Windows), selectors picks the best.
+        with selectors.DefaultSelector() as chosen:
+            chosen.register(sock, selectors.EVENT_READ)
+            return bool(chosen.select(0))
     except (OSError, ValueError):
         return True
-    return bool(readable)
 
 
 def reused_stale(error: BaseException) -> bool:
