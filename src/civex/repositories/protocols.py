@@ -20,6 +20,7 @@ from typing import (
     Callable,
     ContextManager,
     Iterable,
+    Mapping,
     Iterator,
     NamedTuple,
     Protocol,
@@ -519,10 +520,28 @@ class RecordRepository(Protocol):
         self, ids: list[uuid.UUID], stamp: datetime | None = None
     ) -> None: ...
     def restore_many(self, ids: list[uuid.UUID]) -> None: ...
+    def key_clashes(
+        self,
+        dataset_id: uuid.UUID,
+        schema_id: uuid.UUID,
+        places: list[tuple[uuid.UUID | None, dict[str, Any]]],
+    ) -> set[int]:
+        """Which of these (parent, key values) places a live record of the
+        schema in the collection already holds: asked a chunk at a time."""
+        ...
+
     def restore_rows(
         self, ids: list[uuid.UUID], deleted_only: bool = False
     ) -> list[RestoreRow]:
         """The columns a restore is decided from (no values), chunked."""
+        ...
+
+    def parent_links(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, uuid.UUID | None]:
+        """Each of these records' parent (None at the top), deleted or not."""
+        ...
+
+    def deleted_at_of(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, datetime | None]:
+        """When each of these records that exists was deleted (None if live)."""
         ...
 
     def deleted_with(
@@ -729,6 +748,13 @@ class AuditRepository(Protocol):
     ) -> AuditBatchDTO: ...
     def join_batch(self, batch_id: uuid.UUID) -> bool: ...
     def get_batch(self, batch_id: uuid.UUID) -> AuditBatchDTO | None: ...
+    def batch_entries(
+        self, batch_id: uuid.UUID
+    ) -> list[tuple[uuid.UUID, str, str, uuid.UUID]]:
+        """(id, entity type, action, entity id) of every entry in a batch,
+        newest first, columns only."""
+        ...
+
     def batch_entry_ids(self, batch_id: uuid.UUID) -> list[uuid.UUID]:
         """The ids of every entry in a batch, newest first (ties by id), in one
         query however many there are."""
@@ -749,6 +775,7 @@ class AuditRepository(Protocol):
         changes: Iterable[tuple[uuid.UUID, dict | None, dict | None]],
         timestamp: datetime | None = None,
         op: uuid.UUID | None = None,
+        ops: Mapping[uuid.UUID, uuid.UUID] | None = None,
     ) -> int:
         """`log_change` for many things of one kind at once, in the order
         given: one entry each, written a chunk at a time. Returns how many."""

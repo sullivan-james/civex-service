@@ -1280,6 +1280,30 @@ class RestoreSetDTO:
 
 
 @dataclass
+class RecordChangesDTO:
+    """A set of changes to records, of any size: what one bulk action did or
+    what undoing one does. Bulk delete, bulk edit, restore and the undo of any
+    of them are all this, applied by `RecordService.apply_changes`."""
+
+    delete: list[uuid.UUID] = field(default_factory=list)
+    restore: list[uuid.UUID] = field(default_factory=list)
+    # record -> field name -> new value (None clears the field)
+    update: dict[uuid.UUID, dict[str, Any]] = field(default_factory=dict)
+
+
+@dataclass
+class RecordChangesResultDTO:
+    deleted: int = 0  # records deleted in their own right
+    restored: int = 0  # records restored in their own right
+    came_back: int = 0  # records live again in all, with what went with them
+    updated: int = 0  # records whose fields were changed
+    runs: int = 0  # workflow runs queued by the updates
+    # What was not applied and why, at most the first few (the count is exact).
+    left: dict[uuid.UUID, str] = field(default_factory=dict)
+    left_count: int = 0
+
+
+@dataclass
 class RecordMovePlanDTO:
     """What moving some records to a collection would do, worked out without
     doing it. A record moves with everything beneath it and keeps its id; its

@@ -272,3 +272,66 @@ def test_a_bulk_edit_past_the_old_cap_is_undone_in_one_call(world: AppContext):
         )
     ).one()
     assert ops == 1
+
+
+def test_undoing_a_delete_and_redoing_it_is_one_step_each(world: AppContext):
+    ctx = world
+    seed(ctx, "c", PARENTS, KIDS)
+    everything = PARENTS * (1 + KIDS)
+    ctx.record_svc.delete_all("c")
+    ctx.commit()
+    batch = _delete_event(ctx).batch.id
+
+    preview = ctx.history_svc.revert_batch(batch)
+    assert (preview.entries, preview.applied, preview.left) == (everything,) * 2 + (0,)
+    undone = ctx.history_svc.revert_batch(batch, dry_run=False)
+    ctx.commit()
+    assert (undone.applied, undone.left) == (everything, 0)
+    assert _count(ctx, Record.deleted_at.is_(None)) == everything
+    restored, _ = ctx.history_svc.events(where={"and": [leaf("how", "restore")]})
+    undo_batch = restored[0].batch.id
+    ops = ctx._session.scalars(
+        select(func.count(func.distinct(AuditLog.op_id))).where(
+            AuditLog.batch_id == undo_batch
+        )
+    ).one()
+    assert ops == 1
+
+    # The undo is a bulk action like any other, so it is undone the same way.
+    redone = ctx.history_svc.revert_batch(undo_batch, dry_run=False)
+    ctx.commit()
+    assert (redone.applied, redone.left) == (everything, 0)
+    assert _count(ctx, Record.deleted_at.is_(None)) == 0
+
+
+def test_unique_key_clashes_of_a_restore_are_asked_a_chunk_at_a_time(
+    ctx: AppContext, make_schema, make_collection
+):
+    make_schema("plot", fields=[("site", "string"), ("number", "integer")])
+    make_collection("c")
+    ctx.schema_svc.set_unique_keys("plot", [["site", "number"]])
+    ctx.commit()
+    ids = ctx.schema_svc.resolver()(ctx.schema_svc.get("plot").id).name_to_id
+    dataset, schema = ctx.dataset_svc.get("c").id, ctx.schema_svc.get("plot").id
+    now = datetime.now(timezone.utc)
+    rows = [
+        {
+            **_row(row_id(), dataset, schema, None, now),
+            "data": {ids["site"]: "s", ids["number"]: i},
+        }
+        for i in range(600)
+    ]
+    ctx._session.execute(insert(Record), rows)
+    ctx.commit()
+    ctx.record_svc.delete_all("c")
+    ctx.commit()
+    ctx.record_svc.add("c", "plot", {"site": "s", "number": 5})  # takes a key back
+    ctx.commit()
+    batch = _delete_event(ctx).batch.id
+
+    plan = ctx.history_svc.plan_restore_all(batch_id=batch)
+    assert (plan.records, plan.restores, plan.blocked) == (600, 599, 1)
+    seen = _statements(ctx, lambda: ctx.history_svc.restore_all(batch_id=batch))
+    ctx.commit()
+    assert seen < 60  # not a lookup per record
+    assert _count(ctx, Record.deleted_at.is_(None)) == 600  # 599 back + the new one

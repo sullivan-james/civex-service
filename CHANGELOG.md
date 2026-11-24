@@ -217,22 +217,30 @@ from the next tag forward.
 
 ### v2.2.1
 
-- **Undoing a bulk action is one step, however big.** Restoring what a bulk
-  delete took stopped at 5,000 records (and eight rounds of parents first): a
-  delete of 69,574 records offered "Restore" and then brought back 5,000, "5,000
-  records in all". There is no cap now. The restore reads only the few columns
-  it decides from (never the values, never a record at a time), works out in
-  memory, parents first and in one pass, what comes back with what, and writes
-  the update and the history a chunk at a time (5,000 ids, 2,000 entries per
-  statement): a few dozen statements for any size. What is left deleted is only
-  what is genuinely held back (a collection, schema or record above it that is
-  deleted and not coming back, or a clash of unique values), and is counted.
-  The preview and the restore are the same computation, so the numbers the
-  dialog shows are exactly what happens. The restore is one action in one batch
-  in history, so sync carries it as one action. A bulk edit already reverted
-  without a cap, in chunks, as one batch; that is now tested at 5,200 records.
-  Measured on PostgreSQL: 69,572 records preview in 4 s and restore in 11 s.
-  `GET /audit/restore-all` no longer has a `truncated` field.
+- **Undoing a bulk action is one step, however big, through one code path.**
+  Restoring what a bulk delete took stopped at 5,000 records (and eight rounds
+  of parents first): a delete of 69,574 records offered "Restore" and then
+  brought back 5,000, "5,000 records in all". There is no cap now, and undo is
+  no longer a path of its own: `RecordService.apply_changes` takes a set of
+  record changes (delete, restore, put fields back), plans it in memory from
+  the few columns it needs, writes it a chunk at a time (5,000 ids, 2,000
+  history entries per statement, a fixed number of statements per chunk, never
+  one per record) and records it with the new bulk history writer. Bulk
+  delete, bulk edit's chunks, restore-all, a restore from Trash and the undo
+  of any bulk action (`revert_batch`: now a bulk edit, a delete or a restore;
+  the inverse change set is read from the batch's history) all use it, and the
+  old per-kind paths (one-at-a-time reverts, the eight-pass loop, a history
+  entry per `log_change`) are gone. What is left deleted is only what is
+  genuinely held back (a collection, schema or record above it that is deleted
+  and not coming back, or a clash of unique values) and is counted; unique
+  keys are checked a chunk of records at a time instead of per record. The
+  preview and the restore are the same computation, so the dialog's numbers
+  are exactly what happens. An undo is one action in one batch in history, so
+  sync carries it as one action. The History restore dialog shows the true
+  count and a busy state. `GET /audit/restore-all` no longer has a `truncated`
+  field. Measured on PostgreSQL with 69,572 records: restore 11 s on a quiet
+  server; the delete, undo and redo round trip took 20 s, 26 s and 32 s with
+  other work on the same server.
 
 - **Faster pushes to an authority.** A push of 100 changes ran about 17
   statements per change (20 for edits), all under the feed's lock; it now runs

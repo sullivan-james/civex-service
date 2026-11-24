@@ -271,6 +271,17 @@ _RESTORE_COLUMNS = (
 # The ids a bulk statement names at a time: a restore of tens of thousands of
 # records is a few dozen statements. SQLite before 3.32 allows 999 variables.
 _BULK_CHUNK = 5000
+# Unique-key places asked about in one statement.
+_KEY_PLACES = 400
+
+
+def _frozen(value: Any) -> Any:
+    """A key value as a hashable that equals another exactly when the key
+    compares them equal."""
+    value = _canonical(value)
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, sort_keys=True)
+    return value
 
 
 def _bulk_chunks(session: Session, ids: list[uuid.UUID]):
@@ -466,6 +477,51 @@ class LocalRecordRepository:
             .first()
             is not None
         )
+
+    def key_clashes(
+        self,
+        dataset_id: uuid.UUID,
+        schema_id: uuid.UUID,
+        places: list[tuple[uuid.UUID | None, dict[str, Any]]],
+    ) -> set[int]:
+        """Which of these (parent, key values) places a live record of the
+        schema in the collection already holds (`any_key_match` for many,
+        saying which): a statement per `_KEY_PLACES` places, whose matches are
+        compared in memory."""
+        hit: set[int] = set()
+        for start in range(0, len(places), _KEY_PLACES):
+            part = places[start : start + _KEY_PLACES]
+            options = []
+            for parent, key in part:
+                parts = [
+                    Record.parent_record_id.is_(None)
+                    if parent is None
+                    else Record.parent_record_id == parent
+                ]
+                parts += [_typed_comparison(Record, f, "eq", v) for f, v in key.items()]
+                options.append(and_(*parts))
+            found = self._s.execute(
+                select(Record.parent_record_id, Record.data).where(
+                    Record.dataset_id == dataset_id,
+                    Record.schema_id == schema_id,
+                    Record.deleted_at.is_(None),
+                    or_(*options),
+                )
+            ).all()
+            if not found:
+                continue
+            shapes = {tuple(sorted(key)) for _, key in part}
+            held = {
+                (parent, fields, tuple(_frozen((data or {}).get(f)) for f in fields))
+                for parent, data in found
+                for fields in shapes
+            }
+            for i, (parent, key) in enumerate(part):
+                fields = tuple(sorted(key))
+                values = tuple(_frozen(key[f]) for f in fields)
+                if (parent, fields, values) in held:
+                    hit.add(start + i)
+        return hit
 
     def dataset_of(self, id: uuid.UUID) -> uuid.UUID | None:
         """The collection a record is in (deleted ones too), without loading it
@@ -1328,6 +1384,28 @@ class LocalRecordRepository:
                 q = q.where(Record.deleted_at.is_not(None))
             out.extend(RestoreRow(*row) for row in self._s.execute(q))
         return out
+
+    def parent_links(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, uuid.UUID | None]:
+        """Each of these records' parent (None at the top), deleted or not: two
+        columns, a statement per chunk."""
+        return {
+            rid: parent
+            for chunk in _bulk_chunks(self._s, list(dict.fromkeys(ids)))
+            for rid, parent in self._s.execute(
+                select(Record.id, Record.parent_record_id).where(Record.id.in_(chunk))
+            )
+        }
+
+    def deleted_at_of(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, datetime | None]:
+        """When each of these records that exists was deleted (None for a live
+        one): two columns, a statement per chunk."""
+        return {
+            rid: at
+            for chunk in _bulk_chunks(self._s, list(dict.fromkeys(ids)))
+            for rid, at in self._s.execute(
+                select(Record.id, Record.deleted_at).where(Record.id.in_(chunk))
+            )
+        }
 
     def deleted_with(
         self, parent_ids: list[uuid.UUID]

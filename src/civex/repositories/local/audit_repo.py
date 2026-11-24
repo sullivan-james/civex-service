@@ -22,7 +22,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import aliased, Session
 
 from contextlib import contextmanager
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Iterator
 
 from civex.db.models import (
@@ -277,6 +277,25 @@ class LocalAuditRepository:
         row = self._s.get(AuditBatch, batch_id)
         return _batch_dto(row) if row else None
 
+    def batch_entries(
+        self, batch_id: uuid.UUID
+    ) -> list[tuple[uuid.UUID, str, str, uuid.UUID]]:
+        """(id, entity type, action, entity id) of every entry in a batch, in
+        the order of `batch_entry_ids`: the columns only, never the stored
+        copies, so a batch of tens of thousands is a few megabytes."""
+        return [
+            (i, t, a, e)
+            for i, t, a, e in self._s.query(
+                AuditLog.id, AuditLog.entity_type, AuditLog.action, AuditLog.entity_id
+            )
+            .filter(AuditLog.batch_id == batch_id)
+            .order_by(
+                AuditLog.local_seq.desc().nullslast(),
+                AuditLog.timestamp.desc(),
+                AuditLog.id,
+            )
+        ]
+
     def batch_entry_ids(self, batch_id: uuid.UUID) -> list[uuid.UUID]:
         return [
             r[0]
@@ -365,11 +384,14 @@ class LocalAuditRepository:
         ],
         timestamp: datetime | None = None,
         op: uuid.UUID | None = None,
+        ops: Mapping[uuid.UUID, uuid.UUID] | None = None,
     ) -> int:
         """`log_change` for many things at once: the same entry each (stored
         form, batch, actor, device, op, a clock stamp in turn), in the order
         given, so what must come first is written first; a statement per
-        chunk instead of one per entry."""
+        chunk instead of one per entry. `ops` gives the action of particular
+        things (a tree deleted together); the rest take `op`, else the
+        enclosing `operation`."""
         when = timestamp or datetime.now(timezone.utc)
         batch_id = self._current_batch()
         op_id = op or self._op_id
@@ -393,7 +415,7 @@ class LocalAuditRepository:
                     "new_data": new_data,
                     "delta": delta,
                     "format": form,
-                    "op_id": op_id,
+                    "op_id": (ops.get(entity_id) if ops else None) or op_id,
                     "timestamp": when,
                     "batch_id": batch_id,
                     "actor": self._actor,
