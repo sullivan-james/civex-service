@@ -16,6 +16,7 @@ from typing import Any
 from sqlalchemy import (
     BigInteger,
     String,
+    Text,
     Uuid,
     and_,
     cast,
@@ -60,6 +61,7 @@ from civex.db.models import (
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.audit_diff import entry_snapshots
 from civex.domain.merge import value_at
+from civex.domain.sync_page import ACTION_ENTRIES_MAX, PAGE_BUDGET_BYTES, take
 from civex.domain.sync import (
     NOT_SYNCED_KINDS,
     LoginRequestDTO,
@@ -2301,35 +2303,72 @@ class LocalSyncRepository:
         self._s.expire_all()
         return int(done)
 
-    def entries_after(self, seq: int, limit: int) -> tuple[list[SyncEntry], bool]:
-        """Numbered entries past `seq`, in order, and whether more follow. A
-        page ends with the action its last entry belongs to, never inside
-        one: a device takes an action whole (a tree moved to another
-        collection is one), so a page that cut one in two would leave it
-        half done at the device's commit."""
+    def _rows_after(self, seq: int, n: int) -> list[tuple[AuditLog, int]]:
+        """Up to `n` numbered rows past `seq`, in order, each with the size of
+        the payload it carries (what the page budget counts)."""
+        size = sum(
+            func.coalesce(func.length(cast(col, Text)), 0)
+            for col in (AuditLog.old_data, AuditLog.new_data, AuditLog.delta)
+        )
         rows = (
-            self._s.query(AuditLog)
+            self._s.query(AuditLog, size)
             .filter(AuditLog.hub_seq > seq, _SYNCED)
             .order_by(AuditLog.hub_seq)
-            .limit(limit + 1)
+            .limit(n)
             .all()
         )
-        more = len(rows) > limit
-        rows = rows[:limit]
+        return [(r, int(s or 0)) for r, s in rows]
+
+    def entries_after(
+        self, seq: int, limit: int, max_bytes: int = PAGE_BUDGET_BYTES
+    ) -> tuple[list[SyncEntry], bool]:
+        """Numbered entries past `seq`, in order, and whether more follow. The
+        page is bounded by `limit` (an "at most") and by `max_bytes` of payload
+        (`domain.sync_page`), and `more` is whether it stopped before the end.
+        It ends with the action its last entry belongs to, never inside one,
+        while the whole action fits (`ACTION_ENTRIES_MAX` entries, the byte
+        budget): a device takes an action whole (a tree moved to another
+        collection is one). One over that on its own is cut; the page then
+        says more follows, and the device holds the part it has until the
+        rest comes."""
+        batch = self._rows_after(seq, limit + 1)
+        rows, more = take(
+            [r for r, _ in batch], [s for _, s in batch], limit, max_bytes
+        )
         if more and rows and rows[-1].op_id is not None:
-            rest = (
-                self._s.query(AuditLog)
-                .filter(AuditLog.hub_seq > rows[-1].hub_seq, _SYNCED)
-                .order_by(AuditLog.hub_seq)
-                .limit(limit + 1)
-                .all()
-            )
-            same = 0
-            while same < len(rest) and rest[same].op_id == rows[-1].op_id:
-                same += 1
-            rows += rest[:same]
-            more = len(rest) > same
+            used = sum(s for _, s in batch[: len(rows)])
+            rows, more = self._finish_action(rows, used, max_bytes)
         return self._entries(rows), more
+
+    def _finish_action(
+        self, rows: list[AuditLog], used: int, max_bytes: int
+    ) -> tuple[list[AuditLog], bool]:
+        """Add the rest of the action `rows` ends in, if it fits the page. If
+        it does not, the page ends before the action (it is sent whole in the
+        next, alone) unless it is the whole page, when it is cut where it is."""
+        op = rows[-1].op_id
+        start = len(rows)
+        while start and rows[start - 1].op_id == op:
+            start -= 1
+        extra: list[AuditLog] = []
+        cursor = rows[-1].hub_seq
+        while True:
+            more_rows = self._rows_after(cursor, 500)
+            for row, size in more_rows:
+                if row.op_id != op:
+                    return rows + extra, True  # the action ended; something follows
+                if (
+                    len(rows) + len(extra) >= ACTION_ENTRIES_MAX
+                    or used + size > max_bytes
+                ):
+                    if start:
+                        return rows[:start], True  # sent whole in the next page
+                    return rows + extra, True  # over the budget alone: cut
+                extra.append(row)
+                used += size
+            if len(more_rows) < 500:
+                return rows + extra, False  # the action ran to the end
+            cursor = more_rows[-1][0].hub_seq
 
     def _entries(self, rows: list[AuditLog]) -> list[SyncEntry]:
         batch_ids = {r.batch_id for r in rows if r.batch_id}

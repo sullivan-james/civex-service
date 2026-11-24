@@ -38,6 +38,7 @@ from civex.domain.permissions import FILE_UNAVAILABLE, file_changes
 from civex.domain.merge import LIFECYCLE_KEYS, DERIVED_KEYS, merge
 from civex.domain.permissions import ReadScope
 from civex.services.sync_scope import FeedShaper
+from civex.domain.sync_page import json_size, take
 from civex.domain.sync import (
     APPLIED,
     CAPABILITIES,
@@ -241,8 +242,8 @@ class SyncAuthorityService:
             )
         except ValueError as e:
             raise ValidationError(f"Not a page cursor: {after!r}") from e
-        page = items[:limit]
-        more = len(items) > limit
+        # By count and by bytes, `more` decided with the feed's (sync_page).
+        page, more = take(items, [json_size(i) for i in items], limit)
         return SnapshotPage(
             kind, page, more, head, snapshot_cursor(page[-1]) if more else None
         )
