@@ -188,7 +188,8 @@ def test_filling_the_same_server_again_after_a_reset(
     """The laptop fills the server it follows again once that server is reset
     (no other server followed, so each thing goes under the same id as before).
     Taken this time, the call is the server's: a restore goes in as one.
-    Refused again after a fill had taken it, it is missing there again."""
+    The refusal nobody had settled is closed as taken. Refused again after a
+    fill had taken it, it is missing there again, and the refusal open again."""
     from civex.services import sync_service
 
     laptop, call, refusal = _refused_when_filling(project, authority)
@@ -230,7 +231,8 @@ def test_filling_the_same_server_again_after_a_reset(
     assert server.sync_repo.snapshot("record", call.id) is not None
     assert laptop.sync_repo.never_taken({("record", call.id)}) == set()
     [seen] = [c for c in laptop.sync_svc.conflicts(None) if c.id == refusal.id]
-    assert seen.status == "open"  # a person's to settle, as before
+    # Nobody had settled it, and it is no longer true: closed as taken.
+    assert (seen.status, seen.resolution) == ("resolved", "taken")
 
     if again == "taken":
         _delete_there_and_restore_here(laptop, server, call)
@@ -244,4 +246,5 @@ def test_filling_the_same_server_again_after_a_reset(
     server = fill_after_reset("server2")
     assert server.sync_repo.snapshot("record", call.id) is None
     assert laptop.sync_repo.never_taken({("record", call.id)}) == {call.id}
-    assert any(c.kind == "rejected" and c.entity_id == call.id for c in _open(laptop))
+    # The same refusal (same id as before the reset) is open again.
+    assert [c.id for c in _open(laptop) if c.entity_id == call.id] == [refusal.id]

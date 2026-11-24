@@ -73,6 +73,7 @@ from civex.domain.sync import (
     SyncEntry,
     SyncInviteDTO,
     SyncMetaDTO,
+    TAKEN,
     parse_snapshot_cursor,
     wire_state,
 )
@@ -2011,41 +2012,63 @@ class LocalSyncRepository:
         self._s.expire_all()
 
     def forget_refusals(self, taken: set[uuid.UUID], refused: set[uuid.UUID]) -> None:
-        """Filling the authority sent these things: it took those in `taken`,
-        so a refusal of their create, by it or by one followed before, no
-        longer says it lacks them (see `never_taken`); it refused those in
-        `refused`, so one it had taken before (filled again after a reset) says
-        so again. How a person settled a refusal is left as it is."""
-        for ids, state, when in (
-            (taken, "synced", datetime.now(timezone.utc)),
-            (refused, None, None),
-        ):
-            chunks = list(ids)
-            for start in range(0, len(chunks), _ID_CHUNK):
-                chunk = chunks[start : start + _ID_CHUNK]
-                if state:
-                    self._s.execute(
-                        update(AuditLog)
-                        .where(
-                            AuditLog.entity_id.in_(chunk),
-                            AuditLog.action == "create",
-                            AuditLog.sync_state == "rejected",
-                        )
-                        .values(sync_state=state)
-                        .execution_options(synchronize_session=False)
-                    )
-                self._s.execute(
-                    update(SyncConflict)
-                    .where(
-                        SyncConflict.entity_id.in_(chunk),
-                        SyncConflict.kind == "rejected",
-                        SyncConflict.taken_at.is_(None)
-                        if when
-                        else SyncConflict.taken_at.is_not(None),
-                    )
-                    .values(taken_at=when)
-                    .execution_options(synchronize_session=False)
+        """Filling the authority sent these things. It took those in `taken`:
+        a refusal of their create, by it or by one followed before, no longer
+        says it lacks them (`taken_at`, see `never_taken`), and one nobody has
+        settled yet is no longer true, so it is closed (`TAKEN`); one a person
+        settled, or is having sent again, stays as they left it. It refused
+        those in `refused`: one it had taken before (filled again after a
+        reset, so the refusal is the same row) says so again, and is open again
+        if only sync had closed it."""
+        now = datetime.now(timezone.utc)
+        for start in range(0, len(ids := list(taken)), _ID_CHUNK):
+            chunk = ids[start : start + _ID_CHUNK]
+            self._s.execute(
+                update(AuditLog)
+                .where(
+                    AuditLog.entity_id.in_(chunk),
+                    AuditLog.action == "create",
+                    AuditLog.sync_state == "rejected",
                 )
+                .values(sync_state="synced")
+                .execution_options(synchronize_session=False)
+            )
+            mine = (SyncConflict.entity_id.in_(chunk), SyncConflict.kind == "rejected")
+            self._s.execute(
+                update(SyncConflict)
+                .where(
+                    *mine,
+                    SyncConflict.status == "open",
+                    SyncConflict.resolution.is_(None),
+                )
+                .values(status="resolved", resolution=TAKEN, resolved_at=now)
+                .execution_options(synchronize_session=False)
+            )
+            self._s.execute(
+                update(SyncConflict)
+                .where(*mine, SyncConflict.taken_at.is_(None))
+                .values(taken_at=now)
+                .execution_options(synchronize_session=False)
+            )
+        for start in range(0, len(ids := list(refused)), _ID_CHUNK):
+            chunk = ids[start : start + _ID_CHUNK]
+            was_taken = (
+                SyncConflict.entity_id.in_(chunk),
+                SyncConflict.kind == "rejected",
+                SyncConflict.taken_at.is_not(None),
+            )
+            self._s.execute(
+                update(SyncConflict)
+                .where(*was_taken, SyncConflict.resolution == TAKEN)
+                .values(status="open", resolution=None, resolved_at=None)
+                .execution_options(synchronize_session=False)
+            )
+            self._s.execute(
+                update(SyncConflict)
+                .where(*was_taken)
+                .values(taken_at=None)
+                .execution_options(synchronize_session=False)
+            )
         self._s.flush()
         self._s.expire_all()
 
