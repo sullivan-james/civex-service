@@ -236,8 +236,8 @@ def test_postgres_pages_stop_at_the_byte_budget(tmp_path):
             pg.schema_svc.create(f"s_{i}")
         pg.commit()
         pg.sync_repo.sequence_local_entries()
-        rows = pg.sync_repo._rows_after(0, 1000)
-        assert rows and all(size > 0 for _, size in rows)
+        rows = pg.sync_repo._keys_after(0, 1000)
+        assert rows and all(size > 0 for _, _, size in rows)
         total = len(rows)
         pages = _pages(pg, 0, 200, max_bytes=2_000)
         assert len(pages) > 2
@@ -245,3 +245,97 @@ def test_postgres_pages_stop_at_the_byte_budget(tmp_path):
         assert sum(len(e) for e, _ in pages) == total
         one, more = pg.sync_repo.entries_after(0, 200)
         assert len(one) == total and more is False
+
+
+def test_only_the_rows_of_the_page_are_loaded(pair, authority):
+    """Choosing a page reads keys and sizes; the (wide) rows are loaded only
+    for what the page holds."""
+    from sqlalchemy import event
+
+    laptop, _, _ = pair
+    laptop.sync_svc.sync()
+    start = authority.sync_repo.head_seq()
+    for i in range(40):
+        laptop.record_svc.add(
+            "study", "encounter", {"site": "w" * 5_000 + str(i), "depth": 1.0}
+        )
+    laptop.commit()
+    laptop.sync_svc.sync()
+    authority.sync_repo.sequence_local_entries()
+    loaded: list[int] = []
+
+    def count(target, context):
+        loaded.append(1)
+
+    event.listen(AuditLog, "load", count)
+    try:
+        page, more = authority.sync_repo.entries_after(start, 200, max_bytes=30_000)
+    finally:
+        event.remove(AuditLog, "load", count)
+    assert more and 0 < len(page) < 40
+    assert len(loaded) == len(page)
+
+
+def _held_action(pair, authority):
+    """An action (10 updates, one `op`) that reaches, in its last entry, a
+    record the phone has an unsent edit to: the phone must hold all of it."""
+    laptop, phone, _ = pair
+    ids = [
+        str(
+            laptop.record_svc.add(
+                "study", "encounter", {"site": f"h{i}", "depth": 1.0}
+            ).id
+        )
+        for i in range(10)
+    ]
+    laptop.commit()
+    laptop.sync_svc.sync()
+    phone.sync_svc.sync()
+    authority.sync_repo.sequence_local_entries()
+    start = authority.sync_repo.head_seq()
+    for i, rid in enumerate(ids):
+        laptop.record_svc.update(rid, {"depth": 50.0 + i})
+    laptop.commit()
+    laptop.sync_svc.sync()
+    authority.sync_repo.sequence_local_entries()
+    authority.sync_repo._s.query(AuditLog).filter(AuditLog.hub_seq > start).update(
+        {"op_id": uuid.uuid4()}, synchronize_session=False
+    )
+    authority.commit()
+    phone.record_svc.update(ids[-1], {"depth": 7.0})
+    phone.commit()
+    return phone, ids, start
+
+
+def test_a_device_holds_a_whole_action_that_fits_a_page_but_not_the_limit(
+    pair, authority, monkeypatch
+):
+    """The server keeps an action in one page while it fits the budget, however
+    small the entry limit: the device sees all of it at once and holds it."""
+    from civex.services import sync_service
+
+    phone, ids, start = _held_action(pair, authority)
+    monkeypatch.setattr(sync_service, "FEED_PAGE", 4)
+    page, more = authority.sync_repo.entries_after(start, 4)
+    assert len(page) == 10 and more is False
+    phone.sync_svc._pull(phone.sync_svc._transport())  # the feed only, no push
+    phone.commit()
+    assert phone.record_svc.get(ids[0]).data["depth"] == 1.0
+
+
+@pytest.mark.xfail(
+    reason="CLIENT: an action over the page budget alone is cut across pages "
+    "and the device's `waiting` is decided per page (sync_service._pull), so "
+    "the part before the entry that touches its unsent edit is applied. Needs "
+    "the client to carry `waiting` across pages while `more` is true.",
+    strict=True,
+)
+def test_a_device_holds_an_over_budget_action_cut_across_pages(
+    pair, authority, monkeypatch
+):
+    phone, ids, start = _held_action(pair, authority)
+    monkeypatch.setattr(sync_page, "PAGE_BUDGET_BYTES", 1_500)
+    assert len(_pages(authority, start, 200)) > 2
+    phone.sync_svc._pull(phone.sync_svc._transport())
+    phone.commit()
+    assert phone.record_svc.get(ids[0]).data["depth"] == 1.0

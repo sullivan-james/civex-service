@@ -40,6 +40,27 @@ from civex.observability import get_logger, request_id_var
 log = get_logger("civex.server")
 
 
+# SQLSTATEs of a lock wait or statement that ran out of time, or was chosen as
+# the victim of a deadlock: nothing was done, the same call can be repeated.
+_BUSY_SQLSTATES = frozenset({"55P03", "57014", "40P01", "40001"})
+
+
+def is_busy_error(error: BaseException) -> bool:
+    """Whether a database error is a wait that ran out (a lock, a statement
+    deadline, a deadlock, SQLite's busy lock) rather than a fault: the
+    database is fine, the call is simply to be repeated."""
+    from sqlalchemy.exc import DBAPIError
+
+    if not isinstance(error, DBAPIError):
+        return False
+    orig = error.orig
+    state = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+    if state is not None:
+        return str(state) in _BUSY_SQLSTATES
+    message = str(orig).lower()
+    return "database is locked" in message or "database table is locked" in message
+
+
 class BusyError(CivexError):
     """The database could not answer in time (a lock or a statement ran past
     its deadline): nothing was done, try again. Answered 503 with

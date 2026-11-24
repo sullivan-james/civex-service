@@ -217,6 +217,8 @@ def test_the_server_push_budget_is_well_below_the_clients_timeout():
     # in sync_transport.py; until it lands the expectation is stated here.
     client_timeout = client_timeout or 120
     assert sync_authority.PUSH_BUDGET_SECONDS * 4 <= client_timeout
+    # a waiter outlasts a push that is working (its budget and its flush)
+    assert sync_policy.LOCK_TIMEOUT_MS / 1000 >= 2 * sync_authority.PUSH_BUDGET_SECONDS
 
 
 def test_a_push_past_its_budget_answers_what_it_settled(pair, authority, monkeypatch):
@@ -263,11 +265,11 @@ def test_postgres_deadlines_are_set_local_to_the_transaction(tmp_path):
             return session.execute(text(f"SHOW {name}")).scalar_one()
 
         sync_policy.deadlines(_Request("feed"), pg)
-        assert shown("lock_timeout") == "10s" and shown("statement_timeout") == "15s"
+        assert shown("lock_timeout") == "30s" and shown("statement_timeout") == "15s"
         pg.commit()  # SET LOCAL ends with the transaction: nothing leaks
         assert shown("lock_timeout") == "0" and shown("statement_timeout") == "0"
         sync_policy.deadlines(_Request("push"), pg)
-        assert shown("lock_timeout") == "10s" and shown("statement_timeout") == "0"
+        assert shown("lock_timeout") == "30s" and shown("statement_timeout") == "0"
         pg.commit()
         sync_policy.deadlines(_Request("download_file"), pg)
         assert shown("lock_timeout") == "0"
@@ -331,7 +333,7 @@ def test_postgres_a_lock_that_runs_out_is_a_503_over_http(
         assert (
             len(built) == 1
         )  # one context for the request, shared by every dependency
-        assert seen == {"statement": "15s", "lock": "10s"}
+        assert seen == {"statement": "15s", "lock": "30s"}
 
         # Hold the feed's counter from another connection; the next calls wait
         # for it and run out of patience.
@@ -358,3 +360,96 @@ def test_postgres_a_lock_that_runs_out_is_a_503_over_http(
         assert (
             client.get("/api/sync/v1/feed?after=0", headers=headers).status_code == 200
         )
+
+
+# ------------------------------------------------ gzip bodies: push only
+
+
+def test_gzip_is_refused_on_every_route_but_push(serving):
+    client, headers = serving
+    gz = headers | {"Content-Encoding": "gzip", "Content-Type": "application/json"}
+    for path in ("/join", "/device-login", "/session", "/files/missing"):
+        reply = client.post(f"/api/sync/v1{path}", content=_gz({}), headers=gz)
+        assert reply.status_code == 415, (path, reply.status_code)
+
+
+def test_an_unauthenticated_gzip_push_is_refused_before_inflating(serving, monkeypatch):
+    client, headers = serving
+
+    def never(*a, **k):
+        raise AssertionError("inflated for a caller nobody knows")
+
+    monkeypatch.setattr(sync_policy, "inflate", never)
+    anonymous = {k: v for k, v in headers.items() if k.lower() != "authorization"}
+    reply = client.post(
+        "/api/sync/v1/push",
+        content=_gz({"entries": []}),
+        headers=anonymous
+        | {"Content-Encoding": "gzip", "Content-Type": "application/json"},
+    )
+    assert reply.status_code == 401
+
+
+def test_push_join_and_device_login_answers_are_never_gzipped(serving, monkeypatch):
+    client, headers = serving
+    monkeypatch.setattr(sync_policy, "GZIP_MIN_BYTES", 0)
+    accept = headers | {"Accept-Encoding": "gzip"}
+    pushed = client.post("/api/sync/v1/push", json={"entries": []}, headers=accept)
+    assert pushed.status_code == 200 and "content-encoding" not in pushed.headers
+    fed = client.get("/api/sync/v1/feed?after=0", headers=accept)
+    assert fed.headers.get("content-encoding") == "gzip"  # the policy is on
+    assert {"push", "join", "request_login"} <= sync_policy.NEVER_COMPRESSED
+
+
+def test_a_busy_database_stays_busy_when_recovery_would_say_unavailable(
+    serving, ctx, monkeypatch
+):
+    """A docker-managed project turns a failed query into "the database is
+    unavailable" (no Retry-After): a lock that ran out is not that."""
+    from civex.domain.exceptions import DatabaseUnavailableError
+    from civex.server import deps
+
+    client, headers = serving
+
+    def unavailable(project):
+        raise DatabaseUnavailableError("restarted")
+
+    monkeypatch.setattr(deps, "_recover_after_query_failure", unavailable)
+
+    def slow(self, after, limit=200):
+        raise OperationalError("select", {}, _Orig("55P03", "lock timeout"))
+
+    monkeypatch.setattr(type(ctx.authority_svc), "feed", slow)
+    reply = client.get("/api/sync/v1/feed?after=0", headers=headers)
+    assert reply.status_code == 503 and reply.json()["code"] == "busy"
+    assert "retry-after" in reply.headers
+
+
+@pytest.mark.skipif(not _PG, reason="CIVEX_TEST_POSTGRES_URL not set")
+def test_postgres_numbering_runs_without_the_statement_timeout(tmp_path):
+    """The numbering UPDATE is as long as the backlog: the read deadline must
+    not cut it, and must be back for what follows."""
+    from sqlalchemy import event, text
+
+    from .test_postgres_authority import _pg_authority
+
+    for pg in _pg_authority(tmp_path):
+        pg.schema_svc.create("needs_a_number")
+        pg.commit()
+        sync_policy.deadlines(_Request("feed"), pg)
+        seen: list[str] = []
+        engine = pg._session.get_bind()
+
+        def peek(conn, cursor, statement, parameters, context, executemany):
+            if statement.lstrip().upper().startswith("UPDATE AUDIT_LOG"):
+                cursor.execute("SHOW statement_timeout")
+                seen.append(cursor.fetchone()[0])
+
+        event.listen(engine, "before_cursor_execute", peek)
+        try:
+            assert pg.sync_repo.sequence_local_entries() > 0
+        finally:
+            event.remove(engine, "before_cursor_execute", peek)
+        assert seen == ["0"]
+        shown = pg._session.execute(text("SHOW statement_timeout")).scalar_one()
+        assert shown == "15s"

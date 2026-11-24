@@ -232,3 +232,52 @@ def test_begins_from_several_processes_make_one_upload(tmp_path):
     assert answers == [(PART, [])] * 4
     uploads = list((shared / ".tmp").glob("*.upload"))
     assert len(uploads) == 1 and (uploads[0] / "data").stat().st_size == len(BODY)
+
+
+def test_a_lock_with_a_live_pid_but_another_start_time_is_stale(store):
+    """A process id reused after a restart (pid 1 in a container) is not the
+    owner that wrote the lock."""
+    import os
+
+    lock = store._upload_lock_path(SHA)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text(f"{os.getpid()}:not-the-start-time-of-this-process")
+    assert store._upload_lock_abandoned(lock)
+    with store._upload_lock(SHA):  # taken over, no wait
+        pass
+
+
+def test_a_lock_of_this_very_process_is_live(store):
+    from civex.repositories.local.file_store import _owner_string
+
+    lock = store._upload_lock_path(SHA)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text(_owner_string())
+    assert not store._upload_lock_abandoned(lock)
+    lock.unlink()
+
+
+def test_waiters_taking_over_one_stale_lock_never_hold_it_together(store):
+    lock = store._upload_lock_path(SHA)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("999999999:old")
+    inside = {"now": 0, "max": 0, "done": 0}
+    guard = threading.Lock()
+
+    def worker():
+        with store._upload_lock(SHA):
+            with guard:
+                inside["now"] += 1
+                inside["max"] = max(inside["max"], inside["now"])
+            threading.Event().wait(0.03)
+            with guard:
+                inside["now"] -= 1
+                inside["done"] += 1
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+    assert inside["done"] == 8 and inside["max"] == 1
+    assert not lock.exists()

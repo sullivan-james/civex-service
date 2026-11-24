@@ -7,11 +7,15 @@ not with civex's own app:
   the reads (`SET LOCAL` only: it ends with the transaction, so it never leaks
   into a shared pool or PgBouncer); on SQLite the busy timeout the engine
   already sets. A timeout is answered 503 + `Retry-After` (`BusyError`), after
-  which the device asks again.
-* wire encoding: a JSON request body sent `Content-Encoding: gzip` is
-  decompressed as a stream up to a cap (413 `too_large` past it), and a JSON
-  answer over `GZIP_MIN_BYTES` is gzipped for a caller that accepts it. File
-  bytes, packs, parts and downloads are never touched (not JSON).
+  which the device asks again. Numbering a backlog suspends the statement
+  timeout for that one statement (`sequence_local_entries`).
+* wire encoding: only `push` takes a gzip request body, read after the caller
+  is authenticated and inflated off the event loop, streamed up to a cap (413
+  `too_large` past it); any other JSON route refuses `Content-Encoding` (415).
+  A JSON answer over `GZIP_MIN_BYTES` is gzipped for a caller that accepts it,
+  except those of `push`, `join` and `device-login`: a host in front (the hub)
+  reads those and will decode them later. File bytes, packs, parts and
+  downloads are never touched (not JSON).
 
 Migrations, partition conversion and reclaim do not go through these routes and
 are not subject to them."""
@@ -24,26 +28,28 @@ import zlib
 from collections.abc import Callable, Coroutine
 from typing import Any
 
-from fastapi import Depends, Request, Response
+from fastapi import Depends, HTTPException, Request, Response
 from fastapi.routing import APIRoute
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
+from starlette.concurrency import run_in_threadpool
 
 from civex.context import AppContext
 from civex.domain.exceptions import ValidationError
 from civex.server.deps import get_ctx
-from civex.server.errors import BusyError, TooLargeError
+from civex.server.errors import BusyError, TooLargeError, is_busy_error
 
-# How long a call may wait for a lock (the feed's counter, numbering).
-LOCK_TIMEOUT_MS = 10_000
+# How long a call may wait for a lock (the feed's counter, numbering): well
+# above `PUSH_BUDGET_SECONDS` plus the flush after it, so a push that is
+# working does not make the calls behind it fail.
+LOCK_TIMEOUT_MS = 30_000
 # How long one statement of a read may run.
 STATEMENT_TIMEOUT_MS = 15_000
 # What a busy answer tells the device to wait, seconds.
 RETRY_AFTER_SECONDS = 2
 
 # Which routes (by function name) the deadlines apply to, and which of the two.
-# A route not named has neither (files, library, join, login). Every route is
-# named in exactly one of `DEADLINED` or `UNLIMITED`: a test holds that, so a
+# Every route is named in exactly one of the sets: a test holds that, so a
 # route added later has to be classified.
 READS = frozenset({"hello", "feed", "snapshot"})
 LOCKING = frozenset({"push"})
@@ -68,16 +74,17 @@ UNLIMITED = frozenset(
         "unpublish",
     }
 )
+# The one route that takes a gzip request body.
+GZIP_BODY_ROUTES = frozenset({"push"})
+# Answers a host in front reads: never compressed here.
+NEVER_COMPRESSED = frozenset({"push", "join", "request_login"})
 
 # Decompressed size cap of a request body.
 DEFAULT_MAX_REQUEST_BYTES = 64 * 1024 * 1024
 MAX_REQUEST_BYTES_ENV = "CIVEX_SYNC_MAX_REQUEST_BYTES"
 # A JSON answer smaller than this is sent as it is.
 GZIP_MIN_BYTES = 1024
-
-# SQLSTATEs of a lock wait or statement that ran out of time, or was chosen as
-# the victim of a deadlock: nothing was done, the same call can be repeated.
-_BUSY_SQLSTATES = frozenset({"55P03", "57014", "40P01", "40001"})
+_INFLATE_STEP = 1024 * 1024
 
 
 def max_request_bytes() -> int:
@@ -111,49 +118,12 @@ def deadlines(
 
 
 def is_busy(error: BaseException) -> bool:
-    """Whether a database error is a wait that ran out (a lock, a statement
-    deadline, a deadlock, SQLite's busy lock) rather than a fault."""
-    if not isinstance(error, DBAPIError):
-        return False
-    orig = error.orig
-    state = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
-    if state is not None:
-        return str(state) in _BUSY_SQLSTATES
-    message = str(orig).lower()
-    return "database is locked" in message or "database table is locked" in message
+    return is_busy_error(error)
 
 
 # ----------------------------------------------------------------------
 # Wire encoding
 # ----------------------------------------------------------------------
-
-
-class _GzipRequest(Request):
-    """A request whose gzip body reads as the JSON it holds. Decompression is
-    streamed and stops at the cap, so a small body cannot expand into memory."""
-
-    async def body(self) -> bytes:
-        if not hasattr(self, "_body"):
-            cap = max_request_bytes()
-            inflater = zlib.decompressobj(wbits=16 + zlib.MAX_WBITS)
-            out = bytearray()
-            try:
-                async for chunk in self.stream():
-                    pending = chunk
-                    while pending:
-                        out += inflater.decompress(pending, cap + 1 - len(out))
-                        if len(out) > cap:
-                            raise _too_large(cap)
-                        pending = inflater.unconsumed_tail
-                out += inflater.flush()
-            except zlib.error as e:
-                raise ValidationError(f"The request body is not valid gzip: {e}")
-            if len(out) > cap or not inflater.eof:
-                if len(out) > cap:
-                    raise _too_large(cap)
-                raise ValidationError("The request body is not valid gzip: cut short")
-            self._body = bytes(out)
-        return self._body
 
 
 def _too_large(cap: int) -> TooLargeError:
@@ -162,12 +132,58 @@ def _too_large(cap: int) -> TooLargeError:
     )
 
 
-def _gzipped_json(request: Request) -> bool:
-    headers = request.headers
-    return (
-        headers.get("content-encoding", "").strip().lower() == "gzip"
-        and "json" in headers.get("content-type", "").lower()
+def inflate(chunks: list[bytes], cap: int) -> bytearray:
+    """The gzip stream `chunks` hold, decompressed in steps and stopped at
+    `cap` (so a small body cannot expand into memory), without a second copy
+    of the result."""
+    inflater = zlib.decompressobj(wbits=16 + zlib.MAX_WBITS)
+    out = bytearray()
+    try:
+        for chunk in chunks:
+            pending = chunk
+            while pending:
+                step = min(_INFLATE_STEP, cap + 1 - len(out))
+                out += inflater.decompress(pending, step)
+                if len(out) > cap:
+                    raise _too_large(cap)
+                pending = inflater.unconsumed_tail
+        out += inflater.flush()
+    except zlib.error as e:
+        raise ValidationError(f"The request body is not valid gzip: {e}") from None
+    if len(out) > cap:
+        raise _too_large(cap)
+    if not inflater.eof:
+        raise ValidationError("The request body is not valid gzip: cut short")
+    return out
+
+
+def _encoded(request: Request) -> bool:
+    return request.headers.get("content-encoding", "").strip().lower() not in (
+        "",
+        "identity",
     )
+
+
+async def read_json_body(request: Request) -> bytes | bytearray:
+    """The JSON body of a request that takes a gzip one, read by the route
+    itself, after the caller is authenticated (a dependency): the compressed
+    bytes are capped as they arrive, the inflating runs in a thread."""
+    cap = max_request_bytes()
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > cap:
+            raise _too_large(cap)
+        chunks.append(chunk)
+    if not _encoded(request):
+        return b"".join(chunks)
+    encoding = request.headers.get("content-encoding", "").strip().lower()
+    if encoding != "gzip":
+        raise HTTPException(
+            415, detail=f"Content-Encoding {encoding!r} is not accepted"
+        )
+    return await run_in_threadpool(inflate, chunks, cap)
 
 
 def _accepts_gzip(request: Request) -> bool:
@@ -208,22 +224,29 @@ class SyncRoute(APIRoute):
         self,
     ) -> Callable[[Request], Coroutine[Any, Any, Response]]:
         handler = super().get_route_handler()
+        name = self.name
 
         async def sync_handler(request: Request) -> Response:
-            if _gzipped_json(request):
-                request = _GzipRequest(request.scope, request.receive)
-                # Read here, not by FastAPI, which turns any error while
-                # reading a body into a plain 400: ours are 413 and 422.
-                await request.body()
+            if (
+                name not in GZIP_BODY_ROUTES
+                and _encoded(request)
+                and "json" in request.headers.get("content-type", "").lower()
+            ):
+                # Refused before anything is read: only push takes one.
+                raise HTTPException(
+                    415, detail="This route does not take a compressed body"
+                )
             try:
                 response = await handler(request)
             except DBAPIError as e:
-                if is_busy(e):
+                if is_busy_error(e):
                     raise BusyError(
                         "The server is busy: nothing was done, try again",
                         RETRY_AFTER_SECONDS,
                     ) from e
                 raise
+            if name in NEVER_COMPRESSED:
+                return response
             return compress_response(request, response)
 
         return sync_handler

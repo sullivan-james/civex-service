@@ -32,6 +32,8 @@ from fastapi.responses import (
     StreamingResponse,
 )
 from pydantic import BaseModel, Field
+from pydantic import ValidationError as PydanticValidationError
+from starlette.concurrency import run_in_threadpool
 
 from civex.context import AppContext
 from civex.domain.dtos import UploadedPart
@@ -73,7 +75,7 @@ from civex.domain.sync import (
     snapshot_for,
 )
 from civex.server.deps import current_project, get_ctx
-from civex.server.sync_policy import SyncRoute, deadlines
+from civex.server.sync_policy import SyncRoute, deadlines, read_json_body
 
 log = logging.getLogger(__name__)
 
@@ -527,11 +529,39 @@ def hello(call: Peer = Depends(peer)):
     return SyncHelloResponse(**hello.to_dict())
 
 
-@router.post("/push", response_model=SyncPushResponse)
-def push(body: SyncPushRequest, call: Peer = Depends(peer)):
+@router.post(
+    "/push",
+    response_model=SyncPushResponse,
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": "#/components/schemas/SyncPushRequest"}
+                }
+            },
+        }
+    },
+)
+async def push(request: Request, call: Peer = Depends(peer)):
     """Settle the changes a device made. Each is merged with what the authority
     holds, numbered, and answered; the answer is remembered, so a repeat (the
-    device never heard) is answered the same way and nothing is done twice."""
+    device never heard) is answered the same way and nothing is done twice.
+
+    The body (`SyncPushRequest`, optionally `Content-Encoding: gzip`) is read
+    here, once the caller is known, so an anonymous caller never has anything
+    inflated for it."""
+    raw = await read_json_body(request)
+    try:
+        body = SyncPushRequest.model_validate_json(raw)
+    except PydanticValidationError as e:
+        raise HTTPException(
+            422, detail=f"The push is malformed: {e.error_count()} errors"
+        )
+    return await run_in_threadpool(_settle_push, call, body)
+
+
+def _settle_push(call: Peer, body: SyncPushRequest) -> SyncPushResponse:
     try:
         entries = [SyncEntry.from_dict(e) for e in body.entries]
     except (KeyError, ValueError, TypeError) as e:

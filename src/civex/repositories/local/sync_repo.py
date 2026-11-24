@@ -26,6 +26,7 @@ from sqlalchemy import (
     insert,
     or_,
     select,
+    text,
     update,
 )
 from sqlalchemy.exc import DataError, IntegrityError
@@ -2253,6 +2254,26 @@ class LocalSyncRepository:
         )
         return self._entries(rows)
 
+    @contextmanager
+    def _numbering_has_no_deadline(self) -> Iterator[None]:
+        """Numbering a backlog is one statement whose length is the backlog's:
+        a host's `statement_timeout` (set for this transaction by the sync
+        routes) must not cut it, or a big enough backlog would time out at
+        every attempt and never be numbered. It is put back as it was for what
+        follows. A lock wait is still bounded (`lock_timeout`)."""
+        bind = self._s.get_bind()
+        if bind.dialect.name != "postgresql":
+            yield
+            return
+        was: str = self._s.execute(text("SHOW statement_timeout")).scalar_one()
+        self._s.execute(text("SET LOCAL statement_timeout = 0"))
+        try:
+            yield
+        finally:
+            self._s.execute(
+                text("SELECT set_config('statement_timeout', :v, true)"), {"v": was}
+            )
+
     def sequence_local_entries(self) -> int:
         """Authority: number the changes made on this instance itself, in the
         order they were made, so they join the feed. Returns how many.
@@ -2287,25 +2308,27 @@ class LocalSyncRepository:
             .where(*pending)
             .subquery()
         )
-        done = self._s.execute(
-            update(AuditLog)
-            .where(
-                AuditLog.id == order.c.id,
-                AuditLog.timestamp == order.c.timestamp,
-                *pending,
-            )
-            .values(hub_seq=order.c.n + base, sync_state="synced")
-            .execution_options(synchronize_session=False)
-        ).rowcount  # type: ignore[attr-defined]
+        with self._numbering_has_no_deadline():
+            done = self._s.execute(
+                update(AuditLog)
+                .where(
+                    AuditLog.id == order.c.id,
+                    AuditLog.timestamp == order.c.timestamp,
+                    *pending,
+                )
+                .values(hub_seq=order.c.n + base, sync_state="synced")
+                .execution_options(synchronize_session=False)
+            ).rowcount  # type: ignore[attr-defined]
         if done:
             first = self.reserve_hub_seqs(done)
             assert first == base + 1, "the feed counter moved while it was held"
         self._s.expire_all()
         return int(done)
 
-    def _rows_after(self, seq: int, n: int) -> list[tuple[AuditLog, int]]:
-        """Up to `n` numbered rows past `seq`, in order, each with the size of
-        the payload it carries (what the page budget counts)."""
+    def _keys_after(self, seq: int, n: int) -> list[tuple[int, uuid.UUID | None, int]]:
+        """Up to `n` numbered rows past `seq`, in order, as (number, action,
+        payload size): what the page budget counts, read without the rows
+        themselves, so choosing a page never holds more than it takes."""
 
         def width(col: Any) -> Any:
             return func.coalesce(func.length(cast(col, Text)), 0)
@@ -2314,13 +2337,13 @@ class LocalSyncRepository:
             width(AuditLog.old_data) + width(AuditLog.new_data) + width(AuditLog.delta)
         )
         rows = (
-            self._s.query(AuditLog, size)
+            self._s.query(AuditLog.hub_seq, AuditLog.op_id, size)
             .filter(AuditLog.hub_seq > seq, _SYNCED)
             .order_by(AuditLog.hub_seq)
             .limit(n)
             .all()
         )
-        return [(r, int(s or 0)) for r, s in rows]
+        return [(int(h), op, int(sz or 0)) for h, op, sz in rows]
 
     def entries_after(
         self, seq: int, limit: int, max_bytes: int | None = None
@@ -2333,46 +2356,56 @@ class LocalSyncRepository:
         budget): a device takes an action whole (a tree moved to another
         collection is one). One over that on its own is cut; the page then
         says more follows, and the device holds the part it has until the
-        rest comes."""
+        rest comes. Only the rows of the page are loaded."""
         max_bytes = budget() if max_bytes is None else max_bytes
-        batch = self._rows_after(seq, limit + 1)
-        rows, more = take(
-            [r for r, _ in batch], [s for _, s in batch], limit, max_bytes
+        keys = self._keys_after(seq, limit + 1)
+        kept, more = take(keys, [k[2] for k in keys], limit, max_bytes)
+        if more and kept and kept[-1][1] is not None:
+            kept, more = self._finish_action(kept, max_bytes)
+        if not kept:
+            return [], more
+        rows = (
+            self._s.query(AuditLog)
+            .filter(
+                AuditLog.hub_seq >= kept[0][0],
+                AuditLog.hub_seq <= kept[-1][0],
+                _SYNCED,
+            )
+            .order_by(AuditLog.hub_seq)
+            .all()
         )
-        if more and rows and rows[-1].op_id is not None:
-            used = sum(s for _, s in batch[: len(rows)])
-            rows, more = self._finish_action(rows, used, max_bytes)
         return self._entries(rows), more
 
     def _finish_action(
-        self, rows: list[AuditLog], used: int, max_bytes: int
-    ) -> tuple[list[AuditLog], bool]:
-        """Add the rest of the action `rows` ends in, if it fits the page. If
+        self, kept: list[tuple[int, uuid.UUID | None, int]], max_bytes: int
+    ) -> tuple[list[tuple[int, uuid.UUID | None, int]], bool]:
+        """Add the rest of the action `kept` ends in, if it fits the page. If
         it does not, the page ends before the action (it is sent whole in the
         next, alone) unless it is the whole page, when it is cut where it is."""
-        op = rows[-1].op_id
-        start = len(rows)
-        while start and rows[start - 1].op_id == op:
+        op = kept[-1][1]
+        used = sum(k[2] for k in kept)
+        start = len(kept)
+        while start and kept[start - 1][1] == op:
             start -= 1
-        extra: list[AuditLog] = []
-        cursor = rows[-1].hub_seq or 0
+        extra: list[tuple[int, uuid.UUID | None, int]] = []
+        cursor = kept[-1][0]
         while True:
-            more_rows = self._rows_after(cursor, 500)
-            for row, size in more_rows:
-                if row.op_id != op:
-                    return rows + extra, True  # the action ended; something follows
+            more_keys = self._keys_after(cursor, 500)
+            for key in more_keys:
+                if key[1] != op:
+                    return kept + extra, True  # the action ended; something follows
                 if (
-                    len(rows) + len(extra) >= ACTION_ENTRIES_MAX
-                    or used + size > max_bytes
+                    len(kept) + len(extra) >= ACTION_ENTRIES_MAX
+                    or used + key[2] > max_bytes
                 ):
                     if start:
-                        return rows[:start], True  # sent whole in the next page
-                    return rows + extra, True  # over the budget alone: cut
-                extra.append(row)
-                used += size
-            if len(more_rows) < 500:
-                return rows + extra, False  # the action ran to the end
-            cursor = more_rows[-1][0].hub_seq or cursor
+                        return kept[:start], True  # sent whole in the next page
+                    return kept + extra, True  # over the budget alone: cut
+                extra.append(key)
+                used += key[2]
+            if len(more_keys) < 500:
+                return kept + extra, False  # the action ran to the end
+            cursor = more_keys[-1][0]
 
     def _entries(self, rows: list[AuditLog]) -> list[SyncEntry]:
         batch_ids = {r.batch_id for r in rows if r.batch_id}

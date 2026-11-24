@@ -46,7 +46,7 @@ from typing import (
 
 from civex import file_modes, fs_locations
 from civex.repositories.local import inventory
-from civex.processes import pid_alive
+from civex.processes import pid_alive, process_start_token
 from civex.config import StoreConfig, VolumeConfig
 from civex.domain.dtos import (
     VOLUME_OFFLINE,
@@ -171,6 +171,34 @@ def _read_marker(root: Path) -> str | None:
         return str(uuid.UUID((root / _MARKER_FILENAME).read_text("utf-8").strip()))
     except (OSError, ValueError):
         return None
+
+
+_OWNER: dict[int, str] = {}
+
+
+def _owner_string() -> str:
+    """Who holds a lock or marker: this process's id and start time."""
+    pid = os.getpid()
+    if pid not in _OWNER:
+        _OWNER[pid] = f"{pid}:{process_start_token(pid) or ''}"
+    return _OWNER[pid]
+
+
+def _owner_alive(owner: str) -> bool:
+    """Whether the process `owner` names is still the one running: its id is in
+    use and, where its start time can be read, is the same one."""
+    pid_text, _, token = owner.partition(":")
+    try:
+        pid = int(pid_text)
+    except ValueError:
+        return False
+    if not pid_alive(pid):
+        return False
+    if token:
+        now = process_start_token(pid)
+        if now is not None and now != token:
+            return False  # a different process now has that id
+    return True
 
 
 class VolumeAwareFileObjectStore:
@@ -368,10 +396,12 @@ class VolumeAwareFileObjectStore:
     def _upload_lock(self, sha256: str) -> Iterator[None]:
         """One request at a time begins or finishes the parts of one file, in
         every process and on every platform: a lock file made with O_EXCL (no
-        fcntl/msvcrt), holding its owner's process id. One whose owner has
-        gone (or that is very old) is taken over; a request waits for a live
-        one, then gives up with a retryable error. (Windows: a file being
-        deleted refuses a new one with PermissionError, which is "held" too.)"""
+        fcntl/msvcrt), naming its owner (process id and start time, so a
+        process id that has been reused is not mistaken for the owner). A lock
+        whose owner has gone (or that is very old) is taken over, by one
+        waiter at a time (`_take_over`); a request waits for a live one, then
+        gives up with a retryable error. (Windows: a file being deleted
+        refuses a new one with PermissionError, which is "held" too.)"""
         path = self._upload_lock_path(sha256)
         deadline = time.monotonic() + _UPLOAD_LOCK_WAIT_SECONDS
         next_check = 0.0
@@ -383,9 +413,8 @@ class VolumeAwareFileObjectStore:
                 now = time.monotonic()
                 if now >= next_check:  # looked at now and then, not at every try
                     next_check = now + 1.0
-                    if self._upload_lock_abandoned(path):
-                        with contextlib.suppress(OSError):
-                            path.unlink()
+                    if self._take_over(path):
+                        next_check = 0.0
                         continue
                 if now > deadline:
                     raise UploadBusyError(
@@ -395,7 +424,7 @@ class VolumeAwareFileObjectStore:
                 pause = min(pause * 2, 0.25)
                 continue
             try:
-                os.write(fd, str(os.getpid()).encode())
+                os.write(fd, _owner_string().encode())
             finally:
                 os.close(fd)
             break
@@ -409,33 +438,65 @@ class VolumeAwareFileObjectStore:
                 except PermissionError:
                     time.sleep(0.05)
 
+    def _take_over(self, path: Path) -> bool:
+        """Remove `path` if its owner is gone. One waiter at a time looks and
+        removes (under a short guard file made the same way), so a waiter
+        never removes the fresh lock another has just made after the stale one
+        went: while the stale file is there nobody else can create the lock,
+        and only the guard's holder removes it. Returns whether it removed
+        one."""
+        guard = path.with_name(path.name + ".takeover")
+        try:
+            os.close(os.open(str(guard), os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+        except (FileExistsError, PermissionError):
+            with contextlib.suppress(OSError):
+                if time.time() - guard.stat().st_mtime > 30:  # its holder died
+                    guard.unlink()
+            return False
+        try:
+            if not self._upload_lock_abandoned(path):
+                return False
+            with contextlib.suppress(FileNotFoundError):
+                path.unlink()
+            return True
+        finally:
+            for _ in range(40):
+                try:
+                    guard.unlink(missing_ok=True)
+                    break
+                except PermissionError:
+                    time.sleep(0.05)
+
     @staticmethod
     def _marker_live(path: Path, max_age: float) -> bool:
-        """Whether a marker file names a process that is still there and is not
-        older than `max_age`: otherwise it was left by one that died."""
+        """Whether a marker file names a process that is still there (the one
+        that made it, not another that has its id now) and is not older than
+        `max_age`: otherwise it was left by one that died."""
         try:
             age = time.time() - path.stat().st_mtime
         except OSError:
             return False
         try:
-            owner = int(path.read_text().strip())
-        except (OSError, ValueError):
+            owner = path.read_text().strip()
+        except OSError:
+            return age < 60
+        if not owner:
             return age < 60  # just made, not written yet: live
-        return pid_alive(owner) and age < max_age
+        return _owner_alive(owner) and age < max_age
 
     def _upload_lock_abandoned(self, path: Path) -> bool:
         try:
             age = time.time() - path.stat().st_mtime
-        except FileNotFoundError:
+        except OSError:
             return False  # released meanwhile: the next try takes it
+        try:
+            owner = path.read_text().strip()
         except OSError:
             return False
-        try:
-            owner = int(path.read_text().strip())
-        except (OSError, ValueError):
-            # Just made and not written yet, or unreadable: abandoned only if old.
+        if not owner:
+            # Just made and not written yet: abandoned only if old.
             return age > 60
-        return not pid_alive(owner) or age > _UPLOAD_LOCK_ABANDONED_SECONDS
+        return not _owner_alive(owner) or age > _UPLOAD_LOCK_ABANDONED_SECONDS
 
     def begin_parts(
         self,
@@ -514,7 +575,7 @@ class VolumeAwareFileObjectStore:
         # them always sees the other and backs off, retryably.
         writing = d / f"{number}.writing.{uuid.uuid4().hex}"
         try:
-            writing.write_text(str(os.getpid()))
+            writing.write_text(_owner_string())
         except FileNotFoundError:
             if self._any_copy(sha256) is not None:
                 return  # finished meanwhile
@@ -571,7 +632,7 @@ class VolumeAwareFileObjectStore:
                 raise ValidationError("That upload was not begun here")
             vol_name, d = found
             finishing = d / _FINISHING
-            finishing.write_text(str(os.getpid()))
+            finishing.write_text(_owner_string())
             try:
                 if any(
                     self._marker_live(w, _UPLOAD_PART_STALE_SECONDS)
