@@ -341,12 +341,6 @@ export function ActivityFeed({
                   name has since been taken.
                 </p>
               )}
-              {plan.truncated && (
-                <p>
-                  More matched than could be counted here; restore again for the
-                  rest.
-                </p>
-              )}
             </div>
           }
           confirmLabel="Restore all"
