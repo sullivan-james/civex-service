@@ -6,7 +6,9 @@ from typing import Any
 
 from sqlalchemy import (
     exists,
+    insert,
     String,
+    Table,
     and_,
     case,
     cast,
@@ -20,6 +22,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import aliased, Session
 
 from contextlib import contextmanager
+from collections.abc import Iterable
 from typing import Iterator
 
 from civex.db.models import (
@@ -35,6 +38,7 @@ from civex.db.models import (
 )
 from civex.domain.audit_diff import stored_form, tombstone
 from civex.domain.hlc import tick as hlc_tick
+from civex.domain.ids import row_id
 from civex.domain.audit_filter import AuditFilter
 from civex.domain.exceptions import ValidationError
 from civex.domain.filters import FilterCondition, FilterGroup, FilterNode
@@ -186,6 +190,9 @@ def _tree(node: FilterNode):
 
 # How many ids one query is asked about (SQLite caps the variables in one).
 _ID_CHUNK = 500
+_AUDIT_TABLE: Table = AuditLog.__table__  # type: ignore[assignment]
+# History entries written to the database in one statement.
+_LOG_CHUNK = 2000
 
 
 class LocalAuditRepository:
@@ -348,6 +355,57 @@ class LocalAuditRepository:
                 hlc=self._next_hlc(),
             )
         )
+
+    def log_changes(
+        self,
+        action: str,
+        entity_type: str,
+        changes: Iterable[
+            tuple[uuid.UUID, dict[str, Any] | None, dict[str, Any] | None]
+        ],
+        timestamp: datetime | None = None,
+        op: uuid.UUID | None = None,
+    ) -> int:
+        """`log_change` for many things at once: the same entry each (stored
+        form, batch, actor, device, op, a clock stamp in turn), in the order
+        given, so what must come first is written first; a statement per
+        chunk instead of one per entry."""
+        when = timestamp or datetime.now(timezone.utc)
+        batch_id = self._current_batch()
+        op_id = op or self._op_id
+        total = 0
+        rows: list[dict[str, Any]] = []
+
+        def flush() -> None:
+            if rows:
+                self._s.execute(insert(_AUDIT_TABLE), rows)
+                rows.clear()
+
+        for entity_id, old_data, new_data in changes:
+            old_data, new_data, delta, form = stored_form(old_data, new_data)
+            rows.append(
+                {
+                    "id": row_id(),
+                    "action": action,
+                    "entity_type": entity_type,
+                    "entity_id": entity_id,
+                    "old_data": old_data,
+                    "new_data": new_data,
+                    "delta": delta,
+                    "format": form,
+                    "op_id": op_id,
+                    "timestamp": when,
+                    "batch_id": batch_id,
+                    "actor": self._actor,
+                    "device_id": self._device_id,
+                    "hlc": self._next_hlc(),
+                }
+            )
+            total += 1
+            if len(rows) >= _LOG_CHUNK:
+                flush()
+        flush()
+        return total
 
     def event_counts_by_period(
         self,
@@ -772,18 +830,22 @@ class LocalAuditRepository:
         return entries or 0, batches
 
     def entities(
-        self, f: AuditFilter, limit: int
+        self, f: AuditFilter, limit: int | None = None
     ) -> tuple[list[tuple[str, uuid.UUID]], bool]:
-        """The distinct things (type, id) the matching entries are about, newest
-        first, at most `limit`; and whether there were more."""
-        rows = (
+        """The distinct things (type, id) the matching entries are about,
+        newest first; all of them unless `limit`, and then whether there were
+        more."""
+        q = (
             self._audit_query(f)
             .with_entities(AuditLog.entity_type, AuditLog.entity_id)
             .group_by(AuditLog.entity_type, AuditLog.entity_id)
             .order_by(func.max(AuditLog.timestamp).desc())
-            .limit(limit + 1)
-            .all()
         )
+        if limit is not None:
+            q = q.limit(limit + 1)
+        rows = q.all()
+        if limit is None:
+            return [(t, i) for t, i in rows], False
         return [(t, i) for t, i in rows[:limit]], len(rows) > limit
 
     def batch_parts(self, batch_id: uuid.UUID) -> list[dict]:

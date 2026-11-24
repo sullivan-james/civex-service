@@ -45,6 +45,7 @@ from civex.domain.dtos import (
     ResolvedSchema,
     RestoreConflictDTO,
     RestorePlanDTO,
+    RestoreRow,
     RestoreSetDTO,
     RestoreSetResultDTO,
     SchemaDTO,
@@ -5430,89 +5431,200 @@ class RecordService:
         covered_collections: frozenset[str] | set[str] = frozenset(),
         covered_schemas: frozenset[str] | set[str] = frozenset(),
     ) -> RestoreSetDTO:
-        """Which of these deleted records can come back, for all of them at once:
-        the records, their collections, schemas and ancestors, and what each
-        brings back with it, are looked up together rather than record by record
-        (`restore_plan` per record is a dozen queries each, so a bulk delete of a
-        few hundred took minutes to even describe).
+        """Which of these deleted records can come back, and what comes back
+        with them, for all of them at once and however many there are: only the
+        few columns the decision needs are read (a statement per chunk of ids
+        and per level of the tree, never one per record), and the answer is
+        worked out in memory, parents first, in one pass. Nothing is dropped for
+        size; what is left out is what is genuinely held back.
 
-        A record is held back while its collection, its schema, or the topmost
-        deleted record above it is deleted -- unless that is itself being
-        restored (`covered_*` name the collections and schemas that are, and any
-        chosen record is): it then comes back with it."""
+        A record is held back while its collection or schema is deleted, or the
+        record above it is deleted and is not itself coming back (one in the
+        set, or one deleted with a record that is). `covered_*` name the
+        collections and schemas a caller is restoring first, so records under
+        them count as coming. What was deleted with a record (the records under
+        it stamped the same) comes with it; a group that holds a record that
+        can't come back, for a clash of unique values, stays whole, deleted."""
         wanted: list[uuid.UUID] = []
         for raw in ids:
             try:
                 wanted.append(uuid.UUID(str(raw)))
             except ValueError:
                 continue
-        rows = [
-            r
-            for r in self._records.list_by_ids(list(dict.fromkeys(wanted)))
-            if r.deleted_at is not None
-        ]
-        chosen = {r.id for r in rows}
-        blockers = self._restore_blockers(rows)
-        groups = self._restore_groups(rows)
-        plan = RestoreSetDTO(groups=groups)
-        # A record whose group holds one that can't come back for a clash of
-        # unique values is left whole (a half-restored group would be worse).
-        clashing: set[uuid.UUID] = set()
-        members = {
-            r.id: r
-            for r in self._records.list_by_ids(
-                list(dict.fromkeys(m for g in groups.values() for m in g))
-            )
+        found = self._records.restore_rows(wanted, deleted_only=True)
+        plan = RestoreSetDTO()
+        if not found:
+            return plan
+        rows = {r.id: r for r in found}
+        chosen = list(rows)
+        # The records above, a level at a time (live or deleted).
+        frontier = {
+            r.parent_record_id
+            for r in found
+            if r.parent_record_id is not None and r.parent_record_id not in rows
         }
-        clashes = self._restore_clashes(list(members.values()))
-        for root, group in groups.items():
-            if any(m in clashes for m in group):
-                clashing.add(root)
-        for record in rows:
-            if record.id in clashing:
-                plan.blocked.append(record.id)
+        while frontier:
+            above = self._records.restore_rows(list(frontier))
+            rows.update({r.id: r for r in above})
+            frontier = {
+                r.parent_record_id
+                for r in above
+                if r.parent_record_id is not None and r.parent_record_id not in rows
+            }
+        # What was deleted with each: the records under it stamped alike,
+        # reached through others stamped alike.
+        children: dict[uuid.UUID, list[uuid.UUID]] = {}
+        level = list(chosen)
+        seen = set(chosen)
+        while level:
+            below = self._records.deleted_with(level)
+            for child_id, parent_id in below:
+                children.setdefault(parent_id, []).append(child_id)
+            level = list(dict.fromkeys(c for c, _ in below if c not in seen))
+            seen.update(level)
+            fresh = [c for c in level if c not in rows]
+            rows.update({r.id: r for r in self._records.restore_rows(fresh)})
+        # A clash of unique values holds back every group it is in (a group
+        # half restored would be worse): note which records sit above one.
+        tainted = self._restore_taint(rows, seen)
+        held = self._held_by_schema_or_collection(
+            [rows[i] for i in chosen], covered_collections, covered_schemas
+        )
+        coming: dict[uuid.UUID, None] = {}
+        for rid in _parents_first_ids(chosen, rows):
+            row = rows[rid]
+            if rid in coming:
+                plan.restored += 1  # comes back with a record above it
                 continue
-            blocker = blockers[record.id]
-            covered = blocker is not None and (
-                (blocker.kind == "record" and blocker.id in chosen)
+            above_row = rows.get(row.parent_record_id) if row.parent_record_id else None
+            if (
+                rid in tainted
+                or rid in held
                 or (
-                    blocker.kind == "collection" and blocker.name in covered_collections
+                    above_row is not None
+                    and above_row.deleted_at is not None
+                    and above_row.id not in coming
                 )
-                or (blocker.kind == "schema" and blocker.name in covered_schemas)
-            )
-            if blocker is not None and not covered:
-                plan.blocked.append(record.id)
+            ):
+                plan.blocked.append(rid)
                 continue
-            plan.coming.update(groups[record.id])
-            if blocker is None:
-                plan.ready.append(record.id)
-            else:
-                plan.waiting.append(record.id)
+            plan.restored += 1
+            queue = [rid]
+            for member in queue:  # parents before what is under them
+                if member not in coming:
+                    coming[member] = None
+                    queue.extend(children.get(member, ()))
+        plan.coming = list(coming)
+        plan.rows = {rid: rows[rid] for rid in coming}
         return plan
+
+    def _held_by_schema_or_collection(
+        self,
+        records: list[RestoreRow],
+        covered_collections: frozenset[str] | set[str],
+        covered_schemas: frozenset[str] | set[str],
+    ) -> set[uuid.UUID]:
+        """Which of these records sit in a deleted collection or schema that is
+        not one being restored. Each collection and schema is looked up once."""
+        gone_datasets: set[uuid.UUID] = set()
+        for did in {r.dataset_id for r in records}:
+            d = self._datasets.get_by_id(did, include_deleted=True, with_count=False)
+            if d is not None and d.deleted_at is not None:
+                if d.name not in covered_collections:
+                    gone_datasets.add(did)
+        gone_schemas: set[uuid.UUID] = set()
+        for sid in {r.schema_id for r in records}:
+            sc = self._schema_svc._repo.get_by_id(sid, include_deleted=True)
+            if sc is not None and sc.deleted_at is not None:
+                if sc.name not in covered_schemas:
+                    gone_schemas.add(sid)
+        return {
+            r.id
+            for r in records
+            if r.dataset_id in gone_datasets or r.schema_id in gone_schemas
+        }
+
+    def _restore_taint(
+        self, rows: dict[uuid.UUID, RestoreRow], candidates: set[uuid.UUID]
+    ) -> set[uuid.UUID]:
+        """The records that can't come back because one that would come with
+        them (itself, or one deleted with it) clashes on a unique key (see
+        `_restore_clashes`). Only the records of schemas with a unique key are
+        read in full."""
+        shapes = self._schema_svc.resolver()
+        keyed: dict[uuid.UUID, bool] = {}
+        for sid in {rows[i].schema_id for i in candidates}:
+            shape = shapes(sid)
+            keyed[sid] = bool(shape is not None and shape.schema.unique_keys)
+        if not any(keyed.values()):
+            return set()
+        ordered = _parents_first_ids(list(candidates), rows)
+        ids = [i for i in ordered if keyed[rows[i].schema_id]]
+        by_id = {r.id: r for r in self._records.list_by_ids(ids)}
+        clashes = self._restore_clashes([by_id[i] for i in ids if i in by_id])
+        tainted: set[uuid.UUID] = set()
+        for rid in clashes:
+            current = rid
+            while current not in tainted:
+                tainted.add(current)
+                row = rows[current]
+                above = rows.get(row.parent_record_id) if row.parent_record_id else None
+                if above is None or above.deleted_at != row.deleted_at:
+                    break
+                current = above.id
+        return tainted
 
     def restore_set(self, ids: list[str]) -> RestoreSetResultDTO:
         """Restore every one of these deleted records that nothing deleted holds
-        back, each with what was deleted with it, in one go: one lookup, one
-        update and one history entry per record, not a full plan and restore
-        per record. Those held back are returned in `left` (restoring what is
-        above them may free them; the caller goes round again)."""
+        back, each with what was deleted with it, as one action in history:
+        the update and the history entries are written a chunk at a time, so it
+        is a few dozen statements however many records there are. Those held
+        back are returned in `left`."""
         plan = self.plan_restore_set(ids)
-        every = list(
-            dict.fromkeys(rid for root in plan.ready for rid in plan.groups[root])
-        )
-        if every:
-            rows = self._records.list_by_ids(every)
-            self._require_each(permissions.WRITE_RECORDS, rows)
-            before = {r.id: self._snapshot(r) for r in rows}
-            self._records.restore_many(every)
-            self._log_restored(every, before)
-        back = set(every)
-        # Held back, or waiting for a parent that was not deleted with them:
-        # whatever is not live now is left for the next round.
-        left = [str(i) for i in (*plan.blocked, *plan.waiting) if i not in back]
+        if plan.coming:
+            self._require_each(
+                permissions.WRITE_RECORDS,
+                {r.dataset_id: r for r in plan.rows.values()}.values(),
+            )
+            self._records.restore_many(plan.coming)
+            self._log_restored_set(plan)
         return RestoreSetResultDTO(
-            restored=len(plan.ready), came_back=len(every), left=left
+            restored=plan.restored,
+            came_back=len(plan.coming),
+            left=[str(i) for i in plan.blocked],
         )
+
+    def _log_restored_set(self, plan: RestoreSetDTO) -> None:
+        """History for the records of `plan` just brought back: one entry each,
+        parents before what sits under them (they come in that order), the lot
+        one action in one batch. An entry is what the record's own restore
+        writes: the deleted stamp going, with its place; no values are read."""
+        if not self._audit:
+            return
+
+        def place(row: RestoreRow, deleted_at: _dt | None) -> dict[str, Any]:
+            return {
+                "id": str(row.id),
+                "dataset_id": str(row.dataset_id),
+                "schema_id": str(row.schema_id),
+                "parent_record_id": str(row.parent_record_id)
+                if row.parent_record_id
+                else None,
+                "deleted_at": deleted_at.isoformat() if deleted_at else None,
+            }
+
+        with (
+            _audit_batch(self._audit, "restore", len(plan.coming) > 1),
+            self._audit.operation(),
+        ):
+            self._audit.log_changes(
+                "restore",
+                "record",
+                (
+                    (rid, place(row, row.deleted_at), place(row, None))
+                    for rid, row in plan.rows.items()
+                ),
+            )
 
     def restore_records(
         self, ids: list[str], with_parents: bool = True
@@ -5580,35 +5692,6 @@ class RecordService:
             came_back=len(every),
             left=[str(rid) for rid in chosen if rid not in ok],
         )
-
-    def _restore_groups(
-        self, records: list[RecordDTO]
-    ) -> dict[uuid.UUID, list[uuid.UUID]]:
-        """`_restore_group` for many deleted records at once: the subtrees are
-        fetched together (a query per level) and each record's group is worked
-        out in memory."""
-        if not records:
-            return {}
-        levels = self._records.subtree_levels([r.id for r in records], deleted=True)
-        every = list(dict.fromkeys(rid for level in levels for rid in level))
-        rows = {r.id: r for r in self._records.list_by_ids(every)}
-        children: dict[uuid.UUID, list[uuid.UUID]] = {}
-        for row in rows.values():
-            if row.parent_record_id is not None:
-                children.setdefault(row.parent_record_id, []).append(row.id)
-        groups: dict[uuid.UUID, list[uuid.UUID]] = {}
-        for record in records:
-            group = [record.id]
-            pending = [record.id]
-            while pending:
-                for child in children.get(pending.pop(), []):
-                    # Deleted with it: stamped with the same moment, reached
-                    # through others in the group.
-                    if rows[child].deleted_at == record.deleted_at:
-                        group.append(child)
-                        pending.append(child)
-            groups[record.id] = group
-        return groups
 
     def _restore_blockers(
         self, records: list[RecordDTO]
@@ -5894,6 +5977,29 @@ def _tree_actions(records: list[RecordDTO]) -> dict[uuid.UUID, uuid.UUID]:
             root = parent_of[root]  # type: ignore[assignment]
         out[record.id] = ops.setdefault(root, uuid.uuid4())
     return out
+
+
+def _parents_first_ids(
+    ids: list[uuid.UUID], rows: dict[uuid.UUID, RestoreRow]
+) -> list[uuid.UUID]:
+    """`ids` shallowest first, by how many records above each is known: a
+    record comes after every record above it that is among them. Ties keep
+    their order."""
+    depth: dict[uuid.UUID, int] = {}
+
+    def of(rid: uuid.UUID) -> int:
+        trail: list[uuid.UUID] = []
+        current: uuid.UUID | None = rid
+        while current is not None and current not in depth:
+            trail.append(current)
+            row = rows.get(current)
+            current = row.parent_record_id if row is not None else None
+        base = depth[current] + 1 if current is not None else 0
+        for i, step in enumerate(reversed(trail)):
+            depth[step] = base + i
+        return depth[rid]
+
+    return sorted(ids, key=of)
 
 
 def _parents_first(records: list[RecordDTO]) -> list[RecordDTO]:

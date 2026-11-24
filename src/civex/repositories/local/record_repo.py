@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import sqlite3
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -41,7 +42,7 @@ from civex.db.models import (
     WorkflowJob,
 )
 from civex.domain import notes as note_rules
-from civex.domain.dtos import RecordDTO
+from civex.domain.dtos import RecordDTO, RestoreRow
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.filters import FilterCondition, FilterGroup, FilterNode, SortKey
 from civex.domain.file_access import HeldFile
@@ -257,6 +258,28 @@ _CHUNK = 500
 def _chunks(ids: list[uuid.UUID]):
     for start in range(0, len(ids), _CHUNK):
         yield ids[start : start + _CHUNK]
+
+
+_RESTORE_COLUMNS = (
+    Record.id,
+    Record.parent_record_id,
+    Record.dataset_id,
+    Record.schema_id,
+    Record.deleted_at,
+)
+
+# The ids a bulk statement names at a time: a restore of tens of thousands of
+# records is a few dozen statements. SQLite before 3.32 allows 999 variables.
+_BULK_CHUNK = 5000
+
+
+def _bulk_chunks(session: Session, ids: list[uuid.UUID]):
+    size = _BULK_CHUNK
+    bind = session.get_bind()
+    if bind.dialect.name == "sqlite" and sqlite3.sqlite_version_info < (3, 32):
+        size = _CHUNK
+    for start in range(0, len(ids), size):
+        yield ids[start : start + size]
 
 
 # The most a caller limited to some collections is counted to on PostgreSQL
@@ -1292,8 +1315,42 @@ class LocalRecordRepository:
         )
         return [str(r.id) for r in rows]
 
+    def restore_rows(
+        self, ids: list[uuid.UUID], deleted_only: bool = False
+    ) -> list[RestoreRow]:
+        """The columns a restore is decided from, for these records (those that
+        exist; only the deleted ones with `deleted_only`): a statement per
+        chunk of `_bulk_chunk`, and no values loaded."""
+        out: list[RestoreRow] = []
+        for chunk in _bulk_chunks(self._s, list(dict.fromkeys(ids))):
+            q = select(*_RESTORE_COLUMNS).where(Record.id.in_(chunk))
+            if deleted_only:
+                q = q.where(Record.deleted_at.is_not(None))
+            out.extend(RestoreRow(*row) for row in self._s.execute(q))
+        return out
+
+    def deleted_with(
+        self, parent_ids: list[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, uuid.UUID]]:
+        """(id, parent id) of the records directly under these that were deleted
+        with them: deleted, with the very stamp the parent carries."""
+        above = aliased(Record)
+        out: list[tuple[uuid.UUID, uuid.UUID]] = []
+        for chunk in _bulk_chunks(self._s, parent_ids):
+            q = (
+                select(Record.id, Record.parent_record_id)
+                .join(above, above.id == Record.parent_record_id)
+                .where(
+                    Record.parent_record_id.in_(chunk),
+                    Record.deleted_at.is_not(None),
+                    Record.deleted_at == above.deleted_at,
+                )
+            )
+            out.extend((rid, pid) for rid, pid in self._s.execute(q) if pid is not None)
+        return out
+
     def restore_many(self, ids: list[uuid.UUID]) -> None:
-        for chunk in _chunks(ids):
+        for chunk in _bulk_chunks(self._s, ids):
             self._s.execute(
                 update(Record)
                 .where(Record.id.in_(chunk))

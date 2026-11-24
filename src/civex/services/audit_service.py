@@ -58,12 +58,6 @@ REVERTIBLE_BATCHES = ("edit",)
 _BATCH_PAGE = 500
 
 
-# How many things a restore-all will look at, and how many rounds it will make
-# to bring back records under others in the same set.
-MAX_RESTORE_ALL = 5000
-MAX_RESTORE_PASSES = 8
-
-
 class AuditService:
     def __init__(
         self,
@@ -407,7 +401,7 @@ class AuditService:
         count. With `batch_id`, only what that one bulk delete took (a record
         and everything beneath it, say), so it can be undone as the one event
         it was."""
-        collections, schemas, fields, records, truncated = self._deleted_matching(
+        collections, schemas, fields, records = self._deleted_matching(
             where, search, batch_id
         )
         blocked = 0
@@ -430,7 +424,6 @@ class AuditService:
             len(records),
             restores,
             blocked,
-            truncated,
             fields=len(fields),
         )
 
@@ -444,12 +437,12 @@ class AuditService:
         history. Collections and schemas first, then records parent-first; a
         record still under something deleted that is not in the set stays
         deleted and is counted as blocked."""
-        collections, schemas, fields, records, _ = self._deleted_matching(
+        collections, schemas, fields, records = self._deleted_matching(
             where, search, batch_id
         )
         restored = came_back = 0
         field_blocked = 0
-        with self._audit.batch("restore", "Restore all"):
+        with self._audit.batch("restore", "Restore all"), self._audit.operation():
             for name in collections:
                 came_back += self._datasets.restore_plan(name).records
                 self._datasets.restore(name)
@@ -465,31 +458,24 @@ class AuditService:
                     field_blocked += 1  # its name was taken, or it is already back
                     continue
                 restored += 1
-            pending = list(records)
-            # A record under another in the set comes back with it, or once it
-            # has: go round until nothing more can. Each round restores every
-            # record that nothing deleted holds back, all together.
-            for _ in range(MAX_RESTORE_PASSES):
-                if not pending:
-                    break
-                done = self._records.restore_set(pending)
-                restored += done.restored
-                came_back += done.came_back
-                pending = done.left
-                if not done.restored:
-                    break
-        return RestoreAllResultDTO(restored, came_back, len(pending) + field_blocked)
+            # Every record at once, however many: the set is worked out in
+            # memory, parents first, and written a chunk at a time, as one
+            # action; what is left is held back by something deleted that is
+            # not in the set.
+            done = self._records.restore_set(records)
+            restored += done.restored
+            came_back += done.came_back
+        return RestoreAllResultDTO(restored, came_back, len(done.left) + field_blocked)
 
     def _deleted_matching(
         self,
         where: Any,
         search: str | None,
         batch_id: uuid.UUID | str | None = None,
-    ) -> tuple[list[str], list[str], list[tuple[str, uuid.UUID]], list[str], bool]:
+    ) -> tuple[list[str], list[str], list[tuple[str, uuid.UUID]], list[str]]:
         """Names of the deleted collections, names of the deleted schemas, the
         deleted fields as (schema name, field id) and ids of the deleted records
-        a history filter matches (and whether there were more than were looked
-        at)."""
+        a history filter matches: all of them, however many."""
         tree = _parsed(where)
         scope: list[FilterNode] = [
             FilterCondition("now", "eq", "deleted"),
@@ -498,9 +484,8 @@ class AuditService:
         if tree is not None:
             scope.insert(0, self._resolve(tree))
         batch = _as_uuid(batch_id, "batch") if batch_id else None
-        things, truncated = self._audit.entities(
-            AuditFilter(where=FilterGroup("and", scope), search=search, batch_id=batch),
-            MAX_RESTORE_ALL,
+        things, _ = self._audit.entities(
+            AuditFilter(where=FilterGroup("and", scope), search=search, batch_id=batch)
         )
         ids = {
             t: {i for kind, i in things if kind == t}
@@ -522,7 +507,7 @@ class AuditService:
             if field.deleted_at
         )
         records = [str(i) for kind, i in things if kind == "record"]
-        return collections, schemas, fields, records, truncated
+        return collections, schemas, fields, records
 
     # ------------------------------------------------------------------
     # Reverting

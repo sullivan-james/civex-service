@@ -48,6 +48,7 @@ from civex.domain.dtos import (
     FileCopy,
     FileRef,
     RecordDTO,
+    RestoreRow,
     SchemaDTO,
     StoredObjectInfo,
     ViewDTO,
@@ -518,6 +519,18 @@ class RecordRepository(Protocol):
         self, ids: list[uuid.UUID], stamp: datetime | None = None
     ) -> None: ...
     def restore_many(self, ids: list[uuid.UUID]) -> None: ...
+    def restore_rows(
+        self, ids: list[uuid.UUID], deleted_only: bool = False
+    ) -> list[RestoreRow]:
+        """The columns a restore is decided from (no values), chunked."""
+        ...
+
+    def deleted_with(
+        self, parent_ids: list[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, uuid.UUID]]:
+        """(id, parent id) of the records directly under these that were deleted
+        with them (deleted, with the parent's own stamp)."""
+        ...
 
     def references_of(
         self, record_ids: list[uuid.UUID]
@@ -727,8 +740,20 @@ class AuditRepository(Protocol):
         ...
 
     def entities(
-        self, f: AuditFilter, limit: int
+        self, f: AuditFilter, limit: int | None = None
     ) -> tuple[list[tuple[str, uuid.UUID]], bool]: ...
+    def log_changes(
+        self,
+        action: str,
+        entity_type: str,
+        changes: Iterable[tuple[uuid.UUID, dict | None, dict | None]],
+        timestamp: datetime | None = None,
+        op: uuid.UUID | None = None,
+    ) -> int:
+        """`log_change` for many things of one kind at once, in the order
+        given: one entry each, written a chunk at a time. Returns how many."""
+        ...
+
     def batch_parts(self, batch_id: uuid.UUID) -> list[dict]: ...
     def count_prunable(
         self, before: datetime, protect_unsynced: bool

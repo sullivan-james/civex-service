@@ -217,6 +217,23 @@ from the next tag forward.
 
 ### v2.2.1
 
+- **Undoing a bulk action is one step, however big.** Restoring what a bulk
+  delete took stopped at 5,000 records (and eight rounds of parents first): a
+  delete of 69,574 records offered "Restore" and then brought back 5,000, "5,000
+  records in all". There is no cap now. The restore reads only the few columns
+  it decides from (never the values, never a record at a time), works out in
+  memory, parents first and in one pass, what comes back with what, and writes
+  the update and the history a chunk at a time (5,000 ids, 2,000 entries per
+  statement): a few dozen statements for any size. What is left deleted is only
+  what is genuinely held back (a collection, schema or record above it that is
+  deleted and not coming back, or a clash of unique values), and is counted.
+  The preview and the restore are the same computation, so the numbers the
+  dialog shows are exactly what happens. The restore is one action in one batch
+  in history, so sync carries it as one action. A bulk edit already reverted
+  without a cap, in chunks, as one batch; that is now tested at 5,200 records.
+  Measured on PostgreSQL: 69,572 records preview in 4 s and restore in 11 s.
+  `GET /audit/restore-all` no longer has a `truncated` field.
+
 - **Faster pushes to an authority.** A push of 100 changes ran about 17
   statements per change (20 for edits), all under the feed's lock; it now runs
   about 10 (13 for edits): what the push asks one change at a time (was it sent
