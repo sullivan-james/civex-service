@@ -66,42 +66,7 @@ UPLOAD_TIMEOUT_SECONDS = 120.0
 # The capability under which an authority reads a gzipped request body.
 GZIP_REQUESTS = "gzip_requests"
 GZIP_MIN_BYTES = 1024
-# A push carries at most this many serialized bytes (an action over it goes
-# alone), so the size of a request doesn't depend on how wide the records are.
-PUSH_BUDGET_BYTES = 2 * 1024 * 1024
 API = "/api/sync/v1"
-
-
-def batch_by_budget(
-    entries: list[SyncEntry],
-    max_entries: int,
-    max_bytes: int = PUSH_BUDGET_BYTES,
-    size_of: Callable[[SyncEntry], int] | None = None,
-) -> list[SyncEntry]:
-    """The leading entries to send in one push: at most `max_entries` and about
-    `max_bytes` serialized, but never part of an action (entries sharing an
-    `op` are taken together or not at all; an action over the budget goes
-    alone, and the first action is always taken). Entries with no `op` are each
-    an action of their own."""
-    size = size_of or (lambda e: len(json.dumps(e.to_dict())))
-    taken: list[SyncEntry] = []
-    used = 0
-    i = 0
-    while i < len(entries):
-        j = i + 1
-        if entries[i].op is not None:
-            while j < len(entries) and entries[j].op == entries[i].op:
-                j += 1
-        action = entries[i:j]
-        cost = sum(size(e) for e in action)
-        if taken and (
-            len(taken) + len(action) > max_entries or used + cost > max_bytes
-        ):
-            break
-        taken += action
-        used += cost
-        i = j
-    return taken
 
 
 class HttpSyncTransport:
@@ -127,6 +92,10 @@ class HttpSyncTransport:
         self._session_lock = threading.RLock()
         # What the authority said it offers (`Hello.capabilities`), once asked.
         self._capabilities: frozenset[str] | None = None
+
+    def close(self) -> None:
+        """Close the connections this transport holds open."""
+        self._wire.close()
 
     # -- the protocol ----------------------------------------------------
 
@@ -190,6 +159,7 @@ class HttpSyncTransport:
                 body,
                 timeout=CLIENT_PUSH_TIMEOUT_SECONDS,
                 gzip_body=self._offers(GZIP_REQUESTS),
+                idempotent=True,  # the authority answers a repeat from its log
             )
         )
 
@@ -218,7 +188,7 @@ class HttpSyncTransport:
         )
 
     def missing_files(self, shas: list[str]) -> list[str]:
-        body = self._json("POST", "/files/missing", {"sha256": shas})
+        body = self._json("POST", "/files/missing", {"sha256": shas}, idempotent=True)
         return list(body["missing"])
 
     def accepts_packs(self) -> bool:
@@ -246,6 +216,7 @@ class HttpSyncTransport:
                 content_type="application/octet-stream",
                 length=body.length,
                 timeout=UPLOAD_TIMEOUT_SECONDS,
+                idempotent=True,  # a file stored twice is stored once
             )
             return dict(reply.json())
 
@@ -291,6 +262,7 @@ class HttpSyncTransport:
                 "POST",
                 f"/files/{sha256}/parts",
                 {"size": size, "part_size": FILE_PART_BYTES},
+                idempotent=True,  # says which parts it holds already
             )
         except SyncError as e:
             if e.status == 501:
@@ -331,7 +303,9 @@ class HttpSyncTransport:
         done. True when the authority has the file (it had it, or it went in);
         False when it wants the bytes streamed to it after all."""
         try:
-            answer = self._json("POST", f"/files/{sha256}/upload", {"size": size})
+            answer = self._json(
+                "POST", f"/files/{sha256}/upload", {"size": size}, idempotent=True
+            )
         except SyncError as e:
             if e.status == 501:  # this authority doesn't do it: stream instead
                 return False
@@ -482,7 +456,9 @@ class HttpSyncTransport:
             creds.private_key, session_request(creds.authority_key, creds.device_id, at)
         )
         body = {"device_id": creds.device_id, "at": at, "signature": signature}
-        grant = SessionGrant.from_dict(self._plain("POST", "/session", body).json())
+        grant = SessionGrant.from_dict(
+            self._plain("POST", "/session", body, idempotent=True).json()
+        )
         if not keys.verifies(
             creds.authority_key, session_answer(signature), grant.signature
         ):
@@ -519,7 +495,13 @@ class HttpSyncTransport:
             headers["Content-Type"] = content_type
         return headers
 
-    def _plain(self, method: str, path: str, body: Any = None) -> Reply:
+    def _plain(
+        self,
+        method: str,
+        path: str,
+        body: Any = None,
+        idempotent: bool | None = None,
+    ) -> Reply:
         """A call that needs no session (join, sign-in): JSON in, JSON out."""
         data = json.dumps(body).encode("utf-8") if body is not None else None
         return self._wire.request(
@@ -530,6 +512,7 @@ class HttpSyncTransport:
             timeout=self._timeout,
             follow="same_host",
             accept_gzip=True,
+            idempotent=idempotent,
         )
 
     def _call(
@@ -545,6 +528,7 @@ class HttpSyncTransport:
         stream: bool = False,
         gzip: bool = True,
         extra: dict[str, str] | None = None,
+        idempotent: bool | None = None,
     ) -> Reply:
         """A signed-in call through the wire (the status table applies)."""
         headers = self._headers(content_type)
@@ -562,6 +546,7 @@ class HttpSyncTransport:
             stream=stream,
             follow="never" if stream else "same_host",
             accept_gzip=gzip and not stream,
+            idempotent=idempotent,
         )
 
     def _json(
@@ -571,6 +556,7 @@ class HttpSyncTransport:
         body: Any = None,
         timeout: float | None = None,
         gzip_body: bool = False,
+        idempotent: bool | None = None,
     ) -> dict[str, Any]:
         data = json.dumps(body).encode("utf-8") if body is not None else None
         extra: dict[str, str] = {}
@@ -587,6 +573,7 @@ class HttpSyncTransport:
                 length=len(data) if data is not None else None,
                 timeout=timeout,
                 extra=extra,
+                idempotent=idempotent,
             )
             # 204 (a removal) has no body.
             return dict(reply.json())
@@ -721,6 +708,5 @@ def build_transport(base_url: str, credentials: DeviceCredentials) -> HttpSyncTr
 __all__ = [
     "CLIENT_PUSH_TIMEOUT_SECONDS",
     "HttpSyncTransport",
-    "batch_by_budget",
     "build_transport",
 ]

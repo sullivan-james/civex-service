@@ -10,10 +10,11 @@ entry's id, which is what makes sending it twice harmless.
 from __future__ import annotations
 
 import dataclasses
+import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any, Protocol
 
 from civex.domain import features
@@ -870,8 +871,12 @@ class SyncError(RuntimeError):
         status: int = 400,
         detail: str = "",
         retry_after: float | None = None,
+        code: str = "",
     ) -> None:
         super().__init__(message)
+        # Why, for a program to act on (not_a_device, clock_skew, bad_signature,
+        # too_large...), when the authority said; empty from an older server.
+        self.code = code
         self.retryable = retryable
         # Seconds the server asked to wait before trying again (`Retry-After`),
         # when it said.
@@ -1280,3 +1285,40 @@ class SyncTransport(Protocol):
     def unpublish(
         self, kind: str, name: str, version: int | None = None, force: bool = False
     ) -> None: ...
+
+
+# A push carries at most this many serialized bytes (an action over it goes
+# alone), so the size of a request doesn't depend on how wide the records are.
+PUSH_BUDGET_BYTES = 2 * 1024 * 1024
+
+
+def batch_by_budget(
+    entries: list[SyncEntry],
+    max_entries: int,
+    max_bytes: int = PUSH_BUDGET_BYTES,
+    size_of: Callable[[SyncEntry], int] | None = None,
+) -> list[SyncEntry]:
+    """The leading entries to send in one push: at most `max_entries` and about
+    `max_bytes` serialized, but never part of an action (entries sharing an
+    `op` are taken together or not at all; an action over the budget goes
+    alone, and the first action is always taken). Entries with no `op` are each
+    an action of their own."""
+    size = size_of or (lambda e: len(json.dumps(e.to_dict())))
+    taken: list[SyncEntry] = []
+    used = 0
+    i = 0
+    while i < len(entries):
+        j = i + 1
+        if entries[i].op is not None:
+            while j < len(entries) and entries[j].op == entries[i].op:
+                j += 1
+        action = entries[i:j]
+        cost = sum(size(e) for e in action)
+        if taken and (
+            len(taken) + len(action) > max_entries or used + cost > max_bytes
+        ):
+            break
+        taken += action
+        used += cost
+        i = j
+    return taken

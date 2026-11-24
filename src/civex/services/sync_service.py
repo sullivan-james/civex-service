@@ -14,6 +14,7 @@ point leaves the project as it was or one step further, never between.
 from __future__ import annotations
 
 import logging
+import functools
 import threading
 
 import time
@@ -53,7 +54,9 @@ from civex.domain.file_refs import without_file_locations
 from civex.domain.hosts import is_loopback
 from civex.domain.dtos import MissingFileGroupDTO, MissingFilesRemovalDTO
 from civex.domain.sync import (
+    PUSH_BUDGET_BYTES,
     REFUSAL_PERMISSION,
+    batch_by_budget,
     is_lock_contention,
     Joined,
     LoginStarted,
@@ -91,7 +94,6 @@ from civex.services.record_service import RecordService
 from civex.services.sync_applier import SyncApplier
 from civex.services.sync_lock import sync_lock, sync_running
 from civex.services import ssh_tunnel
-from civex.services.sync_transport import PUSH_BUDGET_BYTES, batch_by_budget
 
 # Changes per push. The authority settles at most 500 in one request
 # (`sync_authority.PUSH_MAX`), so a batch never goes over that. Measured on
@@ -333,6 +335,26 @@ class FilesWaiting:
     never_stored_in: list[tuple[str, int]] = field(default_factory=list)
     # Missing files a person chose to stop being told about.
     ignored: int = 0
+
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _closes_transports(fn: _F) -> _F:
+    """A pass that ends, however it ends, closes the connections it opened."""
+
+    @functools.wraps(fn)
+    def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+        depth = self.__dict__.setdefault("_pass_depth", threading.local())
+        depth.n = getattr(depth, "n", 0) + 1
+        try:
+            return fn(self, *args, **kwargs)
+        finally:
+            depth.n -= 1
+            if depth.n == 0:  # not while an outer pass still uses them
+                self._close_transports()
+
+    return wrapper  # type: ignore[return-value]
 
 
 class SyncService:
@@ -852,7 +874,7 @@ class SyncService:
         if invite and invite.strip():
             joined = probe.join(invite.strip())
             user_state.save_authority(url, joined.authority_key)
-        elif not user_state.authority_for(url):
+        elif not self._is_a_device(probe, url):
             # Never joined and no invite: ask to join, show the code (or take a
             # request already made), and wait for a person to approve it.
             if login is None and on_code is None:
@@ -904,6 +926,22 @@ class SyncService:
                 retryable=False,
             )
         return mode, hello, url
+
+    def _is_a_device(self, probe: SyncTransport, url: str) -> bool:
+        """Whether the authority at `url` knows THIS device. Asked, not
+        guessed: this computer may have joined that address for another project
+        (each project is its own device), or this device may have been revoked.
+        Only a refusal that says so (`not_a_device`) means sign in again; any
+        other (a bad signature, a clock) keeps its own message."""
+        if not user_state.authority_for(url):
+            return False
+        try:
+            probe.hello()  # signs in
+        except SyncError as e:
+            if e.code == "not_a_device":
+                return False
+            raise
+        return True
 
     def _await_approval(self, probe: SyncTransport, login: LoginStarted) -> Joined:
         """Poll until a person approves the request, it is denied, or it
@@ -1114,7 +1152,25 @@ class SyncService:
                 f"This computer hasn't joined {remote}: connect again with an invite.",
                 retryable=False,
             )
-        return self._make_transport(remote, self._credentials(remote))
+        transport = self._make_transport(remote, self._credentials(remote))
+        self._opened().append(transport)
+        return transport
+
+    def _opened(self) -> list[Any]:
+        """The transports this thread has made since it last closed them."""
+        local = self.__dict__.setdefault("_transports", threading.local())
+        if not hasattr(local, "list"):
+            local.list = []
+        return local.list  # type: ignore[no-any-return]
+
+    def _close_transports(self) -> None:
+        """Close the connections of every transport this thread opened: a pass
+        leaves no socket behind."""
+        opened, self._opened()[:] = list(self._opened()), []
+        for transport in opened:
+            close = getattr(transport, "close", None)
+            if close is not None:
+                close()
 
     # ------------------------------------------------------------------
     # Syncing
@@ -1203,6 +1259,7 @@ class SyncService:
         except Exception:  # noqa: BLE001 - nothing to save; the error matters more
             pass
 
+    @_closes_transports
     def _sync(self) -> SyncReport:
         progress = self._sync_progress
         if problem := self._one_role():
@@ -1692,6 +1749,7 @@ class SyncService:
                 self._repo.mark_folded(entries, "synced")
         return ready, {k: v for k, v in folded.items() if any(e.id == k for e in ready)}
 
+    @_closes_transports
     def send_files(
         self,
         everything: bool = False,
@@ -2708,6 +2766,7 @@ class SyncService:
             sha256
         )
 
+    @_closes_transports
     def fetch_files(
         self,
         shas: list[str] | None = None,

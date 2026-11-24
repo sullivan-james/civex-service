@@ -19,10 +19,10 @@ import pytest
 from civex.domain.sync import SyncEntry, SyncError
 from civex.services import http_wire
 from civex.services.http_wire import Wire, parse_retry_after, retry_wait, status_error
+from civex.domain.sync import batch_by_budget
 from civex.services.sync_transport import (
     CLIENT_PUSH_TIMEOUT_SECONDS,
     HttpSyncTransport,
-    batch_by_budget,
 )
 
 
@@ -209,7 +209,8 @@ def test_each_thread_has_its_own_connection_and_reuses_it(server) -> None:
         t.start()
     for t in threads:
         t.join()
-    assert wire.connections_made == 3 and len(server.peers) == 3
+    assert 1 <= wire.connections_made <= 3  # idle ones are shared
+    assert wire.open_connections() <= 3
     wire.close()
 
 
@@ -350,3 +351,145 @@ def test_default_budget_is_about_2_mib_of_serialized_entries() -> None:
     total = sum(len(json.dumps(e.to_dict())) for e in taken)
     assert 100 < len(taken) < 250
     assert total <= 2 * 1024 * 1024 + 4000
+
+
+# -- idempotence --------------------------------------------------------------
+
+
+def test_a_post_is_not_sent_again_after_a_5xx_or_a_timeout(server) -> None:
+    server.plan = [(504, {}, b"")]
+    sleeps: list[float] = []
+    with pytest.raises(SyncError):
+        _wire(sleeps).request("POST", server.url + "/x", body=b"{}")
+    assert len(server.seen) == 1 and sleeps == []
+
+
+def test_a_post_is_sent_again_on_429_and_503_and_an_idempotent_one_on_504(
+    server,
+) -> None:
+    server.plan = [(503, {"Retry-After": "1"}, b""), (200, {}, b"{}")]
+    _wire([]).request("POST", server.url + "/x", body=b"{}")
+    assert len(server.seen) == 2
+    server.seen.clear()
+    server.plan = [(504, {}, b""), (200, {}, b"{}")]
+    _wire([]).request("POST", server.url + "/x", body=b"{}", idempotent=True)
+    assert len(server.seen) == 2
+
+
+def test_a_post_that_went_out_and_got_no_answer_is_not_resent() -> None:
+    import socket
+
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(5)
+    port = listener.getsockname()[1]
+    got: list[bytes] = []
+
+    def serve() -> None:
+        while True:
+            try:
+                c, _ = listener.accept()
+            except OSError:
+                return
+            got.append(c.recv(65536))
+            c.close()  # no answer at all
+
+    threading.Thread(target=serve, daemon=True).start()
+    sleeps: list[float] = []
+    with pytest.raises(SyncError) as raised:
+        _wire(sleeps).request("POST", f"http://127.0.0.1:{port}/x", body=b"{}")
+    assert len(got) == 1 and sleeps == []
+    assert "may have done it" in str(raised.value)
+    got.clear()
+    with pytest.raises(SyncError):  # a GET is sent again, with back-off
+        _wire(sleeps).request("GET", f"http://127.0.0.1:{port}/x")
+    assert len(got) > 1
+    listener.close()
+
+
+# -- proxies --------------------------------------------------------------------
+
+
+def test_plain_http_goes_to_the_proxy_with_the_whole_address(
+    server, monkeypatch
+) -> None:
+    server.plan = [(200, {}, b'{"via": "proxy"}')]
+    monkeypatch.setattr(
+        "urllib.request.getproxies", lambda: {"http": server.url.replace("http://", "")}
+    )
+    monkeypatch.setattr("urllib.request.proxy_bypass", lambda host: False)
+    reply = Wire().request("GET", "http://authority.example:8123/api/x?a=1")
+    assert reply.json() == {"via": "proxy"}
+    assert server.seen[0]["path"] == "http://authority.example:8123/api/x?a=1"
+
+
+def test_https_is_tunnelled_through_the_proxy_with_connect(monkeypatch) -> None:
+    import socket
+
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(5)
+    port = listener.getsockname()[1]
+    lines: list[str] = []
+
+    def serve() -> None:
+        c, _ = listener.accept()
+        lines.append(c.recv(65536).decode("latin-1"))
+        c.sendall(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
+        c.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    monkeypatch.setattr(
+        "urllib.request.getproxies",
+        lambda: {"https": f"http://user:pw@127.0.0.1:{port}"},
+    )
+    monkeypatch.setattr("urllib.request.proxy_bypass", lambda host: False)
+    with pytest.raises(SyncError):
+        Wire(sleep=lambda s: None).request(
+            "GET", "https://hub.example.com/x", timeout=1.0
+        )
+    assert lines[0].startswith("CONNECT hub.example.com:443 HTTP/1.1")
+    assert "Proxy-Authorization: Basic " in lines[0]
+    listener.close()
+
+
+def test_no_proxy_is_honoured(server, monkeypatch) -> None:
+    monkeypatch.setattr("urllib.request.getproxies", lambda: {"http": "127.0.0.1:1"})
+    monkeypatch.setattr("urllib.request.proxy_bypass", lambda host: True)
+    assert Wire().request("GET", server.url + "/x").status == 200
+
+
+# -- no sockets left behind -------------------------------------------------------
+
+
+def test_many_threads_and_streams_leave_no_open_sockets(server) -> None:
+    wire = Wire()
+
+    def one() -> None:
+        wire.request("PUT", server.url + "/part", body=b"x" * 100)
+
+    for _ in range(30):  # thirty "big files", each with its own four threads
+        threads = [threading.Thread(target=one) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+    assert wire.open_connections() <= http_wire.MAX_IDLE_PER_HOST
+    for _ in range(20):  # streamed downloads give theirs back
+        with wire.request("GET", server.url + "/f", stream=True) as r:
+            r.read()
+    assert wire.open_connections() <= http_wire.MAX_IDLE_PER_HOST
+    for _ in range(20):  # an abandoned stream is closed, not kept
+        wire.request("GET", server.url + "/f", stream=True).close()
+    assert wire.open_connections() <= http_wire.MAX_IDLE_PER_HOST
+    wire.close()
+    assert wire.open_connections() == 0
+
+
+def test_a_transport_closes_its_connections(server) -> None:
+    t = _transport(server)
+    server.plan = [(200, {}, _hello([]))]
+    t.hello()
+    assert t._wire.open_connections() == 1
+    t.close()
+    assert t._wire.open_connections() == 0

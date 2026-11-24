@@ -23,6 +23,7 @@ shared library and a release bundle:
 
 from __future__ import annotations
 
+import base64
 import gzip
 import http.client
 import json
@@ -32,6 +33,7 @@ import threading
 import time
 import urllib.error
 import urllib.parse
+import urllib.request
 from collections.abc import Callable, Mapping
 from email.message import Message
 from email.utils import parsedate_to_datetime
@@ -52,6 +54,8 @@ JITTER = 0.25
 # A kept-open connection idle this long is not trusted: servers close theirs.
 IDLE_SECONDS = 30.0
 MAX_REDIRECTS = 5
+# Idle connections kept per host (uploads run a few threads at once).
+MAX_IDLE_PER_HOST = 8
 _REDIRECTS = (301, 302, 303, 307, 308)
 _STALE = (
     http.client.RemoteDisconnected,
@@ -113,13 +117,13 @@ class Reply:
         headers: Message,
         body: bytes = b"",
         stream: http.client.HTTPResponse | None = None,
-        conn: http.client.HTTPConnection | None = None,
+        release: Callable[[], None] | None = None,
     ) -> None:
         self.status = status
         self.headers = headers
         self.body = body
         self._stream = stream
-        self._conn = conn
+        self._release = release
 
     def header(self, name: str, default: str = "") -> str:
         return str(self.headers.get(name, default) or default)
@@ -135,9 +139,11 @@ class Reply:
         return self._stream.read(n) if n >= 0 else self._stream.read()
 
     def close(self) -> None:
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
+        """Give the connection back (kept for reuse when the body was read to
+        its end, else closed)."""
+        release, self._release = self._release, None
+        if release is not None:
+            release()
 
     def __enter__(self) -> Reply:
         return self
@@ -199,7 +205,13 @@ def status_error(reply: Reply, not_found: str | None = None) -> SyncError:
     wait = parse_retry_after(reply.header("Retry-After"))
 
     def err(message: str, retryable: bool) -> SyncError:
-        return SyncError(message, retryable=retryable, status=status, retry_after=wait)
+        return SyncError(
+            message,
+            retryable=retryable,
+            status=status,
+            retry_after=wait,
+            code=reply.header("X-Civex-Code") or _code(detail),
+        )
 
     if status == 426:
         return err(mismatch_words(detail), False)
@@ -241,9 +253,28 @@ def _sleep_default(seconds: float) -> None:
     time.sleep(seconds)
 
 
+def proxy_for(url: str) -> urllib.parse.SplitResult | None:
+    """The proxy this address goes through, as the environment and the system
+    say (HTTP_PROXY, HTTPS_PROXY, NO_PROXY, and the macOS and Windows settings),
+    or None to go direct."""
+    parts = urllib.parse.urlsplit(url)
+    host = parts.hostname or ""
+    try:
+        chosen = urllib.request.getproxies().get(parts.scheme)
+        if not chosen or urllib.request.proxy_bypass(host):
+            return None
+    except Exception:  # noqa: BLE001 - a broken proxy setting is not a reason to fail
+        return None
+    if "://" not in chosen:
+        chosen = "http://" + chosen
+    proxy = urllib.parse.urlsplit(chosen)
+    return proxy if proxy.hostname else None
+
+
 class Wire:
-    """A keep-alive HTTP client, safe to share between threads (each thread
-    keeps its own connections)."""
+    """A keep-alive HTTP client, safe to share between threads: idle
+    connections wait in one pool (a few per host) and a call has one to itself
+    while it runs, so no thread owns a socket past its call."""
 
     def __init__(
         self,
@@ -256,21 +287,52 @@ class Wire:
         self._clock = clock
         self._local = threading.local()
         self._lock = threading.Lock()
+        self._idle: dict[tuple[str, str, int | None], list[tuple[Any, float]]] = {}
         self._all: list[http.client.HTTPConnection] = []
         self.connections_made = 0
 
     # -- connections -----------------------------------------------------
 
+    def open_connections(self) -> int:
+        """How many connections this client holds open (idle or in use)."""
+        with self._lock:
+            return len(self._all)
+
     def _connect(
         self, parts: urllib.parse.SplitResult, timeout: float
     ) -> http.client.HTTPConnection:
         host = parts.hostname or ""
-        if parts.scheme == "https":
-            conn: http.client.HTTPConnection = http.client.HTTPSConnection(
-                host, parts.port, timeout=timeout, context=ssl_context()
+        proxy = proxy_for(parts.geturl())
+        conn: http.client.HTTPConnection
+        proxy_headers: dict[str, str] = {}
+        if proxy is not None and proxy.username:
+            token = base64.b64encode(
+                f"{urllib.parse.unquote(proxy.username)}:"
+                f"{urllib.parse.unquote(proxy.password or '')}".encode()
+            ).decode()
+            proxy_headers["Proxy-Authorization"] = f"Basic {token}"
+        if proxy is None:
+            if parts.scheme == "https":
+                conn = http.client.HTTPSConnection(
+                    host, parts.port, timeout=timeout, context=ssl_context()
+                )
+            else:
+                conn = http.client.HTTPConnection(host, parts.port, timeout=timeout)
+        elif parts.scheme == "https":
+            # A tunnel (CONNECT) to the server, then TLS to it through that.
+            conn = http.client.HTTPSConnection(
+                proxy.hostname or "",
+                proxy.port or 80,
+                timeout=timeout,
+                context=ssl_context(),
             )
+            conn.set_tunnel(host, parts.port or 443, headers=proxy_headers)
         else:
-            conn = http.client.HTTPConnection(host, parts.port, timeout=timeout)
+            # Plain http through a proxy: it is sent the whole address.
+            conn = http.client.HTTPConnection(
+                proxy.hostname or "", proxy.port or 80, timeout=timeout
+            )
+            conn.civex_via_proxy = proxy_headers or True  # type: ignore[attr-defined]
         with self._lock:
             self.connections_made += 1
             self._all.append(conn)
@@ -282,47 +344,53 @@ class Wire:
             if conn in self._all:
                 self._all.remove(conn)
 
-    def _pooled(
-        self, parts: urllib.parse.SplitResult, timeout: float
+    def _checkout(
+        self, parts: urllib.parse.SplitResult, timeout: float, fresh: bool
     ) -> tuple[http.client.HTTPConnection, bool]:
-        """This thread's connection to the host and whether it is a reused one."""
-        pool: dict[tuple[str, str, int | None], list[Any]] = self.__dict_of_thread()
+        """A connection for one call, and whether it is a reused one."""
         key = (parts.scheme, parts.hostname or "", parts.port)
-        held = pool.get(key)
-        if held is not None:
+        while not fresh:
+            with self._lock:
+                stack = self._idle.get(key)
+                held = stack.pop() if stack else None
+            if held is None:
+                break
             conn, used = held
             if self._clock() - used <= IDLE_SECONDS and conn.sock is not None:
                 try:
                     conn.timeout = timeout
                     conn.sock.settimeout(timeout)
                     return conn, True
-                except OSError:  # the socket is gone: make a new one
+                except OSError:  # the socket is gone
                     pass
             self._forget(conn)
-            del pool[key]
-        conn = self._connect(parts, timeout)
-        pool[key] = [conn, self._clock()]
-        return conn, False
+        return self._connect(parts, timeout), False
 
-    def __dict_of_thread(self) -> dict[tuple[str, str, int | None], list[Any]]:
-        pool = getattr(self._local, "pool", None)
-        if pool is None:
-            pool = self._local.pool = {}
-        return pool  # type: ignore[no-any-return]
-
-    def _drop(self, parts: urllib.parse.SplitResult) -> None:
-        pool = self.__dict_of_thread()
-        held = pool.pop((parts.scheme, parts.hostname or "", parts.port), None)
-        if held is not None:
-            self._forget(held[0])
+    def _checkin(
+        self,
+        parts: urllib.parse.SplitResult,
+        conn: http.client.HTTPConnection,
+        response: http.client.HTTPResponse,
+        reuse: bool = True,
+    ) -> None:
+        """Keep a connection whose answer was read to its end, for the next
+        call; close one the server closed, or past MAX_IDLE for the host."""
+        key = (parts.scheme, parts.hostname or "", parts.port)
+        if reuse and not response.will_close and response.isclosed():
+            with self._lock:
+                stack = self._idle.setdefault(key, [])
+                if len(stack) < MAX_IDLE_PER_HOST:
+                    stack.append((conn, self._clock()))
+                    return
+        self._forget(conn)
 
     def close(self) -> None:
-        """Close every connection (all threads')."""
+        """Close every connection."""
         with self._lock:
             conns, self._all = self._all, []
+            self._idle = {}
         for conn in conns:
             conn.close()
-        self._local = threading.local()
 
     # -- one request -----------------------------------------------------
 
@@ -334,52 +402,57 @@ class Wire:
         body: Any,
         timeout: float,
         stream: bool,
+        fresh: bool = False,
     ) -> Reply:
-        """Send one request. Whether the connection was a reused one is left
-        in `_local.reused`: a failure on a reused one may only mean the server
-        closed it. A streamed reply holds a connection of its own."""
+        """Send one request. What happened is left in `_local`: `reused` (a
+        failure on a reused connection may only mean the server closed it) and
+        `sent` (the whole request went out, so a failure after it leaves
+        unknown whether the server acted). A streamed reply holds its
+        connection until closed. `fresh` is a connection of its own, for a call
+        that must not meet a stale one."""
         parts = urllib.parse.urlsplit(url)
         target = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
-        if stream:
-            conn, reused = self._connect(parts, timeout), False
-        else:
-            conn, reused = self._pooled(parts, timeout)
+        conn, reused = self._checkout(parts, timeout, fresh)
         self._local.reused = reused
+        self._local.sent = False
+        send_headers = dict(headers)
+        via = getattr(conn, "civex_via_proxy", None)
+        if via:
+            target = url
+            if isinstance(via, dict):
+                send_headers.update(via)
         try:
             try:
-                conn.request(method, target, body=body, headers=dict(headers))
-            except (BrokenPipeError, ConnectionResetError):
+                conn.request(method, target, body=body, headers=send_headers)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 # The server may have answered (413) and closed before the
                 # body went: its answer is better than "broken pipe".
-                if not self._early_answer_readable(conn):
+                if conn.sock is None:
                     raise
+            self._local.sent = True
             response = conn.getresponse()
             if stream:
-                return Reply(response.status, response.msg, b"", response, conn)
+                return Reply(
+                    response.status,
+                    response.msg,
+                    b"",
+                    response,
+                    lambda: self._checkin(parts, conn, response, not fresh),
+                )
             data = response.read()
-            if response.will_close:
-                self._drop(parts)
+            self._checkin(parts, conn, response, not fresh)
             if response.getheader("Content-Encoding", "").lower() == "gzip" and data:
                 data = gzip.decompress(data)
-            held = self.__dict_of_thread().get(
-                (parts.scheme, parts.hostname or "", parts.port)
-            )
-            if held is not None:
-                held[1] = self._clock()
             return Reply(response.status, response.msg, data)
         except BaseException:
-            if stream:
-                self._forget(conn)
-            else:
-                self._drop(parts)
+            self._forget(conn)
             raise
 
     def _local_reused(self) -> bool:
         return bool(getattr(self._local, "reused", False))
 
-    @staticmethod
-    def _early_answer_readable(conn: http.client.HTTPConnection) -> bool:
-        return conn.sock is not None
+    def _local_sent(self) -> bool:
+        return bool(getattr(self._local, "sent", False))
 
     # -- a call, with the status table -----------------------------------
 
@@ -398,6 +471,7 @@ class Wire:
         raise_for_status: bool = True,
         not_found: str | None = None,
         what: str = "the server",
+        idempotent: bool | None = None,
     ) -> Reply:
         """Send a request and answer its reply, applying the status table.
 
@@ -406,7 +480,15 @@ class Wire:
         host, never from https down to http) or "strip_auth" (also to another
         host, without the `Authorization`). With `raise_for_status` (default) a
         failing answer is a `SyncError` (`status_error`); without it, the last
-        answer is returned for the caller to read."""
+        answer is returned for the caller to read.
+
+        `idempotent` says whether sending the request twice is harmless
+        (default: GET, HEAD, PUT and DELETE are, a POST is not). One that is
+        not goes on a connection of its own, and is sent again only when the
+        server said 429 or 503 or the request never went out: after a timeout
+        or a 5xx it may have been acted on, and the caller must find out."""
+        if idempotent is None:
+            idempotent = method.upper() in ("GET", "HEAD", "PUT", "DELETE", "OPTIONS")
         send_headers = dict(headers or {})
         if accept_gzip:
             send_headers["Accept-Encoding"] = "gzip"
@@ -418,15 +500,34 @@ class Wire:
             if prepare:
                 prepare()
             try:
-                reply = self._once(method, url, send_headers, body, timeout, stream)
+                reply = self._once(
+                    method,
+                    url,
+                    send_headers,
+                    body,
+                    timeout,
+                    stream,
+                    fresh=not idempotent,
+                )
             except (OSError, http.client.HTTPException) as e:
-                if reused_stale(e) and not stale_tried and self._local_reused():
+                if (
+                    idempotent
+                    and reused_stale(e)
+                    and not stale_tried
+                    and self._local_reused()
+                ):
                     stale_tried = True  # the server closed an idle connection
                     continue
                 problem = certificate_problem(urllib.error.URLError(e))
                 if problem:
                     raise SyncError(
                         f"Could not reach {what}: {problem}", retryable=False
+                    ) from e
+                if not idempotent and self._local_sent():
+                    raise SyncError(
+                        f"Lost {what} while it was working on this: {_reason(e)}. "
+                        "It may have done it; check before doing it again",
+                        detail=str(e),
                     ) from e
                 limit = 1 if isinstance(e, socket.timeout) else MAX_NETWORK_RETRIES
                 if network_retries >= limit:
@@ -469,7 +570,8 @@ class Wire:
                 continue
             if status < 400 or (status in _REDIRECTS):
                 return reply
-            if retries(status) and status_retries < MAX_STATUS_RETRIES:
+            again = retries(status) if idempotent else status in (429, 503)
+            if again and status_retries < MAX_STATUS_RETRIES:
                 after = parse_retry_after(reply.header("Retry-After"))
                 wait = retry_wait(after, status_retries, self._rng)
                 if waited + wait <= MAX_TOTAL_WAIT_SECONDS:

@@ -438,7 +438,13 @@ def _once(request: Request, attempt):
         return attempt()
     except SyncError as e:
         _attempts.failed(request)
-        raise HTTPException(e.status, detail=str(e))
+        # The reason as a header: `detail` stays the sentence older clients
+        # print; a newer client reads the code.
+        raise HTTPException(
+            e.status,
+            detail=str(e),
+            headers={"X-Civex-Code": e.code} if e.code else None,
+        )
 
 
 @router.post("/join", response_model=SyncJoinResponse)

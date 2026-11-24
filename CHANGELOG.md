@@ -130,6 +130,21 @@ from the next tag forward.
   the server answered short now carries on with the rest in the same pass
   (stopping when an answer settles nothing).
 
+- Review fixes: the client honours the system and environment proxies
+  (`HTTPS_PROXY`, `NO_PROXY`, ...; a CONNECT tunnel for https) including for
+  `clone --release`; a call that is not safe to repeat (join, device sign-in
+  start, finishing a big file, publishing) is resent only on 429/503 or when
+  it never went out, and says so when its answer was lost; connections are
+  pooled across threads (at most 8 idle per host), released when a download is
+  closed and closed when a sync pass ends, so big uploads leave no sockets.
+- **Clone/connect without an invite signs in in the browser even when this
+  computer joined that server for another project.** Each project is its own
+  device, so the client now asks the server whether it knows this device
+  instead of guessing from a per-machine record. Device refusals carry a
+  machine-readable code (`not_a_device`, `clock_skew`, `bad_signature`) in an
+  `X-Civex-Code` header; the message text is unchanged for older clients. A
+  revoked device signs in again the same way; other refusals keep their messages.
+
 #### Changes
 
 - **A first upload that was interrupted always resumes.** A project whose
