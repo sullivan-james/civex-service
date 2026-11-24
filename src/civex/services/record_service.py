@@ -4088,7 +4088,7 @@ class RecordService:
             if len(out.left) < MAX_REPORTED:
                 out.left[record_id] = reason
 
-        with self._audit.operation() if self._audit else nullcontext():
+        with nullcontext():
             if changes.restore:
                 done = self.restore_set(changes.restore, dry_run=dry_run)
                 out.restored, out.came_back = done.restored, done.came_back
@@ -4125,8 +4125,8 @@ class RecordService:
                     states=states,
                 )
                 out.deleted_asked = len(live)
-                if live and not dry_run:
-                    out.deleted = self._delete_records(live, force)
+                if live:
+                    out.deleted = self._delete_records(live, force, dry_run)
         return out
 
     def _note_absent(
@@ -4150,7 +4150,9 @@ class RecordService:
             else:
                 leave(rid, "This record no longer exists.")
 
-    def _delete_records(self, ids: list[uuid.UUID], force: bool) -> int:
+    def _delete_records(
+        self, ids: list[uuid.UUID], force: bool, dry_run: bool = False
+    ) -> int:
         """Delete `ids` and everything beneath them. Returns how many of `ids`
         were deleted in their own right -- one already beneath another is
         deleted with it, and not counted again.
@@ -4165,7 +4167,12 @@ class RecordService:
         doomed = set(every)
         for dataset_id in self._records.collections_of(every):
             self._permissions.require(permissions.DELETE, dataset_id)
-        self._handle_referrers(doomed, force)
+        self._handle_referrers(doomed, force, dry_run)
+        if dry_run:  # every check made, nothing written
+            links = self._records.parent_links(every)
+            return sum(
+                1 for rid in set(ids) if rid in links and links[rid] not in doomed
+            )
         # One instant: it is the entries' time and what the records are stamped
         # with, so every device that applies these entries stamps them alike.
         stamp = _dt.now(timezone.utc)
@@ -5729,7 +5736,9 @@ class RecordService:
         is a few dozen statements however many records there are. Those held
         back are returned in `left`."""
         plan = self.plan_restore_set([str(i) for i in ids])
-        if plan.coming and not dry_run:
+        if plan.coming and dry_run:
+            self._require_restore(plan.coming, plan.rows)
+        elif plan.coming:
             self._restore_write(plan.coming, plan.rows)
         return RestoreSetResultDTO(
             restored=plan.restored,
@@ -5742,28 +5751,21 @@ class RecordService:
         self,
         ids: list[uuid.UUID],
         rows: dict[uuid.UUID, RestoreRow],
-        *,
-        trees: bool = False,
     ) -> None:
         """Bring back these deleted records, `ids` parents before what sits
         under them (a child can't come back under a parent still deleted, here
         or wherever the entries are applied next), `rows` saying what each was:
         the permission to write in every collection first, one update per chunk
         and the history entries a chunk at a time, no values read. The lot is
-        one action in one batch, or with `trees` an action per tree (a restore
-        of one record's group, say). The one place a record is brought back."""
-        self._require_each(
-            permissions.WRITE_RECORDS,
-            {rows[i].dataset_id: rows[i] for i in ids}.values(),
-        )
+        one batch, an action per tree (a record and what comes back with it
+        go together or not at all; a tree refused when sent splits nothing
+        else). The one place a record is brought back."""
+        self._require_restore(ids, rows)
         self._records.restore_many(ids)
         if not self._audit:
             return
-        ops = _tree_ops({i: rows[i].parent_record_id for i in ids}) if trees else None
-        with (
-            _audit_batch(self._audit, "restore", len(ids) > 1),
-            self._audit.operation(),
-        ):
+        ops = _tree_ops({i: rows[i].parent_record_id for i in ids})
+        with _audit_batch(self._audit, "restore", len(ids) > 1):
             self._audit.log_changes(
                 "restore",
                 "record",
@@ -5774,12 +5776,27 @@ class RecordService:
                 ops=ops,
             )
 
+    def _require_restore(
+        self, ids: list[uuid.UUID], rows: dict[uuid.UUID, RestoreRow]
+    ) -> None:
+        """The permission to write in every collection these records are in."""
+        self._require_each(
+            permissions.WRITE_RECORDS,
+            {rows[i].dataset_id: rows[i] for i in ids}.values(),
+        )
+
+    def require_write(self, ids: Iterable[uuid.UUID]) -> None:
+        """`write_records` in every collection these records are in (what a
+        preview of a change asks, as the change itself will)."""
+        for dataset_id in self._records.collections_of(list(ids)):
+            self._permissions.require(permissions.WRITE_RECORDS, dataset_id)
+
     def _restore_ids(self, ids: list[uuid.UUID]) -> None:
         """`_restore_write` for records already known to be able to come back:
         their columns are read and put parents first."""
         rows = {r.id: r for r in self._records.restore_rows(ids)}
         ordered = _parents_first_ids([i for i in dict.fromkeys(ids) if i in rows], rows)
-        self._restore_write(ordered, rows, trees=True)
+        self._restore_write(ordered, rows)
 
     def restore_records(
         self, ids: list[str], with_parents: bool = True
@@ -5820,7 +5837,7 @@ class RecordService:
                 everything |= frontier
         plan = self.plan_restore_set([str(i) for i in everything], exact=True)
         if plan.coming:
-            self._restore_write(plan.coming, plan.rows, trees=True)
+            self._restore_write(plan.coming, plan.rows)
         return RestoreSetResultDTO(
             restored=len([i for i in plan.coming if i in chosen]),
             came_back=len(plan.coming),
@@ -6017,7 +6034,9 @@ class RecordService:
         records = {r.id: r for r in self._records.list_by_ids(list(matched))}
         return [(records[rid], m) for rid, m in matched.items() if rid in records]
 
-    def _handle_referrers(self, target_ids: set[uuid.UUID], force: bool) -> None:
+    def _handle_referrers(
+        self, target_ids: set[uuid.UUID], force: bool, dry_run: bool = False
+    ) -> None:
         """Block a delete of target_ids if anything outside the batch still
         references it, unless force=True -- in which case the referencing
         fields are cleared (ON DELETE SET NULL) and audit-logged instead."""
@@ -6036,6 +6055,8 @@ class RecordService:
             return
         if not force:
             raise ValidationError(_referrers_message(referrers))
+        if dry_run:
+            return
 
         target_strs = {str(t) for t in target_ids}
         for rec, matched_fields in referrers:

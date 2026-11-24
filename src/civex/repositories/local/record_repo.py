@@ -275,20 +275,33 @@ _BULK_CHUNK = 5000
 _KEY_PLACES = 400
 
 
-def _frozen(value: Any) -> Any:
-    """A key value as a hashable that equals another exactly when the key
-    compares them equal."""
-    value = _canonical(value)
+def _loose(value: Any) -> Any:
+    """A key value as loosely as the database compares it (`find_key_match`
+    reads the stored value as the kind of the value asked for, so "7", 7 and
+    7.0 meet, and case is not told apart): a key two records may share is
+    never missed. A match found this way is a candidate; the caller checks it
+    the exact way."""
+    if isinstance(value, bool):
+        return str(value).lower()
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        pass
     if isinstance(value, (dict, list)):
-        return json.dumps(value, sort_keys=True)
-    return value
+        return json.dumps(value, sort_keys=True).lower()
+    return str(value).lower()
+
+
+def _bulk_size(session: Session) -> int:
+    """The ids a bulk statement names at a time (see `_bulk_chunks`)."""
+    bind = session.get_bind()
+    if bind.dialect.name == "sqlite" and sqlite3.sqlite_version_info < (3, 32):
+        return _CHUNK
+    return _BULK_CHUNK
 
 
 def _bulk_chunks(session: Session, ids: list[uuid.UUID]):
-    size = _BULK_CHUNK
-    bind = session.get_bind()
-    if bind.dialect.name == "sqlite" and sqlite3.sqlite_version_info < (3, 32):
-        size = _CHUNK
+    size = _bulk_size(session)
     for start in range(0, len(ids), size):
         yield ids[start : start + size]
 
@@ -486,11 +499,16 @@ class LocalRecordRepository:
     ) -> set[int]:
         """Which of these (parent, key values) places a live record of the
         schema in the collection already holds (`any_key_match` for many,
-        saying which): a statement per `_KEY_PLACES` places, whose matches are
-        compared in memory."""
+        saying which): a statement per few hundred places, whose matches are
+        compared in memory, loosely (a candidate is checked exactly by the
+        caller; one the database would call a match is never missed)."""
         hit: set[int] = set()
-        for start in range(0, len(places), _KEY_PLACES):
-            part = places[start : start + _KEY_PLACES]
+        # Each place names a parent and, per key field, a path and a value:
+        # few enough in a statement to stay under the variable limit.
+        widest = max((len(key) for _, key in places), default=1)
+        step = max(1, min(_KEY_PLACES, _bulk_size(self._s) // (2 + 3 * widest)))
+        for start in range(0, len(places), step):
+            part = places[start : start + step]
             options = []
             for parent, key in part:
                 parts = [
@@ -512,13 +530,13 @@ class LocalRecordRepository:
                 continue
             shapes = {tuple(sorted(key)) for _, key in part}
             held = {
-                (parent, fields, tuple(_frozen((data or {}).get(f)) for f in fields))
+                (parent, fields, tuple(_loose((data or {}).get(f)) for f in fields))
                 for parent, data in found
                 for fields in shapes
             }
             for i, (parent, key) in enumerate(part):
                 fields = tuple(sorted(key))
-                values = tuple(_frozen(key[f]) for f in fields)
+                values = tuple(_loose(key[f]) for f in fields)
                 if (parent, fields, values) in held:
                     hit.add(start + i)
         return hit

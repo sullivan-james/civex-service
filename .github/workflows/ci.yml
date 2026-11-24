@@ -172,6 +172,16 @@ jobs:
       - name: Run the PostgreSQL tests
         run: uv run pytest tests/sync/test_postgres_authority.py tests/db -q -n 2 --dist loadgroup
 
+      - name: Run the bulk restore tests on psycopg 2
+        run: uv run pytest tests/services/test_restore_bulk_postgres.py tests/services/test_restore_core_postgres.py -q
+
+      - name: Run the bulk restore tests on psycopg 3
+        # civex prefers psycopg 3 when it is installed (`detect_pg_driver`), and
+        # the bulk history writer is COPY, which each driver spells its own way.
+        env:
+          CIVEX_TEST_POSTGRES_URL: postgresql+psycopg://civex:civex@localhost:5432/postgres
+        run: uv run --with "psycopg[binary]>=3.1" pytest tests/services/test_restore_bulk_postgres.py tests/services/test_restore_core_postgres.py -q
+
   sdk-sync:
     # civex and civex-plugin-sdk release separately; these keep them in step.
     # See docs/contributing/sdk-release.md.

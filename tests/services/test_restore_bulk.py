@@ -125,7 +125,8 @@ def test_a_bulk_delete_past_the_old_cap_is_restored_in_one_call(world: AppContex
         .order_by(AuditLog.local_seq)
     ).all()
     assert len(entries) == everything
-    assert len({op for op, _, _ in entries}) == 1 and entries[0][0] is not None
+    # One action per tree: a refused tree splits nothing else when sent.
+    assert len({op for op, _, _ in entries}) == PARENTS and entries[0][0] is not None
     seen: set[uuid.UUID] = set()
     parent_of = {
         rid: pid
@@ -295,7 +296,7 @@ def test_undoing_a_delete_and_redoing_it_is_one_step_each(world: AppContext):
             AuditLog.batch_id == undo_batch
         )
     ).one()
-    assert ops == 1
+    assert ops == PARENTS  # an action per tree, one batch
 
     # The undo is a bulk action like any other, so it is undone the same way.
     redone = ctx.history_svc.revert_batch(undo_batch, dry_run=False)
@@ -360,3 +361,26 @@ def test_bulk_written_entries_keep_awkward_text_exactly(world: AppContext):
         assert getattr(a, column) == getattr(b, column)
     assert b.old_data == awkward and b.actor == 'a\tb\\c\nd "e"'
     assert b.timestamp is not None and b.sync_state == a.sync_state
+
+
+def test_key_clashes_find_what_the_database_calls_a_match(world: AppContext):
+    """The in-memory check is no stricter than the database's: a "7" asked
+    about meets a live 7, a 7.0 meets it too, and another parent does not."""
+    ctx = world
+    field = ctx.schema_svc.resolver()(ctx.schema_svc.get("site").id).name_to_id["name"]
+    dataset, schema = ctx.dataset_svc.get("c").id, ctx.schema_svc.get("site").id
+    now = datetime.now(timezone.utc)
+    ctx._session.execute(
+        insert(Record),
+        [{**_row(row_id(), dataset, schema, None, now), "data": {field: 7}}],
+    )
+    ctx.commit()
+    places = [
+        (None, {field: "7"}),
+        (None, {field: 7}),
+        (None, {field: 7.0}),
+        (None, {field: "8"}),
+        (uuid.uuid4(), {field: 7}),
+    ]
+    hit = ctx.record_svc.records_repo.key_clashes(dataset, schema, places)
+    assert hit == {0, 1, 2}

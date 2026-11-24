@@ -445,7 +445,7 @@ class AuditService:
         )
         restored = came_back = 0
         field_blocked = 0
-        with self._audit.batch("restore", "Restore all"), self._audit.operation():
+        with self._audit.batch("restore", "Restore all"):
             for name in collections:
                 came_back += self._datasets.restore_plan(name).records
                 self._datasets.restore(name)
@@ -726,6 +726,7 @@ class AuditService:
                 # is `same`; what is gone altogether is left.
                 done = self._records.apply_changes(
                     RecordChangesDTO(restore=undelete, delete=delete),
+                    force=force,
                     dry_run=dry_run,
                 )
                 result.applied += done.restored + done.deleted_asked
@@ -754,6 +755,7 @@ class AuditService:
                         [str(e.entity_id) for e in found if e.entity_type == "record"]
                     )
                 }
+                would_change: list[uuid.UUID] = []
                 for entry in found:
                     if entry.entity_id in queued:
                         # A second change to a record: judge it against what
@@ -779,6 +781,7 @@ class AuditService:
                             leave(plan.entity_id, "Every field was edited since.")
                             continue
                     if dry_run:
+                        would_change.append(plan.entity_id)
                         result.applied += 1
                         continue
                     put_back = {
@@ -796,6 +799,9 @@ class AuditService:
                         continue
                     queued[plan.entity_id] = put_back
                 save_queued()
+                if would_change:
+                    # What the real run will ask: write access, once for the page.
+                    self._records.require_write(would_change)
                 yield result
             if not entries:
                 yield result

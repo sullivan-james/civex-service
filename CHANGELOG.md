@@ -235,8 +235,10 @@ from the next tag forward.
   and not coming back, or a clash of unique values) and is counted; unique
   keys are checked a chunk of records at a time instead of per record. The
   preview and the restore are the same computation, so the dialog's numbers
-  are exactly what happens. An undo is one action in one batch in history, so
-  sync carries it as one action. The History restore dialog shows the true
+  are exactly what happens. An undo is one step and one batch in history; each
+  tree it restores is its own action when sent, so one refused tree splits
+  nothing else, and a preview runs the same checks as the undo (referrers,
+  permissions, `force`). The History restore dialog shows the true
   count and a busy state. `GET /audit/restore-all` no longer has a `truncated`
   field. History entries go in with COPY on PostgreSQL (about 30k rows/s through the
   driver, against 5k/s before). Measured on PostgreSQL with 69,572 records:

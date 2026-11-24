@@ -436,6 +436,9 @@ class LocalAuditRepository:
         chunk instead of one per entry. `ops` gives the action of particular
         things (a tree deleted together); the rest take `op`, else the
         enclosing `operation`."""
+        # Entries are numbered in the order they are written: anything the
+        # session holds (a `log_change` before this call) goes first.
+        self._s.flush()
         when = timestamp or datetime.now(timezone.utc)
         batch_id = self._current_batch()
         op_id = op or self._op_id
@@ -533,12 +536,14 @@ class LocalAuditRepository:
 
     def _copy(self, lines: list[str]) -> None:
         """Send these lines of COPY text (columns in `_COPY_COLUMNS` order)."""
+        sql = f"COPY {AuditLog.__tablename__} ({', '.join(_COPY_COLUMNS)}) FROM STDIN"
         cursor = self._s.connection().connection.cursor()
         try:
-            cursor.copy_expert(
-                f"COPY {AuditLog.__tablename__} ({', '.join(_COPY_COLUMNS)}) FROM STDIN",
-                io.StringIO("".join(lines)),
-            )
+            if hasattr(cursor, "copy_expert"):  # psycopg 2
+                cursor.copy_expert(sql, io.StringIO("".join(lines)))
+            else:  # psycopg 3
+                with cursor.copy(sql) as copy:
+                    copy.write("".join(lines))
         finally:
             cursor.close()
 
