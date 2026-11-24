@@ -48,17 +48,31 @@ def engine(monkeypatch):
 
 
 def _bloat(engine, table: str) -> None:
+    """A table that is mostly empty room. The room comes from an insert that is
+    rolled back, not from a DELETE: rows deleted by a committed transaction are
+    only reclaimable once no snapshot in the cluster predates it, and the
+    other tests running in parallel on the shared scratch server hold such
+    snapshots. Aborted rows are dead to everyone at once."""
     with engine.begin() as c:
         c.execute(text(f"CREATE TABLE {table} (id int PRIMARY KEY, note text)"))
+    with engine.connect() as c:
+        tx = c.begin()
         c.execute(
             text(
                 f"INSERT INTO {table} SELECT g, repeat('x', 200) "
-                "FROM generate_series(1, 40000) g"
+                "FROM generate_series(1, 36000) g"
+            )
+        )
+        tx.rollback()
+    with engine.begin() as c:  # lands after the aborted rows' pages
+        c.execute(
+            text(
+                f"INSERT INTO {table} SELECT g, repeat('x', 200) "
+                "FROM generate_series(36001, 40000) g"
             )
         )
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
         c.execute(text(f"ANALYZE {table}"))
-        c.execute(text(f"DELETE FROM {table} WHERE id <= 36000"))
         c.execute(text(f"VACUUM {table}"))  # reusable, but the table stays big
 
 
