@@ -3,7 +3,7 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { mount, type Unmount } from './embed'
 import { Menu } from './components/ui/Menu'
-import { isMounted, portalRoot } from './utils/host'
+import { hostRelease, isMounted, portalRoot } from './utils/host'
 import { localFeatures } from './utils/features'
 
 const json = (body: unknown) =>
@@ -119,6 +119,20 @@ describe('mount', () => {
     unmount = null
     expect(el.querySelector('[data-civex-embed]')).toBeNull()
     expect(isMounted()).toBe(false)
+  })
+})
+
+describe('releasing', () => {
+  it('hands the host a release scope, and offers none without a handler', async () => {
+    start()
+    await waitFor(() => expect(isMounted()).toBe(true))
+    expect(hostRelease()).toBeNull()
+    unmount!()
+    const seen: unknown[] = []
+    start({ onRelease: (scope) => seen.push(scope) })
+    await waitFor(() => expect(isMounted()).toBe(true))
+    hostRelease()!({ records: ['r1'] })
+    expect(seen).toEqual([{ records: ['r1'] }])
   })
 })
 

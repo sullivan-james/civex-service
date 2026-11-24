@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import dataclasses
 import uuid
+from datetime import datetime, timezone
 from dataclasses import dataclass, field as _field
 from typing import Any
 
@@ -35,8 +36,19 @@ class RecordQuery:
     # Field names to look in for `search` (None: every searchable field).
     # Requires `schema`, like `where`.
     search_fields: list[str] | None = None
+    # When the record was added: at or after / before these instants (naive
+    # values are UTC).
+    created_after: datetime | None = None
+    created_before: datetime | None = None
     # [{"field": name, "direction": "asc"|"desc"}, ...]
     sort: list[dict[str, Any]] | None = None
+
+    def __post_init__(self) -> None:
+        # A naive instant is UTC, so a stored scope reads the same anywhere.
+        for name in ("created_after", "created_before"):
+            value = getattr(self, name)
+            if value is not None and value.tzinfo is None:
+                setattr(self, name, value.replace(tzinfo=timezone.utc))
 
     def for_kind(self, schema: str) -> RecordQuery:
         """The same query run for another kind of record (the kinds beneath a
@@ -92,6 +104,8 @@ class ResolvedQuery:
     field_filters: list[tuple[str, str]] = _field(default_factory=list)
     search: TextSearch | None = None
     filter_tree: FilterNode | None = None
+    created_after: datetime | None = None
+    created_before: datetime | None = None
     sort: list[SortKey] | None = None
 
 

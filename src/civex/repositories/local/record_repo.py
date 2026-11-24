@@ -78,6 +78,8 @@ def _is_unfiltered(query: ResolvedQuery) -> bool:
         and not query.field_filters
         and query.search is None
         and query.filter_tree is None
+        and query.created_after is None
+        and query.created_before is None
     )
 
 
@@ -1583,6 +1585,10 @@ def _base_query(session: Session, query: ResolvedQuery, is_postgres: bool = Fals
         q = q.filter(_build_filter_condition(query.filter_tree, is_postgres))
     if query.search:
         q = q.filter(text_match(query.search, is_postgres))
+    if query.created_after is not None:
+        q = q.filter(Record.created_at >= query.created_after)
+    if query.created_before is not None:
+        q = q.filter(Record.created_at < query.created_before)
     return q
 
 

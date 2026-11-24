@@ -30,7 +30,7 @@ import { ToastProvider } from './components/ui/ToastProvider'
 import { createQueryClient } from './queryClient'
 import { announceNavigation } from './utils/navigation'
 import { scopeCss } from './utils/scopeCss'
-import { setMountedHost, type Boot } from './utils/host'
+import { setMountedHost, type Boot, type ReleaseScopeBody } from './utils/host'
 
 export interface MountOptions {
   /** Where the app is: the path its pages and API live under, such as
@@ -48,6 +48,15 @@ export interface MountOptions {
   /** Called with the app's path and query, within `base`, now and on every
    * route change. */
   onNavigate?: (path: string) => void
+  /** Called when the person chooses "Release these…" in the records list,
+   * with the scope to release: `{ records: [ids] }` for ticked records or
+   * `{ query: {...} }` (the API's `RecordQueryRequest`: `collection`,
+   * `schema_name`, `within`, `filter`, `where`, `search`, `search_fields`,
+   * `created_after`, `created_before`) for every match. This is the JSON of
+   * the API's `ReleaseScopeRequest`, so the host can POST it to
+   * `/releases/plan` or give it to `ReleaseScopeRequest` in Python. civex has
+   * no release wizard of its own: without this option the item is not shown. */
+  onRelease?: (scope: ReleaseScopeBody) => void
 }
 
 /** Takes the app out. */
@@ -125,6 +134,7 @@ export function mount(el: HTMLElement, options: MountOptions): Unmount {
     boot: { ...boot, chrome: 'embedded' as const },
     fetch: options.fetch,
     headers: options.headers,
+    onRelease: options.onRelease,
     portal,
     root,
   }

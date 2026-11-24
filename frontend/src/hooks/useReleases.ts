@@ -1,5 +1,3 @@
-import { runFileJob } from './fileJobs'
-import { tracked } from '../components/files/fileFlows'
 import {
   keepPreviousData,
   useMutation,
@@ -9,9 +7,7 @@ import {
 import {
   releasesApi,
   type ComparedKind,
-  type ReleaseCreateBody,
   type ReleaseMetadata,
-  type ReleaseScopeBody,
 } from '../api/releases'
 
 export function useReleases() {
@@ -23,30 +19,6 @@ export function useRelease(name: string) {
     queryKey: ['releases', name],
     queryFn: () => releasesApi.get(name),
     enabled: !!name,
-  })
-}
-
-/** What a release of this scope would hold, from the catalog. */
-export function useReleasePlan(body: ReleaseScopeBody, enabled = true) {
-  return useQuery({
-    queryKey: ['release-plan', body],
-    queryFn: () => releasesApi.plan(body),
-    enabled,
-    placeholderData: keepPreviousData,
-  })
-}
-
-/** How a release with these details would be cited, asked again as they
- * change (the caller debounces). */
-export function useCitationPreview(
-  body: ReleaseMetadata & { name: string },
-  enabled = true,
-) {
-  return useQuery({
-    queryKey: ['release-citation-preview', body],
-    queryFn: () => releasesApi.preview(body),
-    enabled,
-    placeholderData: keepPreviousData,
   })
 }
 
@@ -122,20 +94,6 @@ export function useRecordDifferences(name: string, id: string | null) {
     queryKey: ['records', 'release-compare', name, 'record', id],
     queryFn: () => releasesApi.recordDifferences(name, id as string),
     enabled: !!name && !!id,
-  })
-}
-
-/** Makes a release, as a job: the status bar shows how far it has got (a
- * big one reads every record it holds), and it carries on if the person
- * leaves the page. */
-export function useCreateRelease() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (body: ReleaseCreateBody) =>
-      runFileJob({ title: 'Making release…' }, (j) =>
-        tracked({}, j, (progressId) => releasesApi.create(body, progressId)),
-      ),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['releases'] }),
   })
 }
 

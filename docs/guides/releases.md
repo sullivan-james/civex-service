@@ -43,16 +43,30 @@ drives plugged in.
 
 ## Making one
 
-On a host that offers releases (a civex hub), in the app: **Releases → New release**, or tick records in a collection's
-explorer and press **Release these…**. The page has three steps:
+civex's own app has no screen that makes a release: the host does (a civex
+hub has its own full-page wizard). In civex's records list, **Release these…**
+(on a host that mounts the app with an `onRelease` handler; otherwise it is
+not shown) hands the host the chosen records, or the query behind them, and
+the host takes it from there. The handler receives the JSON of the API's
+`ReleaseScopeRequest`: `{ "records": [ids] }` for ticked records or
+`{ "query": {...} }` for every match, and the query can select by
+`created_after` / `created_before` (ISO 8601; no offset means UTC) as well as
+by collection, kind (`schema_name`), `filter`, `where` and `search`.
 
-1. **What**: the whole project, some collections, a saved list, or the
-   records chosen, with how many records and files that is.
-2. **Citation**: the version, title, description, authors, licence, DOI and
-   keywords, with the citation shown as it will read (text, BibTeX or
-   `CITATION.cff`) as you type.
-3. **Review**: the records per collection, the files by drive, and where
-   history is.
+A host written in Python builds the scope without private imports:
+
+```python
+from civex.domain.release import ReleaseScope           # or
+from civex.server.models import ReleaseScopeRequest
+
+body = ReleaseScopeRequest.model_validate(scope_json)    # what onRelease gave
+ctx.release_svc.create("v1", "Seal survey", scope=body.scope(),
+                       include_workflows=body.include_workflows)
+```
+
+`ctx.release_svc.plan(scope)` counts what it would hold first. A host that
+does not use Python can call `POST /releases/plan` and `POST /releases`
+with the same JSON.
 
 There is no command that makes one: `civex release create` was removed, and
 `civex release` says "Releases are published on a civex hub".

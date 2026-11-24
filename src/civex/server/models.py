@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from civex.domain.audit_diff import entry_snapshots
 from civex.domain.query import RecordQuery
+from civex.domain.release import ReleaseScope
 from civex.domain.dtos import (
     POINTS_DEFAULT_LIMIT,
     RecordPoints,
@@ -725,6 +726,16 @@ class RecordQueryRequest(BaseModel):
         default=None,
         description="Look for 'search' only in these fields of 'schema_name'.",
     )
+    created_after: datetime | None = Field(
+        default=None,
+        description="Only records added at or after this instant (ISO 8601; no "
+        "offset means UTC).",
+    )
+    created_before: datetime | None = Field(
+        default=None,
+        description="Only records added before this instant (ISO 8601; no "
+        "offset means UTC).",
+    )
 
     def to_query(self) -> RecordQuery:
         return RecordQuery(
@@ -735,6 +746,8 @@ class RecordQueryRequest(BaseModel):
             where=self.where,
             search=self.search,
             search_fields=self.search_fields,
+            created_after=self.created_after,
+            created_before=self.created_before,
         )
 
 
@@ -3798,3 +3811,38 @@ class FieldIndexReportResponse(BaseModel):
     error: str | None = Field(
         default=None, description="Why the last attempt to keep them in step failed."
     )
+
+
+class ReleaseScopeRequest(BaseModel):
+    collections: list[str] | None = Field(
+        default=None,
+        description="Only these collections (by name). Leave out, with no query, for the whole project.",
+    )
+    query: RecordQueryRequest | None = Field(
+        default=None,
+        description="Only the records this query lists, and the records above them.",
+    )
+    records: list[str] | None = Field(
+        default=None,
+        description="Exactly these records (by id), and the records above them.",
+    )
+    below: bool = Field(
+        default=True,
+        description="With `query` or `records`: also every record inside the "
+        "ones chosen (an encounter with its recordings). False takes only the "
+        "records chosen and those above them.",
+    )
+    include_workflows: bool = Field(
+        default=False,
+        description="Also carry the project's workflows and plugins (their "
+        "code). Left out unless asked for: a release is of the data, and code "
+        "may not be yours to publish.",
+    )
+
+    def scope(self) -> ReleaseScope:
+        return ReleaseScope(
+            collections=self.collections or None,
+            query=self.query.to_query() if self.query else None,
+            records=self.records or None,
+            below=self.below and bool(self.query or self.records),
+        )

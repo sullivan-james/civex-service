@@ -757,3 +757,18 @@ def test_who_may_make_withdraw_and_yank_releases(tmp_path: Path):
     finally:
         writer.close()
         owner.close()
+
+
+def test_scope_with_a_created_range_round_trips_and_selects(ctx, study):
+    from datetime import datetime, timezone
+
+    past = datetime(2000, 1, 1)  # naive means UTC
+    scope = ReleaseScope(query=RecordQuery(schema="site", created_after=past))
+    assert scope.query.created_after == past.replace(tzinfo=timezone.utc)
+    assert ReleaseScope.from_dict(scope.to_dict()) == scope
+    assert ctx.release_svc.plan(scope).records == 2
+    none = ReleaseScope(query=RecordQuery(schema="site", created_before=past))
+    assert ctx.release_svc.plan(none).records == 0
+    made = _make(ctx, "recent", scope=scope)
+    assert made.counts["records"] == 2
+    assert made.scope["query"]["created_after"].startswith("2000-01-01")

@@ -23,6 +23,26 @@ from the next tag forward.
 
 ## Unreleased
 
+## v2.3.1 — release screens left to the host (2026-11-24)
+
+- **civex no longer has a release wizard.** The "New release" page and button
+  are gone from the app (they appeared only on a host, where the host's gate
+  refused the final request). The read-only views (list, a release, compare,
+  downloads) and the whole engine and API stay.
+- **`onRelease` embed option.** In the records list, "Release these…" now hands
+  the selection to the host: `mount(el, { onRelease(scope) {...} })`, where
+  `scope` is the JSON of `ReleaseScopeRequest` (`{ records: [...] }` or
+  `{ query: {...} }`). Without a handler the item is not shown.
+- **A scope on the allowed surface.** `ReleaseScope` now lives in
+  `civex.domain.release` (still importable from `civex.services.release_service`),
+  and `ReleaseScopeRequest` in `civex.server.models`, so a host can build a scope
+  and call `release_svc.create` / `plan` without importing `civex.services`.
+- **Records by when they were added.** Every record query (listing, counts,
+  exports, release scopes and plans) takes `created_after` / `created_before`
+  (ISO 8601, naive means UTC; after is inclusive, before exclusive). A stored
+  release scope keeps them as ISO strings. Selecting by kind already worked
+  (`schema` / `schema_name`).
+
 ## v2.3.0 — upload speed, hub-only releases, embeddable data views, sync fixes (2026-11-24)
 
 #### Breaking

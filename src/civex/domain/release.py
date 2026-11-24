@@ -43,12 +43,14 @@ import json
 import re
 import zipfile
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from civex.domain import bundle as spec
 from civex.domain.audit_diff import strip_derived
 from civex.domain.field_descriptors import COMPUTED_DTYPES
 from civex.domain.exceptions import ValidationError
+from civex.domain.query import RecordQuery
 
 HASH_PREFIX = "sha256:"
 # Bumped only if what the hash covers changes; written into the header line, so
@@ -675,3 +677,75 @@ def citation(c: CitationFacts, form: str) -> str:
     if form == "cff":
         return citation_cff(c)
     raise ValidationError(f"A citation is one of: {', '.join(CITATION_FORMATS)}")
+
+
+_QUERY_FIELDS = (
+    "dataset",
+    "schema",
+    "within",
+    "parent_record_id",
+    "filter_tree",
+    "where",
+    "search",
+    "search_fields",
+    "created_after",
+    "created_before",
+)
+
+
+@dataclass
+class ReleaseScope:
+    """What a release covers: the whole project (none set), these collections
+    (by name), the records a query lists, or exactly these records (by id);
+    with the records above them, so it reads in whole, and with `below`
+    everything inside them too (a chosen Encounter with its Recordings). A
+    release made before `below` existed has none: it covers what it covered."""
+
+    collections: list[str] | None = None
+    query: RecordQuery | None = None
+    records: list[str] | None = None
+    below: bool = False
+
+    def __post_init__(self) -> None:
+        if self.collections is not None and not self.collections:
+            self.collections = None
+        if self.records is not None and not self.records:
+            raise ValidationError("Choose at least one record to release")
+        chosen = (self.collections, self.query, self.records)
+        if sum(x is not None for x in chosen) > 1:
+            raise ValidationError(
+                "A release covers some collections, a query's records or some "
+                "records: one of them"
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        if self.collections:
+            return {"collections": list(self.collections)}
+        inside = {"below": True} if self.below else {}
+        if self.records:
+            return {"records": list(self.records)} | inside
+        if self.query is not None:
+            return {
+                "query": {
+                    k: v.isoformat() if isinstance(v, datetime) else v
+                    for k in _QUERY_FIELDS
+                    if (v := getattr(self.query, k)) not in (None, [], "")
+                }
+            } | inside
+        return {}
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any] | None) -> "ReleaseScope":
+        raw = raw or {}
+        if raw.get("collections"):
+            return cls(collections=[str(c) for c in raw["collections"]])
+        below = bool(raw.get("below"))
+        if raw.get("records"):
+            return cls(records=[str(r) for r in raw["records"]], below=below)
+        if isinstance(raw.get("query"), dict):
+            q = {k: v for k, v in raw["query"].items() if k in _QUERY_FIELDS}
+            for k in ("created_after", "created_before"):
+                if isinstance(q.get(k), str):
+                    q[k] = datetime.fromisoformat(q[k])
+            return cls(query=RecordQuery(**q), below=below)
+        return cls()

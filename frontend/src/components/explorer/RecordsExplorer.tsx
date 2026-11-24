@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router'
+import { hostRelease } from '../../utils/host'
 import {
   useDeleteManyRecords,
   useDeleteMatchingRecords,
@@ -531,6 +532,7 @@ export function RecordsExplorer({
   // What this person may do here: the controls stay, off, saying why.
   const { can, why } = usePermissions()
   const hasFeature = useHasFeature()
+  const onRelease = hostRelease()
   const mayWrite = can('write_records', collection?.id)
   const mayDelete = can('delete', collection?.id)
   const starters = dataset ? (x.schemas ?? []).filter((s) => !s.parent_id) : []
@@ -1126,7 +1128,7 @@ export function RecordsExplorer({
                                     Edit…
                                   </Button>
                                 )}
-                              {hasFeature('releases') && (
+                              {hasFeature('releases') && onRelease && (
                                 <Button
                                   size="sm"
                                   disabled={
@@ -1142,24 +1144,15 @@ export function RecordsExplorer({
                                         : why('release')
                                   }
                                   onClick={() =>
-                                    navigate(
-                                      `/releases/new?${new URLSearchParams(
-                                        allMatching
-                                          ? {
-                                              query: JSON.stringify(
-                                                queryBody(
-                                                  {
-                                                    ...x.query,
-                                                    sort: undefined,
-                                                  },
-                                                  dataset,
-                                                ),
-                                              ),
-                                            }
-                                          : {
-                                              records: [...selected].join(','),
-                                            },
-                                      )}`,
+                                    onRelease(
+                                      allMatching
+                                        ? {
+                                            query: queryBody(
+                                              { ...x.query, sort: undefined },
+                                              dataset,
+                                            ),
+                                          }
+                                        : { records: [...selected] },
                                     )
                                   }
                                 >

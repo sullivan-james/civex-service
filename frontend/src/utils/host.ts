@@ -52,11 +52,23 @@ export interface MountedHost {
   fetch?: typeof fetch
   /** Headers to add to requests `fetch` cannot carry (XHR uploads). */
   headers?: () => Record<string, string>
+  /** Called with a release scope (the JSON of the API's `ReleaseScopeRequest`:
+   * `records`, or `query`) when the person chooses "Release these…"; civex
+   * has no release wizard of its own. */
+  onRelease?: (scope: ReleaseScopeBody) => void
   /** Where floating UI (menus, popovers) is drawn: inside the mounted tree, so
    * it keeps the app's styles. */
   portal: HTMLElement
   /** The element holding the mounted app (its style scope). */
   root: HTMLElement
+}
+
+/** What a host is handed to release: the API's `ReleaseScopeRequest`. */
+export interface ReleaseScopeBody {
+  /** Exactly these records (by id). */
+  records?: string[]
+  /** Or every record this query lists (the API's `RecordQueryRequest`). */
+  query?: object
 }
 
 let mounted: MountedHost | null = null
@@ -68,6 +80,12 @@ export function setMountedHost(host: MountedHost | null): void {
 /** Whether the app is mounted inside a host page (`embed.tsx`). */
 export function isMounted(): boolean {
   return mounted !== null
+}
+
+/** The host's handler for "Release these…", if it has one: the item is shown
+ * only then. */
+export function hostRelease(): ((scope: ReleaseScopeBody) => void) | null {
+  return mounted?.onRelease ?? null
 }
 
 /** `fetch` as the host wants the app's requests made (to add its sign-in), the

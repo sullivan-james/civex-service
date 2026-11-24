@@ -244,3 +244,30 @@ def test_the_bundle_lists_a_file_it_cannot_read_and_keeps_an_empty_one(
         names = zf.namelist()
     assert manifest["files"]["missing"] == [gone["sha256"]]
     assert f"files/{empty['sha256']}" in names
+
+
+def test_created_range_selects_records_and_scopes_a_release(client: TestClient):
+    _study(client)
+    past, future = "2000-01-01T00:00:00", "2999-01-01T00:00:00"
+    url = "/api/collections/north/records"
+
+    def listed(**params: str) -> list:
+        res = client.get(url, params=params)
+        assert res.status_code == 200, res.text
+        return res.json()["items"]
+
+    assert len(listed()) == 1
+    assert len(listed(created_after=past)) == 1
+    assert listed(created_after=future) == []
+    assert listed(created_before=past) == []
+    assert len(listed(created_before=future)) == 1
+    plan = client.post(
+        "/api/releases/plan",
+        json={"query": {"schema_name": "sample", "created_after": past}},
+    )
+    assert plan.status_code == 200 and plan.json()["records"] == 2
+    none = client.post(
+        "/api/releases/plan",
+        json={"query": {"schema_name": "sample", "created_before": past}},
+    )
+    assert none.status_code == 200 and none.json()["records"] == 0

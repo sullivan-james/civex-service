@@ -2717,6 +2717,8 @@ class RecordService:
             field_filters=field_filters,
             search=self.text_search(query.search, schema, query.search_fields),
             filter_tree=self._resolve_filter(schema, query.filter_tree),
+            created_after=query.created_after,
+            created_before=query.created_before,
             sort=self._resolve_sort(schema, query.sort),
         )
 
