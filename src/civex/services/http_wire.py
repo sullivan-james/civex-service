@@ -28,6 +28,7 @@ import gzip
 import http.client
 import json
 import random
+import select
 import socket
 import threading
 import time
@@ -51,8 +52,10 @@ MAX_TOTAL_WAIT_SECONDS = 180.0
 BACKOFF_BASE_SECONDS = 0.5
 BACKOFF_CAP_SECONDS = 30.0
 JITTER = 0.25
-# A kept-open connection idle this long is not trusted: servers close theirs.
-IDLE_SECONDS = 30.0
+# A kept-open connection idle this long is not trusted: servers close theirs
+# (uvicorn after 5 s), so it stays under that, and a socket that has become
+# readable (the server's FIN) is not trusted at all.
+IDLE_SECONDS = 4.0
 MAX_REDIRECTS = 5
 # Idle connections kept per host (uploads run a few threads at once).
 MAX_IDLE_PER_HOST = 8
@@ -356,7 +359,11 @@ class Wire:
             if held is None:
                 break
             conn, used = held
-            if self._clock() - used <= IDLE_SECONDS and conn.sock is not None:
+            if (
+                self._clock() - used <= IDLE_SECONDS
+                and conn.sock is not None
+                and not _server_hung_up(conn.sock)
+            ):
                 try:
                     conn.timeout = timeout
                     conn.sock.settimeout(timeout)
@@ -379,10 +386,21 @@ class Wire:
         if reuse and not response.will_close and response.isclosed():
             with self._lock:
                 stack = self._idle.setdefault(key, [])
-                if len(stack) < MAX_IDLE_PER_HOST:
+                # Only a connection this client still tracks (not one that
+                # `close()` already let go of).
+                if conn in self._all and len(stack) < MAX_IDLE_PER_HOST:
                     stack.append((conn, self._clock()))
                     return
         self._forget(conn)
+
+    def _drop_idle(self, parts: urllib.parse.SplitResult) -> None:
+        """Close every idle connection to a host: one that went stale says the
+        others sat as long and went the same way."""
+        key = (parts.scheme, parts.hostname or "", parts.port)
+        with self._lock:
+            stale = self._idle.pop(key, [])
+        for conn, _ in stale:
+            self._forget(conn)
 
     def close(self) -> None:
         """Close every connection."""
@@ -422,6 +440,10 @@ class Wire:
             if isinstance(via, dict):
                 send_headers.update(via)
         try:
+            if conn.sock is None:
+                # Connecting (and a proxy tunnel) first, so a failure there is
+                # known not to have sent anything.
+                conn.connect()
             try:
                 conn.request(method, target, body=body, headers=send_headers)
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
@@ -494,7 +516,6 @@ class Wire:
             send_headers["Accept-Encoding"] = "gzip"
         status_retries = network_retries = 0
         waited = 0.0
-        stale_tried = False
         hops = 0
         while True:
             if prepare:
@@ -510,13 +531,11 @@ class Wire:
                     fresh=not idempotent,
                 )
             except (OSError, http.client.HTTPException) as e:
-                if (
-                    idempotent
-                    and reused_stale(e)
-                    and not stale_tried
-                    and self._local_reused()
-                ):
-                    stale_tried = True  # the server closed an idle connection
+                if idempotent and reused_stale(e) and self._local_reused():
+                    # The server closed an idle connection: not a failure to
+                    # count. Its siblings are as old, so they all go, and the
+                    # next attempt is on a new connection (which ends this).
+                    self._drop_idle(urllib.parse.urlsplit(url))
                     continue
                 problem = certificate_problem(urllib.error.URLError(e))
                 if problem:
@@ -586,6 +605,16 @@ class Wire:
                 reply.body = _drain(reply)
                 reply.close()
             raise status_error(reply, not_found)
+
+
+def _server_hung_up(sock: Any) -> bool:
+    """Whether an idle socket has something to read: for a connection with
+    nothing in flight that is the server's close (or noise): not reusable."""
+    try:
+        readable, _, _ = select.select([sock], [], [], 0)
+    except (OSError, ValueError):
+        return True
+    return bool(readable)
 
 
 def reused_stale(error: BaseException) -> bool:

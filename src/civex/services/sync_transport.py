@@ -97,6 +97,11 @@ class HttpSyncTransport:
         """Close the connections this transport holds open."""
         self._wire.close()
 
+    def __del__(self) -> None:  # a backstop: whoever has it should close it
+        wire = getattr(self, "_wire", None)
+        if wire is not None:
+            wire.close()
+
     # -- the protocol ----------------------------------------------------
 
     def join(self, invite: str) -> Joined:

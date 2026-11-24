@@ -34,6 +34,7 @@ class _Server:
         self.plan: list[tuple[int, dict[str, str], bytes]] = [(200, {}, b"{}")]
         self.seen: list[dict[str, Any]] = []
         self.peers: set[tuple[str, int]] = set()
+        self.sockets: list[Any] = []
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -43,6 +44,7 @@ class _Server:
                 length = int(self.headers.get("Content-Length") or 0)
                 raw = self.rfile.read(length) if length else b""
                 outer.peers.add(self.client_address)
+                outer.sockets.append(self.connection)
                 outer.seen.append(
                     {"path": self.path, "headers": dict(self.headers), "body": raw}
                 )
@@ -493,3 +495,151 @@ def test_a_transport_closes_its_connections(server) -> None:
     assert t._wire.open_connections() == 1
     t.close()
     assert t._wire.open_connections() == 0
+
+
+# -- stale connections ------------------------------------------------------------
+
+
+def _pool_five(wire: Wire, server: _Server) -> None:
+    gate = threading.Barrier(5)
+
+    def one() -> None:
+        wire.request("GET", server.url + "/x")
+        gate.wait(5)
+
+    threads = [threading.Thread(target=one) for _ in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+
+def _hang_up(server: _Server) -> None:
+    import socket as _socket
+
+    for c in server.sockets:
+        try:
+            c.shutdown(_socket.SHUT_RDWR)
+        except OSError:
+            pass
+        c.close()
+    server.sockets.clear()
+
+
+def test_stale_idle_connections_do_not_use_up_the_retry_budget(
+    server, monkeypatch
+) -> None:
+    """The server closed five idle sockets (its keep-alive ran out): the next
+    call must not fail 'could not reach' against a healthy server."""
+    wire = Wire(sleep=lambda s: None)
+    _pool_five(wire, server)
+    made = wire.connections_made
+    assert made >= 2
+    _hang_up(server)
+    # Without the readable-socket check the failure shows at the request: the
+    # call must go on to a new connection without counting it.
+    monkeypatch.setattr(http_wire, "_server_hung_up", lambda sock: False)
+    assert wire.request("GET", server.url + "/x").status == 200
+    assert wire.connections_made == made + 1
+    wire.close()
+
+
+def test_a_socket_the_server_closed_is_noticed_before_it_is_used(server) -> None:
+    wire = Wire(sleep=lambda s: None)
+    _pool_five(wire, server)
+    made = wire.connections_made
+    _hang_up(server)
+    import time as _time
+
+    _time.sleep(0.05)
+    assert wire.request("GET", server.url + "/x").status == 200
+    assert wire.connections_made == made + 1
+    wire.close()
+
+
+def test_connections_idle_past_the_server_keep_alive_are_not_reused(server) -> None:
+    now = [0.0]
+    wire = Wire(clock=lambda: now[0])
+    wire.request("GET", server.url + "/x")
+    now[0] += http_wire.IDLE_SECONDS + 1
+    wire.request("GET", server.url + "/x")
+    assert wire.connections_made == 2
+    wire.close()
+
+
+def test_a_reset_before_the_request_went_out_is_not_may_have_done_it() -> None:
+    sleeps: list[float] = []
+    with pytest.raises(SyncError) as raised:
+        _wire(sleeps).request("POST", "http://127.0.0.1:1/x", body=b"{}")
+    assert "may have done it" not in str(raised.value)
+    assert len(sleeps) == http_wire.MAX_NETWORK_RETRIES  # safe to try again
+
+
+def test_a_connection_returned_after_close_is_not_pooled(server) -> None:
+    wire = Wire()
+    reply = wire.request("GET", server.url + "/f", stream=True)
+    wire.close()
+    reply.read()
+    reply.close()
+    assert wire.open_connections() == 0 and not any(wire._idle.values())
+
+
+def test_a_resent_push_goes_out_again_with_the_same_body(server) -> None:
+    server.plan = [
+        (200, {}, _hello([])),
+        (504, {}, b""),
+        (200, {}, json.dumps({"results": [], "head_seq": 0}).encode()),
+    ]
+    t = _transport(server)
+    t._wire = Wire(sleep=lambda s: None)
+    t.push(_entries(2, width=10))
+    pushes = [r for r in server.seen if r["path"].endswith("/push")]
+    assert len(pushes) == 2 and pushes[0]["body"] == pushes[1]["body"]
+
+
+def test_the_proxy_login_goes_to_the_proxy_only_never_to_the_target(
+    monkeypatch,
+) -> None:
+    import urllib.parse
+
+    monkeypatch.setattr(
+        "urllib.request.getproxies",
+        lambda: {"https": "http://user:pw@127.0.0.1:3128"},
+    )
+    monkeypatch.setattr("urllib.request.proxy_bypass", lambda host: False)
+    wire = Wire()
+    conn = wire._connect(urllib.parse.urlsplit("https://hub.example.com/x"), 5.0)
+    assert "Proxy-Authorization" in conn._tunnel_headers  # type: ignore[attr-defined]
+    assert not getattr(conn, "civex_via_proxy", None)  # nothing added to requests
+    wire.close()
+
+
+def test_a_401_without_a_code_keeps_its_message_and_is_no_sign_in_loop(
+    server,
+) -> None:
+    server.plan = [(401, {}, b'{"detail": "The session expired"}')]
+    with pytest.raises(SyncError) as raised:
+        _wire([]).request("GET", server.url + "/x")
+    assert raised.value.code == "" and raised.value.status == 401
+    assert "The session expired" in str(raised.value)
+    assert len(server.seen) == 1
+
+
+def test_only_not_a_device_turns_into_a_sign_in(project, authority, monkeypatch):
+    from civex import user_state
+    from civex.testing.peers import device
+
+    svc = object.__getattribute__(device(project, authority, "x").sync_svc, "_svc")
+    monkeypatch.setattr(user_state, "authority_for", lambda url: "key")
+
+    class Probe:
+        def __init__(self, code: str) -> None:
+            self.code = code
+
+        def hello(self) -> None:
+            raise SyncError("no", retryable=False, status=401, code=self.code)
+
+    assert svc._is_a_device(Probe("not_a_device"), "https://a.test") is False
+    for code in ("", "bad_signature", "clock_skew"):
+        with pytest.raises(SyncError):
+            svc._is_a_device(Probe(code), "https://a.test")

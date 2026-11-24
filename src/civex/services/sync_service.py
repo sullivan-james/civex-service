@@ -392,6 +392,7 @@ class SyncService:
     def configured(self) -> bool:
         return bool(self._config.sync.remote)
 
+    @_closes_transports
     def identity(self, *, ask: bool = True) -> DeviceIdentity:
         """This computer's standing with the authority. `ask` lets it say its
         name for the device (one request); an authority that can't be reached
@@ -402,11 +403,7 @@ class SyncService:
         name: str | None = None
         if ask and joined and remote:
             try:
-                name = (
-                    self._make_transport(remote, self._credentials(remote))
-                    .hello()
-                    .device_name
-                )
+                name = self._made(remote).hello().device_name
             except (SyncError, OSError):
                 name = None
         return DeviceIdentity(
@@ -549,6 +546,7 @@ class SyncService:
             self._commit()
         return ignored - found
 
+    @_closes_transports
     def missing_files(
         self, include_ignored: bool = False, with_groups: bool = True
     ) -> MissingFilesReport:
@@ -831,6 +829,7 @@ class SyncService:
         url = url.strip().rstrip("/")
         return not (invite and invite.strip()) and not user_state.authority_for(url)
 
+    @_closes_transports
     def request_login(self, url: str) -> LoginStarted:
         """Ask the authority at `url` to let this computer join without an
         invite. The answer's `user_code` is for a person to approve there;
@@ -838,8 +837,9 @@ class SyncService:
         url = url.strip().rstrip("/")
         self._refuse_following_while_serving()
         _check_address(url)
-        return self._make_transport(url, self._credentials(url)).request_login()
+        return self._made(url).request_login()
 
+    @_closes_transports
     def check_connect(self, url: str, invite: str | None) -> str:
         """What connecting to this authority would do, found out without doing
         it: the address is read, the protocol accepted, and who holds data
@@ -870,7 +870,7 @@ class SyncService:
         url = url.strip().rstrip("/")
         self._refuse_following_while_serving()
         _check_address(url)
-        probe = self._make_transport(url, self._credentials(url))
+        probe = self._made(url)
         if invite and invite.strip():
             joined = probe.join(invite.strip())
             user_state.save_authority(url, joined.authority_key)
@@ -960,6 +960,7 @@ class SyncService:
     # How waiting is done; a test makes it instant.
     _sleep: Callable[[float], None] = staticmethod(time.sleep)
 
+    @_closes_transports
     def connect(
         self,
         url: str,
@@ -1137,7 +1138,16 @@ class SyncService:
     def transport(self) -> SyncTransport:
         """A connection to the authority this project follows, signed in as
         this device (for the library, which is not part of syncing)."""
-        return self._transport()
+        transport = self._transport()
+        # The caller's to close: not closed when a pass of ours ends.
+        self._opened().remove(transport)
+        return transport
+
+    def _made(self, url: str) -> SyncTransport:
+        """A transport for `url` that the pass in hand closes when it ends."""
+        transport = self._make_transport(url, self._credentials(url))
+        self._opened().append(transport)
+        return transport
 
     def _transport(self) -> SyncTransport:
         remote = self._config.sync.remote
@@ -1152,9 +1162,7 @@ class SyncService:
                 f"This computer hasn't joined {remote}: connect again with an invite.",
                 retryable=False,
             )
-        transport = self._make_transport(remote, self._credentials(remote))
-        self._opened().append(transport)
-        return transport
+        return self._made(remote)
 
     def _opened(self) -> list[Any]:
         """The transports this thread has made since it last closed them."""
@@ -1397,6 +1405,7 @@ class SyncService:
             self._commit()
         return sent
 
+    @_closes_transports
     def pull(self) -> int:
         with sync_lock(self._config.civex_dir):
             return self._pull(self._transport())
@@ -1407,20 +1416,45 @@ class SyncService:
         dirty = self._catch_up()
         cursor = self._repo.meta().cursor
         applied = 0
+        # Where the next page is asked from, and the tail of an action the last
+        # page ended inside: not applied until the action's last entry has
+        # arrived and the decision to hold it or not is made for all of it
+        # (the stored cursor stays before it, so a stop re-reads it).
+        fetch_after = cursor
+        carried: list[SyncEntry] = []
         while True:
-            page = transport.feed(cursor, FEED_PAGE)
+            page = transport.feed(fetch_after, FEED_PAGE)
+            entries = carried + list(page.entries)
+            carried = []
+            if entries and entries[-1].hub_seq is None:
+                raise SyncError("The server sent a change without a number")
+            fetch_before = fetch_after
+            if entries:
+                fetch_after = entries[-1].hub_seq or fetch_after
+            if page.more and entries and entries[-1].op:
+                op = entries[-1].op
+                cut = len(entries)
+                while cut > 0 and entries[cut - 1].op == op:
+                    cut -= 1
+                carried, entries = entries[cut:], entries[:cut]
+            if (
+                page.more
+                and fetch_after == fetch_before
+                and not (page.through or 0) > fetch_before
+            ):
+                return applied  # no progress: asking again would repeat itself
+            if not entries and carried:
+                continue  # one action still arriving: nothing to settle yet
             # An action is taken whole or held whole: if one of its entries
             # must wait for a push of this device's own, every entry of it
             # waits with that one (a tree moved to another collection can't
             # be half moved: a child's collection is its parent's).
             above = self._above_dirty(dirty)
-            waiting = {
-                e.op for e in page.entries if e.op and self._waits(e, dirty, above)
-            }
+            waiting = {e.op for e in entries if e.op and self._waits(e, dirty, above)}
             touched: list[uuid.UUID] = []
             try:
                 with self._repo.savepoint():
-                    for entry in page.entries:
+                    for entry in entries:
                         if entry.hub_seq is None:
                             raise SyncError("The server sent a change without a number")
                         if entry.entity_type in NOT_SYNCED_KINDS:
@@ -1446,19 +1480,24 @@ class SyncService:
                     # The server may have looked past changes it did not send
                     # (ones this device may not see): the cursor goes where it
                     # got to, or they would be read again at every sync.
-                    if page.through is not None and page.through > cursor:
+                    if (
+                        page.through is not None
+                        and page.through > cursor
+                        and not carried
+                    ):
                         cursor = page.through
                     # A collection that came in the feed is one this device
                     # holds: it is not read again when the next hello lists it.
                     born = {
                         str(e.entity_id)
-                        for e in page.entries
+                        for e in entries
                         if e.entity_type == "dataset" and e.action == "create"
                     }
                     known = self._repo.readable() if born else None
                     if known is not None:
                         self._repo.set_readable(known | born)
                     self._repo.set_cursor(cursor)
+                    fetch_after = max(fetch_after, cursor)
                     # What this page settled may have freed a held change (a
                     # parent's move held while a child's change was unsent,
                     # the child now settled by this page): it goes in with the
@@ -2516,6 +2555,7 @@ class SyncService:
             self._repo.set_readable({c["id"] for c in hello.readable})
         self._commit()
 
+    @_closes_transports
     def fetch_history(
         self, progress: ProgressFn | None = None, pages: int | None = None
     ) -> bool:
@@ -2710,6 +2750,7 @@ class SyncService:
                 "else to come from: they can't be removed to free space."
             )
 
+    @_closes_transports
     def _free(
         self, here: dict[str, int], kept: set[uuid.UUID], dry_run: bool
     ) -> FreeUpReport:
