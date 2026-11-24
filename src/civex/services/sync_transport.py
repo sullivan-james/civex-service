@@ -27,6 +27,7 @@ from civex.domain.dtos import DirectUpload
 from civex.domain.sync import (
     DIRECT_FILES,
     FILE_PACKS,
+    GZIP_REQUESTS,
     FILE_PART_BYTES,
     FILE_PART_MAX,
     FILE_PARTS,
@@ -63,8 +64,6 @@ CLIENT_PUSH_TIMEOUT_SECONDS = 120.0
 # An ordinary call (feed, snapshot, hello, sign-in), and a file or part upload.
 READ_TIMEOUT_SECONDS = 60.0
 UPLOAD_TIMEOUT_SECONDS = 120.0
-# The capability under which an authority reads a gzipped request body.
-GZIP_REQUESTS = "gzip_requests"
 GZIP_MIN_BYTES = 1024
 API = "/api/sync/v1"
 

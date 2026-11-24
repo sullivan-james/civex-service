@@ -212,10 +212,7 @@ def test_the_server_push_budget_is_well_below_the_clients_timeout():
     assert sync_authority.PUSH_BUDGET_SECONDS <= 15
     from civex.services import sync_transport
 
-    client_timeout = getattr(sync_transport, "CLIENT_PUSH_TIMEOUT_SECONDS", None)
-    # TODO(coordinator): the client agent defines CLIENT_PUSH_TIMEOUT_SECONDS (120)
-    # in sync_transport.py; until it lands the expectation is stated here.
-    client_timeout = client_timeout or 120
+    client_timeout = sync_transport.CLIENT_PUSH_TIMEOUT_SECONDS
     assert sync_authority.PUSH_BUDGET_SECONDS * 4 <= client_timeout
     # a waiter outlasts a push that is working (its budget and its flush)
     assert sync_policy.LOCK_TIMEOUT_MS / 1000 >= 2 * sync_authority.PUSH_BUDGET_SECONDS

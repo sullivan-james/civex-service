@@ -323,13 +323,6 @@ def test_a_device_holds_a_whole_action_that_fits_a_page_but_not_the_limit(
     assert phone.record_svc.get(ids[0]).data["depth"] == 1.0
 
 
-@pytest.mark.xfail(
-    reason="CLIENT: an action over the page budget alone is cut across pages "
-    "and the device's `waiting` is decided per page (sync_service._pull), so "
-    "the part before the entry that touches its unsent edit is applied. Needs "
-    "the client to carry `waiting` across pages while `more` is true.",
-    strict=True,
-)
 def test_a_device_holds_an_over_budget_action_cut_across_pages(
     pair, authority, monkeypatch
 ):
