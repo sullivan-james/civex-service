@@ -215,7 +215,15 @@ def test_filling_the_same_server_again_after_a_reset(
         with pytest.raises(sync_service.SyncError):
             connect(laptop, f"https://{name}.test")
         monkeypatch.setattr(sync_service.SyncService, "_seed", original)
+        repo = laptop.sync_repo
+        forgot = []
+        real_forget = repo.forget_numbers
+        monkeypatch.setattr(
+            repo, "forget_numbers", lambda: forgot.append(1) or real_forget()
+        )
         laptop.sync_svc.sync()
+        assert forgot  # it found the server empty and started over
+        monkeypatch.setattr(repo, "forget_numbers", real_forget)
         return server
 
     server = fill_after_reset("server")
