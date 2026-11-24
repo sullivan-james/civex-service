@@ -308,8 +308,9 @@ Server-side only, or advertised in `hello`; older devices keep working.
   `sync_conflicts.entity_id`; how a person settled a refusal is left as it was,
   so letting one go can still be undone), and a refusal of the same thing by a
   server filled again after a reset says it is missing there again. Copies
-  that already hold such stale refusals are not repaired (re-clone them). Also: following another server settles what was waiting for
-  review as `followed` (it wrote "followed another server", longer than the
+  that already hold such stale refusals are not repaired (re-clone them).
+  Also: following another server settles what was waiting for review as
+  `followed` (it wrote "followed another server", longer than the
   column, so a device on PostgreSQL could not follow another server).
 - **Undoing a bulk action is one step, however big, through one code path.**
   Restoring what a bulk delete took stopped at 5,000 records (and eight rounds
