@@ -14,8 +14,10 @@ from fastapi import (
 from starlette.datastructures import UploadFile
 
 from civex.context import AppContext, context_factory
+from civex.domain import features
 from civex.domain.exceptions import (
     AllVolumesFull,
+    FeatureUnavailableError,
     NotFoundError,
     ValidationError,
     VolumeUnavailableError,
@@ -41,7 +43,7 @@ from civex.server.models import (
     WorkflowStepResponse,
     WorkflowTriggerResponse,
 )
-from civex.workflows.definition import WorkflowDef, trigger_summaries
+from civex.workflows.definition import WorkflowDef, run_inputs, trigger_summaries
 from civex.workflows.trial import try_workflow
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
@@ -80,7 +82,7 @@ def _triggers(wf: WorkflowDef) -> dict[str, WorkflowTriggerResponse] | None:
 def _inputs(wf: WorkflowDef) -> dict[str, WorkflowInputResponse] | None:
     return {
         k: WorkflowInputResponse(type=v.type, label=v.label, description=v.description)
-        for k, v in (wf.inputs or {}).items()
+        for k, v in run_inputs(wf).items()
     } or None
 
 
@@ -171,6 +173,28 @@ def delete_workflow(stem: str, force: bool = False, ctx: AppContext = Depends(ge
         raise HTTPException(404, detail=str(e))
 
 
+def _folder_choices(raw: Any, wf_def: WorkflowDef, ctx: AppContext) -> dict[str, Any]:
+    """The folders a run is told to read for its Files steps (`{step id:
+    {folder, glob, subfolders}}`), checked: only where this server reads
+    folders, only for steps that ask for files. Read by the run itself, so
+    its progress shows."""
+    if not raw:
+        return {}
+    if not features.enabled(ctx.features, features.SERVER_PATH_IMPORT):
+        raise FeatureUnavailableError(features.SERVER_PATH_IMPORT)
+    asked = {k for k, v in run_inputs(wf_def).items() if v.type == "files"}
+    chosen: dict[str, Any] = {}
+    for step_id, spec in dict(raw).items():
+        if step_id not in asked or not isinstance(spec, dict) or not spec.get("folder"):
+            raise HTTPException(422, detail=f"'{step_id}' doesn't ask for files.")
+        chosen[step_id] = {
+            "folder": str(spec["folder"]),
+            "glob": str(spec.get("glob") or "*"),
+            "subfolders": bool(spec.get("subfolders")),
+        }
+    return chosen
+
+
 async def _form_inputs(
     form: Any, wf_def: WorkflowDef, record_id: str, ctx: AppContext
 ) -> dict[str, Any] | None:
@@ -185,8 +209,15 @@ async def _form_inputs(
         except NotFoundError:
             input_collection = None
     resolved: dict[str, Any] = {}
-    for input_name, input_decl in (wf_def.inputs or {}).items():
-        if input_decl.type != "files":
+    try:
+        folders = _folder_choices(
+            json.loads(str(form.get("folders") or "null")), wf_def, ctx
+        )
+    except json.JSONDecodeError as e:
+        raise HTTPException(422, detail=f"Invalid folders: {e}")
+    resolved.update(folders)
+    for input_name, input_decl in run_inputs(wf_def).items():
+        if input_decl.type != "files" or input_name in folders:
             continue
         refs = []
         for upload in form.getlist(input_name):
@@ -355,7 +386,7 @@ def run_workflow_on_many(
     wf_def = ctx.workflow_svc.find_by_name(name)
     if wf_def is None:
         raise HTTPException(404, detail=f"Workflow '{name}' not found")
-    if any(i.type == "files" for i in (wf_def.inputs or {}).values()):
+    if any(i.type == "files" for i in run_inputs(wf_def).values()):
         raise HTTPException(
             422,
             detail=f"Workflow '{name}' needs files for each run, so it can't be "
@@ -420,6 +451,9 @@ async def run_workflow(
         except json.JSONDecodeError as e:
             raise HTTPException(422, detail=f"Invalid JSON body: {e}")
         record_id = body.get("record_id", "")
+        folders = _folder_choices(body.get("folders"), wf_def, ctx)
+        if folders:
+            input_data = {"__input__": folders}
 
     if not record_id:
         raise HTTPException(422, detail="record_id is required")

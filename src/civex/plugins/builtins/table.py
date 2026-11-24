@@ -7,10 +7,11 @@ from typing import Any
 from civex_plugin_sdk.plugin_base import IOSpec
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from civex.domain.dtos import FileRef
 from civex.domain.exceptions import ValidationError
 from civex_plugin_sdk import Ctx
 from civex_plugin_sdk import Plugin as PluginBase
-from civex.plugins.hints import advanced, choices, says
+from civex.plugins.hints import advanced, choices, hint, says
 
 log = logging.getLogger(__name__)
 
@@ -84,19 +85,22 @@ def detect_delimiter(text: str, candidates: list[str]) -> str:
 
 
 class Plugin(PluginBase):
-    id = "civex.parse_table"
-    name = "Read a table from a file"
+    id = "civex.table@1"
+    name = "Table"
     description = (
-        "Parse delimited text (CSV, TSV, ...) into a table for a downstream "
-        "records step."
+        "Read a table from a spreadsheet or text file: CSV, TSV or Excel. Use "
+        "the files from a Files step, or the file in a field of this record. "
+        "Its rows can then be saved as records."
     )
-    category = "data-sources"
-    capabilities: list[str] = []
+    category = "bring-in"
+    capabilities: list[str] = ["read"]
     inputs = [
         IOSpec(
-            name="bytes",
-            type="bytes",
-            description="The file to read as a table: CSV, TSV or other delimited text.",
+            name="files",
+            type="files",
+            required=False,
+            description="The file (or files, whose rows are put one after "
+            "another) to read. Leave out to read the file in the Field setting.",
         )
     ]
     outputs = [IOSpec(name="table", type="table", description="The table it read.")]
@@ -104,22 +108,32 @@ class Plugin(PluginBase):
     class Config(BaseModel):
         model_config = ConfigDict(
             json_schema_extra=says(
-                "Reads {bytes} as a table, its columns separated by {delimiter}."
+                "Reads a table from {files}, or from the file in {field}."
             )
+        )
+        field: str | None = Field(
+            title="Read the file in field",
+            json_schema_extra=hint("field", dtypes=["file"]),
+            default=None,
+            description="A file field of the record the workflow runs on. Not "
+            "needed when files are given by a Files step.",
         )
         delimiter: str = Field(
             title="Columns separated by",
             json_schema_extra=choices(
+                ("auto", "Work it out from the file"),
                 (",", "Commas"),
                 ("tab", "Tabs"),
                 (";", "Semicolons"),
                 ("|", "Pipes |"),
                 ("space", "Spaces"),
             ),
-            default=",",
+            default="auto",
             description=(
-                "Column separator: one character, or a name (comma, tab, "
-                "semicolon, pipe, space). Used when `delimiters` isn't set."
+                "Column separator of a text file: auto (commas, tabs or "
+                "semicolons, whichever the file uses), one character, or a name "
+                "(comma, tab, semicolon, pipe, space). Used when `delimiters` "
+                "isn't set. Excel files need none."
             ),
         )
         delimiters: list[str] | None = Field(
@@ -137,7 +151,14 @@ class Plugin(PluginBase):
             title="Text encoding",
             json_schema_extra=advanced(),
             default="utf-8",
-            description="Text encoding to decode the file with.",
+            description="Text encoding to decode a text file with.",
+        )
+        sheet: str | None = Field(
+            title="Sheet",
+            json_schema_extra=advanced(),
+            default=None,
+            description="Which sheet of an Excel file to read, by name. The "
+            "first sheet when empty.",
         )
 
         @field_validator("delimiters")
@@ -158,37 +179,84 @@ class Plugin(PluginBase):
             import pandas as pd
         except ImportError:
             raise ImportError(
-                "civex.parse_table requires pandas: pip install 'civex[workflows]'"
+                "civex.table requires pandas: pip install 'civex[workflows]'"
             )
 
-        raw: bytes = inputs["bytes"]
-        try:
-            # utf-8-sig drops a byte-order mark, which would otherwise end up
-            # glued to the first column's name.
-            text = raw.decode(
-                "utf-8-sig"
-                if config.encoding.lower() in ("utf-8", "utf8")
-                else config.encoding
-            )
-            if config.delimiters:
-                candidates = [resolve_delimiter(t) for t in config.delimiters]
-                delimiter = detect_delimiter(text, candidates)
-                log.info("Read the file as separated by %r", delimiter)
-            else:
-                delimiter = resolve_delimiter(config.delimiter, single_char=False)
-            df = pd.read_csv(io.StringIO(text), sep=delimiter)
-        except UnicodeDecodeError as e:
-            raise ValidationError(
-                f"Could not decode the file as {config.encoding}: {e}"
-            ) from e
-        except pd.errors.EmptyDataError as e:
-            raise ValidationError("The file has no data to parse") from e
-        except pd.errors.ParserError as e:
-            raise ValidationError(f"Could not parse the file as a table: {e}") from e
+        refs = _files_to_read(inputs, config, ctx)
+        frames = []
+        for ref in refs:
+            frames.append(_read_one(pd, ctx.get_file(ref.sha256), ref.filename, config))
+        df = frames[0] if len(frames) == 1 else pd.concat(frames, ignore_index=True)
         log.info(
-            "Parsed table: %d rows × %d columns %s",
+            "Read table: %d rows x %d columns %s",
             len(df),
             len(df.columns),
             list(df.columns),
         )
         return {"table": df}
+
+
+def _files_to_read(inputs: dict[str, Any], config: Any, ctx: Ctx) -> list[FileRef]:
+    given = inputs.get("files")
+    if given is None:
+        if not config.field:
+            raise ValidationError(
+                "Say where the table is: connect a Files step, or choose the "
+                "field holding the file."
+            )
+        raw = ctx.get_context_record()["data"].get(config.field)
+        if raw is None:
+            raise ValueError(f"Field '{config.field}' has no file on this record")
+        given = raw
+    if isinstance(given, dict):
+        given = [given]
+    refs = [
+        FileRef.from_dict(f) for f in given if isinstance(f, dict) and "sha256" in f
+    ]
+    if not refs:
+        raise ValidationError("There is no file to read a table from.")
+    return refs
+
+
+_EXCEL = (".xlsx", ".xlsm", ".xls")
+
+
+def _read_one(pd: Any, raw: bytes, filename: str, config: Any) -> Any:
+    try:
+        if filename.lower().endswith(_EXCEL):
+            try:
+                return pd.read_excel(
+                    io.BytesIO(raw), sheet_name=config.sheet or 0, engine=None
+                )
+            except ImportError as e:
+                raise ValidationError(
+                    f"'{filename}' is an Excel file this computer can't read yet "
+                    f"({e}). Save it as .xlsx or CSV."
+                ) from e
+            except ValueError as e:
+                raise ValidationError(f"Could not read '{filename}': {e}") from e
+        # utf-8-sig drops a byte-order mark, which would otherwise end up
+        # glued to the first column's name.
+        text = raw.decode(
+            "utf-8-sig"
+            if config.encoding.lower() in ("utf-8", "utf8")
+            else config.encoding
+        )
+        if config.delimiters:
+            candidates = [resolve_delimiter(t) for t in config.delimiters]
+            delimiter = detect_delimiter(text, candidates)
+            log.info("Read '%s' as separated by %r", filename, delimiter)
+        elif config.delimiter.strip().lower() == "auto":
+            delimiter = detect_delimiter(text, [",", "\t", ";"])
+            log.info("Read '%s' as separated by %r", filename, delimiter)
+        else:
+            delimiter = resolve_delimiter(config.delimiter, single_char=False)
+        return pd.read_csv(io.StringIO(text), sep=delimiter)
+    except UnicodeDecodeError as e:
+        raise ValidationError(
+            f"Could not decode '{filename}' as {config.encoding}: {e}"
+        ) from e
+    except pd.errors.EmptyDataError as e:
+        raise ValidationError(f"'{filename}' has no data to read") from e
+    except pd.errors.ParserError as e:
+        raise ValidationError(f"Could not read '{filename}' as a table: {e}") from e

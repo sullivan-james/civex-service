@@ -22,7 +22,7 @@ Use it in a workflow:
   timeout: 30   # optional; overrides [plugins].default_timeout_seconds from config.toml
 
 - id: save
-  plugin: civex.save_field
+  plugin: civex.set_fields@1
   config:
     field: greeting
   inputs:
@@ -180,7 +180,7 @@ value = record["data"].get("reading")   # None if not set
 ctx.patch_record(record["id"], {"duration": 42.5})   # only this field changes
 ```
 
-Or use `civex.save_field` / `civex.save_fields` as separate workflow steps instead of calling `ctx.update_record` directly.
+Or use `civex.set_fields@1` as a separate workflow step instead of calling `ctx.update_record` directly.
 
 ### The run's folder
 

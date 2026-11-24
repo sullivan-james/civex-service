@@ -13,7 +13,7 @@ _FAILING_YAML = """\
 name: failing
 steps:
   - id: load-the-attachment
-    plugin: civex.load_file
+    plugin: civex.table@1
     config: {field: attachment}
 """
 
@@ -21,7 +21,7 @@ _FINE_YAML = """\
 name: fine
 steps:
   - id: read
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config: {field: name}
 """
 
@@ -146,13 +146,13 @@ def test_plugin_failure_counts_generalizes_the_worker_stats_aggregate(
     assert body["bucket"] == "day"
     assert len(body["items"]) == 1
     item = body["items"][0]
-    assert item["plugin"] == "civex.load_file"
+    assert item["plugin"] == "civex.table@1"
     assert item["count"] == 2
 
     # Narrowed to a plugin that never failed.
     resp = client.get(
         "/api/analytics/jobs/failures-by-plugin",
-        params={"plugin_id": "civex.get_field"},
+        params={"plugin_id": "civex.value_from_filename@1"},
     )
     assert resp.json()["items"] == []
 
@@ -183,7 +183,7 @@ def test_job_duration_stats(client: TestClient) -> None:
     assert {m["label"] for m in body["percentile_markers"]} == {"p50", "p90", "p99"}
 
     resp = client.get(
-        "/api/analytics/jobs/duration", params={"plugin_id": "civex.get_field"}
+        "/api/analytics/jobs/duration", params={"plugin_id": "civex.value_from_filename@1"}
     )
     assert resp.json()["count"] == 1
 

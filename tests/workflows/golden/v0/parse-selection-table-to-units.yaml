@@ -1,0 +1,43 @@
+name: Parse Selection Table to Unit Selections
+description: |
+  Triggered when a unit_selection_table (CSV/TSV) is uploaded to a Sequence Selection.
+  Parses the table and creates Unit Selection records with all metadata fields
+  using built-in field mapping to rename columns.
+
+record_schema: sequence_selection
+
+triggers:
+  record_updated:
+    schema: sequence_selection
+    fields: [unit_selection_table]
+
+steps:
+  - id: load-table
+    plugin: civex.load_file
+    config:
+      field: unit_selection_table
+
+  - id: parse-table
+    plugin: civex.parse_table
+    inputs:
+      bytes: load-table.bytes
+
+  - id: create-units
+    plugin: civex.rows_to_records
+    config:
+      schema: unit_selection
+      field_mapping:
+        "Selection": "unit_number"
+        "View": "view"
+        "Channel": "channel"
+        "Begin Time (s)": "begin_time_s"
+        "End Time (s)": "end_time_s"
+        "Low Freq (Hz)": "low_freq_hz"
+        "High Freq (Hz)": "high_freq_hz"
+        "Delta Time (s)": "delta_time_s"
+        "Delta Freq (Hz)": "delta_freq_hz"
+        "Avg Power Density (dB FS/Hz)": "avg_power_db"
+        "Annotation": "annotation"
+        "Contoured": "contoured"
+    inputs:
+      table: parse-table.table

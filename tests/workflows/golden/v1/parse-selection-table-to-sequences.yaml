@@ -1,0 +1,37 @@
+name: Parse Selection Table to Sequence Selections
+description: |
+  Triggered when a rec_selection_table (CSV/TSV) is uploaded to a Recording.
+  Parses the table and creates Sequence Selection records with all metadata fields
+  using built-in field mapping to rename columns.
+record_schema: recording
+triggers:
+  record_updated:
+    schema: recording
+    fields:
+      - rec_selection_table
+steps:
+  - id: parse-table
+    plugin: civex.table@1
+    config:
+      field: rec_selection_table
+      delimiter: ','
+  - id: create-sequences
+    plugin: civex.save_records@1
+    config:
+      schema: sequence_selection
+      if_exists: update
+      field_mapping:
+        Selection: selection_number
+        View: view
+        Channel: channel
+        Begin Time (s): begin_time_s
+        End Time (s): end_time_s
+        Low Freq (Hz): low_freq_hz
+        High Freq (Hz): high_freq_hz
+        Delta Time (s): delta_time_s
+        Delta Freq (Hz): delta_freq_hz
+        Avg Power Density (dB FS/Hz): avg_power_db
+        Annotation: annotation
+        Contoured: contoured
+    inputs:
+      rows: parse-table.table

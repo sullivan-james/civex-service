@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import AsyncIterable
@@ -65,6 +66,35 @@ class FileService:
         return self._store.put_path(
             path, original_filename=filename, collection_id=collection_id
         )
+
+    def store_unless_stored(
+        self,
+        path: Path,
+        collection_id: str | None = None,
+        filename: str | None = None,
+    ) -> tuple[FileRef, bool]:
+        """`store`, except that a file whose content is already stored is not
+        copied again: its content hash is worked out first (the file is read
+        once, never held whole) and, when the store has it, only the reference
+        is made. Returns the reference and whether anything was stored."""
+        self._may_add(collection_id)
+        name = filename or path.name
+        hasher = hashlib.sha256()
+        with path.open("rb") as src:
+            while chunk := src.read(_CHUNK):
+                hasher.update(chunk)
+        sha256 = hasher.hexdigest()
+        if self._store.exists(sha256):
+            volume = self._store.locate_volumes([sha256]).get(sha256)
+            if volume is not None:
+                size = self._store.size_of(sha256)
+                if size is None:
+                    size = path.stat().st_size
+                return FileRef(sha256, name, size, volume), False
+        ref = self._store.put_path(
+            path, original_filename=name, collection_id=collection_id
+        )
+        return ref, True
 
     def store_bytes(
         self, data: bytes, filename: str, collection_id: str | None = None

@@ -1,5 +1,5 @@
 """Reading a value out of a file's name: the `from_filename` restriction and
-the `civex.extract_from_filename` plugin. Pure, so anything may import it.
+the `civex.value_from_filename` step. Pure, so anything may import it.
 
 A rule's `pattern` is one pattern or a list tried in order, first match wins.
 For a `date`/`datetime` a pattern is a token format (`YYYY MM DD HH mm SS`,

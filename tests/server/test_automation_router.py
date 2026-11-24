@@ -20,16 +20,11 @@ triggers:
     schema: selection
     fields: [contour_file]
 steps:
-  - id: read
-    plugin: civex.get_field
-    config:
-      field: seed
   - id: save
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config:
-      field: duration
-    inputs:
-      value: read.value
+      fields:
+        duration: {from_field: seed}
 """
 
 WATCH_DURATION = """\
@@ -39,10 +34,11 @@ triggers:
     schema: selection
     fields: [duration]
 steps:
-  - id: read
-    plugin: civex.get_field
+  - id: save
+    plugin: civex.set_fields@1
     config:
-      field: duration
+      fields:
+        seed: {from_field: duration}
 """
 
 

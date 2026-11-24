@@ -12,34 +12,41 @@ Save this as `_civex/workflows/load-samples.yaml`:
 ```yaml
 name: load-samples
 record_schema: visit            # run it on a visit
-inputs:
-  files:
-    type: files
-    label: CSV files
-
 steps:
+  - id: readings
+    plugin: civex.files@1
+    config:
+      source: run              # chosen when it is run
+      label: CSV files
+
   - id: insert
-    plugin: civex.create_records_from_files
+    plugin: civex.save_records@1
     config:
       schema: sample
+      if_exists: add_new       # a record for every file
       file_field: reading
     inputs:
-      files: __input__.files
+      files: readings.files
 ```
 
 Then run it on the visit the samples belong to:
 
 ```bash
-civex workflow run load-samples --record 2d69dc46 --input "files=readings/*.csv"
+civex workflow run load-samples --record 2d69dc46 --input "readings=readings/*.csv"
 ```
 
 Each new sample is created inside that visit. To read values out of the
 file names as well, see [Fill fields from file names](fill-fields-from-filenames.md).
-For tables, the [Read a table from a file](../reference/plugins/parse_table.md) and
-[Make a record for each row](../reference/plugins/rows_to_records.md) plugins do the same for
-CSV and TSV files; with **Match rows by** (or a unique key on the kind of record) a
+For tables, the [Table](../reference/plugins/table.md) and
+[Save as records](../reference/plugins/save_records.md) steps do the same for
+CSV, TSV and Excel files; with **Match on** (or a unique key on the kind of record) a
 row updates the record already there, so importing the same table again changes
 nothing.
+
+On your own computer, a **Files** step can read a whole folder instead
+(`source: folder`, or choose a folder in the run dialog): the files are read from
+disk where they are, nothing is uploaded, and files already stored are skipped, so
+it is much faster for many files.
 
 ## See also
 

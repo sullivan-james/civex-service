@@ -27,6 +27,13 @@ export interface WorkflowTrigger {
   fields: string[] | null
 }
 
+/** A folder on the computer civex runs on, to read the files of a step from. */
+export interface FolderChoice {
+  folder: string
+  glob?: string
+  subfolders?: boolean
+}
+
 export interface WorkflowStep {
   id: string
   plugin: string
@@ -161,9 +168,14 @@ export const workflowsApi = {
     name: string,
     recordId: string,
     fileInputs: Record<string, File[]>,
+    folders: Record<string, FolderChoice> = {},
   ): Promise<WorkflowJob> => {
     const form = new FormData()
     form.append('record_id', recordId)
+    // A folder on this computer is read by the server itself: only its path
+    // is sent, nothing is uploaded.
+    if (Object.keys(folders).length > 0)
+      form.append('folders', JSON.stringify(folders))
     for (const [inputName, files] of Object.entries(fileInputs)) {
       for (const file of files) {
         form.append(inputName, file)

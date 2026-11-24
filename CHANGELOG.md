@@ -161,6 +161,60 @@ from the next tag forward.
   (`tests/sync/test_bulk_push.py`). `bench_bulk_push.py --shape parented` times
   the parent/child shape.
 
+### Workflow steps (breaking)
+
+#### Breaking
+
+- **The built-in workflow steps are redesigned for people who don't program, and
+  every step now has a version.** Eleven steps became five, in three groups
+  ("Bring in", "Work out", "Save"), named in a workflow with their version:
+
+  | New step | Replaces |
+  |---|---|
+  | `civex.files@1` (Files: chosen when run, a folder on this computer, or a field of the record) | `civex.load_file_list`; workflow `inputs: {x: {type: files}}` |
+  | `civex.table@1` (Table: CSV, TSV or Excel from a Files step or a file field) | `civex.load_file` + `civex.parse_table` |
+  | `civex.value_from_filename@1` | `civex.extract_from_filename` |
+  | `civex.save_records@1` (Save as records: rows or files; `if_exists` update, skip or add_new) | `civex.rows_to_records`, `civex.upsert_records`, `civex.create_records_from_files`, `civex.match_files_to_records` |
+  | `civex.set_fields@1` (Set fields on this record) | `civex.save_field`, `civex.save_fields` |
+
+  `civex.get_field` is gone as a step: any setting of any step may be written
+  `{from_field: name}` to take its value from a field of the record the workflow
+  runs on. The old ids no longer run; an id without a version means version 0.
+- **Workflow files are upgraded automatically.** When civex loads a workflow
+  file written for the old steps (or a workflow is pasted, shared or saved), it
+  rewrites it for the new ones: old steps are mapped one to one, `load_file` +
+  `parse_table` merge into one Table step, and `inputs: {x: {type: files}}`
+  becomes a Files step named `x` with the later steps rewired. The old file is
+  kept beside it as `<name>.yaml.bak` (not a workflow, not synced) and the change
+  is logged. Comments in the file are not kept in the rewrite (the backup has
+  them). A workflow that can't be mapped by itself (a step of your own reading
+  `load_file`'s file name, say) is left untouched and the error says which step
+  to edit. A workflow naming a step version this civex doesn't know is refused
+  ("needs a newer civex") rather than guessed at, since workflow files sync
+  between computers. Future contract changes follow the same path: a new step
+  version plus an upgrade function (`workflows/upgrades.py`), with golden tests
+  per version (`tests/workflows/test_step_upgrades.py`).
+- **Run-time files are asked for by a Files step.** A run's files are given under
+  the step's id (`civex workflow run x --input <step id>=*.wav`; the run dialog
+  and the API use the same name). The old workflow-level `inputs` of type `files`
+  are upgraded into such a step; plain `value` inputs are unchanged.
+- **Table reads commas, tabs or semicolons by itself** when no separator is
+  given (the old Read a table step assumed commas).
+
+#### Added
+
+- **Read a folder on this computer.** A Files step set to a folder (or the run
+  dialog's "choose a folder on this computer") reads the files from disk itself:
+  nothing is uploaded, files whose content is already stored are skipped (by
+  content hash) and the run shows its progress. It needs the new
+  `server_path_import` feature, on for a computer's own civex and off on a host
+  (a hub never reads host paths), and a built-in-only host function
+  (`store_folder`) that no plugin gets from a permission action.
+- **Table reads Excel (`.xlsx`) files**, and several files at once.
+- The workflow builder offers the steps in their three groups, shows a step's
+  settings only when they apply (the folder, once "A folder" is chosen) and lets
+  a setting take its value from a field of the record.
+
 ### v2.2.1
 
 - **Faster pushes to an authority.** A push of 100 changes ran about 17

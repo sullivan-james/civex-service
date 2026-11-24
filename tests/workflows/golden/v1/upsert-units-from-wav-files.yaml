@@ -1,0 +1,22 @@
+name: Upsert Unit Selections from WAV Files
+description: |
+  Manual workflow: Upload WAV files matching sel_NN pattern (sel_01_*.wav, sel_02_*.wav, etc.)
+  to match and attach to Unit Selection records by extracting the sequence number.
+record_schema: sequence_selection
+steps:
+  - id: unit_wav_files
+    plugin: civex.files@1
+    config:
+      source: run
+      label: Unit WAV files (sel_01_*.wav, sel_02_*.wav, etc.)
+  - id: match-files-to-units
+    plugin: civex.save_records@1
+    config:
+      schema: unit_selection
+      if_exists: update
+      match_on:
+        - unit_number
+      filename_pattern: sel_(\d+)
+      file_field: unit_wav_file
+    inputs:
+      files: unit_wav_files.files

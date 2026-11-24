@@ -11,7 +11,7 @@ name: parse-audio-dates
 description: A workflow
 steps:
   - id: step-one
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config:
       field: subject
 """
@@ -117,7 +117,7 @@ def _finished_runs(client: TestClient) -> dict[str, str]:
         json={"schema_name": "doc", "data": {}},
     ).json()
     record_id = uuid.UUID(rec["id"])
-    step = {"step_id": "a", "plugin": "civex.get_field", "status": "failed"}
+    step = {"step_id": "a", "plugin": "civex.value_from_filename@1", "status": "failed"}
     ctx = build_local_context(load_config())
     try:
         repo = ctx.job_svc._repo

@@ -14,11 +14,11 @@ triggers:
     fields: [subject]
 steps:
   - id: read
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config:
       field: subject
   - id: save
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config:
       field: title
     inputs:
@@ -73,11 +73,11 @@ def test_a_trial_names_the_runs_its_saves_would_start(client: TestClient) -> Non
 name: set-subject
 steps:
   - id: read
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config:
       field: title
   - id: save
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config:
       field: subject
     inputs:
@@ -91,9 +91,7 @@ steps:
 
 def test_a_failing_step_is_reported_not_raised(client: TestClient) -> None:
     rid = _record(client, subject="a")
-    broken = _COPY.replace("civex.get_field", "civex.extract_from_filename").replace(
-        "field: subject\n  - id: save", "field: nope\n  - id: save"
-    )
+    broken = _COPY.replace("field: subject\n  - id: save", "field: nope\n  - id: save")
     resp = client.post("/api/workflows/try", json={"content": broken, "record_id": rid})
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -115,7 +113,7 @@ def test_a_trial_checks_the_yaml_like_a_save(client: TestClient) -> None:
     resp = client.post(
         "/api/workflows/try",
         json={
-            "content": _COPY.replace("civex.get_field", "civex.nope"),
+            "content": _COPY.replace("civex.value_from_filename@1", "civex.nope"),
             "record_id": rid,
         },
     )

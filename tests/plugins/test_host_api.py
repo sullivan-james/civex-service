@@ -57,5 +57,16 @@ def test_the_docs_list_every_function_a_plugin_can_call() -> None:
     """writing-a-plugin.md's table of ctx methods is held to the table."""
     text = DOCS.read_text(encoding="utf-8")
     documented = set(re.findall(r"`ctx\.(\w+)\(", text))
-    callable_ = {name for name in HOST_API if name != "commit"}
+    # A function granted only to a plugin naming it (`explicit`) is for civex's
+    # own built-in steps: not part of what a plugin author is told they may call.
+    callable_ = {
+        name for name, fn in HOST_API.items() if name != "commit" and not fn.explicit
+    }
     assert callable_ - documented == set(), "add these to writing-a-plugin.md"
+
+
+def test_reading_a_folder_is_never_granted_by_an_action() -> None:
+    """`store_folder` reads paths on the host: only a plugin that names it
+    (the built-in Files step) has it, whatever actions it holds."""
+    assert "store_folder" not in granted(["read", "manage_files", "write_records"])
+    assert "store_folder" in granted(["store_folder"])

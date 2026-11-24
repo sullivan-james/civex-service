@@ -1,4 +1,4 @@
-# `civex.extract_from_filename`
+# `civex.value_from_filename@1`  (Value from the file name)
 
 Apply a regex to a file field's filename (or a plain string field) and optionally convert the captured value to a typed output. Reach for this when the data you need — a timestamp, a sample number, a session ID — is embedded in a filename rather than stored as its own field. Works with `file`, `file_list`, and `string` fields.
 
@@ -28,7 +28,7 @@ Extracted datetimes carry no UTC offset: a timestamp in a filename is wall time 
 Extract a datetime from `20240315_093000.csv`:
 ```yaml
 - id: extract_time
-  plugin: civex.extract_from_filename
+  plugin: civex.value_from_filename@1
   config:
     field: reading
     pattern: '(\d{8}[-_]\d{6})'
@@ -39,7 +39,7 @@ Extract a datetime from `20240315_093000.csv`:
 Extract a sample number from `sample_042_photo.jpg`:
 ```yaml
 - id: extract_num
-  plugin: civex.extract_from_filename
+  plugin: civex.value_from_filename@1
   config:
     field: photo
     pattern: 'sample_(\d+)'

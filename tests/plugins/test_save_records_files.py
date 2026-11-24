@@ -1,4 +1,4 @@
-"""`civex.match_files_to_records` must not attach a file to a record another file
+"""`civex.save_records@1` (files) must not attach a file to a record another file
 in the same run also belongs to.
 
 A real run had 64 files for selections 1 to 156 and the pattern `sel_([0-9]{2})`,
@@ -31,12 +31,12 @@ def _files(ctx, *names: str) -> list[dict]:
 
 
 def _match(wf_ctx, files, pattern: str):
-    registration = get_plugin("civex.match_files_to_records")
+    registration = get_plugin("civex.save_records@1")
     config = registration.config_model(
         schema="selection",
-        key_field="selection_number",
+        match_on=["selection_number"],
         file_field="contour_file",
-        pattern=pattern,
+        filename_pattern=pattern,
     )
     return registration.invoke({"files": files}, config, wf_ctx, 60.0).outputs
 
@@ -133,9 +133,12 @@ def list_setup(ctx, make_collection, make_schema, make_record):
 
 
 def _match_list(wf_ctx, files):
-    registration = get_plugin("civex.match_files_to_records")
+    registration = get_plugin("civex.save_records@1")
     config = registration.config_model(
-        schema="unit", key_field="unit_number", file_field="wavs", pattern=r"sel_(\d+)"
+        schema="unit",
+        match_on=["unit_number"],
+        file_field="wavs",
+        filename_pattern=r"sel_(\d+)",
     )
     return registration.invoke({"files": files}, config, wf_ctx, 60.0).outputs
 
@@ -167,12 +170,12 @@ def test_a_file_list_gains_a_file_once(ctx, list_setup) -> None:
 
 def test_a_field_that_holds_no_files_is_refused(ctx, list_setup) -> None:
     wf_ctx, _ = list_setup
-    registration = get_plugin("civex.match_files_to_records")
+    registration = get_plugin("civex.save_records@1")
     config = registration.config_model(
         schema="unit",
-        key_field="unit_number",
+        match_on=["unit_number"],
         file_field="unit_number",
-        pattern=r"sel_(\d+)",
+        filename_pattern=r"sel_(\d+)",
     )
     with pytest.raises(Exception, match="not a file field"):
         registration.invoke(

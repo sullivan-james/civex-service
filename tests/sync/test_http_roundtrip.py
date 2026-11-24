@@ -110,7 +110,7 @@ def test_the_library_over_a_socket(project, server):
     laptop = project("laptop")
     laptop.sync_svc.connect(url, invite)
     laptop.commit()
-    text = "name: tidy\nsteps:\n  - id: a\n    plugin: civex.get_field\n    config:\n      field: site\n"
+    text = "name: tidy\nsteps:\n  - id: a\n    plugin: civex.value_from_filename@1\n    config:\n      field: site\n"
     laptop.workflow_svc.save("tidy", text)
 
     with pytest.raises(NotAllowedError, match="may not publish"):

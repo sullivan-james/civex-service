@@ -94,7 +94,7 @@ def test_executor_names_the_step_that_failed(
 name: wf
 steps:
   - id: load-the-attachment
-    plugin: civex.load_file
+    plugin: civex.table@1
     config: {field: attachment}
 """)
     )
@@ -126,7 +126,7 @@ def test_failed_job_records_the_envelope_alongside_the_message(
 name: failing
 steps:
   - id: load-the-attachment
-    plugin: civex.load_file
+    plugin: civex.table@1
     config: {field: attachment}
 """)
     job = ctx.job_svc.enqueue_manual("failing", record)
@@ -161,7 +161,7 @@ def test_successful_job_records_no_error_details(
 name: fine
 steps:
   - id: read
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config: {field: name}
 """)
     job = ctx.job_svc.enqueue_manual("fine", record)
