@@ -129,3 +129,30 @@ def test_following_another_server_forgets_the_old_ones_numbers(pair, project):
     laptop.commit()
     laptop.sync_svc.sync()
     assert replacement.record_svc.get(str(record.id)).data["site"] == "after"
+
+
+def test_a_new_servers_refusal_of_what_filling_it_sent_is_kept(project, authority):
+    """The first server's refusal is settled when the laptop moves on; the
+    new server, filled with the same record, refuses it too, and that refusal
+    is kept for review (filling a server names its changes by the project it
+    joins, so the old refusal can't stand in for the new one)."""
+    from civex.testing.peers import follow
+
+    laptop = device(project, authority, "laptop")
+    laptop.schema_svc.create("call")
+    laptop.schema_svc.add_field("call", "annotation", "string")
+    laptop.dataset_svc.create("survey")
+    made = laptop.record_svc.add("survey", "call", {"annotation": "M (bold)"})
+    laptop.schema_svc.update_field(
+        "call", "annotation", restrictions={"choices": ["Y", "M", "N"]}
+    )
+    laptop.commit()
+    assert connect(laptop) == "seeded"
+    assert [c.entity_id for c in _refusals(laptop)] == [made.id]
+
+    server = project("server")
+    follow(laptop, server, "laptop")
+    assert connect(laptop, "https://server.test") == "seeded"
+
+    assert server.sync_repo.snapshot("record", made.id) is None
+    assert [c.entity_id for c in _refusals(laptop)] == [made.id]

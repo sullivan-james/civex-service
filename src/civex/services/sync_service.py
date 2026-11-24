@@ -61,6 +61,7 @@ from civex.domain.sync import (
     Joined,
     LoginStarted,
     DEFERRED,
+    FOLLOWED,
     ENTITY_ORDER,
     NOT_SYNCED_KINDS,
     PROTOCOL_MAX,
@@ -999,7 +1000,7 @@ class SyncService:
             self._repo.forget_numbers()
             self._repo.resolve_conflicts(
                 [c.id for c in self._repo.find_open_conflicts()],
-                "followed another server",
+                FOLLOWED,
             )
             self._commit()
         self._config.sync.remote = url
@@ -3096,6 +3097,16 @@ class SyncService:
             # A refusal is kept for review, like any other (the person keeps what
             # they made and can fix it and retry); it doesn't stop the rest.
             self._note(result.results, {e.id: e for e in batch}, report)
+            # What it took it holds now, whatever refused it before (another
+            # server, or this one before a fix): an edit of it goes as an edit.
+            things = {e.id: e.entity_id for e in batch}
+            self._repo.forget_refusals(
+                {
+                    things[r.op_id]
+                    for r in result.results
+                    if r.op_id in things and r.status not in (REJECTED, DEFERRED)
+                }
+            )
             sent += len(batch)
             # Kept at once, so a restart goes on from here.
             self._repo.note_seed_acked([e.id for e in batch], head)

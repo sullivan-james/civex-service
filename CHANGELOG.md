@@ -295,6 +295,20 @@ Server-side only, or advertised in `hello`; older devices keep working.
 
 #### Other changes
 
+- **A restore of a record the server once refused goes in as a restore.** A
+  device remembered that a server had refused a record's create even after a
+  later fill of a server (following another one, or filling the same one again)
+  had sent the record and been taken. Every later edit or restore of it was then
+  sent as a create of the record as it is: a restore made after pulling a
+  delete from the server met that delete as an "edit" and was refused with the
+  rest of its tree ("deleted on the server, and edited here", "part of one
+  change that could not go in whole"), and the records went back to deleted.
+  Filling a server now settles the refusals of what it took (their conflicts
+  are resolved as `taken`), and following another server forgets what the old
+  one refused. Copies that already hold such stale refusals are not repaired
+  (re-clone them). Also: following another server settles what was waiting for
+  review as `followed` (it wrote "followed another server", longer than the
+  column, so a device on PostgreSQL could not follow another server).
 - **Undoing a bulk action is one step, however big, through one code path.**
   Restoring what a bulk delete took stopped at 5,000 records (and eight rounds
   of parents first): a delete of 69,574 records offered "Restore" and then
