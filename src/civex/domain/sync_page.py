@@ -20,10 +20,17 @@ PAGE_BUDGET_BYTES = 2 * 1024 * 1024
 ACTION_ENTRIES_MAX = 5000
 
 
-def fit(sizes: Sequence[int], limit: int, max_bytes: int = PAGE_BUDGET_BYTES) -> int:
+def budget() -> int:
+    """The page budget in force (read when asked, so one setting rules every
+    paged read)."""
+    return PAGE_BUDGET_BYTES
+
+
+def fit(sizes: Sequence[int], limit: int, max_bytes: int | None = None) -> int:
     """How many of the leading things fit a page: at most `limit`, at most
     `max_bytes` of payload, and at least one (a thing over the budget on its
     own still travels, alone)."""
+    max_bytes = budget() if max_bytes is None else max_bytes
     used = 0
     for n, size in enumerate(sizes[:limit]):
         if n and used + size > max_bytes:
@@ -36,7 +43,7 @@ def take(
     items: Sequence[Any],
     sizes: Sequence[int],
     limit: int,
-    max_bytes: int = PAGE_BUDGET_BYTES,
+    max_bytes: int | None = None,
 ) -> tuple[list[Any], bool]:
     """The page, and whether more follow. `items` is what was read past the
     cursor, one beyond `limit` if that many exist: the page is a prefix of

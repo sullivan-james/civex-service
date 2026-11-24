@@ -60,6 +60,38 @@ from the next tag forward.
 - **No migration.** Nothing is converted: existing release rows, their
   bundles and file ownership are untouched.
 
+#### Changed (sync server policies; no protocol change)
+
+Server-side only, or advertised in `hello`; older devices keep working.
+
+- **One page budget for every paged read.** Feed, snapshot and history pages
+  stop at 2 MiB of entry payload as well as at `limit` (now an "at most"), and
+  `more`/`next` is decided in one place (`domain/sync_page.py`) as "the page
+  stopped before the end". An action is kept whole while it fits a page
+  (up to 5,000 entries); one over the budget alone is cut and says
+  `more: true`. Fixes the feed cutting an action of over ~400 entries and
+  answering `more: false`.
+- **One request-deadline policy on `/sync/v1`**, at router level so a host that
+  mounts `api_routers` gets it: on PostgreSQL `SET LOCAL lock_timeout` (10 s)
+  for the feed lock and numbering, and `statement_timeout` (15 s) for
+  hello/feed/snapshot reads (never session-level). A wait that runs out is
+  `503` with `Retry-After` (`BusyError`). A push that has run for 10 s
+  (`PUSH_BUDGET_SECONDS`) finishes its current action and answers for what it
+  settled; the device sends the rest next.
+- **One wire-encoding policy for JSON routes.** `Content-Encoding: gzip`
+  request bodies are accepted (streamed, capped at 64 MiB decompressed,
+  `CIVEX_SYNC_MAX_REQUEST_BYTES`; over it: `413` `{"code": "too_large"}`);
+  `hello` advertises `gzip_requests`. JSON answers over 1 KiB are gzipped for a
+  caller that sends `Accept-Encoding: gzip`. Files, packs, parts and
+  downloads are never compressed.
+- **File parts no longer race.** Beginning or finishing the parts of one file
+  takes a per-file lock (a lock file on the volume, valid across processes and
+  on Windows); two `begin`s never wipe each other's parts, `finish` is
+  idempotent (the file already stored is success, not a 507), and a part that
+  lands after the file was stored is accepted. A part and a finish for the
+  same file never overlap: whichever sees the other's marker backs off with a
+  retryable 503 (`upload_busy`).
+
 #### Added
 
 - **`civex clone <repo-url> --release NAME`** downloads a hub's release bundle

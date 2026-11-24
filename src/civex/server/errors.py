@@ -39,6 +39,31 @@ from civex.observability import get_logger, request_id_var
 
 log = get_logger("civex.server")
 
+
+class BusyError(CivexError):
+    """The database could not answer in time (a lock or a statement ran past
+    its deadline): nothing was done, try again. Answered 503 with
+    `Retry-After` (`retry_after` seconds)."""
+
+    kind = "busy"
+    retryable = True
+
+    def __init__(self, message: str, retry_after: int = 2) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+class TooLargeError(CivexError):
+    """A request body, once decompressed, is over the cap: answered 413 with
+    `code: "too_large"`."""
+
+    kind = "too_large"
+
+    def __init__(self, message: str, limit: int) -> None:
+        super().__init__(message)
+        self.limit = limit
+
+
 _REQUEST_ID_HEADER = "x-request-id"
 
 
@@ -117,6 +142,8 @@ class RequestContextMiddleware:
 def _status_for(exc: CivexError) -> int:
     if isinstance(exc, NotFoundError):
         return 404
+    if isinstance(exc, TooLargeError):
+        return 413
     if isinstance(exc, (AlreadyExistsError, GCAlreadyRunningError, ConflictMovedError)):
         return 409
     if isinstance(exc, ValidationError):
@@ -162,7 +189,13 @@ def register_error_handlers(app: FastAPI) -> None:
                 civex_version=exc.civex_version,
                 known_head=exc.known_head,
             )
-        return JSONResponse(status_code=status, content=content)
+        headers: dict[str, str] = {}
+        if isinstance(exc, BusyError):
+            content.update(code="busy", retry_after=exc.retry_after)
+            headers["Retry-After"] = str(exc.retry_after)
+        if isinstance(exc, TooLargeError):
+            content.update(code="too_large", limit=exc.limit)
+        return JSONResponse(status_code=status, content=content, headers=headers)
 
     @app.exception_handler(RequestValidationError)
     async def _validation_error(

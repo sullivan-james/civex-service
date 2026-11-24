@@ -73,10 +73,16 @@ from civex.domain.sync import (
     snapshot_for,
 )
 from civex.server.deps import current_project, get_ctx
+from civex.server.sync_policy import SyncRoute, deadlines
 
 log = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/sync/v1", tags=["sync"])
+router = APIRouter(
+    prefix="/sync/v1",
+    tags=["sync"],
+    route_class=SyncRoute,
+    dependencies=[Depends(deadlines)],
+)
 
 _CHUNK = 1024 * 1024
 

@@ -37,7 +37,15 @@ SCOPED_PROTOCOL = 5
 PROTOCOL_RETIRING: int | None = None
 # Optional features, by name, that a peer can look for in `Hello`. Adding one is
 # not a protocol change; an older peer just doesn't have it.
-CAPABILITIES: tuple[str, ...] = ("library", "device_login", "file_packs")
+CAPABILITIES: tuple[str, ...] = (
+    "library",
+    "device_login",
+    "file_packs",
+    "gzip_requests",
+)
+# JSON request bodies (a push) may be sent `Content-Encoding: gzip`; the
+# authority decompresses them up to a cap (`server.sync_policy`).
+GZIP_REQUESTS = "gzip_requests"
 # Many small files in one request (`POST /files/pack`): each is checked and
 # stored, and the answer says which went in. Offered by every authority that
 # serves; one without it is sent the files one request each.

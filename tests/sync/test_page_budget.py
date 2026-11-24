@@ -4,10 +4,17 @@ page is delivered over several, and kept whole whenever it fits one."""
 
 from __future__ import annotations
 
+import os
 import uuid
 
+import pytest
+
 from civex.db.models import AuditLog
+from civex.domain import sync_page
 from civex.domain.sync_page import fit, take
+from civex.testing.peers import connect, device
+
+from .test_move_records import setup as move_setup
 from civex.testing.convergence import differences
 from civex.testing.peers import snapshots
 
@@ -117,12 +124,124 @@ def test_a_device_follows_a_cut_action_across_pages(pair, authority, monkeypatch
     laptop.sync_svc.sync()
     phone.sync_svc.sync()
     _action_of(laptop, authority, 300)
-    cls = type(authority.sync_repo)
-    original = cls.entries_after
-
-    def small(self, seq, limit, max_bytes=2_000):
-        return original(self, seq, limit, 2_000)
-
-    monkeypatch.setattr(cls, "entries_after", small)
+    monkeypatch.setattr(sync_page, "PAGE_BUDGET_BYTES", 2_000)
     phone.sync_svc.sync()
     assert differences(snapshots(authority), snapshots(phone)) == []
+
+
+def _big_delete(project, authority, records: int):
+    """A collection of `records` records, deleted by a device: one action of
+    records + 1 entries. (The authority does not keep the device's `op` for a
+    cascade it applies itself, so it is stamped on what it wrote: noted in the
+    sync audit as a separate finding.)"""
+    a, b, _, _ = move_setup(project, authority)
+    for i in range(records):
+        a.record_svc.add("archive", "site", {"name": f"r{i}"})
+    a.commit()
+    a.sync_svc.sync()
+    b.sync_svc.sync()
+    authority.sync_repo.sequence_local_entries()
+    start = authority.sync_repo.head_seq()
+    a.dataset_svc.delete("archive")
+    a.commit()
+    a.sync_svc.sync()
+    authority.sync_repo.sequence_local_entries()
+    # The authority writes the cascade as entries of its own; hold them as the
+    # one action the device made, as the feed carries an action (`op_id`).
+    authority.sync_repo._s.query(AuditLog).filter(AuditLog.hub_seq > start).update(
+        {"op_id": uuid.uuid4()}, synchronize_session=False
+    )
+    authority.commit()
+    return a, b, start
+
+
+def _one_op(authority, start: int) -> int:
+    rows = (
+        authority.sync_repo._s.query(AuditLog.op_id)
+        .filter(AuditLog.hub_seq > start)
+        .all()
+    )
+    ops = {r[0] for r in rows}
+    assert len(ops) == 1 and None not in ops, ops
+    return len(rows)
+
+
+def test_a_real_collection_delete_of_a_thousand_records_arrives_whole(
+    project, authority
+):
+    a, b, start = _big_delete(project, authority, 600)
+    size = _one_op(authority, start)
+    assert size >= 601
+    page, more = authority.sync_repo.entries_after(start, 200)
+    assert len(page) == size and more is False  # whole, not cut (audit C1)
+    b.sync_svc.sync()
+    assert differences(snapshots(authority), snapshots(b)) == []
+    assert b.sync_svc.conflicts() == []
+
+
+def test_a_real_collection_delete_cut_by_a_tiny_budget_still_arrives(
+    project, authority, monkeypatch
+):
+    """The action is over the budget: it travels in pieces, each saying more
+    follows, and the device (which holds what it has until the rest comes)
+    ends identical."""
+    a, b, start = _big_delete(project, authority, 600)
+    monkeypatch.setattr(sync_page, "PAGE_BUDGET_BYTES", 20_000)
+    pages = _pages(authority, start, 200)
+    assert len(pages) > 3 and all(more for _, more in pages[:-1])
+    assert sum(len(e) for e, _ in pages) == _one_op(authority, start)
+    b.sync_svc.sync()
+    assert differences(snapshots(authority), snapshots(b)) == []
+    assert b.sync_svc.conflicts() == []
+
+
+def test_a_join_reads_snapshot_pages_cut_by_bytes(
+    pair, authority, project, monkeypatch
+):
+    """Pages of wide records stop at the budget (the same knob as the feed's)
+    and the joining device follows `next`, not a short page."""
+    laptop, _, _ = pair
+    wide = "y" * 5_000
+    for i in range(60):
+        laptop.record_svc.add(
+            "study", "encounter", {"site": f"{wide}{i}", "depth": float(i)}
+        )
+    laptop.commit()
+    laptop.sync_svc.sync()
+    monkeypatch.setattr(sync_page, "PAGE_BUDGET_BYTES", 20_000)
+    pages = []
+    after = None
+    while True:
+        page = authority.authority_svc.snapshot("record", after, 200)
+        pages.append(page)
+        if not page.more:
+            break
+        after = page.next
+    assert len(pages) > 5 and all(p.next for p in pages[:-1])
+    late = device(project, authority, "late")
+    connect(late)  # joins, reading every kind a page at a time
+    assert differences(snapshots(authority), snapshots(late)) == []
+
+
+@pytest.mark.skipif(
+    not os.environ.get("CIVEX_TEST_POSTGRES_URL"),
+    reason="CIVEX_TEST_POSTGRES_URL not set",
+)
+def test_postgres_pages_stop_at_the_byte_budget(tmp_path):
+    """The size of an entry's payload is read in SQL (JSONB cast to text)."""
+    from .test_postgres_authority import _pg_authority
+
+    for pg in _pg_authority(tmp_path):
+        for i in range(40):
+            pg.schema_svc.create(f"s_{i}")
+        pg.commit()
+        pg.sync_repo.sequence_local_entries()
+        rows = pg.sync_repo._rows_after(0, 1000)
+        assert rows and all(size > 0 for _, size in rows)
+        total = len(rows)
+        pages = _pages(pg, 0, 200, max_bytes=2_000)
+        assert len(pages) > 2
+        assert all(more for _, more in pages[:-1]) and not pages[-1][1]
+        assert sum(len(e) for e, _ in pages) == total
+        one, more = pg.sync_repo.entries_after(0, 200)
+        assert len(one) == total and more is False
