@@ -119,7 +119,6 @@ beforeEach(() => {
     things: 0,
     restores: 0,
     blocked: 0,
-    truncated: false,
   }
   calls = []
   vi.stubGlobal(
@@ -395,7 +394,6 @@ describe('ActivityFeed', () => {
       things: 1204,
       restores: 1204,
       blocked: 0,
-      truncated: false,
     }
     renderFeed()
     await screen.findByText('Deleted 1,204 records')
@@ -415,6 +413,37 @@ describe('ActivityFeed', () => {
           (c) => c.method === 'POST' && c.path === '/api/audit/restore-all',
         ),
       ).toBe(true),
+    )
+  })
+
+  it('says the true size of a delete past any old cap, undone as one step', async () => {
+    events = [{ ...batch, count: 69574 }]
+    restoreAll = {
+      collections: 0,
+      schemas: 0,
+      fields: 0,
+      records: 69574,
+      things: 69574,
+      restores: 69574,
+      blocked: 0,
+    }
+    renderFeed()
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'Restore' }),
+    )
+
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent(
+      '69,574 records come back, 69,574 records in all',
+    )
+    expect(dialog).not.toHaveTextContent('5,000')
+    await userEvent.click(screen.getByRole('button', { name: 'Restore all' }))
+    await waitFor(() =>
+      expect(
+        calls.filter(
+          (c) => c.method === 'POST' && c.path === '/api/audit/restore-all',
+        ),
+      ).toHaveLength(1),
     )
   })
 
@@ -466,7 +495,6 @@ describe('ActivityFeed', () => {
       things: 1204,
       restores: 1204,
       blocked: 0,
-      truncated: false,
     }
     renderFeed()
     await screen.findByText('Deleted 1,204 records')
@@ -529,7 +557,6 @@ describe('ActivityFeed', () => {
       things: 3,
       restores: 1206,
       blocked: 1,
-      truncated: false,
     }
     renderFeed()
     await userEvent.click(

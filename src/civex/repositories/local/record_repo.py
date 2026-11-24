@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import sqlite3
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -41,7 +42,7 @@ from civex.db.models import (
     WorkflowJob,
 )
 from civex.domain import notes as note_rules
-from civex.domain.dtos import RecordDTO
+from civex.domain.dtos import RecordDTO, RestoreRow
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.filters import FilterCondition, FilterGroup, FilterNode, SortKey
 from civex.domain.file_access import HeldFile
@@ -259,6 +260,52 @@ def _chunks(ids: list[uuid.UUID]):
         yield ids[start : start + _CHUNK]
 
 
+_RESTORE_COLUMNS = (
+    Record.id,
+    Record.parent_record_id,
+    Record.dataset_id,
+    Record.schema_id,
+    Record.deleted_at,
+)
+
+# The ids a bulk statement names at a time: a restore of tens of thousands of
+# records is a few dozen statements. SQLite before 3.32 allows 999 variables.
+_BULK_CHUNK = 5000
+# Unique-key places asked about in one statement.
+_KEY_PLACES = 400
+
+
+def _loose(value: Any) -> Any:
+    """A key value as loosely as the database compares it (`find_key_match`
+    reads the stored value as the kind of the value asked for, so "7", 7 and
+    7.0 meet, and case is not told apart): a key two records may share is
+    never missed. A match found this way is a candidate; the caller checks it
+    the exact way."""
+    if isinstance(value, bool):
+        return str(value).lower()
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, sort_keys=True).lower()
+    return str(value).lower()
+
+
+def _bulk_size(session: Session) -> int:
+    """The ids a bulk statement names at a time (see `_bulk_chunks`)."""
+    bind = session.get_bind()
+    if bind.dialect.name == "sqlite" and sqlite3.sqlite_version_info < (3, 32):
+        return _CHUNK
+    return _BULK_CHUNK
+
+
+def _bulk_chunks(session: Session, ids: list[uuid.UUID]):
+    size = _bulk_size(session)
+    for start in range(0, len(ids), size):
+        yield ids[start : start + size]
+
+
 # The most a caller limited to some collections is counted to on PostgreSQL
 # (`estimate_count`): a count is an exact scan, and the table's statistics
 # would count what they may not see.
@@ -443,6 +490,56 @@ class LocalRecordRepository:
             .first()
             is not None
         )
+
+    def key_clashes(
+        self,
+        dataset_id: uuid.UUID,
+        schema_id: uuid.UUID,
+        places: list[tuple[uuid.UUID | None, dict[str, Any]]],
+    ) -> set[int]:
+        """Which of these (parent, key values) places a live record of the
+        schema in the collection already holds (`any_key_match` for many,
+        saying which): a statement per few hundred places, whose matches are
+        compared in memory, loosely (a candidate is checked exactly by the
+        caller; one the database would call a match is never missed)."""
+        hit: set[int] = set()
+        # Each place names a parent and, per key field, a path and a value:
+        # few enough in a statement to stay under the variable limit.
+        widest = max((len(key) for _, key in places), default=1)
+        step = max(1, min(_KEY_PLACES, _bulk_size(self._s) // (2 + 3 * widest)))
+        for start in range(0, len(places), step):
+            part = places[start : start + step]
+            options = []
+            for parent, key in part:
+                parts = [
+                    Record.parent_record_id.is_(None)
+                    if parent is None
+                    else Record.parent_record_id == parent
+                ]
+                parts += [_typed_comparison(Record, f, "eq", v) for f, v in key.items()]
+                options.append(and_(*parts))
+            found = self._s.execute(
+                select(Record.parent_record_id, Record.data).where(
+                    Record.dataset_id == dataset_id,
+                    Record.schema_id == schema_id,
+                    Record.deleted_at.is_(None),
+                    or_(*options),
+                )
+            ).all()
+            if not found:
+                continue
+            shapes = {tuple(sorted(key)) for _, key in part}
+            held = {
+                (parent, fields, tuple(_loose((data or {}).get(f)) for f in fields))
+                for parent, data in found
+                for fields in shapes
+            }
+            for i, (parent, key) in enumerate(part):
+                fields = tuple(sorted(key))
+                values = tuple(_loose(key[f]) for f in fields)
+                if (parent, fields, values) in held:
+                    hit.add(start + i)
+        return hit
 
     def dataset_of(self, id: uuid.UUID) -> uuid.UUID | None:
         """The collection a record is in (deleted ones too), without loading it
@@ -1292,8 +1389,82 @@ class LocalRecordRepository:
         )
         return [str(r.id) for r in rows]
 
+    def restore_rows(
+        self, ids: list[uuid.UUID], deleted_only: bool = False
+    ) -> list[RestoreRow]:
+        """The columns a restore is decided from, for these records (those that
+        exist; only the deleted ones with `deleted_only`): a statement per
+        chunk of `_bulk_chunk`, and no values loaded."""
+        out: list[RestoreRow] = []
+        for chunk in _bulk_chunks(self._s, list(dict.fromkeys(ids))):
+            q = select(*_RESTORE_COLUMNS).where(Record.id.in_(chunk))
+            if deleted_only:
+                q = q.where(Record.deleted_at.is_not(None))
+            out.extend(RestoreRow(*row) for row in self._s.execute(q))
+        return out
+
+    def parent_links(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, uuid.UUID | None]:
+        """Each of these records' parent (None at the top), deleted or not: two
+        columns, a statement per chunk."""
+        return {
+            rid: parent
+            for chunk in _bulk_chunks(self._s, list(dict.fromkeys(ids)))
+            for rid, parent in self._s.execute(
+                select(Record.id, Record.parent_record_id).where(Record.id.in_(chunk))
+            )
+        }
+
+    def deleted_at_of(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, datetime | None]:
+        """When each of these records that exists was deleted (None for a live
+        one): two columns, a statement per chunk."""
+        return {
+            rid: at
+            for chunk in _bulk_chunks(self._s, list(dict.fromkeys(ids)))
+            for rid, at in self._s.execute(
+                select(Record.id, Record.deleted_at).where(Record.id.in_(chunk))
+            )
+        }
+
+    def count_deleted_with(self, parent_ids: list[uuid.UUID]) -> int:
+        """How many records sit directly under these and were deleted with them
+        (`deleted_with`), counted in the database: no rows come back."""
+        above = aliased(Record)
+        return sum(
+            self._s.scalar(
+                select(func.count(Record.id))
+                .join(above, above.id == Record.parent_record_id)
+                .where(
+                    Record.parent_record_id.in_(chunk),
+                    Record.deleted_at.is_not(None),
+                    Record.deleted_at == above.deleted_at,
+                )
+            )
+            or 0
+            for chunk in _bulk_chunks(self._s, parent_ids)
+        )
+
+    def deleted_with(
+        self, parent_ids: list[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, uuid.UUID]]:
+        """(id, parent id) of the records directly under these that were deleted
+        with them: deleted, with the very stamp the parent carries."""
+        above = aliased(Record)
+        out: list[tuple[uuid.UUID, uuid.UUID]] = []
+        for chunk in _bulk_chunks(self._s, parent_ids):
+            q = (
+                select(Record.id, Record.parent_record_id)
+                .join(above, above.id == Record.parent_record_id)
+                .where(
+                    Record.parent_record_id.in_(chunk),
+                    Record.deleted_at.is_not(None),
+                    Record.deleted_at == above.deleted_at,
+                )
+            )
+            out.extend((rid, pid) for rid, pid in self._s.execute(q) if pid is not None)
+        return out
+
     def restore_many(self, ids: list[uuid.UUID]) -> None:
-        for chunk in _chunks(ids):
+        for chunk in _bulk_chunks(self._s, ids):
             self._s.execute(
                 update(Record)
                 .where(Record.id.in_(chunk))

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import io
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import (
     exists,
+    insert,
     String,
+    Table,
     and_,
     case,
     cast,
@@ -20,6 +24,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import aliased, Session
 
 from contextlib import contextmanager
+from collections.abc import Iterable, Mapping
 from typing import Iterator
 
 from civex.db.models import (
@@ -35,6 +40,7 @@ from civex.db.models import (
 )
 from civex.domain.audit_diff import stored_form, tombstone
 from civex.domain.hlc import tick as hlc_tick
+from civex.domain.ids import row_id
 from civex.domain.audit_filter import AuditFilter
 from civex.domain.exceptions import ValidationError
 from civex.domain.filters import FilterCondition, FilterGroup, FilterNode
@@ -186,6 +192,51 @@ def _tree(node: FilterNode):
 
 # How many ids one query is asked about (SQLite caps the variables in one).
 _ID_CHUNK = 500
+_AUDIT_TABLE: Table = AuditLog.__table__  # type: ignore[assignment]
+# History entries written to the database in one statement.
+_LOG_CHUNK = 2000
+_COPY_CHUNK = 20000
+_COPY_COLUMNS = (
+    "id",
+    "action",
+    "entity_type",
+    "entity_id",
+    "old_data",
+    "new_data",
+    "delta",
+    "format",
+    "op_id",
+    "timestamp",
+    "batch_id",
+    "actor",
+    "device_id",
+    "hlc",
+)
+_COPY_JSON = frozenset({"old_data", "new_data", "delta"})
+
+
+_COPY_ESCAPES = str.maketrans({"\\": "\\\\", "\t": "\\t", "\n": "\\n", "\r": "\\r"})
+
+
+def _copy_json(value: Any) -> str:
+    """A stored document as COPY text (None is the JSON null, as an insert
+    stores it)."""
+    return json.dumps(value, default=str).translate(_COPY_ESCAPES)
+
+
+def _copy_value(column: str, value: Any) -> str:
+    """One value as a line of COPY text takes it: NULL as \\N, a stored
+    document as JSON (None is the JSON null, as an insert stores it), a tab, a
+    newline or a backslash escaped."""
+    if column in _COPY_JSON:
+        text_ = json.dumps(value, default=str)
+    elif value is None:
+        return "\\N"
+    elif isinstance(value, datetime):
+        text_ = value.isoformat()
+    else:
+        text_ = str(value)
+    return text_.translate(_COPY_ESCAPES)
 
 
 class LocalAuditRepository:
@@ -270,6 +321,25 @@ class LocalAuditRepository:
         row = self._s.get(AuditBatch, batch_id)
         return _batch_dto(row) if row else None
 
+    def batch_entries(
+        self, batch_id: uuid.UUID
+    ) -> list[tuple[uuid.UUID, str, str, uuid.UUID]]:
+        """(id, entity type, action, entity id) of every entry in a batch, in
+        the order of `batch_entry_ids`: the columns only, never the stored
+        copies, so a batch of tens of thousands is a few megabytes."""
+        return [
+            (i, t, a, e)
+            for i, t, a, e in self._s.query(
+                AuditLog.id, AuditLog.entity_type, AuditLog.action, AuditLog.entity_id
+            )
+            .filter(AuditLog.batch_id == batch_id)
+            .order_by(
+                AuditLog.local_seq.desc().nullslast(),
+                AuditLog.timestamp.desc(),
+                AuditLog.id,
+            )
+        ]
+
     def batch_entry_ids(self, batch_id: uuid.UUID) -> list[uuid.UUID]:
         return [
             r[0]
@@ -348,6 +418,134 @@ class LocalAuditRepository:
                 hlc=self._next_hlc(),
             )
         )
+
+    def log_changes(
+        self,
+        action: str,
+        entity_type: str,
+        changes: Iterable[
+            tuple[uuid.UUID, dict[str, Any] | None, dict[str, Any] | None]
+        ],
+        timestamp: datetime | None = None,
+        op: uuid.UUID | None = None,
+        ops: Mapping[uuid.UUID, uuid.UUID] | None = None,
+    ) -> int:
+        """`log_change` for many things at once: the same entry each (stored
+        form, batch, actor, device, op, a clock stamp in turn), in the order
+        given, so what must come first is written first; a statement per
+        chunk instead of one per entry. `ops` gives the action of particular
+        things (a tree deleted together); the rest take `op`, else the
+        enclosing `operation`."""
+        # Entries are numbered in the order they are written: anything the
+        # session holds (a `log_change` before this call) goes first.
+        self._s.flush()
+        when = timestamp or datetime.now(timezone.utc)
+        batch_id = self._current_batch()
+        op_id = op or self._op_id
+        copy = self._s.get_bind().dialect.name == "postgresql"
+        if copy:
+            return self._copy_changes(
+                action, entity_type, changes, when, batch_id, op_id, ops
+            )
+        total = 0
+        rows: list[dict[str, Any]] = []
+        for entity_id, old_data, new_data in changes:
+            old_data, new_data, delta, form = stored_form(old_data, new_data)
+            rows.append(
+                {
+                    "id": row_id(),
+                    "action": action,
+                    "entity_type": entity_type,
+                    "entity_id": entity_id,
+                    "old_data": old_data,
+                    "new_data": new_data,
+                    "delta": delta,
+                    "format": form,
+                    "op_id": (ops.get(entity_id) if ops else None) or op_id,
+                    "timestamp": when,
+                    "batch_id": batch_id,
+                    "actor": self._actor,
+                    "device_id": self._device_id,
+                    "hlc": self._next_hlc(),
+                }
+            )
+            total += 1
+            if len(rows) >= _LOG_CHUNK:
+                self._s.execute(insert(_AUDIT_TABLE), rows)
+                rows.clear()
+        if rows:
+            self._s.execute(insert(_AUDIT_TABLE), rows)
+        return total
+
+    def _copy_changes(
+        self,
+        action: str,
+        entity_type: str,
+        changes: Iterable[
+            tuple[uuid.UUID, dict[str, Any] | None, dict[str, Any] | None]
+        ],
+        when: datetime,
+        batch_id: uuid.UUID | None,
+        op_id: uuid.UUID | None,
+        ops: Mapping[uuid.UUID, uuid.UUID] | None,
+    ) -> int:
+        """`log_changes` on PostgreSQL: each entry is made straight into a line
+        of COPY text (the parts every entry shares are escaped once) and the
+        lines go in a chunk at a time: the fastest way in, several times a
+        multi-row INSERT's rate. Same rows, same defaults (every column left
+        out has one), in the transaction the session is in."""
+        fixed = {
+            name: _copy_value(name, value)
+            for name, value in (
+                ("action", action),
+                ("entity_type", entity_type),
+                ("timestamp", when),
+                ("batch_id", batch_id),
+                ("actor", self._actor),
+                ("device_id", self._device_id),
+            )
+        }
+        shared_op = _copy_value("op_id", op_id)
+        head = f"{fixed['action']}\t{fixed['entity_type']}\t"
+        tail = (
+            f"\t{fixed['timestamp']}\t{fixed['batch_id']}\t{fixed['actor']}\t"
+            f"{fixed['device_id']}\t"
+        )
+        total = 0
+        lines: list[str] = []
+        for entity_id, old_data, new_data in changes:
+            old_data, new_data, delta, form = stored_form(old_data, new_data)
+            op_text = (
+                _copy_value("op_id", ops[entity_id])
+                if ops and entity_id in ops
+                else shared_op
+            )
+            hlc = _copy_value("hlc", self._next_hlc())
+            lines.append(
+                f"{row_id()}\t{head}{entity_id}\t{_copy_json(old_data)}\t"
+                f"{_copy_json(new_data)}\t{_copy_json(delta)}\t{form}\t{op_text}"
+                f"{tail}{hlc}\n"
+            )
+            total += 1
+            if len(lines) >= _COPY_CHUNK:
+                self._copy(lines)
+                lines.clear()
+        if lines:
+            self._copy(lines)
+        return total
+
+    def _copy(self, lines: list[str]) -> None:
+        """Send these lines of COPY text (columns in `_COPY_COLUMNS` order)."""
+        sql = f"COPY {AuditLog.__tablename__} ({', '.join(_COPY_COLUMNS)}) FROM STDIN"
+        cursor = self._s.connection().connection.cursor()
+        try:
+            if hasattr(cursor, "copy_expert"):  # psycopg 2
+                cursor.copy_expert(sql, io.StringIO("".join(lines)))
+            else:  # psycopg 3
+                with cursor.copy(sql) as copy:
+                    copy.write("".join(lines))
+        finally:
+            cursor.close()
 
     def event_counts_by_period(
         self,
@@ -772,18 +970,22 @@ class LocalAuditRepository:
         return entries or 0, batches
 
     def entities(
-        self, f: AuditFilter, limit: int
+        self, f: AuditFilter, limit: int | None = None
     ) -> tuple[list[tuple[str, uuid.UUID]], bool]:
-        """The distinct things (type, id) the matching entries are about, newest
-        first, at most `limit`; and whether there were more."""
-        rows = (
+        """The distinct things (type, id) the matching entries are about,
+        newest first; all of them unless `limit`, and then whether there were
+        more."""
+        q = (
             self._audit_query(f)
             .with_entities(AuditLog.entity_type, AuditLog.entity_id)
             .group_by(AuditLog.entity_type, AuditLog.entity_id)
             .order_by(func.max(AuditLog.timestamp).desc())
-            .limit(limit + 1)
-            .all()
         )
+        if limit is not None:
+            q = q.limit(limit + 1)
+        rows = q.all()
+        if limit is None:
+            return [(t, i) for t, i in rows], False
         return [(t, i) for t, i in rows[:limit]], len(rows) > limit
 
     def batch_parts(self, batch_id: uuid.UUID) -> list[dict]:

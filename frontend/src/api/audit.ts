@@ -231,7 +231,6 @@ export interface RestoreAllPlan {
   restores: number
   /** Matched, but under something deleted that is not in the set. */
   blocked: number
-  truncated: boolean
 }
 
 export interface RestoreAllResult {

@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, NamedTuple
 
 from civex.domain.naming import display_label
 from civex.domain.templating import from_field_list
@@ -1249,24 +1249,62 @@ class RetentionReportDTO:
         }
 
 
+class RestoreRow(NamedTuple):
+    """The few columns of a record that deciding a restore needs: no values,
+    so a bulk delete of tens of thousands is a few megabytes, not the data."""
+
+    id: uuid.UUID
+    parent_record_id: uuid.UUID | None
+    dataset_id: uuid.UUID
+    schema_id: uuid.UUID
+    deleted_at: datetime | None
+
+
 @dataclass
 class RestoreSetDTO:
     """Which of a set of deleted records can come back, worked out for the whole
-    set at once (a bulk delete can be thousands, so nothing here is a query per
-    record)."""
+    set at once, however big it is (a bulk delete can be tens of thousands, so
+    nothing here is a query per record, and nothing is dropped for size)."""
 
-    # Chosen records with nothing deleted above them: restorable right now.
-    ready: list[uuid.UUID] = field(default_factory=list)
-    # Chosen records held back by something deleted that is not covered.
+    # Every record that would be live afterwards, parents before what sits
+    # under them: the chosen ones that can come back and what was deleted with
+    # each, counting each once.
+    coming: list[uuid.UUID] = field(default_factory=list)
+    # How many of the chosen records are among them.
+    restored: int = 0
+    # Chosen records left deleted: something above them is deleted and is not
+    # coming back, or their unique values were taken meanwhile.
     blocked: list[uuid.UUID] = field(default_factory=list)
-    # Chosen records under another chosen one: they come back with it only if
-    # they were deleted with it. Otherwise they wait for it, and go next round.
-    waiting: list[uuid.UUID] = field(default_factory=list)
-    # Every chosen record -> the records that come back with it (itself and what
-    # was deleted with it).
-    groups: dict[uuid.UUID, list[uuid.UUID]] = field(default_factory=dict)
-    # Everything that would be live afterwards, counting each record once.
-    coming: set[uuid.UUID] = field(default_factory=set)
+    # What `coming` is, by record (the columns the history entries are made of).
+    rows: dict[uuid.UUID, RestoreRow] = field(default_factory=dict)
+    # Asked for, but not deleted: already live, or gone altogether.
+    absent: list[uuid.UUID] = field(default_factory=list)
+
+
+@dataclass
+class RecordChangesDTO:
+    """A set of changes to records, of any size: what one bulk action did or
+    what undoing one does. Bulk delete, bulk edit, restore and the undo of any
+    of them are all this, applied by `RecordService.apply_changes`."""
+
+    delete: list[uuid.UUID] = field(default_factory=list)
+    restore: list[uuid.UUID] = field(default_factory=list)
+    # record -> field name -> new value (None clears the field)
+    update: dict[uuid.UUID, dict[str, Any]] = field(default_factory=dict)
+
+
+@dataclass
+class RecordChangesResultDTO:
+    deleted: int = 0  # records deleted in their own right
+    restored: int = 0  # records restored in their own right
+    came_back: int = 0  # records live again in all, with what went with them
+    updated: int = 0  # records whose fields were changed
+    runs: int = 0  # workflow runs queued by the updates
+    # What was not applied and why, at most the first few (the count is exact).
+    left: dict[uuid.UUID, str] = field(default_factory=dict)
+    left_count: int = 0
+    deleted_asked: int = 0  # of the records asked to delete, those live
+    unchanged: int = 0  # asked, but already as wanted (restored, or deleted)
 
 
 @dataclass
@@ -1427,6 +1465,8 @@ class RestoreSetResultDTO:
     restored: int  # records restored in their own right
     came_back: int  # records live again in all, with what went with them
     left: list[str]  # chosen records still held back, as ids
+    # asked for, but not deleted (already live, or gone altogether), as ids
+    absent: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -1439,7 +1479,6 @@ class RestoreAllPlanDTO:
     records: int  # deleted records matched, each deleted in its own right
     restores: int  # records that would come back in all, with what went with them
     blocked: int  # matched, but something above is deleted and not in the set
-    truncated: bool = False  # more matched than were looked at
     fields: int = 0  # deleted fields matched
 
     @property
@@ -1454,7 +1493,6 @@ class RestoreAllPlanDTO:
             "records": self.records,
             "restores": self.restores,
             "blocked": self.blocked,
-            "truncated": self.truncated,
             "things": self.things,
         }
 

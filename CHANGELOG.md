@@ -293,6 +293,35 @@ Server-side only, or advertised in `hello`; older devices keep working.
   a finish for the same file never overlap: whichever sees the other's marker
   backs off with a retryable 503 (`upload_busy`).
 
+#### Other changes
+
+- **Undoing a bulk action is one step, however big, through one code path.**
+  Restoring what a bulk delete took stopped at 5,000 records (and eight rounds
+  of parents first): a delete of 69,574 records offered "Restore" and then
+  brought back 5,000, "5,000 records in all". There is no cap now, and undo is
+  no longer a path of its own: `RecordService.apply_changes` takes a set of
+  record changes (delete, restore, put fields back), plans it in memory from
+  the few columns it needs, writes it a chunk at a time (5,000 ids, 2,000
+  history entries per statement, a fixed number of statements per chunk, never
+  one per record) and records it with the new bulk history writer. Bulk
+  delete, bulk edit's chunks, restore-all, a restore from Trash and the undo
+  of any bulk action (`revert_batch`: now a bulk edit, a delete or a restore;
+  the inverse change set is read from the batch's history) all use it, and the
+  old per-kind paths (one-at-a-time reverts, the eight-pass loop, a history
+  entry per `log_change`) are gone. What is left deleted is only what is
+  genuinely held back (a collection, schema or record above it that is deleted
+  and not coming back, or a clash of unique values) and is counted; unique
+  keys are checked a chunk of records at a time instead of per record. The
+  preview and the restore are the same computation, so the dialog's numbers
+  are exactly what happens. An undo is one step and one batch in history; each
+  tree it restores is its own action when sent, so one refused tree splits
+  nothing else, and a preview runs the same checks as the undo (referrers,
+  permissions, `force`). The History restore dialog shows the true
+  count and a busy state. `GET /audit/restore-all` no longer has a `truncated`
+  field. History entries go in with COPY on PostgreSQL (about 30k rows/s through the
+  driver, against 5k/s before). Measured on PostgreSQL with 69,572 records:
+  delete 10 s, undo preview 3.6 s, undo 8 s, redo 13.5 s.
+
 - **Faster pushes to an authority.** A push of 100 changes ran about 17
   statements per change (20 for edits), all under the feed's lock; it now runs
   about 10 (13 for edits): what the push asks one change at a time (was it sent
