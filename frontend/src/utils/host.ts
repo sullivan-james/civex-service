@@ -36,6 +36,9 @@ export interface Boot {
 declare global {
   interface Window {
     __CIVEX__?: Boot & Record<string, unknown>
+    /** A host page that is not mounted may set this to the headers (its
+     * sign-in) every request needs, for what `fetch` patching cannot reach. */
+    __CIVEX_HEADERS__?: () => Record<string, string>
   }
 }
 
@@ -47,6 +50,8 @@ export interface MountedHost {
   base: string
   boot: Boot
   fetch?: typeof fetch
+  /** Headers to add to requests `fetch` cannot carry (XHR uploads). */
+  headers?: () => Record<string, string>
   /** Where floating UI (menus, popovers) is drawn: inside the mounted tree, so
    * it keeps the app's styles. */
   portal: HTMLElement
@@ -72,6 +77,21 @@ export function hostFetch(
   init?: RequestInit,
 ): Promise<Response> {
   return (mounted?.fetch ?? fetch)(input, init)
+}
+
+/** The host's request headers, for requests that cannot go through
+ * `hostFetch` (an XHR upload, which reports progress). */
+export function hostHeaders(): Record<string, string> {
+  try {
+    return (mounted ? mounted.headers?.() : window.__CIVEX_HEADERS__?.()) ?? {}
+  } catch {
+    return {}
+  }
+}
+
+/** Opens an XHR carrying the host's headers (call after `xhr.open`). */
+export function applyHostHeaders(xhr: XMLHttpRequest): void {
+  for (const [k, v] of Object.entries(hostHeaders())) xhr.setRequestHeader(k, v)
 }
 
 /** Where a floating panel is drawn: `document.body`, or the mounted tree. */

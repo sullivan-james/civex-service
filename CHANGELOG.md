@@ -295,6 +295,12 @@ Server-side only, or advertised in `hello`; older devices keep working.
 
 #### Other changes
 
+- **File uploads work when civex is embedded in a host.** The browser uploads
+  (a file on a record, files into a collection) are XHR so they can show
+  progress, which skipped the host's sign-in and answered 401. A host now
+  supplies request headers for them: `headers()` in the mount options
+  (`embed.tsx`), or `window.__CIVEX_HEADERS__` on a page civex serves.
+
 - **A file field's attachment list reads properly on a phone.** The file
   name now takes the row's width (cut with an ellipsis, full name on hover)
   and the size and remove button wrap beneath it instead of squeezing the name

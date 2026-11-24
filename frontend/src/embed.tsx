@@ -42,6 +42,9 @@ export interface MountOptions {
   /** Makes every request the app makes: the host adds its sign-in here. The
    * browser's `fetch` if left out. */
   fetch?: typeof fetch
+  /** Headers (the host's sign-in) for what `fetch` cannot carry: file
+   * uploads, which are XHR so they can report progress. */
+  headers?: () => Record<string, string>
   /** Called with the app's path and query, within `base`, now and on every
    * route change. */
   onNavigate?: (path: string) => void
@@ -121,6 +124,7 @@ export function mount(el: HTMLElement, options: MountOptions): Unmount {
     base: options.base,
     boot: { ...boot, chrome: 'embedded' as const },
     fetch: options.fetch,
+    headers: options.headers,
     portal,
     root,
   }

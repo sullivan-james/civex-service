@@ -1,5 +1,5 @@
 import { api } from './client'
-import { apiUrl } from '../utils/host'
+import { apiUrl, applyHostHeaders } from '../utils/host'
 
 /** Where a file is stored, stamped on file values in record responses. */
 export interface FileLocation {
@@ -168,6 +168,7 @@ export const filesApi = {
         'PUT',
         apiUrl(`/files/batch${collectionQuery(collectionId, true)}`),
       )
+      applyHostHeaders(xhr)
       xhr.upload.onprogress = (e) =>
         onProgress?.({ loaded: sent(e.loaded), total, saving: false })
       xhr.upload.onload = () =>

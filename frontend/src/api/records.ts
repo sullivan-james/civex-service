@@ -1,5 +1,5 @@
 import { api, ApiError } from './client'
-import { apiUrl, hostFetch } from '../utils/host'
+import { apiUrl, applyHostHeaders, hostFetch } from '../utils/host'
 import { UploadConnectionError, type UploadInfo } from './files'
 import { filenameOf, progressHeaders } from './fileAccess'
 import type { Field } from './schemas'
@@ -522,6 +522,7 @@ export const recordsApi = {
         'PUT',
         apiUrl(`/records/${id}/files/${encodeURIComponent(field)}?${query}`),
       )
+      applyHostHeaders(xhr)
       xhr.upload.onprogress = (e) =>
         onProgress?.({ loaded: e.loaded, total: file.size, saving: false })
       xhr.upload.onload = () =>
