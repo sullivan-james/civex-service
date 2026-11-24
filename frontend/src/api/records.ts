@@ -458,12 +458,14 @@ export const recordsApi = {
         : `/records/counts${recordQueryString(params)}`,
     ),
 
-  get: (id: string) => api.get<CivexRecord>(`/records/${id}`),
-  sync: (id: string) => api.get<RecordSync>(`/records/${id}/sync`),
+  get: (id: string) =>
+    api.get<CivexRecord>(`/records/${encodeURIComponent(id)}`),
+  sync: (id: string) =>
+    api.get<RecordSync>(`/records/${encodeURIComponent(id)}/sync`),
 
   /** What references this record, counted per collection/schema/field. */
   referrers: (id: string) =>
-    api.get<ReferrerGroup[]>(`/records/${id}/referrers`),
+    api.get<ReferrerGroup[]>(`/records/${encodeURIComponent(id)}/referrers`),
 
   create: (
     datasetName: string,
@@ -492,7 +494,7 @@ export const recordsApi = {
   },
 
   update: (id: string, body: { data: object }) =>
-    api.patch<CivexRecord>(`/records/${id}`, body),
+    api.patch<CivexRecord>(`/records/${encodeURIComponent(id)}`, body),
 
   /** One file into a record's file field and the record saved, as one
    * request (`PUT /records/{id}/files/{field}`): appended to a list of files,
@@ -520,7 +522,9 @@ export const recordsApi = {
       const xhr = new XMLHttpRequest()
       xhr.open(
         'PUT',
-        apiUrl(`/records/${id}/files/${encodeURIComponent(field)}?${query}`),
+        apiUrl(
+          `/records/${encodeURIComponent(id)}/files/${encodeURIComponent(field)}?${query}`,
+        ),
       )
       applyHostHeaders(xhr)
       xhr.upload.onprogress = (e) =>
@@ -554,7 +558,8 @@ export const recordsApi = {
       xhr.send(file)
     }),
 
-  delete: (id: string) => api.delete<void>(`/records/${id}`),
+  delete: (id: string) =>
+    api.delete<void>(`/records/${encodeURIComponent(id)}`),
 
   deleteMany: (ids: string[]) =>
     api.post<{ deleted: number }>('/records/bulk-delete', { ids }),
@@ -656,7 +661,8 @@ export const recordsApi = {
     return api.get<CivexRecord[]>(`/records/deleted${qs}`)
   },
 
-  restore: (id: string) => api.post<CivexRecord>(`/records/${id}/restore`, {}),
+  restore: (id: string) =>
+    api.post<CivexRecord>(`/records/${encodeURIComponent(id)}/restore`, {}),
   /** Live records under a deleted record, with what they sit under. */
   orphans: (limit = 200) =>
     api.get<{ total: number; items: Orphan[] }>(
@@ -664,7 +670,10 @@ export const recordsApi = {
     ),
   /** Bring back the deleted records a live record sits under, each by itself. */
   restoreAbove: (id: string) =>
-    api.post<CivexRecord[]>(`/records/${id}/restore-above`, {}),
+    api.post<CivexRecord[]>(
+      `/records/${encodeURIComponent(id)}/restore-above`,
+      {},
+    ),
 
   /** Restore exactly these deleted records, not what was deleted alongside
    * them. The deleted records above a chosen one come back too (each by
@@ -675,15 +684,18 @@ export const recordsApi = {
       with_parents: withParents,
     }),
 
-  purge: (id: string) => api.delete<void>(`/records/${id}/purge`),
+  purge: (id: string) =>
+    api.delete<void>(`/records/${encodeURIComponent(id)}/purge`),
 
   /** What a permanent delete would take (the record and those deleted with
    * it), and which releases keep files of theirs, so the files stay. */
   purgePlan: (id: string) =>
     api.get<{ records: number; kept_by_releases: Record<string, number> }>(
-      `/records/${id}/purge-plan`,
+      `/records/${encodeURIComponent(id)}/purge-plan`,
     ),
 
   audit: (id: string, offset = 0, limit = 50, view?: AuditView) =>
-    api.get<PaginatedAuditLog>(auditUrl(`/records/${id}`, offset, limit, view)),
+    api.get<PaginatedAuditLog>(
+      auditUrl(`/records/${encodeURIComponent(id)}`, offset, limit, view),
+    ),
 }
