@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING
 from civex.config import Config
 from civex.domain.rates import RateWindow
 from civex.domain.sync import FILES, SyncError, SyncProgress
+from civex.services.http_wire import jittered
 from civex.services.sync_lock import SyncBusy
 
 if TYPE_CHECKING:
@@ -409,13 +410,18 @@ class SyncWorker:
                 if not e.retryable
                 else min(MAX_BACKOFF, BASE_BACKOFF * 2**self._failures)
             )
+            if e.retry_after:  # the server said how long it needs
+                wait = max(wait, min(e.retry_after, MAX_BACKOFF))
+            # Jittered, so devices that failed together (a restart, a deploy)
+            # don't come back together.
+            wait = jittered(wait)
             self._backoff_until = now + wait
-            self._next_interval = now + config.sync.interval_seconds
+            self._next_interval = now + jittered(config.sync.interval_seconds)
             log.warning("sync failed (%s); trying again in %ds", e, wait)
             return None
         self._failures = 0
         self._backoff_until = 0.0
-        self._next_interval = now + config.sync.interval_seconds
+        self._next_interval = now + jittered(config.sync.interval_seconds)
         return report
 
     def run(self, stop: threading.Event, poll: float = 2.0) -> None:
@@ -449,5 +455,5 @@ class SyncWorker:
             except Exception:  # noqa: BLE001 - one bad tick must not end syncing
                 log.exception(what)
             # Sleep until the next look, or until someone asks for something.
-            wake.wait(poll)
+            wake.wait(jittered(poll))
             wake.clear()

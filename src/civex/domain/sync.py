@@ -869,9 +869,13 @@ class SyncError(RuntimeError):
         retryable: bool = True,
         status: int = 400,
         detail: str = "",
+        retry_after: float | None = None,
     ) -> None:
         super().__init__(message)
         self.retryable = retryable
+        # Seconds the server asked to wait before trying again (`Retry-After`),
+        # when it said.
+        self.retry_after = retry_after
         # How an authority reports it over HTTP: 401 no/invalid token, 403 a
         # token used from another device.
         self.status = status

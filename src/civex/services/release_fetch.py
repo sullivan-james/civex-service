@@ -11,33 +11,16 @@ written to disk in chunks, never held in memory.
 from __future__ import annotations
 
 import http.client
-import json
 import socket
-import urllib.error
 import urllib.parse
-import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 
 from civex.domain.hosts import is_loopback
 from civex.domain.sync import SyncError
-from civex.tls import certificate_problem, ssl_context
+from civex.services.http_wire import Reply, Wire, detail_of, retries
 
 _CHUNK = 1024 * 1024
-
-
-class _SameHostOnly(urllib.request.HTTPRedirectHandler):
-    """Follows a redirect, but never takes the token to another host or from
-    https down to http."""
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
-        old, new = urllib.parse.urlsplit(req.full_url), urllib.parse.urlsplit(newurl)
-        if old.scheme == "https" and new.scheme != "https":
-            return None
-        follow = super().redirect_request(req, fp, code, msg, headers, newurl)
-        if follow is not None and (old.hostname, old.port) != (new.hostname, new.port):
-            follow.remove_header("Authorization")
-        return follow
 
 
 def bundle_url(base: str, name: str) -> str:
@@ -79,22 +62,24 @@ def fetch_release_bundle(
     headers = {"Accept": "application/zip"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    request = urllib.request.Request(bundle_url(base, name), headers=headers)
-    opener = urllib.request.build_opener(
-        _SameHostOnly, urllib.request.HTTPSHandler(context=ssl_context())
+    # Through the one client every call to a host goes through (the status
+    # table and its waits apply). A redirect, to storage say, is followed but
+    # never takes the token to another host or down to http.
+    response = Wire().request(
+        "GET",
+        bundle_url(base, name),
+        headers=headers,
+        timeout=timeout,
+        stream=True,
+        follow="strip_auth",
+        raise_for_status=False,
     )
-    try:
-        response = opener.open(request, timeout=timeout)
-    except urllib.error.HTTPError as e:
-        raise _refused(e, name) from e
-    except (urllib.error.URLError, socket.timeout, ConnectionError, OSError) as e:
-        problem = certificate_problem(e)
-        reason = problem or str(getattr(e, "reason", None) or e)
-        raise SyncError(
-            f"Could not reach the server: {reason}", retryable=problem is None
-        ) from e
+    if response.status >= 300:
+        response.body = _body(response)
+        response.close()
+        raise _refused(response, name)
     written = 0
-    length = response.headers.get("Content-Length")
+    length = response.header("Content-Length")
     total = int(length) if length and length.isdigit() else None
     try:
         with response, dest.open("wb") as out:
@@ -112,27 +97,40 @@ def fetch_release_bundle(
     return written
 
 
-def _refused(error: urllib.error.HTTPError, name: str) -> SyncError:
+def _body(reply: Reply) -> bytes:
     try:
-        detail = json.loads(error.read().decode("utf-8")).get("detail")
-    except Exception:  # an HTML error page, or nothing
-        detail = None
-    if error.code in (401, 403):
+        return reply.read(65536)
+    except Exception:  # noqa: BLE001
+        return b""
+
+
+def _refused(reply: Reply, name: str) -> SyncError:
+    detail = detail_of(reply)
+    if isinstance(detail, dict):
+        detail = detail.get("message") or detail.get("code")
+    code = reply.status
+    if code in (401, 403):
         return SyncError(
             f"The server wouldn't give you release '{name}': "
             f"{detail or 'sign in (--token) or ask for access'}",
             retryable=False,
-            status=error.code,
+            status=code,
         )
-    if error.code in (404, 501):
+    if code in (404, 501):
         return SyncError(
             f"There is no release '{name}' there, or that address doesn't "
             f"publish releases{f' ({detail})' if detail else ''}",
             retryable=False,
-            status=error.code,
+            status=code,
+        )
+    if code == 413 or code == 402:
+        return SyncError(
+            f"The server refused the download ({code}){f': {detail}' if detail else ''}",
+            retryable=False,
+            status=code,
         )
     return SyncError(
-        f"The server answered {error.code}{f': {detail}' if detail else ''}",
-        retryable=error.code in (408, 429) or error.code >= 500,
-        status=error.code,
+        f"The server answered {code}{f': {detail}' if detail else ''}",
+        retryable=retries(code),
+        status=code,
     )

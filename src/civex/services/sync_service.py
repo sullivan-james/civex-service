@@ -91,6 +91,7 @@ from civex.services.record_service import RecordService
 from civex.services.sync_applier import SyncApplier
 from civex.services.sync_lock import sync_lock, sync_running
 from civex.services import ssh_tunnel
+from civex.services.sync_transport import PUSH_BUDGET_BYTES, batch_by_budget
 
 # Changes per push. The authority settles at most 500 in one request
 # (`sync_authority.PUSH_MAX`), so a batch never goes over that. Measured on
@@ -1604,14 +1605,24 @@ class SyncService:
 
     def _push(self, transport: SyncTransport, report: SyncReport) -> int:
         total = 0
+        last_first: uuid.UUID | None = None
         while True:
             pending = self._repo.pending_entries(PUSH_BATCH)
             if not pending:
                 return total
+            if pending[0].id == last_first:
+                # The same change is still first: the last answer took nothing
+                # off the queue, and asking again would only repeat it.
+                report.waiting += len(pending)
+                return total
+            last_first = pending[0].id
             ready, folded = self._send_whole(pending)
             if not ready:
                 report.waiting += len(pending)
                 return total
+            # By entries and bytes, whole actions only: how much one request
+            # carries doesn't depend on how wide the records are.
+            ready = batch_by_budget(ready, PUSH_BATCH, PUSH_BUDGET_BYTES)
             result = transport.push(ready)
             sent = {e.id: e for e in ready}
             self._repo.mark_sent(result.results)
@@ -1624,9 +1635,16 @@ class SyncService:
             held = self._note(result.results, sent, report, set(folded))
             self._commit()
             total += len(result.results) - held
-            if held or len(result.results) < len(ready) or len(ready) < len(pending):
+            if held:
                 report.waiting += held + (len(pending) - len(result.results))
                 return total
+            if not result.results:
+                # A short answer that settled nothing: going round again would
+                # ask the same question.
+                report.waiting += len(pending)
+                return total
+            # Anything the answer left (it may answer fewer than were sent, to
+            # keep its own request short) is sent in the next round.
 
     def _send_whole(
         self, pending: list[SyncEntry]

@@ -8,7 +8,6 @@ from __future__ import annotations
 import dataclasses
 import threading
 import time
-import urllib.request
 
 import pytest
 
@@ -336,9 +335,6 @@ def test_a_401_during_parallel_uploads_signs_in_once_more_and_confirms_all(
 
     t._token = token
     t._offers = lambda _c: False
-    t._signed_in = lambda m, path, data=None: urllib.request.Request(
-        "http://x" + path, data=data, method=m
-    )
     sent: list[str] = []
     lock = threading.Lock()
 
@@ -346,8 +342,8 @@ def test_a_401_during_parallel_uploads_signs_in_once_more_and_confirms_all(
         def close(self):
             pass
 
-    def opened(request):
-        sha = request.full_url.rsplit("/", 1)[1]
+    def opened(path):
+        sha = path.rsplit("/", 1)[1]
         token()
         with lock:
             first = sha not in rejected
@@ -362,7 +358,10 @@ def test_a_401_during_parallel_uploads_signs_in_once_more_and_confirms_all(
             sent.append(sha)
         return _Open()
 
-    t._open = opened
+    def call(method, path, **kwargs):
+        return opened(path)
+
+    t._call = call
     shas = [f"{i:064x}" for i in range(4)]
     threads = [
         threading.Thread(target=t.upload_file, args=(sha, io.BytesIO(b"x"), 1))

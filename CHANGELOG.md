@@ -105,6 +105,31 @@ from the next tag forward.
   so a write lock is not held while the next upload is read (on SQLite parallel
   uploads could stall until their timeout).
 
+#### Changed (one client transport)
+
+- **Every call to an authority goes through one HTTP client**
+  (`services/http_wire.py`): connect/join, device sign-in, sync, files, packs,
+  parts, storage URLs, the library and `clone --release`. It keeps one
+  keep-alive connection per thread and host (a pass no longer pays TCP and TLS
+  for every request), sends `Accept-Encoding: gzip` on JSON calls, and never
+  takes the session to another host on a redirect or gzips file bytes.
+  A push body is gzipped only when the server's `hello` lists the new
+  capability `gzip_requests`; older servers get plain JSON as before.
+- **One status table.** 429 and 503 wait what `Retry-After` says (seconds or a
+  date, capped at 120 s, +-25% jitter) and send the same request again inside
+  the pass, a bounded number of times; network errors, timeouts and other 5xx
+  back off exponentially with jitter. 402 and 413 are refused at once with a
+  message ("this change is too big to send in one go"). A call that still
+  fails carries `SyncError.retry_after`, which the background worker waits on.
+- **Timeouts by call type:** pushes 120 s (`CLIENT_PUSH_TIMEOUT_SECONDS`),
+  other JSON calls 60 s, uploads 120 s, finishing a big file 600 s.
+- The background worker jitters the poll interval, the sync interval and its
+  failure back-off, so devices that failed together do not retry together.
+- **Pushes are batched by bytes as well as entries** (about 2 MiB serialized,
+  never splitting an action; an oversized action goes alone), and a push that
+  the server answered short now carries on with the rest in the same pass
+  (stopping when an answer settles nothing).
+
 #### Changes
 
 - **A first upload that was interrupted always resumes.** A project whose
