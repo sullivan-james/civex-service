@@ -23,7 +23,7 @@ from the next tag forward.
 
 ## Unreleased
 
-### v2.3.0
+## v2.3.0 — upload speed, hub-only releases, embeddable data views, sync fixes (2026-11-24)
 
 #### Breaking
 
@@ -255,7 +255,7 @@ from the next tag forward.
   settings only when they apply (the folder, once "A folder" is chosen) and lets
   a setting take its value from a field of the record.
 
-### v2.2.1
+### Sync server policies and fixes
 
 #### Sync server policies (no protocol change)
 
