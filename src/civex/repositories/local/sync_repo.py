@@ -2270,28 +2270,36 @@ class LocalSyncRepository:
         if not self._s.query(exists().where(*pending)).scalar():
             return 0  # the common case: nothing to number, nothing locked
         self.lock_feed()
-        count = self._s.execute(
-            select(func.count()).select_from(AuditLog).where(*pending)
-        ).scalar_one()
-        if not count:
-            return 0
-        first = self.reserve_hub_seqs(count)
+        # The numbers start where the counter stands now (held: nobody else
+        # takes one). The rows numbered are the ones the statement sees, which
+        # may be more than a count taken earlier would say if a local write
+        # committed meanwhile (writes do not take the lock), so the counter
+        # moves by what was numbered.
+        base = self.head_seq()
         order = (
             select(
                 AuditLog.id.label("id"),
+                AuditLog.timestamp.label("timestamp"),
                 func.row_number().over(order_by=_WRITE_ORDER).label("n"),
             )
             .where(*pending)
             .subquery()
         )
-        self._s.execute(
+        done = self._s.execute(
             update(AuditLog)
-            .where(AuditLog.id == order.c.id)
-            .values(hub_seq=order.c.n + (first - 1), sync_state="synced")
+            .where(
+                AuditLog.id == order.c.id,
+                AuditLog.timestamp == order.c.timestamp,
+                *pending,
+            )
+            .values(hub_seq=order.c.n + base, sync_state="synced")
             .execution_options(synchronize_session=False)
-        )
+        ).rowcount  # type: ignore[attr-defined]
+        if done:
+            first = self.reserve_hub_seqs(done)
+            assert first == base + 1, "the feed counter moved while it was held"
         self._s.expire_all()
-        return int(count)
+        return int(done)
 
     def entries_after(self, seq: int, limit: int) -> tuple[list[SyncEntry], bool]:
         """Numbered entries past `seq`, in order, and whether more follow. A

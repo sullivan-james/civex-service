@@ -39,7 +39,7 @@ def _old_way(repo: LocalSyncRepository) -> int:
     return len(rows)
 
 
-def _fill(session: Session, n: int, *, shuffle: bool = False) -> None:
+def _fill(session: Session, n: int) -> None:
     """n pending deletes, with ties in local_seq, equal timestamps, a few
     entries with no local_seq, several in one action (op_id)."""
     base = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -79,11 +79,7 @@ def test_numbers_match_the_old_one_by_one_way_row_for_row(project):
         ctx.commit()
         ctx._session.query(AuditLog).delete()
         ctx.commit()
-    import random
-
-    state = random.getstate()
     for ctx in (new, old):
-        random.setstate(state)
         _fill(ctx._session, 60)
         ctx.commit()
     head = _repo(new).head_seq()
@@ -237,4 +233,30 @@ def test_pg_a_second_session_waiting_on_the_counter_numbers_nothing(pg_url):
     with Session(engine) as s:
         assert s.execute(select(SyncMeta.head_seq)).scalar_one() == 5_000
         assert s.execute(select(func.max(AuditLog.hub_seq))).scalar_one() == 5_000
+    engine.dispose()
+
+
+@pg
+def test_pg_a_row_committed_between_lock_and_update_never_repeats_a_number(pg_url):
+    """Local writes take no lock: one that commits after the numbering began
+    is numbered with the rest or left for the next call, never twice."""
+    engine = create_engine(pg_url)
+    _pg_fill(engine, 50)
+    with Session(engine) as s:
+        repo = LocalSyncRepository(s)
+        repo.lock_feed()
+        with engine.begin() as c:  # a local write, not blocked by the lock
+            c.execute(
+                text(
+                    "INSERT INTO audit_log (id, action, entity_type, entity_id, "
+                    "old_data, timestamp, sync_state) VALUES (gen_random_uuid(), "
+                    "'delete', 'record', gen_random_uuid(), '{}', now(), 'pending')"
+                )
+            )
+        assert repo.sequence_local_entries() == 51
+        s.commit()
+        assert repo.sequence_local_entries() == 0
+        seqs = s.execute(select(AuditLog.hub_seq)).scalars().all()
+        assert sorted(seqs) == list(range(1, 52))
+        assert repo.head_seq() == 51
     engine.dispose()
