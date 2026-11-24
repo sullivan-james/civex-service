@@ -295,6 +295,12 @@ Server-side only, or advertised in `hello`; older devices keep working.
 
 #### Other changes
 
+- **A file field's attachment list reads properly on a phone.** The file
+  name now takes the row's width (cut with an ellipsis, full name on hover)
+  and the size and remove button wrap beneath it instead of squeezing the name
+  away; sizes use KB, MB or GB (55707.6 KB is now 54.4 MB); a file with no
+  name shows its short hash.
+
 - **A restore of a record the server once refused goes in as a restore.** A
   device remembered that a server had refused a record's create even after a
   later fill of a server (following another one, or filling the same one again)

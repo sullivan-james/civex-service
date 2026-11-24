@@ -8,6 +8,7 @@ import { ApiError } from '../../api/client'
 import { fieldSaveErrors } from './saveErrors'
 import { isPendingFile, pendingFile, type PendingFile } from './pendingFiles'
 import { formatBytes, toInputProps } from '../../utils/restrictions'
+import { formatSize } from '../../utils/storage'
 import { formatDate, formatInstantDate } from '../../utils/dates'
 import { displayLabel } from '../../utils/naming'
 import { isGeometry, parseLocation, type Geometry } from '../../utils/geo'
@@ -94,6 +95,19 @@ function refusalOf(err: unknown, field: Field): unknown {
   if (!(err instanceof ApiError)) return err
   const said = fieldSaveErrors(err, [field.name], field.name)
   return new Error(said[field.name]?.message ?? err.message)
+}
+
+/** What to call an attached file: its name, else a short hash. */
+export function shownName(file: {
+  resolved_filename?: string
+  filename?: string
+  sha256: string
+}): string {
+  return (
+    file.resolved_filename?.trim() ||
+    file.filename?.trim() ||
+    file.sha256.slice(0, 8)
+  )
 }
 
 function FileControl({
@@ -204,13 +218,18 @@ function FileControl({
         isPendingFile(item) ? (
           <div
             key={`pending-${i}`}
-            className="flex items-center gap-2 text-sm text-fg"
+            className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-fg"
             data-testid="pending-file"
           >
             <Paperclip size={14} className="shrink-0 text-fg-muted" />
-            <span className="truncate">{item.filename}</span>
+            <span
+              className="min-w-0 flex-1 basis-40 truncate"
+              title={item.filename}
+            >
+              {item.filename}
+            </span>
             <span className="shrink-0 text-xs text-fg-muted">
-              {(item.size / 1024).toFixed(1)} KB
+              {formatSize(item.size)}
             </span>
             <span className="shrink-0 rounded-full bg-canvas-inset px-2 py-0.5 text-xs text-fg-muted">
               not added yet
@@ -225,25 +244,27 @@ function FileControl({
         ) : (
           <div
             key={item.sha256}
-            className="flex items-center gap-2 text-sm text-fg"
+            className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-fg"
           >
-            <Paperclip size={14} className="shrink-0 text-fg-muted" />
-            <FileLink
-              file={item}
-              className="truncate text-accent hover:underline"
-              title={`Download · ${(item.size / 1024).toFixed(1)} KB`}
-            >
-              {item.resolved_filename ?? item.filename}
-            </FileLink>
+            <div className="flex min-w-0 flex-1 basis-40 items-center gap-2">
+              <Paperclip size={14} className="shrink-0 text-fg-muted" />
+              <FileLink
+                file={item}
+                className="min-w-0 truncate text-accent hover:underline"
+                title={`${shownName(item)} · Download · ${formatSize(item.size)}`}
+              >
+                {shownName(item)}
+              </FileLink>
+            </div>
             <span className="shrink-0 text-xs text-fg-muted">
-              {(item.size / 1024).toFixed(1)} KB
+              {formatSize(item.size)}
             </span>
             <FileLocationChip file={item} />
             <IconButton
               icon={X}
               variant="danger"
               onClick={() => setRemoving(item)}
-              aria-label={`Remove ${item.filename}`}
+              aria-label={`Remove ${shownName(item)}`}
             />
           </div>
         ),
