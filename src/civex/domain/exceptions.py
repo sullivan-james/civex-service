@@ -124,6 +124,14 @@ class VolumeUnavailableError(CivexError):
     retryable = True
 
 
+class UploadBusyError(CivexError):
+    """Another request is working on the same file (a part upload being begun
+    or finished): nothing was done, ask again."""
+
+    kind = "upload_busy"
+    retryable = True
+
+
 class DatabaseUnavailableError(CivexError):
     """Raised when a docker-managed project's database can't be reached/recovered."""
 

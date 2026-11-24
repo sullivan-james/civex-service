@@ -46,7 +46,11 @@ from typing import (
 
 from civex import file_modes, fs_locations
 from civex.repositories.local import inventory
-from civex.processes import pid_alive
+from civex.processes import (
+    pid_alive,
+    process_namespace,
+    process_start_token,
+)
 from civex.config import StoreConfig, VolumeConfig
 from civex.domain.dtos import (
     VOLUME_OFFLINE,
@@ -72,6 +76,7 @@ from civex.domain.transfers import (
 from civex.domain.exceptions import (
     AllVolumesFull,
     GCAlreadyRunningError,
+    UploadBusyError,
     ValidationError,
     VolumeUnavailableError,
 )
@@ -93,6 +98,12 @@ _SCRATCH_DIRNAME = ".tmp"
 _MARKER_FILENAME = ".civex-volume"
 _GC_LOCK_FILENAME = ".gc.lock"
 _TRANSFER_LOCK_FILENAME = ".transfer.lock"
+# How long a request waits for another working on the same file's parts, and
+# how old a lock file with no readable owner must be to be taken as abandoned.
+_UPLOAD_LOCK_WAIT_SECONDS = 300.0
+_UPLOAD_LOCK_ABANDONED_SECONDS = 6 * 3600.0
+_UPLOAD_PART_STALE_SECONDS = 3600.0  # a part still "being written" for this long is not
+_FINISHING = ".finishing"
 # A copy that moves no bytes at all for this long is treated as its volume having
 # stopped answering (a stuck network write can't be interrupted from outside).
 STALL_SECONDS = 60.0
@@ -164,6 +175,40 @@ def _read_marker(root: Path) -> str | None:
         return str(uuid.UUID((root / _MARKER_FILENAME).read_text("utf-8").strip()))
     except (OSError, ValueError):
         return None
+
+
+_OWNER: dict[int, str] = {}
+
+
+def _owner_string() -> str:
+    """Who holds a lock or marker: this process's id, its start time and the
+    namespace its id is in (`pid|start|namespace`)."""
+    pid = os.getpid()
+    if pid not in _OWNER:
+        _OWNER[pid] = f"{pid}|{process_start_token(pid) or ''}|{process_namespace()}"
+    return _OWNER[pid]
+
+
+def _owner_alive(owner: str) -> bool:
+    """Whether the process `owner` names is still the one running: its id is in
+    use and, where its start time can be read, is the same one. An owner from
+    another pid namespace or host (containers sharing a volume) cannot be
+    judged from here: it counts as alive, and only the age cutoff frees it."""
+    pid_text, _, rest = owner.partition("|")
+    token, _, namespace = rest.partition("|")
+    if namespace and namespace != process_namespace():
+        return True
+    try:
+        pid = int(pid_text)
+    except ValueError:
+        return False
+    if not pid_alive(pid):
+        return False
+    if token:
+        now = process_start_token(pid)
+        if now is not None and now != token:
+            return False  # a different process now has that id
+    return True
 
 
 class VolumeAwareFileObjectStore:
@@ -339,6 +384,130 @@ class VolumeAwareFileObjectStore:
             int(f.name[:-5]) for f in d.glob("*.done") if f.name[:-5].isdigit()
         )
 
+    def _upload_lock_path(self, sha256: str) -> Path:
+        """Beside the file's `<sha>.upload` scratch, on the first volume: the
+        store's root may be private to one process (a host gives each its
+        own), a volume is what every process of the store shares."""
+        vc = next(iter(self._cfg.volumes.values()))
+        scratch = self._resolve_path(vc) / _SCRATCH_DIRNAME
+        try:
+            scratch.mkdir(exist_ok=True)
+        except FileNotFoundError:
+            # The volume is not there (never written to, or unplugged): the
+            # volume's root is not recreated for a lock, and nothing can be
+            # written to it meanwhile, so the store's own root will do.
+            scratch = self._root / "_civex" / "uploads"
+            scratch.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            raise VolumeUnavailableError(f"Cannot work on the first volume: {e}") from e
+        return scratch / f"{sha256}.lock"
+
+    @contextlib.contextmanager
+    def _upload_lock(self, sha256: str) -> Iterator[None]:
+        """One request at a time begins or finishes the parts of one file, in
+        every process and on every platform: a lock file made with O_EXCL (no
+        fcntl/msvcrt), naming its owner (process id and start time, so a
+        process id that has been reused is not mistaken for the owner). A lock
+        whose owner has gone (or that is very old) is taken over, by one
+        waiter at a time (`_take_over`); a request waits for a live one, then
+        gives up with a retryable error. (Windows: a file being deleted
+        refuses a new one with PermissionError, which is "held" too.)"""
+        path = self._upload_lock_path(sha256)
+        deadline = time.monotonic() + _UPLOAD_LOCK_WAIT_SECONDS
+        next_check = 0.0
+        pause = 0.01
+        while True:
+            try:
+                fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except (FileExistsError, PermissionError):
+                now = time.monotonic()
+                if now >= next_check:  # looked at now and then, not at every try
+                    next_check = now + 1.0
+                    if self._take_over(path):
+                        next_check = 0.0
+                        continue
+                if now > deadline:
+                    raise UploadBusyError(
+                        "Another upload of this file is busy: try again"
+                    ) from None
+                time.sleep(pause)
+                pause = min(pause * 2, 0.25)
+                continue
+            try:
+                os.write(fd, _owner_string().encode())
+            finally:
+                os.close(fd)
+            break
+        try:
+            yield
+        finally:
+            for _ in range(40):  # Windows: briefly refused while someone reads it
+                try:
+                    path.unlink(missing_ok=True)
+                    break
+                except PermissionError:
+                    time.sleep(0.05)
+
+    def _take_over(self, path: Path) -> bool:
+        """Remove `path` if its owner is gone. One waiter at a time looks and
+        removes (under a short guard file made the same way), so a waiter
+        never removes the fresh lock another has just made after the stale one
+        went: while the stale file is there nobody else can create the lock,
+        and only the guard's holder removes it. Returns whether it removed
+        one."""
+        guard = path.with_name(path.name + ".takeover")
+        try:
+            os.close(os.open(str(guard), os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+        except (FileExistsError, PermissionError):
+            with contextlib.suppress(OSError):
+                if time.time() - guard.stat().st_mtime > 30:  # its holder died
+                    guard.unlink()
+            return False
+        try:
+            if not self._upload_lock_abandoned(path):
+                return False
+            with contextlib.suppress(FileNotFoundError):
+                path.unlink()
+            return True
+        finally:
+            for _ in range(40):
+                try:
+                    guard.unlink(missing_ok=True)
+                    break
+                except PermissionError:
+                    time.sleep(0.05)
+
+    @staticmethod
+    def _marker_live(path: Path, max_age: float) -> bool:
+        """Whether a marker file names a process that is still there (the one
+        that made it, not another that has its id now) and is not older than
+        `max_age`: otherwise it was left by one that died."""
+        try:
+            age = time.time() - path.stat().st_mtime
+        except OSError:
+            return False
+        try:
+            owner = path.read_text().strip()
+        except OSError:
+            return age < 60
+        if not owner:
+            return age < 60  # just made, not written yet: live
+        return _owner_alive(owner) and age < max_age
+
+    def _upload_lock_abandoned(self, path: Path) -> bool:
+        try:
+            age = time.time() - path.stat().st_mtime
+        except OSError:
+            return False  # released meanwhile: the next try takes it
+        try:
+            owner = path.read_text().strip()
+        except OSError:
+            return False
+        if not owner:
+            # Just made and not written yet: abandoned only if old.
+            return age > 60
+        return not _owner_alive(owner) or age > _UPLOAD_LOCK_ABANDONED_SECONDS
+
     def begin_parts(
         self,
         sha256: str,
@@ -348,7 +517,19 @@ class VolumeAwareFileObjectStore:
     ) -> tuple[int, list[int]]:
         """Begin (or pick up) receiving `sha256`'s `size` bytes in parts of
         `part_size`: the part size in force and the numbers of the parts
-        already held. An upload begun for another size starts again."""
+        already held. An upload begun for another size starts again. Two
+        requests for one file never begin it twice (the second finds the
+        first's and picks it up)."""
+        with self._upload_lock(sha256):
+            return self._begin_parts(sha256, size, part_size, collection_id)
+
+    def _begin_parts(
+        self,
+        sha256: str,
+        size: int,
+        part_size: int,
+        collection_id: str | None,
+    ) -> tuple[int, list[int]]:
         found = self._upload_dir(sha256)
         if found is not None:
             meta: dict[str, int] = {}
@@ -368,9 +549,10 @@ class VolumeAwareFileObjectStore:
                 d.mkdir(exist_ok=True)
                 with (d / "data").open("wb") as f:
                     f.truncate(size)
-                (d / "meta.json").write_text(
-                    json.dumps({"size": size, "part_size": part_size})
-                )
+                # Whole or absent: the upload exists once its meta does.
+                tmp = d / f"meta.json.{uuid.uuid4().hex}.tmp"
+                tmp.write_text(json.dumps({"size": size, "part_size": part_size}))
+                os.replace(tmp, d / "meta.json")
             except (OSError, VolumeUnavailableError) as e:
                 reasons.append(f"{vol_name}: {e}")
                 continue
@@ -384,6 +566,10 @@ class VolumeAwareFileObjectStore:
         exactly the part's length; a part sent again replaces the one held."""
         found = self._upload_dir(sha256)
         if found is None:
+            if self._any_copy(sha256) is not None:
+                async for _ in chunks:  # finished by another request: nothing to do
+                    pass
+                return
             raise ValidationError("That upload was not begun here")
         d = found[1]
         meta = self._part_meta(d)
@@ -393,21 +579,46 @@ class VolumeAwareFileObjectStore:
             raise ValidationError(f"There is no part {number} (1 to {count})")
         offset = (number - 1) * part_size
         want = min(part_size, size - offset)
-        (d / f"{number}.done").unlink(missing_ok=True)
-        got = 0
+        # A marker says a part is being written (a finish does not hash and
+        # store the file under it); a finish says so too (no part is written
+        # under it). Each sets its own, then looks for the other's, so one of
+        # them always sees the other and backs off, retryably.
+        writing = d / f"{number}.writing.{uuid.uuid4().hex}"
         try:
-            with (d / "data").open("r+b") as f:
-                f.seek(offset)
-                async for chunk in chunks:
-                    got += len(chunk)
-                    if got > want:
-                        break
-                    f.write(chunk)
-        except OSError as e:
-            raise self._write_error(found[0], e, got, streamed=True) from e
-        if got != want:
-            raise ValidationError(f"Part {number} is {got} bytes, not {want}")
-        (d / f"{number}.done").touch()
+            writing.write_text(_owner_string())
+        except FileNotFoundError:
+            if self._any_copy(sha256) is not None:
+                return  # finished meanwhile
+            raise ValidationError("That upload was not begun here") from None
+        try:
+            if self._marker_live(d / _FINISHING, _UPLOAD_LOCK_ABANDONED_SECONDS):
+                raise UploadBusyError("The file is being finished: try again")
+            (d / f"{number}.done").unlink(missing_ok=True)
+            got = 0
+            try:
+                with (d / "data").open("r+b") as f:
+                    f.seek(offset)
+                    async for chunk in chunks:
+                        got += len(chunk)
+                        if got > want:
+                            break
+                        f.write(chunk)
+            except FileNotFoundError:
+                if self._any_copy(sha256) is not None:
+                    return  # the file was finished while this part was on its way
+                raise ValidationError("That upload was not begun here") from None
+            except OSError as e:
+                raise self._write_error(found[0], e, got, streamed=True) from e
+            if got != want:
+                raise ValidationError(f"Part {number} is {got} bytes, not {want}")
+            try:
+                (d / f"{number}.done").touch()
+            except FileNotFoundError:
+                if self._any_copy(sha256) is None:
+                    raise ValidationError("That upload was not begun here") from None
+        finally:
+            with contextlib.suppress(OSError):
+                writing.unlink(missing_ok=True)
 
     def finish_parts(
         self,
@@ -417,11 +628,43 @@ class VolumeAwareFileObjectStore:
         collection_id: str | None = None,
     ) -> FileRef:
         """Check every part is held and the whole hashes to `sha256` (one
-        read), then store it. A whole that does not hash to it is dropped."""
-        found = self._upload_dir(sha256)
-        if found is None:
-            raise ValidationError("That upload was not begun here")
-        vol_name, d = found
+        read), then store it. A whole that does not hash to it is dropped.
+        Idempotent: the file already stored (a retry whose answer was lost, or
+        another request that finished it first) is success; one finish at a
+        time per file, the others wait and find it stored. While it runs no
+        part is written, and it does not start while one is."""
+        with self._upload_lock(sha256):
+            found = self._upload_dir(sha256)
+            if found is None:
+                copy = self._any_copy(sha256)
+                if copy is not None:
+                    return self._reuse(copy, sha256, original_filename, size)
+                raise ValidationError("That upload was not begun here")
+            vol_name, d = found
+            finishing = d / _FINISHING
+            finishing.write_text(_owner_string())
+            try:
+                if any(
+                    self._marker_live(w, _UPLOAD_PART_STALE_SECONDS)
+                    for w in d.glob("*.writing.*")
+                ):
+                    raise UploadBusyError("A part is being written: try again")
+                return self._finish_held(
+                    sha256, size, original_filename, collection_id, vol_name, d
+                )
+            finally:
+                with contextlib.suppress(OSError):
+                    finishing.unlink(missing_ok=True)
+
+    def _finish_held(
+        self,
+        sha256: str,
+        size: int,
+        original_filename: str,
+        collection_id: str | None,
+        vol_name: str,
+        d: Path,
+    ) -> FileRef:
         meta = self._part_meta(d)
         if meta["size"] != size:
             raise ValidationError(f"The upload is for {meta['size']} bytes, not {size}")

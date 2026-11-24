@@ -16,6 +16,7 @@ from typing import Any
 from sqlalchemy import (
     BigInteger,
     String,
+    Text,
     Uuid,
     and_,
     cast,
@@ -25,6 +26,7 @@ from sqlalchemy import (
     insert,
     or_,
     select,
+    text,
     update,
 )
 from sqlalchemy.exc import DataError, IntegrityError
@@ -60,6 +62,7 @@ from civex.db.models import (
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.audit_diff import entry_snapshots
 from civex.domain.merge import value_at
+from civex.domain.sync_page import ACTION_ENTRIES_MAX, budget, take
 from civex.domain.sync import (
     NOT_SYNCED_KINDS,
     LoginRequestDTO,
@@ -2251,6 +2254,27 @@ class LocalSyncRepository:
         )
         return self._entries(rows)
 
+    @contextmanager
+    def _numbering_has_no_deadline(self) -> Iterator[None]:
+        """Numbering a backlog is one statement whose length is the backlog's:
+        a host's `statement_timeout` (set for this transaction by the sync
+        routes) must not cut it, or a big enough backlog would time out at
+        every attempt and never be numbered. It is put back as it was for what
+        follows. A lock wait is still bounded (`lock_timeout`)."""
+        bind = self._s.get_bind()
+        if bind.dialect.name != "postgresql":
+            yield
+            return
+        was: str = self._s.execute(text("SHOW statement_timeout")).scalar_one()
+        self._s.execute(text("SET LOCAL statement_timeout = 0"))
+        yield
+        # Only when the statement went through: after a failure the transaction
+        # is aborted, and one more statement would hide the real error (a lock
+        # timeout, a deadlock) behind "current transaction is aborted".
+        self._s.execute(
+            text("SELECT set_config('statement_timeout', :v, true)"), {"v": was}
+        )
+
     def sequence_local_entries(self) -> int:
         """Authority: number the changes made on this instance itself, in the
         order they were made, so they join the feed. Returns how many.
@@ -2285,51 +2309,104 @@ class LocalSyncRepository:
             .where(*pending)
             .subquery()
         )
-        done = self._s.execute(
-            update(AuditLog)
-            .where(
-                AuditLog.id == order.c.id,
-                AuditLog.timestamp == order.c.timestamp,
-                *pending,
-            )
-            .values(hub_seq=order.c.n + base, sync_state="synced")
-            .execution_options(synchronize_session=False)
-        ).rowcount  # type: ignore[attr-defined]
+        with self._numbering_has_no_deadline():
+            done = self._s.execute(
+                update(AuditLog)
+                .where(
+                    AuditLog.id == order.c.id,
+                    AuditLog.timestamp == order.c.timestamp,
+                    *pending,
+                )
+                .values(hub_seq=order.c.n + base, sync_state="synced")
+                .execution_options(synchronize_session=False)
+            ).rowcount  # type: ignore[attr-defined]
         if done:
             first = self.reserve_hub_seqs(done)
             assert first == base + 1, "the feed counter moved while it was held"
         self._s.expire_all()
         return int(done)
 
-    def entries_after(self, seq: int, limit: int) -> tuple[list[SyncEntry], bool]:
-        """Numbered entries past `seq`, in order, and whether more follow. A
-        page ends with the action its last entry belongs to, never inside
-        one: a device takes an action whole (a tree moved to another
-        collection is one), so a page that cut one in two would leave it
-        half done at the device's commit."""
+    def _keys_after(self, seq: int, n: int) -> list[tuple[int, uuid.UUID | None, int]]:
+        """Up to `n` numbered rows past `seq`, in order, as (number, action,
+        payload size): what the page budget counts, read without the rows
+        themselves, so choosing a page never holds more than it takes."""
+
+        def width(col: Any) -> Any:
+            return func.coalesce(func.length(cast(col, Text)), 0)
+
+        size = (
+            width(AuditLog.old_data) + width(AuditLog.new_data) + width(AuditLog.delta)
+        )
         rows = (
-            self._s.query(AuditLog)
+            self._s.query(AuditLog.hub_seq, AuditLog.op_id, size)
             .filter(AuditLog.hub_seq > seq, _SYNCED)
             .order_by(AuditLog.hub_seq)
-            .limit(limit + 1)
+            .limit(n)
             .all()
         )
-        more = len(rows) > limit
-        rows = rows[:limit]
-        if more and rows and rows[-1].op_id is not None:
-            rest = (
-                self._s.query(AuditLog)
-                .filter(AuditLog.hub_seq > rows[-1].hub_seq, _SYNCED)
-                .order_by(AuditLog.hub_seq)
-                .limit(limit + 1)
-                .all()
+        return [(int(h), op, int(sz or 0)) for h, op, sz in rows]
+
+    def entries_after(
+        self, seq: int, limit: int, max_bytes: int | None = None
+    ) -> tuple[list[SyncEntry], bool]:
+        """Numbered entries past `seq`, in order, and whether more follow. The
+        page is bounded by `limit` (an "at most") and by `max_bytes` of payload
+        (`domain.sync_page`), and `more` is whether it stopped before the end.
+        It ends with the action its last entry belongs to, never inside one,
+        while the whole action fits (`ACTION_ENTRIES_MAX` entries, the byte
+        budget): a device takes an action whole (a tree moved to another
+        collection is one). One over that on its own is cut; the page then
+        says more follows, and the device holds the part it has until the
+        rest comes. Only the rows of the page are loaded."""
+        max_bytes = budget() if max_bytes is None else max_bytes
+        keys = self._keys_after(seq, limit + 1)
+        kept, more = take(keys, [k[2] for k in keys], limit, max_bytes)
+        if more and kept and kept[-1][1] is not None:
+            kept, more = self._finish_action(kept, max_bytes)
+        if not kept:
+            return [], more
+        rows = (
+            self._s.query(AuditLog)
+            .filter(
+                AuditLog.hub_seq >= kept[0][0],
+                AuditLog.hub_seq <= kept[-1][0],
+                _SYNCED,
             )
-            same = 0
-            while same < len(rest) and rest[same].op_id == rows[-1].op_id:
-                same += 1
-            rows += rest[:same]
-            more = len(rest) > same
+            .order_by(AuditLog.hub_seq)
+            .all()
+        )
         return self._entries(rows), more
+
+    def _finish_action(
+        self, kept: list[tuple[int, uuid.UUID | None, int]], max_bytes: int
+    ) -> tuple[list[tuple[int, uuid.UUID | None, int]], bool]:
+        """Add the rest of the action `kept` ends in, if it fits the page. If
+        it does not, the page ends before the action (it is sent whole in the
+        next, alone) unless it is the whole page, when it is cut where it is."""
+        op = kept[-1][1]
+        used = sum(k[2] for k in kept)
+        start = len(kept)
+        while start and kept[start - 1][1] == op:
+            start -= 1
+        extra: list[tuple[int, uuid.UUID | None, int]] = []
+        cursor = kept[-1][0]
+        while True:
+            more_keys = self._keys_after(cursor, 500)
+            for key in more_keys:
+                if key[1] != op:
+                    return kept + extra, True  # the action ended; something follows
+                if (
+                    len(kept) + len(extra) >= ACTION_ENTRIES_MAX
+                    or used + key[2] > max_bytes
+                ):
+                    if start:
+                        return kept[:start], True  # sent whole in the next page
+                    return kept + extra, True  # over the budget alone: cut
+                extra.append(key)
+                used += key[2]
+            if len(more_keys) < 500:
+                return kept + extra, False  # the action ran to the end
+            cursor = more_keys[-1][0]
 
     def _entries(self, rows: list[AuditLog]) -> list[SyncEntry]:
         batch_ids = {r.batch_id for r in rows if r.batch_id}

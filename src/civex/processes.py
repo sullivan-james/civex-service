@@ -41,6 +41,69 @@ def pid_alive(pid: int) -> bool:
     return True
 
 
+def process_start_token(pid: int) -> str | None:
+    """Tells one run of a process from another that has the same id (ids are
+    reused: in a container a restarted server is pid 1 again): the time it
+    started (and, on Linux, the boot). None where it cannot be read."""
+    try:
+        if sys.platform == "win32":
+            import ctypes
+            from ctypes import wintypes
+
+            handle = ctypes.windll.kernel32.OpenProcess(  # type: ignore[attr-defined]
+                0x1000, False, pid
+            )
+            if not handle:
+                return None
+            try:
+                created, a, b, c = (wintypes.FILETIME() for _ in range(4))
+                ok = ctypes.windll.kernel32.GetProcessTimes(  # type: ignore[attr-defined]
+                    handle,
+                    ctypes.byref(created),
+                    ctypes.byref(a),
+                    ctypes.byref(b),
+                    ctypes.byref(c),
+                )
+                if not ok:
+                    return None
+                return str((created.dwHighDateTime << 32) | created.dwLowDateTime)
+            finally:
+                ctypes.windll.kernel32.CloseHandle(handle)  # type: ignore[attr-defined]
+        if sys.platform.startswith("linux"):
+            with open(f"/proc/{pid}/stat") as f:
+                fields = f.read().rsplit(")", 1)[1].split()
+            with open("/proc/sys/kernel/random/boot_id") as f:
+                boot = f.read().strip()
+            return f"{boot}:{fields[19]}"  # field 22: start time, in ticks since boot
+        out = subprocess.run(
+            ["ps", "-o", "lstart=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        ).stdout.strip()
+        return out or None
+    except (OSError, IndexError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def process_namespace() -> str:
+    """Where process ids mean something: containers that share a volume each
+    have their own (all run pid 1), so a process id found in a lock on it says
+    nothing about a process of another. Linux: the pid namespace and the boot;
+    elsewhere the host name."""
+    try:
+        if sys.platform.startswith("linux"):
+            with open("/proc/sys/kernel/random/boot_id") as f:
+                boot = f.read().strip()
+            return f"{os.stat('/proc/self/ns/pid').st_ino}-{boot}"
+    except OSError:
+        pass
+    import socket
+
+    return socket.gethostname()
+
+
 def no_window_kwargs() -> dict[str, Any]:
     """`Popen` arguments that keep a console program from opening a window of
     its own on Windows. A program started from one with no console (the

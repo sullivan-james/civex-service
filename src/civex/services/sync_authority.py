@@ -19,6 +19,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from functools import wraps
 
+import time
 import uuid
 from types import SimpleNamespace
 from datetime import datetime, timezone
@@ -38,6 +39,7 @@ from civex.domain.permissions import FILE_UNAVAILABLE, file_changes
 from civex.domain.merge import LIFECYCLE_KEYS, DERIVED_KEYS, merge
 from civex.domain.permissions import ReadScope
 from civex.services.sync_scope import FeedShaper
+from civex.domain.sync_page import json_size, take
 from civex.domain.sync import (
     APPLIED,
     CAPABILITIES,
@@ -79,6 +81,12 @@ FEED_MAX = 500
 FEED_SCAN_MAX = 2000
 SNAPSHOT_MAX = 500
 PUSH_MAX = 500
+# The wall-clock time one push may spend settling: past it the push finishes
+# the action it is in and answers for what it has settled (a short answer, as
+# when it takes `PUSH_MAX`); the device sends the rest on its next request.
+# Well below the client's request timeout (`sync_transport`), so the answer
+# arrives before the device gives up and sends the same thing again.
+PUSH_BUDGET_SECONDS = 10.0
 # How many changes' records one read of what a push asks of them covers.
 PREFETCH_MAX = 150
 
@@ -145,6 +153,7 @@ class SyncAuthorityService:
         # What the push being settled has read (see `RecordService.incoming_cache`),
         # for the changes `_take` settles one at a time; None outside a push.
         self._cache: IncomingCache | None = None
+        self._push_started = 0.0  # when the push now settling began (monotonic)
         # Whether runs of new records are written in bulk (`_fast`); off, every
         # change is settled on its own, as the tests compare.
         self._bulk = True
@@ -241,8 +250,8 @@ class SyncAuthorityService:
             )
         except ValueError as e:
             raise ValidationError(f"Not a page cursor: {after!r}") from e
-        page = items[:limit]
-        more = len(items) > limit
+        # By count and by bytes, `more` decided with the feed's (sync_page).
+        page, more = take(items, [json_size(i) for i in items], limit)
         return SnapshotPage(
             kind, page, more, head, snapshot_cursor(page[-1]) if more else None
         )
@@ -342,6 +351,7 @@ class SyncAuthorityService:
         cache.use_records = self._scope().unrestricted
         self._cache = cache
         position = 0
+        self._push_started = time.monotonic()
         try:
             self._settle_push(who, taken, results, cache, position)
         finally:
@@ -360,6 +370,14 @@ class SyncAuthorityService:
         with self._repo.push_scope(taken):
             run: list[_Fast] = []
             for action in _actions(taken):
+                if (
+                    position
+                    and time.monotonic() - self._push_started > PUSH_BUDGET_SECONDS
+                ):
+                    # Out of time: what is settled is answered, the rest is
+                    # left for the device's next push (never cut an action).
+                    results += self._flush_run(who, run)
+                    break
                 if self._bulk and len(action) == 1 and cache.stale:
                     # What the changes to come ask of the records is read
                     # together (again, after something else wrote some).
