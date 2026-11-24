@@ -154,14 +154,8 @@ nav:
           - civex view: reference/cli/view.md
           - civex workflow: reference/cli/workflow.md
       - Plugins:
-          - Get Field: reference/plugins/get_field.md
-          - Save Field: reference/plugins/save_field.md
-          - Save Fields: reference/plugins/save_fields.md
-          - Load File: reference/plugins/load_file.md
-          - Load File List: reference/plugins/load_file_list.md
-          - Extract from Filename: reference/plugins/extract_from_filename.md
-          - Create Records from Files: reference/plugins/create_records_from_files.md
-          - Match Files to Records: reference/plugins/match_files_to_records.md
-          - Parse Table: reference/plugins/parse_table.md
-          - Rows to Records: reference/plugins/rows_to_records.md
-          - Upsert Records: reference/plugins/upsert_records.md
+          - Files: reference/plugins/files.md
+          - Table: reference/plugins/table.md
+          - Value from the file name: reference/plugins/value_from_filename.md
+          - Save as records: reference/plugins/save_records.md
+          - Set fields on this record: reference/plugins/set_fields.md
