@@ -134,7 +134,7 @@ setup is needed, and it works whether or not the field has a rule.
 
 A rule fills a field as the record is saved. To fill records you already have,
 or when the value needs more than one pattern can give (several fields from one
-name, a lookup, a calculation), use the `civex.extract_from_filename` plugin in
+name, a lookup, a calculation), use the **Value from the file name** step (`civex.value_from_filename@1`) in
 a workflow. Save this as `_civex/workflows/read-sample-time.yaml` (or paste it
 into **Workflows → New workflow** in the app):
 
@@ -148,7 +148,7 @@ triggers:
 
 steps:
   - id: extract
-    plugin: civex.extract_from_filename
+    plugin: civex.value_from_filename@1
     config:
       field: reading
       pattern: '(\d{8}[-_]\d{6})'      # 20240315_093000 or 20240315-093000
@@ -156,7 +156,7 @@ steps:
       date_format: 'YYYYMMDD[-_]HHmmSS'
 
   - id: save
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config:
       field: taken_at
     inputs:
@@ -165,7 +165,7 @@ steps:
 
 The plugin reads names with the same tokens as the field rule, in two steps:
 `pattern` captures the part of the name, `date_format` reads it. See
-[Take a value from a file name](../reference/plugins/extract_from_filename.md) for every
+[Value from the file name](../reference/plugins/value_from_filename.md) for every
 option. A workflow runs *after* the record is saved, so it can't fill a required
 or unique field in time; the rule above can.
 

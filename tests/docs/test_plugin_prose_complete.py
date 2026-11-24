@@ -19,7 +19,7 @@ MARKER = "<!-- civex:tables -->"
 def _registered_builtin_slugs() -> set[str]:
     registry.discover_plugins(builtins)
     return {
-        pid.removeprefix("civex.")
+        pid.removeprefix("civex.").partition("@")[0]
         for pid, reg in registry.all_plugins().items()
         if reg.tier == PluginTier.BUILTIN
     }

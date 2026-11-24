@@ -4,8 +4,11 @@ import {
   useRunWorkflow,
   useRunWorkflowWithFiles,
 } from '../../hooks/useWorkflows'
+import { useHasFeature } from '../../hooks/useFeatures'
+import { FolderBrowser } from '../settings/FolderBrowser'
 import {
   Button,
+  CheckRow,
   Field,
   FileDropZone,
   Input,
@@ -14,7 +17,7 @@ import {
   ModalFooter,
   ModalHeader,
 } from '../ui'
-import type { Workflow } from '../../api/workflows'
+import type { FolderChoice, Workflow } from '../../api/workflows'
 
 interface Props {
   workflow: Workflow
@@ -36,6 +39,11 @@ export function WorkflowRunModal({
   const navigate = useNavigate()
   const [recordId, setRecordId] = useState(prefilled ?? '')
   const [fileInputs, setFileInputs] = useState<Record<string, File[]>>({})
+  // A folder on this computer instead of files dropped in: read by the server
+  // itself, so nothing is uploaded.
+  const [folders, setFolders] = useState<Record<string, FolderChoice>>({})
+  const [browsing, setBrowsing] = useState<string | null>(null)
+  const canReadFolders = useHasFeature()('server_path_import')
   const [error, setError] = useState<string | null>(null)
 
   const runPlain = useRunWorkflow()
@@ -60,6 +68,7 @@ export function WorkflowRunModal({
           name: workflow.name,
           recordId: recordId.trim(),
           fileInputs,
+          folders,
         })
       } else {
         await runPlain.mutateAsync({
@@ -113,6 +122,81 @@ export function WorkflowRunModal({
           {filesInputs.map(([inputName, decl]) => {
             const chosen = fileInputs[inputName] ?? []
             const dropzoneLabel = decl.label ?? inputName
+            const folder = folders[inputName]
+            if (browsing === inputName) {
+              return (
+                <div key={inputName} className="flex flex-col gap-1">
+                  <span className="text-xs font-medium text-fg-muted">
+                    {dropzoneLabel}
+                  </span>
+                  <FolderBrowser
+                    initialPath={folder?.folder}
+                    onSelect={(path) => {
+                      setFolders((prev) => ({
+                        ...prev,
+                        [inputName]: { folder: path, glob: '*' },
+                      }))
+                      setBrowsing(null)
+                    }}
+                    onCancel={() => setBrowsing(null)}
+                  />
+                </div>
+              )
+            }
+            if (folder) {
+              return (
+                <div key={inputName} className="flex flex-col gap-2">
+                  <span className="text-xs font-medium text-fg-muted">
+                    {dropzoneLabel}
+                  </span>
+                  <p className="font-mono text-xs text-fg break-all">
+                    {folder.folder}
+                  </p>
+                  <Field label="Only files named like">
+                    <Input
+                      size="sm"
+                      value={folder.glob ?? '*'}
+                      onChange={(e) =>
+                        setFolders((prev) => ({
+                          ...prev,
+                          [inputName]: { ...folder, glob: e.target.value },
+                        }))
+                      }
+                    />
+                  </Field>
+                  <CheckRow
+                    compact
+                    title="Include subfolders"
+                    checked={!!folder.subfolders}
+                    onChange={(on) =>
+                      setFolders((prev) => ({
+                        ...prev,
+                        [inputName]: { ...folder, subfolders: on },
+                      }))
+                    }
+                  />
+                  <p className="text-xs text-fg-muted">
+                    The files are read from this folder on this computer:
+                    nothing is uploaded.
+                  </p>
+                  <div>
+                    <Button
+                      size="sm"
+                      type="button"
+                      onClick={() =>
+                        setFolders((prev) => {
+                          const next = { ...prev }
+                          delete next[inputName]
+                          return next
+                        })
+                      }
+                    >
+                      Use files instead
+                    </Button>
+                  </div>
+                </div>
+              )
+            }
             return (
               <div key={inputName} className="flex flex-col gap-1">
                 <span className="text-xs font-medium text-fg-muted">
@@ -142,6 +226,19 @@ export function WorkflowRunModal({
                     </span>
                   )}
                 </FileDropZone>
+                {canReadFolders && (
+                  <p className="text-xs text-fg-muted">
+                    Drop files here, or{' '}
+                    <Button
+                      size="sm"
+                      type="button"
+                      onClick={() => setBrowsing(inputName)}
+                    >
+                      choose a folder on this computer
+                    </Button>{' '}
+                    (faster for many files: nothing is uploaded).
+                  </p>
+                )}
               </div>
             )
           })}

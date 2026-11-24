@@ -12,7 +12,7 @@ name: parse-audio-dates
 description: A workflow
 steps:
   - id: step-one
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config:
       field: subject
 """
@@ -56,11 +56,11 @@ triggers:
     schema: doc
 steps:
   - id: read
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config:
       field: subject
   - id: save
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config:
       field: title
     inputs:
@@ -73,14 +73,14 @@ steps:
     assert body["step_list"] == [
         {
             "id": "read",
-            "plugin": "civex.get_field",
+            "plugin": "civex.value_from_filename@1",
             "config": {"field": "subject"},
             "inputs": {},
             "condition": None,
         },
         {
             "id": "save",
-            "plugin": "civex.save_field",
+            "plugin": "civex.set_fields@1",
             "config": {"field": "title"},
             "inputs": {"value": "read.value"},
             "condition": None,
@@ -117,7 +117,7 @@ def test_save_rejects_a_contract_violation_with_structured_per_step_errors(
 name: broken
 steps:
   - id: one
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config:
       field: subject
       fileds: subject
@@ -131,7 +131,7 @@ steps:
             "step": "one",
             "message": (
                 "Step 'one' config has unknown key 'fileds' for plugin "
-                "'civex.get_field' (accepts: field)"
+                "'civex.value_from_filename@1' (accepts: date_format, field, output_type, pattern)"
             ),
         }
     ]
@@ -174,7 +174,7 @@ inputs:
     type: files
 steps:
   - id: save
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config:
       field: attachments
     inputs:
@@ -202,7 +202,9 @@ steps:
 
     job = client.get(f"/api/jobs/{resp.json()['id']}").json()
     assert job["status"] == "completed", job
-    assert job["step_executions"][0]["inputs"]["value"][0]["filename"] == "f.csv"
+    # The old `inputs: files` was upgraded to a Files step named `files`.
+    assert job["step_executions"][0]["plugin"] == "civex.files@1"
+    assert job["step_executions"][1]["inputs"]["value"][0]["filename"] == "f.csv"
 
 
 def test_delete_blocked_by_pending_job_returns_422(client: TestClient) -> None:
@@ -247,7 +249,7 @@ name: stamp
 record_schema: doc
 steps:
   - id: read
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config:
       field: title
 """
@@ -314,7 +316,7 @@ def test_run_many_refuses_a_workflow_that_needs_files(client: TestClient) -> Non
         "/api/workflows/needs-files",
         json={
             "content": "name: needs-files\ninputs:\n  files:\n    type: files\n"
-            "steps:\n  - id: a\n    plugin: civex.get_field\n    config:\n      field: x\n"
+            "steps:\n  - id: a\n    plugin: civex.value_from_filename@1\n    config:\n      field: x\n"
         },
     )
     ids = _doc_records(client, 1)

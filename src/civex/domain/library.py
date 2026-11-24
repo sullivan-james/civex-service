@@ -102,10 +102,10 @@ def content_problem(kind: str, name: str, content: str) -> str | None:
 
 
 def provides_problem(plugin_id: str | None) -> str | None:
+    if plugin_id and is_builtin(plugin_id):
+        return f"'{plugin_id}' is a built-in plugin's id: a shared plugin can't take it"
     if not plugin_id or not _PLUGIN_ID.match(plugin_id):
         return "A shared plugin must say which plugin id it provides"
-    if is_builtin(plugin_id):
-        return f"'{plugin_id}' is a built-in plugin's id: a shared plugin can't take it"
     return None
 
 

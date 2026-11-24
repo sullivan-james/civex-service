@@ -9,7 +9,7 @@ import pytest
 from civex.config import load_config, save_config
 from civex.domain.sync import protocol_header
 
-_WORKFLOW = "name: tidy\nsteps:\n  - id: a\n    plugin: civex.get_field\n    config:\n      field: site\n"
+_WORKFLOW = "name: tidy\nsteps:\n  - id: a\n    plugin: civex.value_from_filename@1\n    config:\n      field: site\n"
 
 
 def _item(kind="workflow", name="tidy", content=_WORKFLOW, **extra):

@@ -32,11 +32,11 @@ def test_upsert_skips_a_refused_row_and_notes_what_it_collided_with(ctx, run):
         {"number": 1, "label": "A"},
         parent_record_id=str(parent.id),
     )
-    registration = get_plugin("civex.upsert_records")
-    config = registration.config_model(schema="selection", key_field="number")
+    registration = get_plugin("civex.save_records@1")
+    config = registration.config_model(schema="selection", match_on=["number"])
     df = pd.DataFrame([{"number": 2, "label": "A"}, {"number": 3, "label": "B"}])
 
-    result = registration.invoke({"table": df}, config, wf_ctx, 60.0)
+    result = registration.invoke({"rows": df}, config, wf_ctx, 60.0)
 
     assert result.outputs["created"] == 1 and result.outputs["skipped"] == 1
     (noted,) = wf_ctx.take_duplicates()

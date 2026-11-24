@@ -1,4 +1,4 @@
-"""`civex.parse_table`: reading CSV, TSV and other delimited text, one separator or
+"""`civex.table@1`: reading CSV, TSV and other delimited text, one separator or
 several the file may use."""
 
 from __future__ import annotations
@@ -8,7 +8,7 @@ from civex_plugin_sdk.io_convert import to_invoke_form
 from pydantic import ValidationError as PydanticValidationError
 
 from civex.domain.exceptions import PluginExecutionError
-from civex.plugins.builtins.parse_table import (
+from civex.plugins.builtins.table import (
     Plugin,
     detect_delimiter,
     resolve_delimiter,
@@ -27,10 +27,14 @@ def wf_ctx(ctx, make_collection, make_schema, make_record) -> WorkflowContext:
     return WorkflowContext(record=record, dataset=dataset, _app_ctx=ctx)
 
 
-def _read(wf_ctx, raw: bytes, **config):
-    registration = get_plugin("civex.parse_table")
+def _read(wf_ctx, raw: bytes, name: str = "table.csv", **config):
+    ref = wf_ctx._app_ctx.file_svc.store_bytes(raw, name)
+    registration = get_plugin("civex.table@1")
     result = registration.invoke(
-        {"bytes": raw}, registration.config_model(**config), wf_ctx, 60.0
+        {"files": [ref.to_dict()]},
+        registration.config_model(**config),
+        wf_ctx,
+        60.0,
     )
     return to_invoke_form("table", result.outputs["table"])
 
@@ -148,3 +152,62 @@ def test_detecting_prefers_the_steadiest_then_the_most_then_the_first() -> None:
     # Only one is steady across lines.
     assert detect_delimiter("a,b\tc\n1,2,3\n", ["\t", ","]) == ","
     assert detect_delimiter("", [",", "\t"]) == ","
+
+
+def test_it_reads_an_excel_file_and_a_named_sheet(wf_ctx, tmp_path) -> None:
+    import openpyxl
+
+    book = openpyxl.Workbook()
+    book.active.title = "first"
+    book.active.append(["name", "age"])
+    book.active.append(["Alice", 30])
+    other = book.create_sheet("second")
+    other.append(["name", "age"])
+    other.append(["Bob", 25])
+    path = tmp_path / "t.xlsx"
+    book.save(path)
+    raw = path.read_bytes()
+    assert _read(wf_ctx, raw, "t.xlsx")["name"].tolist() == ["Alice"]
+    assert _read(wf_ctx, raw, "t.xlsx", sheet="second")["name"].tolist() == ["Bob"]
+
+
+def test_it_reads_the_file_in_a_field_of_the_record(
+    ctx, make_collection, make_schema, make_record
+) -> None:
+    dataset = make_collection("study")
+    make_schema("doc", fields=[("table", "file")])
+    ref = ctx.file_svc.store_bytes(CSV, "t.csv")
+    record = make_record("study", "doc", {"table": ref.to_dict()})
+    wf_ctx = WorkflowContext(record=record, dataset=dataset, _app_ctx=ctx)
+    registration = get_plugin("civex.table@1")
+    result = registration.invoke(
+        {}, registration.config_model(field="table"), wf_ctx, 60.0
+    )
+    assert to_invoke_form("table", result.outputs["table"])["age"].tolist() == [30, 25]
+
+
+def test_several_files_are_put_one_after_another(wf_ctx) -> None:
+    a = wf_ctx._app_ctx.file_svc.store_bytes(CSV, "a.csv").to_dict()
+    b = wf_ctx._app_ctx.file_svc.store_bytes(b"name,age\nCy,9\n", "b.csv").to_dict()
+    registration = get_plugin("civex.table@1")
+    result = registration.invoke(
+        {"files": [a, b]}, registration.config_model(), wf_ctx, 60.0
+    )
+    assert to_invoke_form("table", result.outputs["table"])["name"].tolist() == [
+        "Alice",
+        "Bob",
+        "Cy",
+    ]
+
+
+def test_without_files_or_a_field_it_says_what_to_connect(wf_ctx) -> None:
+    registration = get_plugin("civex.table@1")
+    with pytest.raises(PluginExecutionError, match="Say where the table is"):
+        registration.invoke({}, registration.config_model(), wf_ctx, 60.0)
+
+
+def test_by_default_commas_tabs_and_semicolons_are_told_apart(wf_ctx) -> None:
+    for raw in (CSV, TSV, b"name;age\nAlice;30\nBob;25\n"):
+        df = _read(wf_ctx, raw)
+        assert list(df.columns) == ["name", "age"]
+        assert df["age"].tolist() == [30, 25]

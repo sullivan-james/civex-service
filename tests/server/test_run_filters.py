@@ -14,7 +14,7 @@ from civex.config import load_config
 from civex.context import build_local_context
 from civex.domain.dtos import ErrorEnvelope
 
-_YAML = "name: {n}\nsteps:\n  - id: s\n    plugin: civex.get_field\n    config:\n      field: subject\n"
+_YAML = "name: {n}\nsteps:\n  - id: s\n    plugin: civex.value_from_filename@1\n    config:\n      field: subject\n"
 
 
 def _f(field: str, op: str, value=None):

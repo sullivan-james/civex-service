@@ -16,8 +16,6 @@ import sys
 
 import pandas as pd
 import pytest
-from civex_plugin_sdk.io_convert import to_invoke_form
-from civex_plugin_sdk.protocol import decode_binary
 
 from civex.context import AppContext
 from civex.plugins.base import WorkflowContext
@@ -74,77 +72,6 @@ def _assert_names_match(plugin_id: str, kind: str, specs, actual: dict) -> None:
     assert not missing, f"{plugin_id} omitted required {kind}(s): {sorted(missing)}"
 
 
-def test_get_field_reads_record_data(ctx, make_collection, make_schema, make_record):
-    dataset = make_collection("study")
-    make_schema("subject", fields=[("name", "string")])
-    record = make_record("study", "subject", {"name": "S01"})
-    wf_ctx = _wf_ctx(ctx, record, dataset)
-
-    registration = get_plugin("civex.get_field")
-    result = registration.invoke(
-        {}, registration.config_model(field="name"), wf_ctx, 60.0
-    )
-
-    assert result.outputs == {"value": "S01"}
-
-
-def test_save_field_writes_value_to_trigger_record(
-    ctx, make_collection, make_schema, make_record
-):
-    dataset = make_collection("study")
-    make_schema("subject", fields=[("status", "string")])
-    record = make_record("study", "subject", {"status": "pending"})
-    wf_ctx = _wf_ctx(ctx, record, dataset)
-
-    registration = get_plugin("civex.save_field")
-    config = registration.config_model(field="status")
-    result = registration.invoke({"value": "done"}, config, wf_ctx, 60.0)
-
-    assert result.outputs == {}
-    assert ctx.record_svc.get(str(record.id)).data["status"] == "done"
-
-
-def test_save_fields_drops_none_valued_updates(
-    ctx, make_collection, make_schema, make_record
-):
-    dataset = make_collection("study")
-    make_schema("subject", fields=[("a", "string"), ("b", "string")])
-    record = make_record("study", "subject", {"a": "1", "b": "orig"})
-    wf_ctx = _wf_ctx(ctx, record, dataset)
-
-    registration = get_plugin("civex.save_fields")
-    result = registration.invoke(
-        {"updates": {"a": "2", "b": None}}, registration.config_model(), wf_ctx, 60.0
-    )
-
-    assert result.outputs == {}
-    updated = ctx.record_svc.get(str(record.id))
-    assert updated.data["a"] == "2"
-    assert updated.data["b"] == "orig"  # None-valued update silently dropped
-
-
-def test_load_file_returns_bytes_filename_and_sha256(
-    ctx, make_collection, make_schema, make_record
-):
-    dataset = make_collection("study")
-    make_schema("doc", fields=[("attachment", "file")])
-    file_ref = ctx.file_svc.store_bytes(b"hello world", "hello.txt")
-    record = make_record("study", "doc", {"attachment": file_ref.to_dict()})
-    wf_ctx = _wf_ctx(ctx, record, dataset)
-
-    registration = get_plugin("civex.load_file")
-    config = registration.config_model(field="attachment")
-    result = registration.invoke({}, config, wf_ctx, 60.0)
-
-    # A declared `bytes` output leaves a step in the binary envelope, not as
-    # raw bytes -- the wire form every tier produces (see
-    # registry._registration_for_tier0). The next step's own convert_inputs
-    # turns it back into `bytes` before its invoke() sees it.
-    assert result.outputs["filename"] == "hello.txt"
-    assert result.outputs["sha256"] == file_ref.sha256
-    assert decode_binary(result.outputs["bytes"]) == b"hello world"
-
-
 def test_load_file_list_returns_raw_file_refs(
     ctx, make_collection, make_schema, make_record
 ):
@@ -157,8 +84,8 @@ def test_load_file_list_returns_raw_file_refs(
     )
     wf_ctx = _wf_ctx(ctx, record, dataset)
 
-    registration = get_plugin("civex.load_file_list")
-    config = registration.config_model(field="attachments")
+    registration = get_plugin("civex.files@1")
+    config = registration.config_model(source="field", field="attachments")
     result = registration.invoke({}, config, wf_ctx, 60.0)
 
     # Record reads stamp `resolved_filename` onto every file/file_list value
@@ -180,8 +107,8 @@ def test_load_file_list_returns_empty_list_when_field_missing_no_raise(
     record = make_record("study", "doc", {})
     wf_ctx = _wf_ctx(ctx, record, dataset)
 
-    registration = get_plugin("civex.load_file_list")
-    config = registration.config_model(field="attachments")
+    registration = get_plugin("civex.files@1")
+    config = registration.config_model(source="field", field="attachments")
     result = registration.invoke({}, config, wf_ctx, 60.0)
 
     assert result.outputs == {"files": []}
@@ -196,7 +123,7 @@ def test_extract_from_filename_uses_capture_group(
     record = make_record("study", "doc", {"attachment": ref.to_dict()})
     wf_ctx = _wf_ctx(ctx, record, dataset)
 
-    registration = get_plugin("civex.extract_from_filename")
+    registration = get_plugin("civex.value_from_filename@1")
     config = registration.config_model(field="attachment", pattern=r"sample_(\d+)")
     result = registration.invoke({}, config, wf_ctx, 60.0)
 
@@ -216,7 +143,7 @@ def test_extract_from_filename_converts_to_date_via_token_format(
     record = make_record("study", "doc", {"attachment": ref.to_dict()})
     wf_ctx = _wf_ctx(ctx, record, dataset)
 
-    registration = get_plugin("civex.extract_from_filename")
+    registration = get_plugin("civex.value_from_filename@1")
     config = registration.config_model(
         field="attachment",
         pattern=r"sample_(\d+)",
@@ -237,7 +164,7 @@ def test_extract_from_filename_datetime_is_naive_wall_time(
     record = make_record("study", "doc", {"attachment": ref.to_dict()})
     wf_ctx = _wf_ctx(ctx, record, dataset)
 
-    registration = get_plugin("civex.extract_from_filename")
+    registration = get_plugin("civex.value_from_filename@1")
     config = registration.config_model(
         field="attachment",
         pattern=r"rec_(\d{8}_\d{6})",
@@ -260,7 +187,7 @@ def test_extracted_datetime_is_read_in_the_collection_timezone_when_saved(
     record = make_record("study", "doc", {"attachment": ref.to_dict()})
     wf_ctx = _wf_ctx(ctx, record, dataset)
 
-    registration = get_plugin("civex.extract_from_filename")
+    registration = get_plugin("civex.value_from_filename@1")
     config = registration.config_model(
         field="attachment",
         pattern=r"rec_(\d{8}_\d{6})",
@@ -275,34 +202,6 @@ def test_extracted_datetime_is_read_in_the_collection_timezone_when_saved(
     assert updated.data["recorded_at"] == "2021-02-18T13:50:00+00:00"  # CST, UTC-6
 
 
-def test_parse_table_parses_bytes_into_dataframe(
-    ctx, make_collection, make_schema, make_record
-):
-    dataset = make_collection("study")
-    make_schema("trigger", fields=[])
-    record = make_record("study", "trigger", {})
-    wf_ctx = _wf_ctx(ctx, record, dataset)
-
-    registration = get_plugin("civex.parse_table")
-    csv_bytes = b"name,age\nAlice,30\nBob,25\n"
-    result = registration.invoke(
-        {"bytes": csv_bytes}, registration.config_model(), wf_ctx, 60.0
-    )
-
-    # Same as the `bytes` case above: the DataFrame the plugin returns leaves
-    # the step as the columnar, typed envelope, and is reconstructed into a
-    # real DataFrame by whichever downstream step actually reads it.
-    assert result.outputs["table"] == {
-        "encoding": "inline",
-        "columns": ["name", "age"],
-        "dtypes": {"name": "string", "age": "integer"},
-        "data": {"name": ["Alice", "Bob"], "age": [30, 25]},
-    }
-    df = to_invoke_form("table", result.outputs["table"])
-    assert list(df.columns) == ["name", "age"]
-    assert len(df) == 2
-
-
 def test_rows_to_records_creates_one_record_per_row(
     ctx, make_collection, make_schema, make_record
 ):
@@ -312,10 +211,10 @@ def test_rows_to_records_creates_one_record_per_row(
     make_schema("item", fields=[("name", "string"), ("age", "integer")])
     wf_ctx = _wf_ctx(ctx, trigger, dataset)
 
-    registration = get_plugin("civex.rows_to_records")
+    registration = get_plugin("civex.save_records@1")
     config = registration.config_model(schema="item")
     df = pd.DataFrame([{"name": "Alice", "age": 30}, {"name": "Bob", "age": 25}])
-    result = registration.invoke({"table": df}, config, wf_ctx, 60.0)
+    result = registration.invoke({"rows": df}, config, wf_ctx, 60.0)
 
     assert result.outputs == {
         "created": 2,
@@ -340,7 +239,7 @@ def test_rows_to_records_counts_validation_failures_as_skipped_and_continues(
     ctx.commit()
     wf_ctx = _wf_ctx(ctx, trigger, dataset)
 
-    registration = get_plugin("civex.rows_to_records")
+    registration = get_plugin("civex.save_records@1")
     config = registration.config_model(schema="item")
     df = pd.DataFrame(
         [
@@ -348,7 +247,7 @@ def test_rows_to_records_counts_validation_failures_as_skipped_and_continues(
             {"name": "Bob"},  # missing required_note -> fails validation
         ]
     )
-    result = registration.invoke({"table": df}, config, wf_ctx, 60.0)
+    result = registration.invoke({"rows": df}, config, wf_ctx, 60.0)
 
     assert result.outputs["created"] == 1 and result.outputs["skipped"] == 1
     assert result.outputs["skipped_rows"][0].startswith("Row 2: ")
@@ -365,12 +264,14 @@ def test_create_records_from_files_creates_one_per_file(
     make_schema("attachment", fields=[("file_field", "file")])
     wf_ctx = _wf_ctx(ctx, trigger, dataset)
 
-    registration = get_plugin("civex.create_records_from_files")
-    config = registration.config_model(schema="attachment", file_field="file_field")
+    registration = get_plugin("civex.save_records@1")
+    config = registration.config_model(
+        schema="attachment", file_field="file_field", if_exists="add_new"
+    )
     ref = ctx.file_svc.store_bytes(b"x", "a.txt")
     result = registration.invoke({"files": [ref.to_dict()]}, config, wf_ctx, 60.0)
 
-    assert result.outputs == {"created": 1, "skipped": 0}
+    assert result.outputs["created"] == 1 and result.outputs["skipped"] == 0
     created = ctx.record_svc.find("study", schema_name="attachment")
     assert len(created) == 1
     assert created[0].data["file_field"]["filename"] == "a.txt"
@@ -388,12 +289,19 @@ def test_create_records_from_files_counts_validation_failures_as_skipped(
     ctx.commit()
     wf_ctx = _wf_ctx(ctx, trigger, dataset)
 
-    registration = get_plugin("civex.create_records_from_files")
-    config = registration.config_model(schema="attachment", file_field="file_field")
+    registration = get_plugin("civex.save_records@1")
+    config = registration.config_model(
+        schema="attachment", file_field="file_field", if_exists="add_new"
+    )
     ref = ctx.file_svc.store_bytes(b"x", "a.txt")
     result = registration.invoke({"files": [ref.to_dict()]}, config, wf_ctx, 60.0)
 
-    assert result.outputs == {"created": 0, "skipped": 1}
+    assert result.outputs["created"] == 0 and result.outputs["skipped"] == 1
+
+
+def _files(result):
+    out = result.outputs
+    return out["created"], out["updated"], out["unmatched"], out["ambiguous"]
 
 
 def test_match_files_to_records_creates_then_updates_by_key(
@@ -408,40 +316,25 @@ def test_match_files_to_records_creates_then_updates_by_key(
     ctx.commit()
     wf_ctx = _wf_ctx(ctx, trigger, dataset)
 
-    registration = get_plugin("civex.match_files_to_records")
+    registration = get_plugin("civex.save_records@1")
     config = registration.config_model(
         schema="selection",
-        key_field="selection_number",
+        match_on=["selection_number"],
         file_field="contour_file",
-        pattern=r"sel_(\d+)",
+        filename_pattern=r"sel_(\d+)",
     )
 
     ref1 = ctx.file_svc.store_bytes(b"x", "sel_01.txt")
     result1 = registration.invoke({"files": [ref1.to_dict()]}, config, wf_ctx, 60.0)
-    assert result1.outputs == {
-        "created": 1,
-        "updated": 0,
-        "unmatched": [],
-        "ambiguous": [],
-    }
+    assert _files(result1) == (1, 0, [], [])
 
     ref2 = ctx.file_svc.store_bytes(b"y", "sel_01_v2.txt")
     result2 = registration.invoke({"files": [ref2.to_dict()]}, config, wf_ctx, 60.0)
-    assert result2.outputs == {
-        "created": 0,
-        "updated": 1,
-        "unmatched": [],
-        "ambiguous": [],
-    }
+    assert _files(result2) == (0, 1, [], [])
 
     ref3 = ctx.file_svc.store_bytes(b"z", "nope.txt")
     result3 = registration.invoke({"files": [ref3.to_dict()]}, config, wf_ctx, 60.0)
-    assert result3.outputs == {
-        "created": 0,
-        "updated": 0,
-        "unmatched": ["nope.txt"],
-        "ambiguous": [],
-    }
+    assert _files(result3) == (0, 0, ["nope.txt"], [])
 
 
 def test_upsert_records_creates_then_updates_by_key(
@@ -455,11 +348,11 @@ def test_upsert_records_creates_then_updates_by_key(
     )
     wf_ctx = _wf_ctx(ctx, trigger, dataset)
 
-    registration = get_plugin("civex.upsert_records")
-    config = registration.config_model(schema="item", key_field="sku")
+    registration = get_plugin("civex.save_records@1")
+    config = registration.config_model(schema="item", match_on=["sku"])
 
     result1 = registration.invoke(
-        {"table": pd.DataFrame([{"sku": "A1", "qty": 5}])}, config, wf_ctx, 60.0
+        {"rows": pd.DataFrame([{"sku": "A1", "qty": 5}])}, config, wf_ctx, 60.0
     )
     assert result1.outputs == {
         "created": 1,
@@ -470,7 +363,7 @@ def test_upsert_records_creates_then_updates_by_key(
     }
 
     result2 = registration.invoke(
-        {"table": pd.DataFrame([{"sku": "A1", "qty": 9}])}, config, wf_ctx, 60.0
+        {"rows": pd.DataFrame([{"sku": "A1", "qty": 9}])}, config, wf_ctx, 60.0
     )
     assert result2.outputs == {
         "created": 0,
@@ -494,10 +387,10 @@ def test_upsert_records_skips_and_names_rows_with_missing_key_value(
     make_schema("item", fields=[("sku", "string"), ("qty", "integer")])
     wf_ctx = _wf_ctx(ctx, trigger, dataset)
 
-    registration = get_plugin("civex.upsert_records")
-    config = registration.config_model(schema="item", key_field="sku")
+    registration = get_plugin("civex.save_records@1")
+    config = registration.config_model(schema="item", match_on=["sku"])
     result = registration.invoke(
-        {"table": pd.DataFrame([{"sku": None, "qty": 1}])}, config, wf_ctx, 60.0
+        {"rows": pd.DataFrame([{"sku": None, "qty": 1}])}, config, wf_ctx, 60.0
     )
 
     # Counted and named now, not dropped without a word.
@@ -523,16 +416,55 @@ def test_upsert_records_counts_validation_failures_as_skipped_and_continues(
     ctx.commit()
     wf_ctx = _wf_ctx(ctx, trigger, dataset)
 
-    registration = get_plugin("civex.upsert_records")
-    config = registration.config_model(schema="item", key_field="sku")
+    registration = get_plugin("civex.save_records@1")
+    config = registration.config_model(schema="item", match_on=["sku"])
     df = pd.DataFrame(
         [
             {"sku": "A1", "qty": 5, "required_note": "ok"},
             {"sku": "A2", "qty": 6},  # missing required_note -> fails validation
         ]
     )
-    result = registration.invoke({"table": df}, config, wf_ctx, 60.0)
+    result = registration.invoke({"rows": df}, config, wf_ctx, 60.0)
 
     assert result.outputs["created"] == 1 and result.outputs["skipped"] == 1
     existing = ctx.record_svc.find("study", schema_name="item")
     assert [r.data["sku"] for r in existing] == ["A1"]
+
+
+def test_set_fields_sets_values_updates_and_a_single_value(
+    ctx, make_collection, make_schema, make_record
+):
+    dataset = make_collection("study")
+    make_schema("subject", fields=[("a", "string"), ("b", "string"), ("c", "string")])
+    record = make_record("study", "subject", {"a": "1", "b": "orig", "c": "x"})
+    wf_ctx = _wf_ctx(ctx, record, dataset)
+
+    registration = get_plugin("civex.set_fields@1")
+    result = registration.invoke(
+        {"updates": {"a": "2", "b": None}, "value": "z"},
+        registration.config_model(field="c"),
+        wf_ctx,
+        60.0,
+    )
+
+    assert result.outputs == {}
+    updated = ctx.record_svc.get(str(record.id))
+    assert updated.data["a"] == "2"
+    assert updated.data["b"] == "orig"  # an empty update never clears a field
+    assert updated.data["c"] == "z"
+
+
+def test_files_from_a_field_lists_the_files(
+    ctx, make_collection, make_schema, make_record
+):
+    dataset = make_collection("study")
+    make_schema("doc", fields=[("attachment", "file")])
+    file_ref = ctx.file_svc.store_bytes(b"hello world", "hello.txt")
+    record = make_record("study", "doc", {"attachment": file_ref.to_dict()})
+    wf_ctx = _wf_ctx(ctx, record, dataset)
+
+    registration = get_plugin("civex.files@1")
+    result = registration.invoke(
+        {}, registration.config_model(source="field", field="attachment"), wf_ctx, 60.0
+    )
+    assert [f["filename"] for f in result.outputs["files"]] == ["hello.txt"]

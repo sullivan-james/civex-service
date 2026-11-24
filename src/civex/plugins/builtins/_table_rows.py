@@ -1,7 +1,7 @@
-"""Saving a table's rows as records: the one implementation behind
-`civex.rows_to_records` and its older name `civex.upsert_records`.
+"""Saving a table's rows as records: the rows half of `civex.save_records`.
 
-With no key, every row makes a new record (a pure insert). With a key (the
+With `if_exists: add_new`, or no key, every row makes a new record (a pure
+insert). With `skip`, a row whose record exists is left alone (and named). With a key (the
 fields named in *Match rows by*, else the kind's first unique key), a row is
 the same record as one already inside the same record (or at the top of the
 collection) whose key fields hold the row's values, compared the way a unique
@@ -189,9 +189,10 @@ def save_rows(
     match_on: list[str],
     mapping: dict[str, str],
     parent_record_id: str,
+    if_exists: str = "update",
 ) -> dict[str, Any]:
     dataset_name = dataset or ctx.get_context_dataset()["name"]
-    key = match_key(ctx, schema_name, match_on)
+    key = {} if if_exists == "add_new" else match_key(ctx, schema_name, match_on)
     parent_id = parent_record_id or ctx.get_context_record()["id"]
     columns = list(df.columns)
     log.info(
@@ -235,6 +236,12 @@ def save_rows(
             if not found:
                 ctx.create_record(dataset_name, schema_name, data, parent_id)
                 out.created += 1
+                continue
+            if if_exists == "skip":
+                out.skip(
+                    f"Row {number}: a record with {_said(key, values)} already "
+                    "exists, left as it is"
+                )
                 continue
             before = found[0]
             after = ctx.patch_record(before["id"], data)

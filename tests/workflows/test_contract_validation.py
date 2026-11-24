@@ -29,16 +29,13 @@ def test_valid_workflow_has_no_contract_errors():
         _errors("""
 name: csv-import
 steps:
-  - id: load
-    plugin: civex.load_file
-    config: {field: attachment}
   - id: parse
-    plugin: civex.parse_table
-    inputs: {bytes: load.bytes}
+    plugin: civex.table@1
+    config: {field: attachment}
   - id: store
-    plugin: civex.upsert_records
-    config: {schema: Sample, key_field: sample_id}
-    inputs: {table: parse.table}
+    plugin: civex.save_records@1
+    config: {schema: Sample, match_on: [sample_id]}
+    inputs: {rows: parse.table}
 """)
         == []
     )
@@ -62,11 +59,11 @@ def test_typo_in_config_key_is_rejected():
 name: wf
 steps:
   - id: one
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config: {fileds: subject}
 """)
     assert any("unknown key 'fileds'" in e for e in errors)
-    assert any("accepts: field" in e for e in errors)
+    assert any("accepts: date_format, field, output_type, pattern" in e for e in errors)
 
 
 def test_missing_required_config_key_is_rejected():
@@ -74,10 +71,10 @@ def test_missing_required_config_key_is_rejected():
 name: wf
 steps:
   - id: one
-    plugin: civex.get_field
+    plugin: civex.save_records@1
     config: {}
 """)
-    assert errors == ["Step 'one' config: 'field' is a required property"]
+    assert errors == ["Step 'one' config: 'schema' is a required property"]
 
 
 def test_config_value_of_wrong_type_is_rejected():
@@ -85,7 +82,7 @@ def test_config_value_of_wrong_type_is_rejected():
 name: wf
 steps:
   - id: one
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config: {field: 42}
 """)
     assert errors == ["Step 'one' config: field: 42 is not of type 'string'"]
@@ -100,9 +97,9 @@ def test_config_key_declared_by_alias_is_accepted():
 name: wf
 steps:
   - id: one
-    plugin: civex.rows_to_records
+    plugin: civex.save_records@1
     config: {schema: Sample}
-    inputs: {table: __input__.rows}
+    inputs: {rows: __input__.rows}
 inputs:
   rows: {type: value}
 """)
@@ -115,15 +112,14 @@ def test_unknown_input_name_is_rejected():
 name: wf
 steps:
   - id: get
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config: {field: a}
   - id: save
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config: {field: b}
     inputs: {valeu: get.value}
 """)
     assert any("supplies unknown input 'valeu'" in e for e in errors)
-    assert any("missing required input 'value'" in e for e in errors)
 
 
 def test_reference_to_an_output_the_upstream_step_does_not_produce():
@@ -134,11 +130,11 @@ def test_reference_to_an_output_the_upstream_step_does_not_produce():
 name: wf
 steps:
   - id: save
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config: {field: a}
     inputs: {value: __input__.v}
   - id: after
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config: {field: b}
     inputs: {value: save.result}
 inputs:
@@ -146,7 +142,7 @@ inputs:
 """)
     assert errors == [
         "Step 'after' input 'value' references 'save.result', but step 'save' "
-        "(civex.save_field) produces no output 'result' (produces: none)"
+        "(civex.set_fields@1) produces no output 'result' (produces: none)"
     ]
 
 
@@ -155,7 +151,7 @@ def test_reference_to_unknown_step_is_reported():
 name: wf
 steps:
   - id: one
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config: {field: a}
     inputs: {value: nope.value}
 """)
@@ -167,7 +163,7 @@ def test_reference_without_an_output_name_is_reported():
 name: wf
 steps:
   - id: one
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config: {field: a}
     inputs: {value: justastep}
 """)
@@ -181,7 +177,7 @@ def test_manual_run_input_must_be_declared_by_the_workflow():
 name: wf
 steps:
   - id: one
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config: {field: a}
     inputs: {value: __input__.missing}
 inputs:
@@ -199,7 +195,7 @@ def test_declared_manual_run_input_is_accepted():
 name: wf
 steps:
   - id: one
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config: {field: a}
     inputs: {value: __input__.present}
 inputs:
@@ -216,10 +212,10 @@ def test_duplicate_step_ids_are_reported():
 name: wf
 steps:
   - id: same
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config: {field: a}
   - id: same
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config: {field: b}
 """)
     assert errors == ["Step id 'same' is used more than once"]
@@ -232,13 +228,14 @@ def test_all_violations_are_reported_together():
 name: wf
 steps:
   - id: one
-    plugin: civex.get_field
+    plugin: civex.save_records@1
     config: {}
   - id: two
     plugin: civex.nope
   - id: three
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config: {field: x}
+    inputs: {valeu: one.created}
 """)
     assert len(errors) == 3
 
@@ -249,10 +246,10 @@ def test_valid_if_condition_has_no_errors():
 name: wf
 steps:
   - id: one
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config: {field: a}
   - id: two
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config: {field: b}
     inputs: {value: __input__.v}
     if: one.value == 'x'
@@ -268,7 +265,7 @@ def test_if_referencing_unknown_step_is_reported():
 name: wf
 steps:
   - id: one
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config: {field: a}
     inputs: {value: __input__.v}
     if: nope.value
@@ -283,7 +280,7 @@ def test_if_referencing_undeclared_workflow_input_is_reported():
 name: wf
 steps:
   - id: one
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config: {field: a}
     inputs: {value: __input__.v}
     if: __input__.missing
@@ -301,11 +298,11 @@ def test_if_referencing_an_output_the_upstream_step_does_not_produce():
 name: wf
 steps:
   - id: save
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config: {field: a}
     inputs: {value: __input__.v}
   - id: after
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config: {field: b}
     inputs: {value: __input__.v}
     if: save.result == 1
@@ -314,7 +311,7 @@ inputs:
 """)
     assert errors == [
         "Step 'after' 'if' references 'save.result', but step 'save' "
-        "(civex.save_field) produces no output 'result' (produces: none)"
+        "(civex.set_fields@1) produces no output 'result' (produces: none)"
     ]
 
 
@@ -323,7 +320,7 @@ def test_unsafe_if_expression_is_rejected():
 name: wf
 steps:
   - id: one
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config: {field: a}
     inputs: {value: __input__.v}
     if: one.value + 1
@@ -340,19 +337,19 @@ def test_plugin_declaring_no_input_contract_is_not_input_checked(monkeypatch):
     using it unsaveable."""
     import dataclasses
 
-    registration = all_plugins()["civex.get_field"]
+    registration = all_plugins()["civex.value_from_filename@1"]
     undeclared = dataclasses.replace(registration, inputs=None, outputs=None)
-    plugins = {**all_plugins(), "civex.get_field": undeclared}
+    plugins = {**all_plugins(), "civex.value_from_filename@1": undeclared}
 
     wf = WorkflowDef.model_validate(
         yaml.safe_load("""
 name: wf
 steps:
   - id: one
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config: {field: a}
   - id: two
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config: {field: b}
     inputs: {anything_at_all: one.whatever}
 """)
@@ -365,7 +362,7 @@ def test_undeclared_contract_does_not_exempt_config_validation(monkeypatch):
     validation -- every plugin has a Config model."""
     import dataclasses
 
-    registration = all_plugins()["civex.get_field"]
+    registration = all_plugins()["civex.value_from_filename@1"]
     undeclared = dataclasses.replace(registration, inputs=None, outputs=None)
 
     wf = WorkflowDef.model_validate(
@@ -373,11 +370,13 @@ def test_undeclared_contract_does_not_exempt_config_validation(monkeypatch):
 name: wf
 steps:
   - id: one
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config: {nonsense: 1}
 """)
     )
-    errors = validate_workflow_contracts(wf, {"civex.get_field": undeclared})
+    errors = validate_workflow_contracts(
+        wf, {"civex.value_from_filename@1": undeclared}
+    )
     assert any("unknown key 'nonsense'" in e.message for e in errors)
 
 
@@ -391,7 +390,7 @@ def test_save_rejects_a_workflow_that_violates_a_contract(ctx):
 name: broken
 steps:
   - id: one
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config: {field: subject, fileds: subject}
 """,
         )
@@ -404,7 +403,7 @@ steps:
             "step": "one",
             "message": (
                 "Step 'one' config has unknown key 'fileds' for plugin "
-                "'civex.get_field' (accepts: field)"
+                "'civex.value_from_filename@1' (accepts: date_format, field, output_type, pattern)"
             ),
         }
     ]
@@ -419,7 +418,7 @@ def test_contract_errors_are_tagged_with_their_step():
 name: wf
 steps:
   - id: one
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config: {}
   - id: two
     plugin: civex.nope
@@ -447,7 +446,7 @@ def test_run_revalidates_before_executing_any_step(
 name: wf
 steps:
   - id: one
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config: {no_such_key: x}
 """)
     )

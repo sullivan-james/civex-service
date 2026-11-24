@@ -28,7 +28,7 @@ def test_run_returns_a_success_record_per_step(
 name: wf
 steps:
   - id: read
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config: {field: name}
 """)
     )
@@ -38,10 +38,10 @@ steps:
     assert step_executions == [
         {
             "step_id": "read",
-            "plugin": "civex.get_field",
+            "plugin": "civex.value_from_filename@1",
             "status": "success",
             "inputs": {},
-            "outputs": {"value": "alice"},
+            "outputs": {"value": "alice", "filename": "alice", "extracted": "alice"},
             "duration_seconds": step_executions[0]["duration_seconds"],
             "error": None,
             "depends_on": [],
@@ -63,10 +63,10 @@ def test_run_records_depends_on_for_a_step_that_reads_another_steps_output(
 name: wf
 steps:
   - id: read
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config: {field: name}
   - id: write
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config: {field: copy}
     inputs: {value: read.value}
 """)
@@ -91,7 +91,7 @@ def test_run_records_a_skipped_step(ctx, make_collection, make_schema, make_reco
 name: wf
 steps:
   - id: read
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config: {field: name}
     if: "1 == 2"
 """)
@@ -102,7 +102,7 @@ steps:
     assert step_executions == [
         {
             "step_id": "read",
-            "plugin": "civex.get_field",
+            "plugin": "civex.value_from_filename@1",
             "status": "skipped",
             "inputs": {},
             "outputs": None,
@@ -126,10 +126,10 @@ def test_a_failing_step_attaches_partial_records_to_the_exception(
 name: wf
 steps:
   - id: read
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config: {field: name}
   - id: load-the-attachment
-    plugin: civex.load_file
+    plugin: civex.table@1
     config: {field: attachment}
 """)
     )
@@ -162,7 +162,7 @@ def test_drain_jobs_persists_step_executions_on_a_completed_job(
 name: fine
 steps:
   - id: read
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config: {field: name}
 """)
     job = ctx.job_svc.enqueue_manual("fine", record)
@@ -176,10 +176,10 @@ steps:
     assert finished.step_executions == [
         {
             "step_id": "read",
-            "plugin": "civex.get_field",
+            "plugin": "civex.value_from_filename@1",
             "status": "success",
             "inputs": {},
-            "outputs": {"value": "alice"},
+            "outputs": {"value": "alice", "filename": "alice", "extracted": "alice"},
             "duration_seconds": finished.step_executions[0]["duration_seconds"],
             "error": None,
             "depends_on": [],
@@ -202,7 +202,7 @@ def test_drain_jobs_persists_partial_step_executions_on_a_failed_job(
 name: failing
 steps:
   - id: load-the-attachment
-    plugin: civex.load_file
+    plugin: civex.table@1
     config: {field: attachment}
 """)
     job = ctx.job_svc.enqueue_manual("failing", record)
@@ -237,14 +237,14 @@ def test_failure_counts_by_plugin_aggregates_across_jobs(
 name: failing
 steps:
   - id: load-the-attachment
-    plugin: civex.load_file
+    plugin: civex.table@1
     config: {field: attachment}
 """)
     (wf_dir / "fine.yaml").write_text("""
 name: fine
 steps:
   - id: read
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config: {field: name}
 """)
 
@@ -259,4 +259,4 @@ steps:
 
     drain_jobs(ctx)
 
-    assert ctx.job_svc.failure_counts_by_plugin() == {"civex.load_file": 2}
+    assert ctx.job_svc.failure_counts_by_plugin() == {"civex.table@1": 2}

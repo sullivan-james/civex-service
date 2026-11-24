@@ -33,11 +33,13 @@ def setup(ctx, make_collection, make_schema, make_record):
 
 
 def _upsert(wf_ctx, rows: list[dict]):
-    registration = get_plugin("civex.upsert_records")
-    config = registration.config_model(schema="selection", key_field="selection_number")
+    registration = get_plugin("civex.save_records@1")
+    config = registration.config_model(
+        schema="selection", match_on=["selection_number"]
+    )
     # The table as the previous step hands it on.
     df = pd.DataFrame(rows)
-    registration.invoke({"table": df}, config, wf_ctx, 60.0)
+    registration.invoke({"rows": df}, config, wf_ctx, 60.0)
     return df
 
 
@@ -162,7 +164,7 @@ def test_patch_record_reads_the_record_as_it_is_now(ctx, setup) -> None:
 def test_save_fields_keeps_everything_else_too(ctx, setup) -> None:
     wf_ctx, parent = setup
     rid = _existing(ctx, parent)
-    registration = get_plugin("civex.save_fields")
+    registration = get_plugin("civex.set_fields@1")
     ctx_for_record = WorkflowContext(
         record=ctx.record_svc.get(rid), dataset=wf_ctx.dataset, _app_ctx=ctx
     )

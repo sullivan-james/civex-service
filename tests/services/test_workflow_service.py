@@ -16,7 +16,7 @@ name: parse-audio-dates
 description: A workflow
 steps:
   - id: step-one
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config:
       field: subject
 """
@@ -101,13 +101,13 @@ _CYCLE_YAML = """\
 name: cyclic
 steps:
   - id: a
-    plugin: civex.parse_table
+    plugin: civex.table@1
     inputs:
-      bytes: b.table
+      files: b.table
   - id: b
-    plugin: civex.parse_table
+    plugin: civex.table@1
     inputs:
-      bytes: a.table
+      files: a.table
 """
 
 

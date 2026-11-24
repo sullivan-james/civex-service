@@ -143,6 +143,47 @@ class WorkflowContext:
             path, str(self.dataset.id), filename=filename
         )
 
+    def store_folder(
+        self, folder: str, pattern: str = "*", subfolders: bool = False
+    ) -> dict[str, Any]:
+        """Store the files of a folder on this computer in the run's collection,
+        the host reading them from disk itself (nothing is uploaded). A file
+        whose content is already stored is not copied again. Says how far it
+        has got as it goes. Only where the host offers reading folders
+        (`features.SERVER_PATH_IMPORT`: never on a hub). Returns
+        `{"files": [FileRef dicts], "stored": n, "already_stored": n}`."""
+        from civex.domain import features
+        from civex.domain.exceptions import FeatureUnavailableError, ValidationError
+
+        if not features.enabled(self._app_ctx.features, features.SERVER_PATH_IMPORT):
+            raise FeatureUnavailableError(features.SERVER_PATH_IMPORT)
+        root = Path(folder).expanduser()
+        if not root.is_absolute() or not root.is_dir():
+            raise ValidationError(f"'{folder}' is not a folder on this computer.")
+        pattern = pattern or "*"
+        if Path(pattern).is_absolute() or ".." in Path(pattern).parts:
+            raise ValidationError("The file filter must stay inside the folder.")
+        matches = root.rglob(pattern) if subfolders else root.glob(pattern)
+        real_root = root.resolve()
+        paths = sorted(
+            p
+            for p in matches
+            if p.is_file()
+            and p.resolve().is_relative_to(real_root)
+            and not any(part.startswith(".") for part in p.relative_to(root).parts)
+        )
+        refs: list[dict[str, Any]] = []
+        new = 0
+        for number, path in enumerate(paths, start=1):
+            self.progress(number - 1, len(paths), f"Reading {path.name}")
+            ref, stored = self._app_ctx.file_svc.store_unless_stored(
+                path, str(self.dataset.id)
+            )
+            refs.append(ref.to_dict())
+            new += stored
+        self.progress(len(paths), len(paths), "")
+        return {"files": refs, "stored": new, "already_stored": len(refs) - new}
+
     def copy_file(self, sha256: str, dest: Path) -> None:
         """Write a stored file's bytes to `dest`, a chunk at a time."""
         with open(dest, "wb") as out:

@@ -16,7 +16,12 @@ from civex.domain import features as f
 from civex.project import Project, scaffold_project
 from civex.server.app import api_routers, create_app
 
-MACHINE_TOUCHING = {f.SERVER_PATH_EXPORT, f.PLUGIN_INSTALL, f.REMOTE_DIAL}
+MACHINE_TOUCHING = {
+    f.SERVER_PATH_EXPORT,
+    f.SERVER_PATH_IMPORT,
+    f.PLUGIN_INSTALL,
+    f.REMOTE_DIAL,
+}
 HOSTED = (
     f.LOCAL_FEATURES
     - {f.VOLUMES, f.TERMINAL, f.DESKTOP, f.LOCAL_WORKFLOWS}

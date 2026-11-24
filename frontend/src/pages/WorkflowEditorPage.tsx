@@ -362,12 +362,32 @@ export default function WorkflowEditorPage({
     )
   }
 
-  const inputs: Record<string, WorkflowInput> = Object.fromEntries(
-    (draft?.inputs ?? []).map((i) => [
-      i.key,
-      { type: i.type, label: i.label || null, description: null },
-    ]),
-  )
+  // What it asks for when run: its own value inputs, and each Files step set
+  // to be chosen then (named by the step).
+  const inputs: Record<string, WorkflowInput> = {
+    ...Object.fromEntries(
+      (draft?.steps ?? [])
+        .filter(
+          (s) =>
+            s.plugin.startsWith('civex.files') &&
+            (s.config.source ?? 'run') === 'run',
+        )
+        .map((s) => [
+          s.id,
+          {
+            type: 'files',
+            label: typeof s.config.label === 'string' ? s.config.label : s.id,
+            description: null,
+          },
+        ]),
+    ),
+    ...Object.fromEntries(
+      (draft?.inputs ?? []).map((i) => [
+        i.key,
+        { type: i.type, label: i.label || null, description: null },
+      ]),
+    ),
+  }
   const triggered = !!draft && (draft.onCreated || draft.onUpdated)
 
   return (

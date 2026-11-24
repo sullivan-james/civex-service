@@ -22,6 +22,7 @@ export const LOCAL_FEATURES = [
   'settings_devices',
   'settings_members',
   'remote_dial',
+  'server_path_import',
 ] as const
 
 export type Feature = (typeof LOCAL_FEATURES)[number] | string

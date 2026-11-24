@@ -1,0 +1,22 @@
+name: Upsert Sequence Selections from WAV Files
+description: |
+  Manual workflow: Upload WAV files matching sel_NN pattern (sel_01_*.wav, sel_02_*.wav, etc.)
+  to match and attach to Sequence Selection records by extracting the sequence number.
+record_schema: recording
+steps:
+  - id: seq_wav_files
+    plugin: civex.files@1
+    config:
+      source: run
+      label: Sequence WAV files (sel_01_*.wav, sel_02_*.wav, etc.)
+  - id: match-files-to-sequences
+    plugin: civex.save_records@1
+    config:
+      schema: sequence_selection
+      if_exists: update
+      match_on:
+        - selection_number
+      filename_pattern: sel_(\d+)
+      file_field: seq_wav_file
+    inputs:
+      files: seq_wav_files.files

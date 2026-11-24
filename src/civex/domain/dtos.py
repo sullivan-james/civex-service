@@ -1792,7 +1792,7 @@ class AnalyticsFilters:
     `dataset`/`schema` are names (not ids), matching how every other
     endpoint in this API addresses them. `workflow_id`/`plugin_id` are the
     string identifiers used elsewhere too (WorkflowDef.name and the plugin
-    registry key, e.g. "civex.load_file") -- neither resource has a separate
+    registry key, e.g. "civex.table@1") -- neither resource has a separate
     numeric/uuid id.
     """
 

@@ -92,8 +92,8 @@ tests/
 
 **4. Workflows and plugins** — executor topological sort, cycle detection,
 `step_id.output_name` resolution, manual-run `__input__` path, and one test
-per built-in plugin (especially the regex-heavy `extract_from_filename` and
-`match_files_to_records`).
+per built-in plugin (especially the regex-heavy `value_from_filename` and
+`save_records`).
 
 **5. Server routers** — `datasets`, `files`, `jobs`, `plugins`, `workflows`,
 `store`, `dump` have no tests. `ai.py` (873 lines, the largest

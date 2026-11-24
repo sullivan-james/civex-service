@@ -307,7 +307,7 @@ function fits(groups: Group[], tokens: string[]): boolean {
 }
 
 /** The capture regex for a token format, for the plugin that takes the text
- * first and reads it with the format second (`civex.extract_from_filename`):
+ * first and reads it with the format second (`civex.value_from_filename`):
  * `YYYYMMDD[-_]HHmmSS` → `([0-9]{8}[-_][0-9]{6})`. */
 export function captureForDateFormat(fmt: string): string {
   let body = ''
@@ -360,7 +360,7 @@ export function describeDateFormat(text: string, fmt: string): string {
 }
 
 /** Names that give the same key once it is compared as the records' field is
- * ("07" and "7" are one key; `civex.match_files_to_records`), by that key:
+ * ("07" and "7" are one key; `civex.save_records (files)`), by that key:
  * only keys more than one name gives. */
 export function keyClashes(
   results: { filename: string; value: unknown }[],

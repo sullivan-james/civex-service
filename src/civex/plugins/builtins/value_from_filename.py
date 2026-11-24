@@ -13,13 +13,13 @@ from civex.plugins.hints import choices, hint, says
 
 
 class Plugin(PluginBase):
-    id = "civex.extract_from_filename"
-    name = "Take a value from a file name"
+    id = "civex.value_from_filename@1"
+    name = "Value from the file name"
     description = (
-        "Apply a regex to a file field's filename and optionally convert the "
-        "captured text to a date/datetime/number."
+        "Take a piece of the name of a file on this record, such as a date or "
+        "a number written in it, to use in later steps."
     )
-    category = "data-access"
+    category = "work-out"
     capabilities: list[str] = ["read"]
     inputs: list[IOSpec] = []
     outputs = [

@@ -107,7 +107,13 @@ def _registration(launcher: Launcher, describe_result: Any) -> PluginRegistratio
     and are what the host functions it calls are checked against, never
     re-derived from the running plugin."""
     capabilities = list(describe_result.capabilities)
-    from civex.plugins.host_api import unknown_capabilities
+    from civex.plugins.host_api import explicit_functions, unknown_capabilities
+
+    if launcher.tier != PluginTier.BUILTIN:
+        # A function that reaches beyond the project (reading a folder on the
+        # host) is for civex's own steps: a plugin can't give itself it by
+        # naming it, whatever its tier's sandbox.
+        capabilities = [c for c in capabilities if c not in explicit_functions()]
 
     unknown = unknown_capabilities(capabilities)
     if unknown:

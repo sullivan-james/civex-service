@@ -87,7 +87,8 @@ def validate_workflow_contracts(
             errors.append(
                 ContractError(
                     step=step.id,
-                    message=f"Step '{step.id}' references unknown plugin '{step.plugin}'",
+                    message=f"Step '{step.id}' references unknown plugin '{step.plugin}'"
+                    + _version_hint(step.plugin, plugins),
                 )
             )
         else:
@@ -103,6 +104,15 @@ def validate_workflow_contracts(
         )
 
     return errors
+
+
+def _version_hint(plugin: str, plugins: Mapping[str, "PluginRegistration"]) -> str:
+    """What to say beside an unknown plugin id that is a built-in step written
+    without its version (`civex.save_records`): the versions there are."""
+    versions = sorted(p for p in plugins if p.startswith(plugin + "@"))
+    if not versions:
+        return ""
+    return f" (built-in steps are named with their version: {', '.join(versions)})"
 
 
 def _check_unique_step_ids(wf: "WorkflowDef") -> list[ContractError]:
@@ -139,6 +149,36 @@ def _check_config(
     if schema is None:
         schema = registration.config_model.model_json_schema()
 
+    # A setting given as `{from_field: x}` takes its value from the record at
+    # run time: whatever its type, its form is what is checked, not its value.
+    from_record = {
+        key
+        for key, value in step.config.items()
+        if isinstance(value, dict) and "from_field" in value
+    }
+    errors_extra: list[ContractError] = []
+    if step.plugin.partition("@")[0] == "civex.files":
+        for key in ("source", "folder"):
+            if key in from_record:
+                errors_extra.append(
+                    ContractError(
+                        step=step.id,
+                        message=f"Step '{step.id}' can't take '{key}' from a "
+                        "field: what a Files step reads is chosen by whoever "
+                        "writes or runs the workflow, not by a record's data",
+                    )
+                )
+    if "provided" in step.inputs and any(
+        s.name == "provided" for s in registration.inputs or []
+    ):
+        errors_extra.append(
+            ContractError(
+                step=step.id,
+                message=f"Step '{step.id}' input 'provided' is filled in by "
+                "civex from what is chosen when the workflow is run; "
+                "don't connect it",
+            )
+        )
     errors = [
         ContractError(
             step=step.id, message=f"Step '{step.id}' config: {_format_schema_error(e)}"
@@ -147,7 +187,9 @@ def _check_config(
             Draft202012Validator(schema).iter_errors(step.config),
             key=lambda e: list(e.path),
         )
+        if not (e.path and e.path[0] in from_record)
     ]
+    errors.extend(errors_extra)
 
     properties = schema.get("properties")
     if properties is not None and schema.get("additionalProperties") is not True:

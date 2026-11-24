@@ -93,7 +93,9 @@ def config_table(schema: dict) -> str:
 
 
 for pid, reg in sorted(registry.all_plugins().items()):
-    slug = pid.removeprefix("civex.")
+    if not pid.startswith("civex."):
+        continue
+    slug = pid.removeprefix("civex.").partition("@")[0]  # one page per step
     prose = (PROSE_DIR / f"{slug}.md").read_text()
     tables = (
         header(reg)

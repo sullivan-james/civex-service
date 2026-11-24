@@ -47,8 +47,8 @@ def test_list_registered_includes_capabilities(ctx: AppContext) -> None:
     API/frontend surfaces need it to show what an out-of-process plugin is
     allowed to touch."""
     registered = {p["id"]: p for p in ctx.plugin_svc.list_registered()}
-    assert registered["civex.save_field"]["capabilities"] == ["read", "write_records"]
-    assert registered["civex.parse_table"]["capabilities"] == []
+    assert registered["civex.set_fields@1"]["capabilities"] == ["read", "write_records"]
+    assert registered["civex.table@1"]["capabilities"] == ["read"]
 
 
 def test_list_registered_includes_category_and_config_schema(

@@ -5,7 +5,7 @@ import {
 } from './workflowYaml'
 
 describe('buildFilesImportWorkflowYaml', () => {
-  it('emits a create_records_from_files step for the "create" strategy', () => {
+  it('emits a Files step and a save_records step that adds new records for the "create" strategy', () => {
     const yaml = buildFilesImportWorkflowYaml({
       name: 'Import scans',
       strategy: 'create',
@@ -14,17 +14,19 @@ describe('buildFilesImportWorkflowYaml', () => {
       datasetName: 'study-1',
     })
     expect(yaml).toContain('name: "Import scans"')
-    expect(yaml).toContain('type: files')
-    expect(yaml).toContain('plugin: civex.create_records_from_files')
-    expect(yaml).toContain('files: __input__.files')
+    expect(yaml).toContain('plugin: civex.files@1')
+    expect(yaml).toContain('source: run')
+    expect(yaml).toContain('plugin: civex.save_records@1')
+    expect(yaml).toContain('files: files.files')
+    expect(yaml).toContain('if_exists: add_new')
     expect(yaml).toContain('schema: "scan"')
     expect(yaml).toContain('file_field: "file"')
     expect(yaml).toContain('dataset: "study-1"')
-    expect(yaml).not.toContain('context_record_id')
-    expect(yaml).not.toContain('key_field')
+    expect(yaml).not.toContain('parent_record_id')
+    expect(yaml).not.toContain('match_on')
   })
 
-  it('includes context_record_id only when a parent record is given', () => {
+  it('includes parent_record_id only when a parent record is given', () => {
     const yaml = buildFilesImportWorkflowYaml({
       name: 'Import scans',
       strategy: 'create',
@@ -33,10 +35,10 @@ describe('buildFilesImportWorkflowYaml', () => {
       datasetName: 'study-1',
       parentRecordId: 'abc-123',
     })
-    expect(yaml).toContain('context_record_id: "abc-123"')
+    expect(yaml).toContain('parent_record_id: "abc-123"')
   })
 
-  it('emits a match_files_to_records step with key/pattern for the "match" strategy', () => {
+  it('emits match_on and filename_pattern for the "match" strategy', () => {
     const yaml = buildFilesImportWorkflowYaml({
       name: 'Attach scans',
       strategy: 'match',
@@ -47,15 +49,15 @@ describe('buildFilesImportWorkflowYaml', () => {
       keyField: 'subject_id',
       pattern: 'subject_(\\d+)',
     })
-    expect(yaml).toContain('plugin: civex.match_files_to_records')
-    expect(yaml).toContain('key_field: "subject_id"')
-    expect(yaml).toContain('pattern: "subject_(\\\\d+)"')
+    expect(yaml).toContain('if_exists: update')
+    expect(yaml).toContain('- "subject_id"')
+    expect(yaml).toContain('filename_pattern: "subject_(\\\\d+)"')
     expect(yaml).toContain('parent_record_id: "parent-1"')
   })
 })
 
 describe('buildCsvImportWorkflowYaml', () => {
-  it('emits a record_created-triggered load_file -> parse_table -> rows_to_records chain', () => {
+  it('emits a record_created-triggered table -> save_records chain', () => {
     const yaml = buildCsvImportWorkflowYaml({
       name: 'Import subjects',
       triggerSchemaName: 'subject_import',
@@ -67,12 +69,10 @@ describe('buildCsvImportWorkflowYaml', () => {
     expect(yaml).toContain('record_schema: "subject_import"')
     expect(yaml).toContain('record_created:')
     expect(yaml).toContain('schema: "subject_import"')
-    expect(yaml).toContain('plugin: civex.load_file')
+    expect(yaml).toContain('plugin: civex.table@1')
     expect(yaml).toContain('field: "csv_file"')
-    expect(yaml).toContain('plugin: civex.parse_table')
-    expect(yaml).toContain('bytes: load.bytes')
-    expect(yaml).toContain('plugin: civex.rows_to_records')
-    expect(yaml).toContain('table: parse.table')
+    expect(yaml).toContain('plugin: civex.save_records@1')
+    expect(yaml).toContain('rows: parse.table')
     expect(yaml).toContain('schema: "subject"')
     expect(yaml).toContain('dataset: "study-1"')
     expect(yaml).toContain('"Subject ID": "subject_id"')

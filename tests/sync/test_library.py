@@ -29,7 +29,7 @@ triggers:
     schema: encounter
 steps:
   - id: read
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config:
       field: site
 """
@@ -344,7 +344,7 @@ def test_text_damaged_on_the_way_is_not_installed(authority, pair):
     laptop.workflow_svc.save("tidy-sites", _BUILTIN_ONLY)
     laptop.library_svc.publish(WORKFLOW, "tidy-sites")
     row = authority._session.query(LibraryItem).one()
-    row.content = row.content.replace("civex.get_field", "civex.save_field")
+    row.content = row.content.replace("civex.value_from_filename@1", "civex.set_fields@1")
     authority.commit()
 
     with pytest.raises(ValidationError, match="damaged"):
@@ -389,7 +389,7 @@ _CONTRACT = {
     [
         (PLUGIN, "no_class", "x = 1\n", "project.x", _CONTRACT, "class named 'Plugin'"),
         (PLUGIN, "bad_python", "def (:\n", "project.x", _CONTRACT, "not valid Python"),
-        (PLUGIN, "takes_builtin", _PLUGIN, "civex.get_field", _CONTRACT, "built-in"),
+        (PLUGIN, "takes_builtin", _PLUGIN, "civex.value_from_filename@1", _CONTRACT, "built-in"),
         (PLUGIN, "says_nothing", _PLUGIN, None, _CONTRACT, "which plugin id"),
         (PLUGIN, "no_contract", _PLUGIN, "project.x", None, "without its contract"),
         (

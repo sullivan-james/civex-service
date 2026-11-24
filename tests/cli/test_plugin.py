@@ -18,23 +18,23 @@ runner = CliRunner()
 def test_plugin_list_includes_builtins(project_dir: Path) -> None:
     result = runner.invoke(app, ["plugin", "list"])
     assert result.exit_code == 0
-    assert "civex.get_field" in result.output
+    assert "civex" in result.output
     assert "built-in" in result.output
 
 
 def test_plugin_info_shows_description_inputs_outputs_and_config(
     project_dir: Path,
 ) -> None:
-    result = runner.invoke(app, ["plugin", "info", "civex.get_field"])
+    result = runner.invoke(app, ["plugin", "info", "civex.value_from_filename@1"])
     assert result.exit_code == 0
-    assert "Read a field" in result.output
-    assert "civex.get_field" in result.output
+    assert "Value from the file name" in result.output
+    assert "civex.value_from_filename@1" in result.output
     assert "value" in result.output  # declared output name
     assert "field" in result.output  # declared config key
 
 
 def test_plugin_info_shows_capabilities_when_declared(project_dir: Path) -> None:
-    result = runner.invoke(app, ["plugin", "info", "civex.save_field"])
+    result = runner.invoke(app, ["plugin", "info", "civex.set_fields@1"])
     assert result.exit_code == 0
     assert "write_records" in result.output
 

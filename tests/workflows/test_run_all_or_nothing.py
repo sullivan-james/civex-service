@@ -10,14 +10,14 @@ WORKFLOW = """
 name: half
 steps:
   - id: read
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config: {field: source}
   - id: save
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config: {field: title}
     inputs: {value: read.value}
   - id: then-fail
-    plugin: civex.load_file
+    plugin: civex.table@1
     if: "read.value == 'after'"
     config: {field: attachment}
 """
@@ -26,10 +26,10 @@ WORKS = """
 name: whole
 steps:
   - id: read
-    plugin: civex.get_field
+    plugin: civex.value_from_filename@1
     config: {field: source}
   - id: save
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config: {field: title}
     inputs: {value: read.value}
 """

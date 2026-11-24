@@ -1,4 +1,4 @@
-"""`civex.rows_to_records` matches rows to the records already there.
+"""`civex.save_records@1` (rows) matches rows to the records already there.
 
 Running the same table twice once made every record twice: the step only ever
 inserted. With a key (Match rows by, else the kind's unique key) a row updates
@@ -32,10 +32,10 @@ def place(ctx, make_collection, make_schema, make_record):
     return WorkflowContext(record=parent, dataset=dataset, _app_ctx=ctx), parent
 
 
-def _run(wf_ctx, rows, plugin="civex.rows_to_records", **config):
+def _run(wf_ctx, rows, plugin="civex.save_records@1", **config):
     registration = get_plugin(plugin)
     model = registration.config_model(schema="selection", **config)
-    return registration.invoke({"table": pd.DataFrame(rows)}, model, wf_ctx, 60.0)
+    return registration.invoke({"rows": pd.DataFrame(rows)}, model, wf_ctx, 60.0)
 
 
 def _selections(ctx, parent):
@@ -195,7 +195,7 @@ def test_matching_stays_inside_the_record(ctx, place, make_record):
     _run(wf_ctx, TABLE, match_on=["number"])
     other = make_record("study", "recording", {})
 
-    result = _run(wf_ctx, TABLE, match_on=["number"], context_record_id=str(other.id))
+    result = _run(wf_ctx, TABLE, match_on=["number"], parent_record_id=str(other.id))
 
     assert result.outputs["created"] == 3  # the same numbers in another recording
 
@@ -206,14 +206,20 @@ def test_an_unknown_or_unmatchable_field_stops_the_step(ctx, place):
         _run(wf_ctx, TABLE, match_on=["nope"])
 
 
-def test_upsert_records_is_the_same_step_under_its_old_name(ctx, place):
+def test_skip_leaves_matching_records_alone_and_add_new_never_matches(ctx, place):
     wf_ctx, parent = place
-    first = _run(wf_ctx, TABLE, plugin="civex.upsert_records", key_field="number")
-    again = _run(wf_ctx, TABLE, plugin="civex.upsert_records", key_field="number")
+    _run(wf_ctx, TABLE, match_on=["number"])
 
-    assert first.outputs["created"] == 3
-    assert again.outputs["unchanged"] == 3 and again.outputs["created"] == 0
-    assert len(_selections(ctx, parent)) == 3
+    changed = [{"number": 1, "channel": 99}, {"number": 9, "channel": 5}]
+    skipped = _run(wf_ctx, changed, match_on=["number"], if_exists="skip")
+    assert skipped.outputs["created"] == 1 and skipped.outputs["skipped"] == 1
+    assert "already exists, left as it is" in skipped.outputs["skipped_rows"][0]
+    (one,) = [r for r in _selections(ctx, parent) if r.data["number"] == 1]
+    assert one.data["channel"] != 99
+
+    added = _run(wf_ctx, TABLE, match_on=["number"], if_exists="add_new")
+    assert added.outputs["created"] == 3
+    assert len(_selections(ctx, parent)) == 7
 
 
 def test_several_records_with_the_key_are_not_guessed_between(ctx, place):

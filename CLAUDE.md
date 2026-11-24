@@ -206,12 +206,13 @@ A `formula` field is **worked out when read, never stored**: nothing in `records
 - Every plugin, built-in or not, runs over the SDK wire protocol; a tier is only a `Launcher`. Built-ins get an SDK `Ctx`, never a `WorkflowContext`. Custom plugins live in `_civex/plugins/*.py`, define `class Plugin(civex_plugin_sdk.Plugin)`, and declare their contract in the PEP 723 header (`[tool.civex]`).
 - Files go by path in one run folder outside the project; `host_api.inside_run` refuses paths outside it.
 - Triggers: `trigger_for_record()`. On create, `record_updated` fires only with non-null fields in `changed_fields`. `changed` is computed from stored values, never the response form (derived `resolved_filename` once made a file-watching workflow re-trigger itself on every save).
-- Manual inputs: `initial_outputs["__input__"]`, referenced as `__input__.field_name`.
+- Manual inputs: `initial_outputs["__input__"]`. A Files step set to `source: run` is asked for by its step id: the executor fills its optional `provided` input from `__input__.<step id>` (uploaded `FileRef`s, or `{folder, glob, subfolders}` read by the step through the explicit-only `store_folder` host function, gated by `features.SERVER_PATH_IMPORT`, off on a hub). `workflows.definition.run_inputs(wf)` is what a run asks for.
+- **Step versions** (`workflows/upgrades.py`): built-in ids carry a version (`civex.save_records@1`; none = version 0, the pre-versioning steps). A contract change (id, config keys, inputs/outputs) needs a new plugin id, a bump of `upgrades.LATEST`, an `@upgrade(base, from_version)` function that rewrites the raw workflow dict, and golden pairs in `tests/workflows/test_step_upgrades.py`. `load_workflow` upgrades a file on read and rewrites it (old text kept as `<name>.yaml.bak`, atomically, never overwritten); `parse_workflow` upgrades in memory (shared/pasted/saved text). A step version beyond `LATEST` raises `NeedsNewerCivex`. A setting `{from_field: x}` is resolved by the executor from the record (`resolve_from_fields`).
 - `AutomationConfig.paused` is the kill switch; `WorkflowJobService` is its one decision point. Every drain must pass `WorkflowContext.job_depth` (chains stop at `MAX_JOB_DEPTH`).
-- `civex.match_files_to_records` refuses to guess: clashing keys are skipped and listed as `ambiguous`.
+- `civex.save_records` (files) refuses to guess: clashing keys are skipped and listed as `ambiguous`.
 - `utils/runNarrative.runProblems` (frontend) is the one rule for "finished with problems"; a new plugin output meaning "left something undone" belongs there.
 
-Built-in plugins (`plugins/builtins/`, auto-discovered): `get_field`, `save_field`, `save_fields`, `load_file`, `load_file_list`, `extract_from_filename`, `create_records_from_files`, `match_files_to_records`, `upsert_records`, `rows_to_records`, `parse_table`, all prefixed `civex.`.
+Built-in steps (`plugins/builtins/`, auto-discovered), in the app's three groups: Bring in: `civex.files@1`, `civex.table@1`; Work out: `civex.value_from_filename@1`; Save: `civex.save_records@1`, `civex.set_fields@1`.
 
 ## Frontend
 

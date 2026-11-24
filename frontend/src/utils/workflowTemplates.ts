@@ -46,11 +46,11 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
     build: (schema) => `${head('Fill a field from the file name', schema)}
 ${onChange(schema)}steps:
   - id: take_from_name
-    plugin: civex.extract_from_filename
+    plugin: civex.value_from_filename@1
     config:
       field: null
   - id: set_field
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config:
       field: null
     inputs:
@@ -64,16 +64,10 @@ ${onChange(schema)}steps:
       'When a field changes, put its value in another field of the same record.',
     build: (schema) => `${head('Copy a field', schema)}
 ${onChange(schema)}steps:
-  - id: read
-    plugin: civex.get_field
-    config:
-      field: null
   - id: set_field
-    plugin: civex.save_field
+    plugin: civex.set_fields@1
     config:
-      field: null
-    inputs:
-      value: read.value
+      fields: {}
 `,
   },
   {
@@ -82,20 +76,22 @@ ${onChange(schema)}steps:
     description:
       'Run it with a batch of files; each goes on the record inside this one whose number or code is in its name.',
     build: (schema) => `${head('Put files on matching records', schema)}
-inputs:
-  files:
-    type: files
-    label: Files
 steps:
+  - id: files
+    plugin: civex.files@1
+    config:
+      source: run
+      label: Files
   - id: match
-    plugin: civex.match_files_to_records
+    plugin: civex.save_records@1
     config:
       schema: null
-      key_field: null
+      if_exists: update
+      match_on: []
       file_field: null
-      pattern: null
+      filename_pattern: null
     inputs:
-      files: __input__.files
+      files: files.files
 `,
   },
   {
@@ -104,18 +100,20 @@ steps:
     description:
       'Run it with a batch of files; each becomes a new record inside this one.',
     build: (schema) => `${head('Make a record for each file', schema)}
-inputs:
-  files:
-    type: files
-    label: Files
 steps:
+  - id: files
+    plugin: civex.files@1
+    config:
+      source: run
+      label: Files
   - id: make_records
-    plugin: civex.create_records_from_files
+    plugin: civex.save_records@1
     config:
       schema: null
+      if_exists: add_new
       file_field: null
     inputs:
-      files: __input__.files
+      files: files.files
 `,
   },
   {
@@ -126,37 +124,35 @@ steps:
     build: (schema) => `${head('Run my plugin on a file', schema)}
 ${onChange(schema)}steps:
   - id: read_file
-    plugin: civex.load_file
+    plugin: civex.files@1
     config:
+      source: field
       field: null
   - id: my_plugin
     plugin: ""
   - id: save
-    plugin: civex.save_fields
+    plugin: civex.set_fields@1
 `,
   },
   {
     id: 'table',
     title: 'Add or update records from a table',
     description:
-      'When a CSV or similar file is added, make or update a record for each row.',
+      'When a CSV, TSV or Excel file is added, make or update a record for each row.',
     build: (schema) => `${head('Records from a table', schema)}
 ${onChange(schema)}steps:
-  - id: read_file
-    plugin: civex.load_file
+  - id: read_table
+    plugin: civex.table@1
     config:
       field: null
-  - id: read_table
-    plugin: civex.parse_table
-    inputs:
-      bytes: read_file.bytes
   - id: add_or_update
-    plugin: civex.rows_to_records
+    plugin: civex.save_records@1
     config:
       schema: null
+      if_exists: update
       match_on: []
     inputs:
-      table: read_table.table
+      rows: read_table.table
 `,
   },
 ]

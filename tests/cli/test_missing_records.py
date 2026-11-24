@@ -92,7 +92,7 @@ def test_a_queued_run_for_a_deleted_record_fails_saying_why(
     wf_dir = ctx.workflow_svc._dir
     wf_dir.mkdir(parents=True, exist_ok=True)
     (wf_dir / "fine.yaml").write_text(
-        "name: fine\nsteps:\n  - id: read\n    plugin: civex.get_field\n    config: {field: name}\n"
+        "name: fine\nsteps:\n  - id: read\n    plugin: civex.value_from_filename@1\n    config: {field: name}\n"
     )
     job = ctx.job_svc.enqueue_manual("fine", record)
     ctx.record_svc.delete(str(record.id))

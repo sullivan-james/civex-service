@@ -27,6 +27,7 @@ DIRECT_FILES = "direct_files"
 ACCOUNTS = "accounts"
 HUB_COMPUTE = "hub_compute"
 SERVER_PATH_EXPORT = "server_path_export"
+SERVER_PATH_IMPORT = "server_path_import"
 PLUGIN_INSTALL = "plugin_install"
 REMOTE_DIAL = "remote_dial"
 RELEASES = "releases"
@@ -56,6 +57,7 @@ FEATURES: dict[str, str] = {
     ACCOUNTS: "signing in as a person, members and roles",
     HUB_COMPUTE: "running workflows on the server's own compute",
     SERVER_PATH_EXPORT: "writing exports to a folder on the server's machine",
+    SERVER_PATH_IMPORT: "reading files from a folder on the server's machine",
     PLUGIN_INSTALL: "installing plugins and workflows from a bundle onto the server",
     REMOTE_DIAL: "connecting out from the server to another civex",
     RELEASES: "releases: permanent, citable versions of the data, published on a host",
@@ -101,6 +103,7 @@ LOCAL_FEATURES: frozenset[str] = frozenset(
         OPEN_FOLDER,
         DESKTOP,
         SERVER_PATH_EXPORT,
+        SERVER_PATH_IMPORT,
         PLUGIN_INSTALL,
         REMOTE_DIAL,
     }
