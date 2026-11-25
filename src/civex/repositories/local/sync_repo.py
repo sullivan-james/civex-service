@@ -512,6 +512,23 @@ class LocalSyncRepository:
             counts[dataset_id] = counts.get(dataset_id, 0) + 1
         return counts
 
+    def received_since(self, ids: set[uuid.UUID], since: datetime) -> set[uuid.UUID]:
+        """Of these things, those a device sent a change to since `since`."""
+        listed = sorted(ids)
+        out: set[uuid.UUID] = set()
+        for at in range(0, len(listed), 500):
+            out.update(
+                self._s.scalars(
+                    select(SyncOp.entity_id)
+                    .where(
+                        SyncOp.entity_id.in_(listed[at : at + 500]),
+                        SyncOp.received_at >= since,
+                    )
+                    .distinct()
+                )
+            )
+        return out
+
     def server_lacks_of(self, shas: set[str]) -> set[str]:
         """Of these files, those the authority said it hasn't got, when asked."""
         listed = sorted(shas)

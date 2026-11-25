@@ -23,6 +23,16 @@ from the next tag forward.
 
 ## Unreleased
 
+- **Files still being uploaded show as "Uploading", not "missing".** On an
+  authority, a file cited by a record a device sent lately, whose bytes have
+  not arrived yet, is `arriving` (record location state, `arriving` in the
+  Files tab's places, and not a `missing_file` in the data check) for
+  `[sync] arriving_hours` (default 24, 0 = no allowance) after the record's
+  last received change; after that, or once the file is uploaded, it is as
+  before. One lookup per page of records, only when one cites a file not
+  here; the push itself does no extra work beyond one more index on
+  `sync_ops` (migration `a4e9c2b7d6f1`).
+
 - **Records created and then deleted before their first upload no longer slow a
   push 15-fold.** The authority took a record that arrives already deleted one
   at a time (about 9 ms each); it now writes it in bulk with the rest of its

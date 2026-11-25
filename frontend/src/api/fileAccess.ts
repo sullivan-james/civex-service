@@ -293,7 +293,8 @@ export interface FilePick extends FileSelection {
   server?: ServerState
 }
 
-export type PlaceKind = 'drive' | 'unreachable' | 'server' | 'missing'
+export type PlaceKind =
+  'drive' | 'unreachable' | 'server' | 'missing' | 'arriving'
 
 /** How much of a selection is in one place. */
 export interface PlaceSummary {

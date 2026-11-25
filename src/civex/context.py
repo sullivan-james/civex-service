@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import time
 import uuid
+from datetime import datetime, timedelta, timezone
 import weakref
 
 from contextlib import contextmanager
@@ -783,6 +784,15 @@ def build_context(
     record_svc.files_from_server = lambda: _sync().fetches_files
     record_svc.not_on_server = lambda shas: _sync().not_on_server(shas)
     record_svc.server_lacks = lambda shas: _sync().server_lacks(shas)
+
+    def _recently_received(ids: set[uuid.UUID]) -> set[uuid.UUID]:
+        hours = config.sync.arriving_hours
+        if hours <= 0:
+            return set()
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
+        return sync_repo.received_since(ids, since)
+
+    record_svc.recently_received = _recently_received
     record_svc.why_not_here = lambda shas: _sync().not_here_reasons(shas)
     file_info_svc.files_from_server = lambda: _sync().fetches_files
     file_access_svc.fetch_missing = (
