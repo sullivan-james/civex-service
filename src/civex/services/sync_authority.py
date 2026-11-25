@@ -851,6 +851,7 @@ class SyncAuthorityService:
                 action,
                 str(e),
                 code=REFUSAL_PERMISSION if isinstance(e, _Denied) else None,
+                data=not isinstance(e, _Denied),
             )
         except (ValueError, TypeError, KeyError, AttributeError) as e:
             return self._refuse_action(who, action, f"A value is not valid: {e}")
@@ -866,9 +867,14 @@ class SyncAuthorityService:
         action: list[SyncEntry],
         why: str,
         code: str | None = None,
+        data: bool = False,
     ) -> list[OpResult]:
         message = f"Part of one change that could not go in whole: {why}"
-        if code is None and any(e.entity_type in KEPT_STRUCTURE for e in action):
+        if (
+            data
+            and code is None
+            and any(e.entity_type in KEPT_STRUCTURE for e in action)
+        ):
             # The data or the structure here refuses a part of it: the whole
             # action is refused and kept by the device (the records a schema
             # delete took with it too), never half put back.

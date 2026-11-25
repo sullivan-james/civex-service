@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 from civex.domain.exceptions import ValidationError
+from civex.services.sync_service import SyncService
 from civex.testing.peers import connect, device, snapshots
 
 
@@ -96,23 +97,16 @@ def test_a_field_rename_and_the_templates_it_rewrote_go_in_together_or_not_at_al
     held = authority.schema_svc.get("site")
     assert held.display_template == "{name} / {code}"
     assert "code" in [f.name for f in held.fields]  # not renamed: not half done
-    parts = [c for c in a.sync_svc.conflicts() if c.kind == "rejected"]
+    parts = [c for c in a.sync_svc.conflicts() if c.kind == "not_taken"]
     assert {c.entity_type for c in parts} == {"field", "schema"}
     assert all("could not go in whole" in c.message for c in parts)
-    # A keeps what it made, marked: the server's version waits (not half done).
+    # A is put back where the server is, not left half way through.
     a.sync_svc.sync()
-    mine = a.schema_svc.get("site")
-    assert "ref" in [f.name for f in mine.fields]
-    assert mine.display_template == "{name} ({ref})"
-    # Letting one part go lets the whole go: A takes the server's version.
-    a.sync_svc.resolve_conflict(parts[0].id, "theirs")
-    a.commit()
     mine = a.schema_svc.get("site")
     assert (mine.display_template, [f.name for f in mine.fields]) == (
         held.display_template,
         [f.name for f in held.fields],
     )
-    assert a.sync_svc.conflicts() == []
 
 
 def test_deleting_a_tree_part_of_which_was_edited_elsewhere_keeps_all_of_it(
@@ -175,12 +169,12 @@ def test_an_action_that_did_not_go_in_is_done_again_on_what_is_there_now(
     b.commit()
     b.sync_svc.sync()
     a.sync_svc.sync()
-    a.sync_svc.sync()  # (kept as it is, marked)
+    a.sync_svc.sync()  # back where the server is
 
     # The person sees it did not go in, and renames again: this time the
     # rename rewrites the template the server has, and goes in whole.
-    a.sync_svc.resolve_conflict(a.sync_svc.conflicts()[0].id, "theirs")  # all parts
-    assert a.sync_svc.conflicts() == []
+    for c in a.sync_svc.conflicts():
+        a.sync_svc.resolve_conflict(c.id, "theirs")
     a.schema_svc.update_field("site", "code", new_name="ref")
     a.commit()
     a.sync_svc.sync()
@@ -327,30 +321,28 @@ def test_letting_go_is_refused_while_another_change_to_it_is_unsent(project, aut
 
 
 def test_a_field_delete_the_server_refuses_is_kept_and_letting_go_restores_it(
-    project, authority
+    project, authority, monkeypatch
 ):
     a, b, _, _ = setup(project, authority)
-    b.schema_svc.set_unique_keys("site", [["name"]])
-    b.commit()
-    b.sync_svc.sync()
-    a.sync_svc.sync()  # (a key can't outlive its field)
+    real = authority.authority_svc._rules.check
+
+    def refuse_when_a_field_goes(touched):
+        if any(kind == "field" for kind, _ in touched):
+            raise ValidationError("A rule here says the field stays")
+        real(touched)
+
+    monkeypatch.setattr(
+        authority.authority_svc._rules, "check", refuse_when_a_field_goes
+    )
     a.schema_svc.delete_field("site", "code")
-    a.schema_svc.update_field("site", "name", required=True)
-    a.commit()
-    b.schema_svc.add_field("site", "tag", "string")
-    b.schema_svc.set_unique_keys("site", [["name", "tag"]])
-    b.commit()
-    b.sync_svc.sync()
-    a.schema_svc.delete_field("site", "name")
     a.commit()
     a.sync_svc.sync()
     items = refusals(a)
-    assert items, [(c.kind, c.entity_type) for c in a.sync_svc.conflicts()]
-    assert not [c for c in a.sync_svc.conflicts() if c.kind == "not_taken"]
-    assert "name" not in [f.name for f in a.schema_svc.get("site").fields]  # kept
+    assert items and not [c for c in a.sync_svc.conflicts() if c.kind == "not_taken"]
+    assert "code" not in [f.name for f in a.schema_svc.get("site").fields]  # kept
     a.sync_svc.resolve_conflict(items[0].id, "theirs")
     a.commit()
-    assert "name" in [f.name for f in a.schema_svc.get("site").fields]
+    assert "code" in [f.name for f in a.schema_svc.get("site").fields]
 
 
 def test_a_refused_schema_delete_is_kept_whole_with_the_records_it_took(
@@ -405,3 +397,63 @@ def test_only_a_data_refusal_of_structure_holds_the_servers_changes(project, aut
         assert (("schema", schema) in a.sync_svc._repo.dirty_entities()) is held
         for c in a.sync_svc._repo.find_open_conflicts(kind="rejected"):
             a.sync_svc._repo.resolve_conflict(c.id, "theirs")
+
+
+def test_letting_go_reads_the_server_once_for_all_items(
+    project, authority, monkeypatch
+):
+    a, b = _clash_on_keys(project, authority)
+    asked = []
+    real = SyncService._transport
+
+    def counting(self):
+        t = real(self)
+        original = t.snapshot
+
+        def snap(kind, *args, **kw):
+            asked.append(kind)
+            return original(kind, *args, **kw)
+
+        t.snapshot = snap
+        return t
+
+    monkeypatch.setattr(SyncService, "_transport", counting)
+    report = a.sync_svc.resolve_many("theirs", kind="rejected")
+    assert report.done == 1 and not report.failed
+    assert asked.count("schema") == 1
+
+
+def test_a_letting_go_that_fails_leaves_nothing_half_done_and_the_item_open(
+    project, authority, monkeypatch
+):
+    a, b = _clash_on_keys(project, authority)
+    (refused,) = refusals(a)
+
+    def boom(*_):
+        raise ValidationError("could not apply")
+
+    monkeypatch.setattr(SyncService, "_replay_held", boom)
+    report = a.sync_svc.resolve_many("theirs", kind="rejected")
+    assert [f[0] for f in report.failed] == [refused.id]
+    assert [c.id for c in refusals(a)] == [refused.id]
+    assert a.schema_svc.get("site").unique_keys  # still as kept, not half taken
+
+
+def test_letting_go_of_a_refused_create_is_refused_while_records_under_it_are_unsent(
+    project, authority
+):
+    a, b, _, _ = setup(project, authority)
+    b.schema_svc.create("dup")
+    b.commit()
+    a.schema_svc.create("dup")
+    a.commit()
+    b.sync_svc.sync()
+    a.sync_svc.sync()
+    (item,) = refusals(a)
+    a.dataset_svc.create("extra")
+    a.record_svc.add("extra", "dup", {})
+    a.commit()
+    with pytest.raises(ValidationError, match="Send or undo your other change"):
+        a.sync_svc.resolve_conflict(item.id, "theirs")
+    assert [c.id for c in refusals(a)] == [item.id]
+    assert not a.schema_svc.list_deleted()

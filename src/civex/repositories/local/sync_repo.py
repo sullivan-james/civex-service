@@ -2025,14 +2025,34 @@ class LocalSyncRepository:
         return found | {(t, i) for t, i in kept}
 
     def has_unsent(self, kind: str, entity_id: uuid.UUID) -> bool:
-        """Whether a change to this thing is still waiting to be sent."""
+        """Whether a change to this thing is still waiting to be sent, or (for
+        a schema or a field) one to a record that sits under it: a record of
+        the schema, or one carrying a value for the field."""
+        unsent = (
+            AuditLog.sync_state.in_(("pending", "seeding")),
+            AuditLog.hub_seq.is_(None),
+        )
+        if (
+            self._s.query(AuditLog.id)
+            .filter(
+                AuditLog.entity_type == kind, AuditLog.entity_id == entity_id, *unsent
+            )
+            .first()
+            is not None
+        ):
+            return True
+        if kind not in ("schema", "field"):
+            return False
+        needle = str(entity_id)
         return (
             self._s.query(AuditLog.id)
             .filter(
-                AuditLog.entity_type == kind,
-                AuditLog.entity_id == entity_id,
-                AuditLog.sync_state.in_(("pending", "seeding")),
-                AuditLog.hub_seq.is_(None),
+                AuditLog.entity_type == "record",
+                or_(
+                    cast(AuditLog.old_data, String).contains(needle),
+                    cast(AuditLog.new_data, String).contains(needle),
+                ),
+                *unsent,
             )
             .first()
             is not None

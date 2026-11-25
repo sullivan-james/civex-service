@@ -3378,7 +3378,11 @@ class SyncService:
             and conflict.code == UNFIT_DATA
         )
 
-    def _let_structure_go(self, conflict: SyncConflictDTO) -> None:
+    def _let_structure_go(
+        self,
+        conflict: SyncConflictDTO,
+        read: dict[str, dict[str, dict[str, Any]]] | None = None,
+    ) -> None:
         """A refused change to a schema or a field is let go: this copy becomes
         what the authority holds now (what it holds of the thing, read from it;
         a thing it never had is put in the trash here, with what went with it),
@@ -3407,7 +3411,7 @@ class SyncService:
                 named = self._named(conflict)
                 name = named.get("field_label") or named.get("schema_name") or kind
                 raise ValidationError(f"Send or undo your other change to {name} first")
-        held = self._authority_holds(structure)
+        held = self._authority_holds(structure, read)
         for (kind, thing_id), state in held.items():
             if state is not None:
                 self._applier.apply_state(kind, thing_id, state)
@@ -3417,26 +3421,29 @@ class SyncService:
         self._replay_held(self._repo.dirty_entities())
 
     def _authority_holds(
-        self, things: set[tuple[str, uuid.UUID]]
+        self,
+        things: set[tuple[str, uuid.UUID]],
+        read: dict[str, dict[str, dict[str, Any]]] | None = None,
     ) -> dict[tuple[str, uuid.UUID], dict[str, Any] | None]:
         """What the authority holds of each of these schemas and fields now
-        (None: nothing), read from it page by page, as a copy of it is."""
+        (None: nothing). A kind is read from it once, page by page, as a copy
+        of it is: into `read` when the caller keeps one across several."""
+        read = {} if read is None else read
         try:
             transport = self._transport()
-            out: dict[tuple[str, uuid.UUID], dict[str, Any] | None] = {
-                t: None for t in things
-            }
-            for kind in {k for k, _ in things}:
-                wanted = {str(i) for k, i in things if k == kind}
+            for kind in {k for k, _ in things} - set(read):
+                held: dict[str, dict[str, Any]] = {}
                 after: str | None = None
                 while True:
                     page = transport.snapshot(kind, after, SNAPSHOT_PAGE)
-                    for snap in page.items:
-                        if snap["id"] in wanted:
-                            out[(kind, uuid.UUID(snap["id"]))] = snap
+                    held.update({snap["id"]: snap for snap in page.items})
                     if not page.more:
                         break
                     after = page.next
+                read[kind] = held
+            out: dict[tuple[str, uuid.UUID], dict[str, Any] | None] = {
+                (k, i): read[k].get(str(i)) for k, i in things
+            }
             return out
         except SyncError as e:
             raise ValidationError(
@@ -3479,11 +3486,13 @@ class SyncService:
             plain = [c for c in offered if c not in kept]
             report.settled = [c.id for c in plain]
             report.done = self._repo.resolve_conflicts(report.settled, take)
+            read: dict[str, dict[str, dict[str, Any]]] = {}
             for c in kept:
                 if self._repo.get_conflict(c.id).status != "open":  # type: ignore[union-attr]
                     continue  # (settled with an earlier part of its action)
                 try:
-                    self._let_structure_go(c)
+                    with self._repo.savepoint():
+                        self._let_structure_go(c, read)
                     report.done += 1
                     report.settled.append(c.id)
                 except CivexError as e:
