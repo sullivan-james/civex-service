@@ -1985,6 +1985,23 @@ class RecordService:
         records = {r.id: r for r in self._records.list_by_ids(list(fields))}
         return total, [(records[rid], f) for rid, f in fields.items() if rid in records]
 
+    def referrer_collections_into(self, dataset_id: uuid.UUID) -> set[uuid.UUID]:
+        """The collections holding a live record, other than one in this
+        collection, that points into it: what the sync authority asks (it sees
+        every collection) to learn whether a hidden one does."""
+        field_map = self._reference_field_map()
+        return self._records.referrer_collections_into_dataset(
+            dataset_id, [uuid.UUID(f) for f in field_map]
+        )
+
+    def hidden_collection_referrers(self, dataset_id: uuid.UUID) -> int:
+        """How many records the caller cannot see, in other collections, point
+        into this one: what deleting it or making it local must respect."""
+        field_map = self._reference_field_map()
+        return self._records.hidden_referrers_into_dataset(
+            dataset_id, [uuid.UUID(f) for f in field_map]
+        )
+
     def patched_data(
         self, record_id: str, fields: dict[str, Any]
     ) -> tuple[RecordDTO, dict[str, Any] | None]:
