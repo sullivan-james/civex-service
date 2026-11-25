@@ -535,3 +535,22 @@ def test_the_records_a_push_holds_follow_a_delete_restore_and_edit(project, pair
             text("SELECT count(*) FROM records WHERE deleted_at IS NULL")
         ).scalar()
         assert live == 3
+
+
+def test_a_large_run_with_awkward_text_is_kept_as_one_at_a_time(project, pair, spy):
+    """(on PostgreSQL a run this size goes in by COPY: tabs, newlines, quotes,
+    backslashes and non-ASCII text in the stored documents must survive it)"""
+    f = Flow(project)
+    odd = ["a\tb", "line\nbreak", "back\\slash \\N", 'quote"s', "naïve ✓", "\r\n"]
+    ids = [
+        f.make("mine", "encounter", {"site": odd[i % len(odd)] + str(i)})
+        for i in range(30)
+    ]
+    first = f.structure + f.take()
+    for a in pair:
+        send(a, first)
+    gone = f.deleted(ids)
+    back = f.restored(ids)
+    answers = both(pair, [gone, back])
+    assert [r[1] for r in answers[1]] == ["applied"] * 30
+    assert spy["delete"] == [30] and spy["restore"] == [30]

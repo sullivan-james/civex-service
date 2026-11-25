@@ -6,6 +6,7 @@ is how a change made on one machine is reproduced on another."""
 
 from __future__ import annotations
 
+import io
 import json
 import uuid
 from collections.abc import Iterable, Iterator
@@ -14,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     String,
     Text,
@@ -80,6 +82,7 @@ from civex.domain.sync import (
     parse_snapshot_cursor,
     wire_state,
 )
+from civex.repositories.local.audit_repo import _COPY_ESCAPES
 from civex.repositories.local.inventory import stored_files
 from civex.repositories.local.dataset_repo import _to_dtos as _dataset_dtos
 from civex.repositories.local.record_repo import _to_dto as _record_dto
@@ -143,6 +146,8 @@ def _kept_owner():  # type: ignore[no-untyped-def]
 
 LACK_RETRY_FIRST = timedelta(minutes=10)
 _ID_CHUNK = 500
+# Fewest rows `_insert_many` sends as a COPY (below it an INSERT is as quick).
+_COPY_MIN = 20
 LACK_RETRY_MAX = timedelta(days=1)
 
 
@@ -1261,6 +1266,47 @@ class LocalSyncRepository:
         if self._absent is not None:
             self._absent.difference_update(v["id"] for v in every)
 
+    def _insert_many(self, model: Any, rows: list[dict[str, Any]]) -> None:
+        """These rows into the table of `model`, every column of each given
+        (a default of the model is the caller's to fill): on PostgreSQL as one
+        COPY, the fastest way in (several times a multi-row INSERT's rate), in
+        the transaction the session is in; elsewhere one INSERT. The same rows
+        either way."""
+        conn = self._s.connection()
+        if conn.dialect.name != "postgresql" or len(rows) < _COPY_MIN:
+            conn.execute(insert(model), rows)
+            return
+        table = model.__table__
+        names = list(rows[0])
+        document = {c.name for c in table.columns if isinstance(c.type, JSON)}
+        lines = []
+        for row in rows:
+            cells = []
+            for name in names:
+                value = row[name]
+                if name in document:
+                    text_ = json.dumps(value, default=str)
+                elif value is None:
+                    cells.append("\\N")
+                    continue
+                elif isinstance(value, datetime):
+                    text_ = value.isoformat()
+                else:
+                    text_ = str(value)
+                cells.append(text_.translate(_COPY_ESCAPES))
+            lines.append("\t".join(cells))
+        sql = f"COPY {table.name} ({', '.join(names)}) FROM STDIN"
+        data = "\n".join(lines) + "\n"
+        cursor = conn.connection.cursor()
+        try:
+            if hasattr(cursor, "copy_expert"):  # psycopg 2
+                cursor.copy_expert(sql, io.StringIO(data))
+            else:  # psycopg 3
+                with cursor.copy(sql) as copy:
+                    copy.write(data)
+        finally:
+            cursor.close()
+
     def live_children(self, ids: list[uuid.UUID]) -> set[uuid.UUID]:
         """Which of these records have a live record directly beneath them."""
         found: set[uuid.UUID] = set()
@@ -1348,8 +1394,8 @@ class LocalSyncRepository:
             ]
             if fresh:
                 conn.execute(insert(AuditBatch), fresh)
-        conn.execute(
-            insert(AuditLog),
+        self._insert_many(
+            AuditLog,
             [
                 {
                     "id": e.id,
@@ -1385,8 +1431,9 @@ class LocalSyncRepository:
         if not items:
             return
         self._s.flush()
-        self._s.connection().execute(
-            insert(SyncOp),
+        received = datetime.now(timezone.utc)
+        self._insert_many(
+            SyncOp,
             [
                 {
                     "op_id": entry.id,
@@ -1398,6 +1445,7 @@ class LocalSyncRepository:
                     "message": result.message,
                     "conflicts": result.conflicts,
                     "hub_seq": result.hub_seq,
+                    "received_at": received,
                 }
                 for entry, result in items
             ],

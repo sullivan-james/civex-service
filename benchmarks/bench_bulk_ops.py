@@ -116,7 +116,7 @@ def main() -> None:
         phase("delete ", lambda: laptop.record_svc.delete_many(ids))
         phase("restore", lambda: laptop.record_svc.restore_set(ids))
         if prof:
-            pstats.Stats(prof).sort_stats("tottime").print_stats(30)
+            pstats.Stats(prof).sort_stats("cumulative").print_stats(45)
     finally:
         projects.close()
         for name in (a_name, d_name):
