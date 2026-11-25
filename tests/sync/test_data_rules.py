@@ -41,6 +41,10 @@ class Rules(Batch):
         laptop.schema_svc.add_field(
             "encounter", "seen", "date", restrictions={"precision": "day"}
         )
+        laptop.schema_svc.add_field(
+            "encounter", "when", "datetime", restrictions={"min": "2000-01-01T00:00:00"}
+        )
+        laptop.schema_svc.add_field("encounter", "note", "string")
         laptop.dataset_svc.create("mine")
         laptop.commit()
         self.structure = self.take()
@@ -477,3 +481,154 @@ def test_hidden_and_missing_records_answer_alike_and_the_view_honours_read_scope
                     assert found  # (the one it reads is there)
         finally:
             ctx.close()
+
+
+def test_datetime_and_date_wrong_kinds_are_refused_and_an_unrestricted_one_is_not(
+    project, monkeypatch
+):
+    w = Rules(project)
+    wrong = [
+        w.make(when=123),
+        w.make(when="2020-13-01T00:00"),
+        w.make(when=["x"]),
+        w.make(when=2020),
+        w.make(seen=123),
+        w.make(seen=["x"]),
+    ]
+    fine = [
+        w.make(when="2021-01-01T00:00:00"),
+        w.make(when="1999-01-01T00:00:00"),  # below its minimum: flagged
+        w.make(note=123),  # no restrictions: a local write takes it, so does this
+    ]
+    answers, calls = _compare(project, w.structure, [wrong + fine], monkeypatch)
+    assert answers == [["rejected"] * 6 + ["applied"] * 3]
+    assert calls == [3]
+
+
+def test_a_value_saved_locally_under_no_rule_is_accepted_on_push(project):
+    w = Rules(project)
+    made = w.add("mine", site="s", depth=1.0, kind="a", note=123)  # (a local add)
+    answers, _ = _compare(project, w.structure, [[made]])
+    assert answers == [["applied"]]
+
+
+def _open_flags(ctx):
+    return [c for c in ctx.sync_svc.conflicts() if c.kind == "unfit"]
+
+
+def _flagged_laptop(laptop, phone):
+    made = laptop.record_svc.add("survey", "call", {"annotation": "odd"})
+    laptop.commit()
+    phone.schema_svc.update_field(
+        "call", "annotation", restrictions={"choices": ["Y", "M", "N"]}
+    )
+    phone.commit()
+    phone.sync_svc.sync()
+    laptop.sync_svc.sync()
+    assert [c.entity_id for c in _open_flags(laptop)] == [made.id]
+    return made
+
+
+def test_a_later_pass_judges_flags_a_pass_that_was_not_level_left(
+    laptop_and_phone, monkeypatch
+):
+    """Nothing is carried between passes: the rule is relaxed elsewhere, a pass
+    that cannot be level (a push held back) keeps the flag, and the next pass
+    knowing nothing of the first clears it."""
+    laptop, phone = laptop_and_phone
+    made = _flagged_laptop(laptop, phone)
+    phone.schema_svc.update_field("call", "annotation", restrictions={})
+    phone.commit()
+    phone.sync_svc.sync()
+    laptop.record_svc.add("survey", "call", {"annotation": "Y"})
+    laptop.commit()
+    with monkeypatch.context() as m:
+        m.setattr(sync_service.SyncService, "_push", lambda *a, **k: 0)
+        laptop.sync_svc.sync()  # pulls the relaxed rule, sends nothing
+        assert [c.entity_id for c in _open_flags(laptop)] == [made.id]
+    assert (
+        laptop.sync_svc._at_head is True
+    )  # (it was level at the head; the flag was kept for the push)
+    laptop.sync_svc._at_head = False  # (a new pass starts knowing nothing)
+    laptop.sync_svc.sync()
+    assert _open_flags(laptop) == []
+
+
+def test_a_refused_change_or_lost_read_or_unjudgeable_record_keeps_its_flag(
+    laptop_and_phone, monkeypatch
+):
+    laptop, phone = laptop_and_phone
+    made = _flagged_laptop(laptop, phone)
+    phone.schema_svc.update_field("call", "annotation", restrictions={})
+    phone.commit()
+    phone.sync_svc.sync()
+    svc = laptop.sync_svc
+    with monkeypatch.context() as m:  # (the laptop learns the relaxed rule only)
+        m.setattr(sync_service.SyncService, "_push", lambda *a, **k: 0)
+        laptop.record_svc.add("survey", "call", {"annotation": "Y"})
+        laptop.commit()
+        svc.sync()
+    assert [c.entity_id for c in _open_flags(laptop)] == [made.id]
+    laptop.sync_svc._repo.mark_all_synced()  # (nothing of its own is unsent)
+    laptop.commit()
+
+    def level():
+        svc._at_head = True
+        svc._settle_flags()  # never raises
+        return [c.entity_id for c in _open_flags(laptop)]
+
+    # A change of its own the authority refused: the fix may not have gone in.
+    laptop.sync_svc._repo.add_conflict(
+        kind="rejected",
+        entity_type="record",
+        entity_id=made.id,
+        field=None,
+        yours=None,
+        theirs=None,
+        op_id=None,
+        device_name=None,
+        message="no",
+    )
+    laptop.commit()
+    laptop.sync_svc._repo.resolve_conflicts([], "x")
+    assert level() == [made.id]
+    for c in laptop.sync_svc.conflicts():
+        if c.kind == "rejected":
+            laptop.sync_svc._repo.resolve_conflicts([c.id], "theirs")
+    laptop.commit()
+
+    # A collection it can no longer read is not judged.
+    survey = str(laptop.dataset_svc.get("survey").id)
+    laptop.sync_svc._repo.set_readable({"00000000-0000-4000-8000-000000000000"})
+    assert level() == [made.id]
+    laptop.sync_svc._repo.set_readable({survey})
+
+    # A record that cannot be judged (a file or geo break, a stored wrong kind)
+    # leaves the flag, and the sync is not failed by it.
+    def cannot(*a, **k):
+        raise sync_service.ValidationError("a file that is not allowed")
+
+    with monkeypatch.context() as m:
+        m.setattr(type(svc._records), "rule_findings", cannot)
+        assert level() == [made.id]
+
+    # Judged on its own once level, with the rule gone: cleared.
+    assert level() == []
+
+
+def test_re_copying_drops_a_purged_record_and_its_flag(laptop_and_phone, authority):
+    from datetime import datetime, timedelta, timezone
+
+    laptop, phone = laptop_and_phone
+    made = _flagged_laptop(laptop, phone)
+    phone.sync_svc.sync()
+    phone.record_svc.delete(str(made.id), force=True)
+    phone.record_svc.purge(str(made.id))
+    phone.commit()
+    phone.sync_svc.sync()
+    authority.audit_svc.prune(datetime.now(timezone.utc) + timedelta(days=1), False)
+    authority.commit()
+    assert authority.sync_repo.meta().feed_floor > laptop.sync_repo.meta().cursor
+    laptop.sync_svc.sync()  # copies again
+    assert laptop.sync_repo.snapshot("record", made.id) is None
+    assert _open_flags(laptop) == []

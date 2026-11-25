@@ -57,9 +57,6 @@ from civex.domain.sync import (
     PUSH_BUDGET_BYTES,
     REFUSAL_PERMISSION,
     UNFIT,
-    APPLIED,
-    CONFLICT,
-    MERGED,
     batch_by_budget,
     is_lock_contention,
     Joined,
@@ -377,12 +374,8 @@ class SyncService:
         config_store: ConfigStore,
     ) -> None:
         self._config = config
-        # What the flags (`unfit` items) of this pass need judging again: the
-        # records a push was answered for or a pull brought, or every flag when
-        # the rules themselves moved (`_settle_flags`); and whether the last pull
-        # reached the authority's head.
-        self._flag_scope: set[uuid.UUID] = set()
-        self._flag_all = False
+        # Whether this pass's last pull (or copy) reached the authority's head
+        # (`_settle_flags`); nothing else of a pass is carried to the next.
         self._at_head = False
         # Where `[sync]` is saved (config.toml for a local project); never
         # written to directly, so a hosted project's settings live elsewhere.
@@ -1287,6 +1280,7 @@ class SyncService:
     @_closes_transports
     def _sync(self) -> SyncReport:
         progress = self._sync_progress
+        self._at_head = False
         if problem := self._one_role():
             raise SyncError(problem, retryable=False)
         transport = self._transport()
@@ -1499,10 +1493,6 @@ class SyncService:
                             applied += 1
                             if entry.entity_type == "record":
                                 touched.append(entry.entity_id)
-                        if entry.entity_type == "record":
-                            self._flag_scope.add(entry.entity_id)
-                        elif entry.entity_type in ("schema", "field"):
-                            self._flag_all = True  # the rules moved
                         cursor = entry.hub_seq
                     if arriving is not None and not page.more:
                         self._settle_arriving(arriving, to_hold, dirty, start)
@@ -2480,47 +2470,61 @@ class SyncService:
                 )
                 if kind == "rejected":
                     refused.add(entry.entity_id)
-        self._flag_scope.update(
-            e.entity_id
-            for r in results
-            if r.status in (APPLIED, MERGED, CONFLICT)
-            and (e := sent.get(r.op_id)) is not None
-            and e.entity_type == "record"
-        )
         return held
 
     def _settle_flags(self) -> None:
-        """A flag (`unfit`) is the authority's judgement of the record's values
-        by its rules, so a copy shows what the authority says: it goes only when
-        this copy is level with the authority (nothing unsent, the feed read to
-        its head), where the schemas and values it holds are the authority's.
-        Then the open flags of the records this pass concerned (the ones a push
-        was answered for, the ones a pull brought, deleted or purged ones
-        included; every flag if a schema or field came in) are judged again, with
-        one resolver, and those whose field no longer breaks a rule are settled.
-        A copy with something unsent keeps them: its own data and schema may be
-        ahead of what the authority will say."""
-        scope, everything = self._flag_scope, self._flag_all
+        """Settle the flags (`unfit` items) the data no longer earns. See
+        `_judge_flags`; whatever goes wrong there leaves the flags as they are
+        and never fails the sync."""
+        try:
+            self._judge_flags()
+        except Exception:  # noqa: BLE001 - a flag is a reminder, never a reason to fail
+            log.warning("sync: could not judge the flags again", exc_info=True)
+            self._repo.rollback()
+
+    def _judge_flags(self) -> None:
+        """A flag is the authority's judgement of a record's values by its
+        rules, so a copy shows what the authority says: it goes only when this
+        copy is level with the authority (nothing unsent, no refused change of
+        structure, the feed read to its head), where the schemas and values it
+        holds are the authority's. Then every open flag (there are few, so
+        nothing is carried between passes) is judged again with one resolver,
+        and those whose field no longer breaks a rule, or whose record is
+        deleted or gone, are settled. Kept as they are: a record with a refused
+        change of its own (the fix may not have been taken), one in a collection
+        this copy may no longer read, and one that cannot be judged here."""
         if not (self._at_head and self._repo.count_pending() == 0):
-            return  # (kept for the pass that is level)
-        self._flag_scope, self._flag_all = set(), False
-        if not scope and not everything:
             return
         flags: dict[uuid.UUID, list[SyncConflictDTO]] = {}
         for c in self._repo.find_open_conflicts(kind=UNFIT):
-            if c.entity_type == "record" and (everything or c.entity_id in scope):
+            if c.entity_type == "record":
                 flags.setdefault(c.entity_id, []).append(c)
         if not flags:
             return
+        refused = [
+            c
+            for kind in ("rejected", "not_taken")
+            for c in self._repo.find_open_conflicts(kind=kind)
+        ]
+        if any(c.entity_type in ("schema", "field") for c in refused):
+            return  # the rules here may be ahead of the authority's
+        refused_records = {c.entity_id for c in refused}
+        readable = self._repo.readable()
         cache = self._records.incoming_cache()
         done: list[uuid.UUID] = []
         for record_id, items in flags.items():
+            if record_id in refused_records:
+                continue
             state = self._repo.snapshot("record", record_id)
-            broken = (
-                {f["field"] for f in self._records.rule_findings(state, cache)}
-                if state is not None
-                else set()
-            )
+            if state is None:
+                done += [c.id for c in items]  # (purged here or there)
+                continue
+            if readable is not None and str(state.get("dataset_id")) not in readable:
+                continue
+            try:
+                broken = {f["field"] for f in self._records.rule_findings(state, cache)}
+            except (ValidationError, ValueError, TypeError, KeyError, AttributeError):
+                continue
             done += [c.id for c in items if c.field not in broken]
         if done:
             self._repo.resolve_conflicts(done, "fixed")
@@ -2724,8 +2728,12 @@ class SyncService:
         )
         report.pushed += self._push(transport, report)
         head, held = self._copy_state(transport, hello)
+        # (A flag alone keeps nothing: a record the authority no longer holds
+        # goes, and its flag with it, `_settle_flags`.)
         keep = {(kind, str(i)) for kind, i in self._repo.dirty_entities()} | {
-            (c.entity_type, str(c.entity_id)) for c in self._repo.find_open_conflicts()
+            (c.entity_type, str(c.entity_id))
+            for c in self._repo.find_open_conflicts()
+            if c.kind != UNFIT
         }
         for kind in reversed(ENTITY_ORDER):
             gone = self._repo.all_ids(kind) - held.get(kind, set())
@@ -2737,6 +2745,8 @@ class SyncService:
         if hello.readable is not None:
             self._repo.set_readable({c["id"] for c in hello.readable})
         self._commit()
+        self._at_head = True  # (it holds the authority as of `head`)
+        self._settle_flags()
 
     @_closes_transports
     def fetch_history(

@@ -495,16 +495,22 @@ def _file_dicts(value: Any) -> list[dict[str, Any]]:
 
 
 def _kind_problem(value: Any, dtype: str, name: str) -> str | None:
-    """Why `value` is not a value of a `dtype` field at all (what a person's own
-    write would also refuse, whatever the restrictions): the checks that must
-    pass before a restriction can be said to be broken."""
+    """Why `value` is not a value of a restricted `dtype` field at all: what
+    must hold before a restriction can be said to be broken. Only called for
+    fields that carry restrictions, so what a person's own write accepts of an
+    unrestricted field (text of any kind, say) is accepted here too."""
     if dtype in ("string", "longtext", "enum") and not isinstance(value, str):
         return f"Field '{name}': '{value}' is not text"
-    if dtype == "date" and isinstance(value, str):
+    if dtype in ("date", "datetime"):
+        if not isinstance(value, str):
+            return f"Field '{name}': '{value}' is not a {dtype}"
         try:
-            partial_dates.period(value)
+            if dtype == "date":
+                partial_dates.period(value)
+            else:
+                _dt.fromisoformat(value)
         except ValueError:
-            return f"Field '{name}': '{value}' is not a year, month or day"
+            return f"Field '{name}': '{value}' is not a valid {dtype}"
     return None
 
 
@@ -2437,7 +2443,9 @@ class RecordService:
             # Only a value of its field's kind can break a rule: anything else
             # (and a file's or a geometry's restrictions, which `_check_restrictions`
             # mixes with their shape) refuses as it always did.
-            if problem := _kind_problem(value, field.dtype, name):
+            if field.restrictions and (
+                problem := _kind_problem(value, field.dtype, name)
+            ):
                 raise FieldValueError(problem, f"data.{field.id}")
             try:
                 _check_restrictions(value, field.dtype, field.restrictions, name)
