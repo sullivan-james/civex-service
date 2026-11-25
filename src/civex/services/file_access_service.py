@@ -46,6 +46,7 @@ from civex.domain.transfers import KIND_FILES, TransferSpec
 from civex.services.transfer_engine import Step, plan_steps
 from civex.domain.file_refs import collect_sha256_refs
 from civex.domain.file_access import (
+    arriving_location,
     PLACE_SENT,
     PLACE_UNSENT,
     SERVER_STATES,
@@ -1801,15 +1802,18 @@ class FileAccessService:
         lost, lost_fix = not_on_server_yet(None)
         # Records a device sent lately whose file is on no drive here: that
         # file is arriving (its device is still uploading), not missing.
-        arriving: set[str] = set()
+        arriving: set[tuple[str, str]] = set()
         if not following:
-            owners = {
-                uuid.UUID(record_key(h.record_id))
-                for h in held
-                if h.volume is None and not h.stored_on
-            }
+            owners: dict[uuid.UUID, set[str]] = {}
+            for h in held:
+                if h.volume is None and not h.stored_on:
+                    owners.setdefault(uuid.UUID(record_key(h.record_id)), set()).add(
+                        h.sha256
+                    )
             if owners:
-                arriving = {str(i) for i in self._records.recently_received(owners)}
+                arriving = {
+                    (str(r), sha) for r, sha in self._records.recently_received(owners)
+                }
         out: list[tuple[FileItem, bool, tuple[Any, Any, Any]]] = []
         for h in held:
             record_id = ids.get(h.record_id)
@@ -1876,7 +1880,8 @@ class FileAccessService:
                     None,
                     h.on_server,
                 )
-            elif record_id in arriving:
+            elif (record_id, h.sha256) in arriving:
+                here = arriving_location()
                 item = FileItem(
                     "",
                     h.sha256,
@@ -1886,9 +1891,10 @@ class FileAccessService:
                     "",
                     h.field,
                     None,
-                    "arriving",
+                    here["state"],
                     False,
-                    "Uploading: the computer that added it is still sending it.",
+                    here["reason"],
+                    here["fix"],
                 )
             else:
                 item = FileItem(

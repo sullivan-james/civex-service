@@ -23,8 +23,25 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_index("ix_sync_ops_entity", "sync_ops", ["entity_id", "received_at"])
+    if op.get_bind().dialect.name == "postgresql":
+        # Built without blocking writes (a big authority keeps taking pushes):
+        # CONCURRENTLY cannot run inside a transaction.
+        with op.get_context().autocommit_block():
+            op.create_index(
+                "ix_sync_ops_entity",
+                "sync_ops",
+                ["entity_id", "received_at"],
+                postgresql_concurrently=True,
+                if_not_exists=True,
+            )
+    else:
+        op.create_index(
+            "ix_sync_ops_entity",
+            "sync_ops",
+            ["entity_id", "received_at"],
+            if_not_exists=True,
+        )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_sync_ops_entity", table_name="sync_ops")
+    op.drop_index("ix_sync_ops_entity", table_name="sync_ops", if_exists=True)

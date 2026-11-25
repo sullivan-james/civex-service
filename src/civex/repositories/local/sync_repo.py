@@ -66,6 +66,8 @@ from civex.domain.sync_page import ACTION_ENTRIES_MAX, budget, take
 from civex.domain.sync import (
     NOT_SYNCED_KINDS,
     LoginRequestDTO,
+    APPLIED,
+    MERGED,
     OpResult,
     SyncBatchInfo,
     SyncConflictDTO,
@@ -512,21 +514,33 @@ class LocalSyncRepository:
             counts[dataset_id] = counts.get(dataset_id, 0) + 1
         return counts
 
-    def received_since(self, ids: set[uuid.UUID], since: datetime) -> set[uuid.UUID]:
-        """Of these things, those a device sent a change to since `since`."""
-        listed = sorted(ids)
-        out: set[uuid.UUID] = set()
+    def received_since(
+        self, cited: dict[uuid.UUID, set[str]], since: datetime
+    ) -> set[tuple[uuid.UUID, str]]:
+        """Of these (record -> files it cites), the (record, file) pairs a device
+        sent since `since`: a change taken (applied or merged, never refused or
+        held) whose entry added or changed that file on that record. One
+        lookup per 500 records, through the ops' own index and the entries'
+        feed position (`hub_seq`)."""
+        from civex.domain.permissions import file_changes
+
+        listed = sorted(cited)
+        out: set[tuple[uuid.UUID, str]] = set()
         for at in range(0, len(listed), 500):
-            out.update(
-                self._s.scalars(
-                    select(SyncOp.entity_id)
-                    .where(
-                        SyncOp.entity_id.in_(listed[at : at + 500]),
-                        SyncOp.received_at >= since,
-                    )
-                    .distinct()
+            rows = self._s.execute(
+                select(AuditLog)
+                .join(SyncOp, AuditLog.hub_seq == SyncOp.hub_seq)
+                .where(
+                    SyncOp.entity_id.in_(listed[at : at + 500]),
+                    SyncOp.received_at >= since,
+                    SyncOp.status.in_((APPLIED, MERGED)),
+                    SyncOp.device_id.is_not(None),
+                    AuditLog.entity_id == SyncOp.entity_id,
                 )
-            )
+            ).scalars()
+            for entry in rows:
+                for sha in file_changes(entry)[0] & cited.get(entry.entity_id, set()):
+                    out.add((entry.entity_id, sha))
         return out
 
     def server_lacks_of(self, shas: set[str]) -> set[str]:

@@ -187,6 +187,18 @@ def place_of(item: FileItem) -> tuple[str, str]:
     return PLACE_MISSING, "missing"
 
 
+def arriving_location() -> dict[str, Any]:
+    """The `location` of a file a device sent a record for and is still
+    uploading: the one word and wording for it, wherever it is said."""
+    return {
+        "volume": None,
+        "state": "arriving",
+        "available": None,
+        "reason": "Uploading: the computer that added it is still sending it.",
+        "fix": "",
+    }
+
+
 def server_state(item: FileItem) -> str | None:
     """Whether the server has a file: `sent`, `unsent` (on a drive here, so it
     goes up once it can be read) or None (not following a server, or not here:

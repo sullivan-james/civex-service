@@ -785,12 +785,14 @@ def build_context(
     record_svc.not_on_server = lambda shas: _sync().not_on_server(shas)
     record_svc.server_lacks = lambda shas: _sync().server_lacks(shas)
 
-    def _recently_received(ids: set[uuid.UUID]) -> set[uuid.UUID]:
+    def _recently_received(
+        cited: dict[uuid.UUID, set[str]],
+    ) -> set[tuple[uuid.UUID, str]]:
         hours = config.sync.arriving_hours
         if hours <= 0:
             return set()
         since = datetime.now(timezone.utc) - timedelta(hours=hours)
-        return sync_repo.received_since(ids, since)
+        return sync_repo.received_since(cited, since)
 
     record_svc.recently_received = _recently_received
     record_svc.why_not_here = lambda shas: _sync().not_here_reasons(shas)

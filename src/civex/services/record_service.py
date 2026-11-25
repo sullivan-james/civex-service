@@ -18,6 +18,7 @@ from civex.domain.file_refs import collect_sha256_refs
 from civex.domain import notes as note_rules
 from civex.domain.permissions import EVERYTHING, Permissions
 from civex.domain.file_refs import without_file_locations
+from civex.domain.file_access import arriving_location
 from civex.domain.sync import not_on_server_yet
 from civex.domain.dtos import (
     OrphanDTO,
@@ -803,11 +804,12 @@ class RecordService:
         # Of these files, those the authority hasn't said it holds (set by
         # `context.py`; nothing when the project follows no authority).
         self.not_on_server: Callable[[set[str]], set[str]] = lambda _: set()
-        # Of these records, those a device sent lately (an authority only): a
-        # file of theirs on no drive is `arriving`, its device still uploading.
-        self.recently_received: Callable[[set[uuid.UUID]], set[uuid.UUID]] = lambda _: (
-            set()
-        )
+        # Of these (record -> files it cites), the pairs a device sent lately
+        # (an authority only): such a file on no drive is `arriving`, its
+        # device still uploading.
+        self.recently_received: Callable[
+            [dict[uuid.UUID, set[str]]], set[tuple[uuid.UUID, str]]
+        ] = lambda _: set()
         # Of these files, those the authority said it hasn't got, and (reason,
         # fix) for one neither here nor there (set by `context.py`).
         self.server_lacks: Callable[[set[str]], set[str]] = lambda _: set()
@@ -1264,12 +1266,13 @@ class RecordService:
         following = self.files_from_server()
         # Records a device sent lately that cite a file not here: one lookup
         # for the batch, and only when there is such a file.
-        arriving: set[uuid.UUID] = set()
+        arriving: set[tuple[uuid.UUID, str]] = set()
         if cited_by and not following:
-            owners: set[uuid.UUID] = set()
+            owners: dict[uuid.UUID, set[str]] = {}
             for sha, volume in volume_of.items():
                 if volume is None:
-                    owners |= cited_by.get(sha, set())
+                    for record_id in cited_by.get(sha, set()):
+                        owners.setdefault(record_id, set()).add(sha)
             if owners:
                 arriving = self.recently_received(owners)
         from_server = None in volume_of.values() and following
@@ -1314,14 +1317,8 @@ class RecordService:
                     "fix": "Opening or exporting it downloads it from the server.",
                     "sent": sha not in unsent,
                 }
-            if volume is None and record_id in arriving:
-                return {
-                    "volume": None,
-                    "state": "arriving",
-                    "available": None,
-                    "reason": "Uploading: the computer that added it is still sending it.",
-                    "fix": "",
-                }
+            if volume is None and (record_id, sha or "") in arriving:
+                return arriving_location()
             if volume is None:
                 # Not on any volume we know of (yet): don't claim it is gone --
                 # it may only be on a remote that hasn't been fetched.

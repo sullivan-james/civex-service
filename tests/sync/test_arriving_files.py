@@ -115,3 +115,35 @@ def test_the_files_list_says_arriving_then_missing(pair, authority):
     _with_old_receipt(authority, days=2)
     assert not svc.listing(sel, place=PLACE_ARRIVING).items
     assert len(svc.listing(sel, place=PLACE_MISSING).items) == 1
+
+
+def test_an_unrelated_edit_does_not_make_an_old_missing_file_arrive(pair, authority):
+    laptop, _, record = pair
+    _cite(laptop, record)
+    laptop.sync_svc.sync()
+    _with_old_receipt(authority, days=2)
+    laptop.record_svc.update(
+        str(record.id), {"site": "y", "depth": 2.0, "scan": _scan(laptop, record)}
+    )
+    laptop.commit()
+    laptop.sync_svc.sync()  # lately received, but it did not cite the file
+    missing = [i for i in _lines(authority) if i.issue == quality.MISSING_FILE]
+    assert len(missing) == 1
+
+
+def test_a_refused_change_does_not_make_a_file_arrive(pair, authority):
+    from sqlalchemy import update
+
+    from civex.db.models import SyncOp
+
+    laptop, _, record = pair
+    _cite(laptop, record)
+    laptop.sync_svc.sync()
+    authority.sync_repo._s.execute(update(SyncOp).values(status="refused"))
+    authority.commit()
+    missing = [i for i in _lines(authority) if i.issue == quality.MISSING_FILE]
+    assert len(missing) == 1
+
+
+def _scan(laptop, record):
+    return laptop.record_svc.get(str(record.id)).data["scan"]
