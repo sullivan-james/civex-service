@@ -1830,11 +1830,12 @@ class SyncService:
             e = entries[j]
             if e.entity_type != "record" or e.action != kind:
                 break  # (the next kind of change starts a run of its own)
+            if e.entity_id in seen:
+                break  # (a repeat: it may begin the next run)
             if (
                 e.hub_seq is None
                 or e.superseded
                 or e.id in owned
-                or e.entity_id in seen
                 or ("record", e.entity_id) in dirty
                 or (e.op and (j >= tail or e.op in waiting))
             ):
@@ -1850,12 +1851,15 @@ class SyncService:
             # (Reads and writes alike under one savepoint: a database error in
             # either must leave the transaction usable for the one at a time way.)
             with self._repo.savepoint():
-                if len(run) > 2 * RUN_MIN:
-                    # A run that stops early must not cost a read of all of it,
-                    # again for each change after it: look at its start first.
-                    head = self._plain(kind, run[:RUN_MIN], above, {}, [])
-                    if len(head) < RUN_MIN:
+                # A run that stops early must not cost a read of all of it, again
+                # for each change after it: look at its start first, in growing
+                # steps, and stop at the first that is cut.
+                size = RUN_MIN
+                while size * 2 < len(run):
+                    head = self._plain(kind, run[:size], above, {}, [])
+                    if len(head) < size:
                         return [], len(head) + 1
+                    size *= 4
                 rows: dict[uuid.UUID, Any] = {}
                 states: list[tuple[uuid.UUID, dict[str, Any]]] = []
                 plain = self._plain(kind, run, above, rows, states)

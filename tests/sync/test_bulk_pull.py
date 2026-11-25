@@ -488,7 +488,9 @@ def test_a_superseded_change_inside_a_run_is_kept_not_applied(
         phone.sync_svc._pull(transport)
         phone.commit()
     t.same()
-    assert spy[id(service(t.new))] >= 3
+    assert (
+        spy[id(service(t.new))] == 12 + 11
+    )  # (the creates; 5, then 6 after the odd one)
     live = {r[0] for r in dump(t.new)["records"] if r[-1] == "None"}
     assert odd.replace("-", "") in live and len(live) == 2
 

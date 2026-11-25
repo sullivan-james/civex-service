@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import (
+    event,
     BigInteger,
     String,
     Text,
@@ -174,6 +175,7 @@ class LocalSyncRepository:
         # ids `_told` set `deleted_at` of in the session: a rolled-back savepoint
         # does not expire what `set_committed_value` set, so they are expired too
         self._told_ids: set[uuid.UUID] = set()
+        event.listen(session, "after_commit", lambda _s: self._told_ids.clear())
 
     def rollback(self) -> None:
         """Drop what the session holds that was not committed."""
