@@ -31,7 +31,7 @@ from sqlalchemy.sql.base import Executable
 from sqlalchemy.sql.expression import ClauseElement
 from sqlalchemy.orm import Session, aliased
 
-from civex.db.field_values import field_value
+from civex.db.field_values import field_json, field_value
 from civex.db import read_scope
 from civex.db.models import (
     Dataset,
@@ -1256,6 +1256,52 @@ class LocalRecordRepository:
             marker = (dataset_id, parent_id, tuple(_canonical(v) for v in values))
             groups.setdefault(marker, []).append(rid)
         return [ids for ids in groups.values() if len(ids) > 1]
+
+    def has_key_duplicate(self, schema_id: uuid.UUID, field_ids: list[str]) -> bool:
+        """Whether `key_duplicates` would find any group: the database narrows
+        the records to those that share what the key holds (a window count,
+        so nothing else is read), and the first group confirmed ends it. The
+        database's equality is never narrower than ours (a number is a number
+        however written), so it can only name more candidates, which are then
+        judged exactly as `key_duplicates` does."""
+        from civex.domain.uniqueness import key_values
+
+        if not field_ids:
+            return False
+        values = [field_json(Record, f) for f in field_ids]
+        sharing = func.count().over(
+            partition_by=[Record.dataset_id, Record.parent_record_id, *values]
+        )
+        inner = (
+            select(
+                Record.dataset_id.label("d"),
+                Record.parent_record_id.label("p"),
+                Record.data.label("v"),
+                sharing.label("n"),
+            )
+            .where(
+                Record.schema_id == schema_id,
+                Record.deleted_at.is_(None),
+                *[v.is_not(None) for v in values],
+            )
+            .subquery()
+        )
+        seen: set[tuple] = set()
+        rows = self._s.execute(
+            select(inner.c.d, inner.c.p, inner.c.v).where(inner.c.n > 1)
+        ).yield_per(1000)
+        try:
+            for dataset_id, parent_id, data in rows:
+                found = key_values(data or {}, field_ids)
+                if found is None:
+                    continue
+                marker = (dataset_id, parent_id, tuple(_canonical(v) for v in found))
+                if marker in seen:
+                    return True
+                seen.add(marker)
+        finally:
+            rows.close()
+        return False
 
     def subtree_levels(
         self, root_ids: list[uuid.UUID], deleted: bool | None = None

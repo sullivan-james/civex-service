@@ -16,6 +16,10 @@ afterwards.
 in four, and three recordings under each (a uniqueness key on the label within
 its parent, and a reference to a species held in a global collection).
 
+`--deleted PCT` deletes that share of the records on the laptop before the
+first upload, so the seed sends them as creates that carry `deleted_at` (the
+client that deletes before it syncs).
+
 `--profile` prints where the authority's time goes (cProfile, by cumulative).
 """
 
@@ -106,6 +110,7 @@ def main() -> None:
     ap.add_argument("--batches", type=int, default=8)
     ap.add_argument("--mode", choices=("seed", "pending"), default="seed")
     ap.add_argument("--shape", choices=("flat", "parented"), default="flat")
+    ap.add_argument("--deleted", type=int, default=0, metavar="PCT")
     ap.add_argument("--profile", action="store_true")
     args = ap.parse_args()
     base = os.environ["PG_URL"]
@@ -152,6 +157,7 @@ def main() -> None:
             for i in range(50)
         ]
         parent: str | None = None
+        made_ids: list[str] = []
         for i in range(n):
             if args.shape == "parented" and i % 4:
                 laptop.record_svc.add(
@@ -177,6 +183,10 @@ def main() -> None:
                 with_labels=False,
             )
             parent = str(made.id)
+            made_ids.append(parent)
+        for k, rid in enumerate(made_ids):
+            if k % 100 < args.deleted:
+                laptop.record_svc.delete(rid)
         laptop.commit()
 
         counts = Counter(authority._session.get_bind())
@@ -211,7 +221,7 @@ def main() -> None:
         records = sum(1 for s, _ in results if s == "applied")
         print(
             f"{args.mode} ({args.shape}): {spent['calls']} pushes, {len(results)} entries, "
-            f"{records} applied\n"
+            f"{records} applied ({args.deleted}% deleted)\n"
             f"  authority {spent['server'] / n * 1000:6.2f} ms/record\n"
             f"  client    {client / n * 1000:6.2f} ms/record  "
             f"({client / spent['calls'] * 1000:.0f} ms/batch)\n"

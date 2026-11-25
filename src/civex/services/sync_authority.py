@@ -476,16 +476,19 @@ class SyncAuthorityService:
                 return _Fast(
                     entry, None, self._refuse(who, entry, problem[0], code=problem[1])
                 )
-            if final.get("deleted_at"):
-                return None
+            gone = bool(final.get("deleted_at"))
             shape = self._records.shape_of(final, cache)
             if shape is None:
                 return None
-            marks = self._records.unique_marks(final, shape)
+            # A record made already deleted holds no key and satisfies no
+            # reference (`check_incoming` asks nothing of it), so it neither
+            # reserves a unique mark nor needs its references read; it still
+            # needs the parent it sits under, as `_settle` asks.
+            marks = [] if gone else self._records.unique_marks(final, shape)
             if not cache.use_records and (
                 final.get("parent_record_id")
                 or marks
-                or self._records.cites_records(final, shape)
+                or (not gone and self._records.cites_records(final, shape))
             ):
                 return None  # (what it sits under, points at or must differ from
                 # is read through the caller's own view)
@@ -1397,7 +1400,24 @@ def _changed(entries: list[SyncEntry]) -> list[tuple[str, uuid.UUID]]:
     what is already there (and filling an empty authority sends a schema before
     the fields its template uses); a record's own create is checked before it
     is written (`RecordService.check_incoming`)."""
-    return [(e.entity_type, e.entity_id) for e in entries if e.action != "create"]
+    out: list[tuple[str, uuid.UUID]] = []
+    for e in entries:
+        if e.action == "create":
+            continue
+        out.append((e.entity_type, e.entity_id))
+        if e.entity_type == "schema" and _may_change_keys(e):
+            out.append(("keys", e.entity_id))
+    return out
+
+
+def _may_change_keys(entry: SyncEntry) -> bool:
+    """Whether a schema change may leave records sharing what a uniqueness key
+    now holds: only a change of the keys themselves (or of whether the schema
+    exists) can; an edit that names what it changed and not these cannot. A
+    change that does not say is taken as one that might."""
+    if entry.action != "update" or entry.delta is None:
+        return True
+    return bool({"unique_keys", "deleted_at"} & set(entry.delta))
 
 
 def _at_most(entries: list[SyncEntry], limit: int) -> list[SyncEntry]:

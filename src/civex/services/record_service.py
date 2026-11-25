@@ -2166,14 +2166,16 @@ class RecordService:
         if not cache.use_records:
             return
         record_id = uuid.UUID(str(state["id"]))
+        gone = state.get("deleted_at")
         cache.places[record_id] = RecordPlace(
             record_id,
             uuid.UUID(str(state["dataset_id"])),
             shape.schema.id,
             shape.schema.name,
-            None,
+            _stamp_of(gone) if gone else None,
         )
-        cache.made.update(self.unique_marks(state, shape))
+        if not gone:  # a deleted record holds no unique key
+            cache.made.update(self.unique_marks(state, shape))
 
     def check_incoming(
         self,
@@ -6175,3 +6177,13 @@ def _parents_first_ids(
         return depth[rid]
 
     return sorted(ids, key=of)
+
+
+def _stamp_of(text: Any) -> _dt:
+    """When a record was deleted, as its state says (any moment, if it does
+    not parse: only that it is deleted is asked of it)."""
+    try:
+        at = _dt.fromisoformat(str(text))
+    except ValueError:
+        return _dt.min.replace(tzinfo=timezone.utc)
+    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)

@@ -75,6 +75,16 @@ jobs:
           PYTHONPATH=$PWD/src:$PWD/benchmarks uv run python benchmarks/bench_bulk_push.py \
             --prefill "${BENCH_PREFILL}" --batches "${BENCH_BATCHES}" | tee /tmp/after.txt
 
+      - name: Deleted creates, before (the base)
+        run: |
+          PYTHONPATH=/tmp/base/src:$PWD/benchmarks uv run python benchmarks/bench_bulk_push.py \
+            --prefill "${BENCH_PREFILL}" --batches "${BENCH_BATCHES}" --deleted 65 | tee /tmp/before-deleted.txt
+
+      - name: Deleted creates, after (this branch)
+        run: |
+          PYTHONPATH=$PWD/src:$PWD/benchmarks uv run python benchmarks/bench_bulk_push.py \
+            --prefill "${BENCH_PREFILL}" --batches "${BENCH_BATCHES}" --deleted 65 | tee /tmp/after-deleted.txt
+
       - name: Summary
         run: |
           {
@@ -82,4 +92,6 @@ jobs:
             echo "Base: ${BENCH_BASE}"
             echo '### Before'; echo '```'; cat /tmp/before.txt; echo '```'
             echo '### After'; echo '```'; cat /tmp/after.txt; echo '```'
+            echo '### Before, 65% of the records deleted before the first upload'; echo '```'; cat /tmp/before-deleted.txt; echo '```'
+            echo '### After, 65% deleted'; echo '```'; cat /tmp/after-deleted.txt; echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

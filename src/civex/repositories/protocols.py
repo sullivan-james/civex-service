@@ -369,6 +369,7 @@ class RecordRepository(Protocol):
     def key_duplicates(
         self, schema_id: uuid.UUID, field_ids: list[str]
     ) -> list[list[uuid.UUID]]: ...
+    def has_key_duplicate(self, schema_id: uuid.UUID, field_ids: list[str]) -> bool: ...
     def list_deleted(
         self,
         dataset_id: uuid.UUID | None = None,

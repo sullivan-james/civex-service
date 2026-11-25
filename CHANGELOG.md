@@ -23,6 +23,19 @@ from the next tag forward.
 
 ## Unreleased
 
+- **Records created and then deleted before their first upload no longer slow a
+  push 15-fold.** The authority took a record that arrives already deleted one
+  at a time (about 9 ms each); it now writes it in bulk with the rest of its
+  run, as it does a live one, to the same rows (a deleted record holds no
+  unique key and its references are not asked about, as before). The client
+  still sends such records as they are: they are in the trash, and the server's
+  copy is what lets another device restore them and see their history.
+- **Checking that records still differ on a uniqueness key is a query that
+  stops at the first duplicate, and runs only when it can have changed.** It no
+  longer reads every record of the schema into memory under the push lock, and
+  a schema change that does not touch its keys (a label, a description) skips
+  it. The answers are the same.
+
 ## v2.3.1 — release screens left to the host (2026-11-24)
 
 - **civex no longer has a release wizard.** The "New release" page and button

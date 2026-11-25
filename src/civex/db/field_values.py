@@ -22,6 +22,7 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy import Boolean, Float, String
+from sqlalchemy.types import NullType
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.visitors import InternalTraversal
@@ -74,3 +75,38 @@ def _default(element: FieldValue, compiler: Any, **kw: Any) -> str:
     key = element.field_id.replace("\\", "\\\\").replace('"', '\\"')
     path = _quoted(f'$."{key}"')
     return f"CAST(JSON_EXTRACT({data}, {path}) AS {_CASTS[element.kind]})"
+
+
+class FieldJson(ColumnElement[Any]):
+    """`data -> field_id` as the JSON value it is, whatever its type: values
+    that compare equal as JSON group together (a number is a number however it
+    is written), which is all a duplicate search needs of it. Not for indexes."""
+
+    inherit_cache = True
+    _traverse_internals = [
+        ("data", InternalTraversal.dp_clauseelement),
+        ("field_id", InternalTraversal.dp_string),
+    ]
+
+    def __init__(self, data: Any, field_id: str) -> None:
+        self.data = data
+        self.field_id = str(field_id)
+        self.type = NullType()
+
+
+def field_json(entity: Any, field_id: str) -> FieldJson:
+    return FieldJson(entity.data, field_id)
+
+
+@compiles(FieldJson, "postgresql")
+def _json_postgresql(element: FieldJson, compiler: Any, **kw: Any) -> str:
+    data = compiler.process(element.data, **kw)
+    return f"(CAST({data} AS JSONB) -> {_quoted(element.field_id)})"
+
+
+@compiles(FieldJson)
+def _json_default(element: FieldJson, compiler: Any, **kw: Any) -> str:
+    data = compiler.process(element.data, **kw)
+    key = element.field_id.replace("\\", "\\\\").replace('"', '\\"')
+    path = _quoted(f'$."{key}"')
+    return f"JSON_EXTRACT({data}, {path})"

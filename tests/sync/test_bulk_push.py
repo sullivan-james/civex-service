@@ -531,3 +531,62 @@ def test_a_resent_push_with_keys_does_not_read_again_for_each(project, monkeypat
     monkeypatch.setattr(LocalRecordRepository, "any_key_match", spy)
     send(fast, [e1] + kids)
     assert not reads
+
+
+def deleted(entry: SyncEntry, at: str = "2026-01-02T03:04:05+00:00") -> SyncEntry:
+    """The create of a record that was deleted before it was first sent."""
+    return dataclasses.replace(
+        entry, new_data={**entry.new_data, "deleted_at": at, "updated_at": at}
+    )
+
+
+def test_records_made_already_deleted_go_in_in_bulk_as_one_at_a_time(
+    project, monkeypatch
+):
+    f = Family(project)
+    sp = f.add("taxa", "species", {"latin": "orca"})
+    sp_gone = deleted(f.add("taxa", "species", {"latin": "gone"}))
+    enc = f.add("mine", "encounter", {"site": "a"})
+    enc_gone = deleted(f.add("mine", "encounter", {"site": "b"}))
+    # one that cites a deleted record and one that cites a record that is not there
+    cites_gone = deleted(
+        f.add("mine", "encounter", {"site": "c", "seen": str(sp.entity_id)})
+    )
+    seen_key = next(
+        k for k, v in cites_gone.new_data["data"].items() if v == str(sp.entity_id)
+    )
+    cites_gone.new_data["data"][seen_key] = str(sp_gone.entity_id)
+    cites_nothing = deleted(f.add("mine", "encounter", {"site": "d"}))
+    cites_nothing.new_data["data"][seen_key] = str(uuid.uuid4())
+    # deleted children of a live and of a deleted parent
+    under_live = deleted(f.add("mine", "recording", {"label": "x"}, str(enc.entity_id)))
+    under_gone = deleted(
+        f.add("mine", "recording", {"label": "y"}, str(enc_gone.entity_id))
+    )
+    # a live record under a deleted parent is refused, as before
+    live_under_gone = f.add(
+        "mine", "recording", {"label": "z"}, str(enc_gone.entity_id)
+    )
+    # a deleted record holds no key: a live record may take its label (and the
+    # other way round: a deleted one may repeat a live label)
+    live_same = again(under_live)
+    live_same.new_data["deleted_at"] = None
+    dup_of_live = deleted(
+        again(f.add("mine", "recording", {"label": "v"}, str(enc.entity_id)))
+    )
+    live_w = f.add("mine", "recording", {"label": "w"}, str(enc.entity_id))
+    # a deleted child of a parent made later in the push, and of one not there
+    early = deleted(f.add("mine", "recording", {"label": "e"}, str(enc.entity_id)))
+    orphan = deleted(f.add("mine", "recording", {"label": "o"}, str(enc.entity_id)))
+    orphan.new_data["parent_record_id"] = str(uuid.uuid4())
+    for k, v in dup_of_live.new_data["data"].items():
+        dup_of_live.new_data["data"][k] = "w"  # the label of live_w
+    batch = [
+        sp, sp_gone, enc, enc_gone, cites_gone, cites_nothing, under_live,
+        under_gone, live_under_gone, live_same, dup_of_live, live_w, early, orphan,
+    ]  # fmt: skip
+    statuses, calls = _compare(project, f.structure, [batch], monkeypatch)
+    assert statuses[0][1] == "applied" and statuses[0][3] == "applied"
+    assert statuses[0][8] == "rejected"  # live under a deleted parent
+    assert statuses[0][-1] == "rejected"  # parent not there
+    assert max(calls) >= 8  # deleted records are written with the rest of the run
