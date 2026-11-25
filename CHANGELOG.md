@@ -5,6 +5,17 @@ One section per tagged release: `## vX.Y.Z — <label> (YYYY-MM-DD)`. Every
 `.github/workflows/release.yml` fails the release job if it's missing (see
 PRODUCTION_READINESS.md §4a). A pre-release tag (`v1.3.0rc1`) may use the
 final version's entry or `## Unreleased` instead of one of its own. The version itself has one source of truth,
+
+- **Sync: a record that breaks a data rule is taken in and flagged.** A required
+  field left empty, or a value outside its field's restrictions (min/max,
+  choices, length, date range or precision), no longer refuses a pushed record:
+  it goes in as sent and the answer carries an `unfit` item per field (a new
+  conflict kind, code `data`). The authority's rules decide, so data saved
+  under older rules can arrive flagged. Still refused: a value of the wrong kind
+  (a list in a text field, a malformed date), a taken unique key, a missing
+  reference, and, for now, file (`accept`, `max_size`) and geo restrictions. The
+  pusher's item clears when the copy is level with the authority and the record
+  no longer breaks the rule (fixed, deleted or the rule relaxed elsewhere).
 the git tag (resolved via setuptools-scm into `civex.__version__`); this
 file is release notes, not a second place to track the number.
 

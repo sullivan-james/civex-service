@@ -494,6 +494,20 @@ def _file_dicts(value: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _kind_problem(value: Any, dtype: str, name: str) -> str | None:
+    """Why `value` is not a value of a `dtype` field at all (what a person's own
+    write would also refuse, whatever the restrictions): the checks that must
+    pass before a restriction can be said to be broken."""
+    if dtype in ("string", "longtext", "enum") and not isinstance(value, str):
+        return f"Field '{name}': '{value}' is not text"
+    if dtype == "date" and isinstance(value, str):
+        try:
+            partial_dates.period(value)
+        except ValueError:
+            return f"Field '{name}': '{value}' is not a year, month or day"
+    return None
+
+
 def _unfit(field_id: Any, message: str, value: Any = None) -> dict[str, Any]:
     """One finding of the data rules, as an answer's `conflicts` item carries it
     (nothing here is a query: no one else's value is named)."""
@@ -2277,8 +2291,10 @@ class RecordService:
         would have refused: values that are not values of their field's kind,
         references to records that aren't there or can't be referenced, a
         uniqueness key already taken, a collection that doesn't hold its schema,
-        a parent that isn't right. The same checks as `add`/`update`, so sync
-        can't bring in what an edit here couldn't.
+        a parent that isn't right. The same checks as `add`/`update`, except
+        that the data rules below are judged by the authority's rules, not the
+        sender's: what a person saved here under the rules they had can
+        arrive flagged, though it was valid when it was made.
 
         The project's data rules are the exception: a required field left
         empty or a value outside its field's restrictions (`RuleBroken`) does
@@ -2286,8 +2302,10 @@ class RecordService:
         id>`, the shape of an answer's `conflicts` item), for the record to be
         taken in and flagged. A new record, or one brought back, is judged in
         full; an edit by what it changed and the required fields it emptied, so
-        it is never flagged for an old problem. Nothing is returned when
-        anything else refuses.
+        it is never flagged for an old problem. Only a well-typed value can
+        break a rule: a value of the wrong kind, a file's or a geometry's
+        restrictions (their shape is checked with them) and everything else
+        refuse as before. Nothing is returned when anything else refuses.
 
         `state` is the record as it would become (values keyed by field id, as
         stored) and `head` what is held now, or None for a record not held. What
@@ -2384,18 +2402,20 @@ class RecordService:
         )
         return unfit
 
-    def rule_findings(self, state: dict[str, Any]) -> list[dict[str, Any]]:
+    def rule_findings(
+        self, state: dict[str, Any], cache: IncomingCache | None = None
+    ) -> list[dict[str, Any]]:
         """What a record state, as it is held, breaks of the data rules, in
         full: what `check_incoming` returns for a new record. For a copy
         working out whether a flag it was told of is still true."""
         if state.get("deleted_at") or not isinstance(state.get("data") or {}, dict):
             return []
         schema_id = uuid.UUID(str(state["schema_id"]))
-        shape = self._schema_svc.resolver()(schema_id)
+        shape = (cache.shapes if cache else self._schema_svc.resolver())(schema_id)
         if shape is None or shape.schema.deleted_at is not None:
             return []
         named = self._ids_to_names(state.get("data") or {}, shape)
-        return self._rule_findings(named, None, shape, schema_id, None)
+        return self._rule_findings(named, None, shape, schema_id, cache)
 
     def _rule_findings(
         self,
@@ -2414,6 +2434,11 @@ class RecordService:
             field = shape.by_name.get(name)
             if field is None or value is None:
                 continue
+            # Only a value of its field's kind can break a rule: anything else
+            # (and a file's or a geometry's restrictions, which `_check_restrictions`
+            # mixes with their shape) refuses as it always did.
+            if problem := _kind_problem(value, field.dtype, name):
+                raise FieldValueError(problem, f"data.{field.id}")
             try:
                 _check_restrictions(value, field.dtype, field.restrictions, name)
             except RuleBroken as e:
