@@ -812,6 +812,15 @@ class IncomingCache:
         # Schema id -> its required fields (name, id, label), read from the shape.
         self.required: dict[uuid.UUID, list[tuple[str, str, str]]] = {}
         self.made: set[tuple[Any, ...]] = set()
+        # What the sync authority's bulk deletes and restores ask of the records
+        # they are about to settle, read together (`SyncAuthorityService.
+        # _prefetch_changes`) and dropped with `places` when anything else
+        # writes: each record's state as held (None: not there), those with a
+        # live record beneath them, and those a record the caller cannot see
+        # points at.
+        self.heads: dict[uuid.UUID, dict[str, Any] | None] = {}
+        self.children: set[uuid.UUID] = set()
+        self.hidden: set[uuid.UUID] = set()
         # Records were changed since `places` was read: to be read again.
         self.stale = True
 
@@ -830,6 +839,9 @@ class IncomingCache:
         self.uses.clear()
         self.dirty.clear()
         self.uses_upto = 0
+        self.heads.clear()
+        self.children.clear()
+        self.hidden.clear()
         self.stale = True
 
 
@@ -2077,6 +2089,24 @@ class RecordService:
         return any(
             not sees(where) for rid, where in holders.items() if rid not in exclude
         )
+
+    def hidden_referrer_targets(
+        self, target_ids: list[uuid.UUID], sees: Callable[[Any], bool]
+    ) -> set[uuid.UUID]:
+        """Which of these records a record the caller cannot see points at (a
+        record pointing at itself does not count): `hidden_referrers_of_records`
+        for each of many one-record deletes, in the same few queries."""
+        field_map = self._reference_field_map()
+        if not field_map or not target_ids:
+            return set()
+        held = self._records.referrer_places_by_target(
+            list(target_ids), [uuid.UUID(f) for f in field_map]
+        )
+        return {
+            target
+            for referrer, target, where in held
+            if referrer != target and not sees(where)
+        }
 
     def patched_data(
         self, record_id: str, fields: dict[str, Any]
