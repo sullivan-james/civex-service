@@ -492,14 +492,14 @@ class RecordRepository(Protocol):
         self, dataset_id: uuid.UUID, field_ids: list[uuid.UUID]
     ) -> set[uuid.UUID]:
         """The collections of the live records, in other collections, that
-        point at a live record in `dataset_id`."""
+        point at a live record in `dataset_id` (whatever the caller may see)."""
         ...
 
-    def hidden_referrers_into_dataset(
-        self, dataset_id: uuid.UUID, field_ids: list[uuid.UUID]
-    ) -> int:
-        """How many records the caller cannot see point into `dataset_id`
-        from other collections."""
+    def referrer_places_of(
+        self, target_ids: list[uuid.UUID], field_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, uuid.UUID]:
+        """Each live record holding a reference to any of `target_ids`, with
+        its collection (whatever the caller may see)."""
         ...
 
     def dangling_references(
