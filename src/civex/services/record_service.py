@@ -4374,6 +4374,8 @@ class RecordService:
         # together or not at all (a child left live under a deleted parent
         # is not a project), but separate trees deleted at once don't.
         ops = _tree_ops(links) if self._audit else None
+        if ops:
+            every = _by_tree(every, ops)  # a tree's entries together
         with _audit_batch(self._audit, "delete", len(every) > 1):
             for start in range(0, len(every), _APPLY_CHUNK):
                 chunk = every[start : start + _APPLY_CHUNK]
@@ -5958,6 +5960,7 @@ class RecordService:
         if not self._audit:
             return
         ops = _tree_ops({i: rows[i].parent_record_id for i in ids})
+        ids = _by_tree(ids, ops)  # a tree's entries together, parents first
         with _audit_batch(self._audit, "restore", len(ids) > 1):
             self._audit.log_changes(
                 "restore",
@@ -6331,6 +6334,16 @@ def _tree_ops(
             root = parent_of[root]  # type: ignore[assignment]
         out[rid] = ops.setdefault(root, uuid.uuid4())
     return out
+
+
+def _by_tree(ids: list[uuid.UUID], ops: dict[uuid.UUID, uuid.UUID]) -> list[uuid.UUID]:
+    """`ids` with each tree together (trees in the order first met, each tree's
+    own order kept): the authority settles consecutive entries of one action as
+    one, so trees logged level by level would each be settled alone."""
+    first: dict[uuid.UUID, int] = {}
+    for rid in ids:
+        first.setdefault(ops.get(rid, rid), len(first))
+    return sorted(ids, key=lambda rid: first[ops.get(rid, rid)])
 
 
 def _place(row: RestoreRow, deleted_at: _dt | None) -> dict[str, Any]:

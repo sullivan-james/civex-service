@@ -34,6 +34,16 @@ from the next tag forward.
 
 ## Unreleased
 
+### Fixed
+
+- **Sync: deleting several records that have children in one call no longer
+  half-applies.** A delete (or exact restore) of two or more trees logged its
+  entries level by level, so the authority settled each parent alone, refused
+  it for the child sent with it (`conflict`: something added beneath it), and
+  left the parents live. Each tree's entries are now logged together, and the
+  authority gathers one action's entries even when an older device sent them
+  apart (answers then follow that order; devices match answers by entry id).
+
 - **Sync: a refused schema or field change is kept and marked, not put back.**
   When the authority's data or structure refuses a schema or field change (code
   `data`), it answers `rejected`, writes nothing to the feed, and refuses the

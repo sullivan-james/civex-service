@@ -352,6 +352,7 @@ class SyncAuthorityService:
         self._repo.lock_feed()
         self._head()  # number this instance's own changes first
         results: list[OpResult] = []
+        entries = _by_action(entries)
         taken = _at_most(entries, PUSH_MAX)
         # What the push will ask about one change at a time (was it sent
         # before; the record it names) is read once, now the feed is locked.
@@ -1595,6 +1596,22 @@ def _at_most(entries: list[SyncEntry], limit: int) -> list[SyncEntry]:
                 break
             kept.append(entry)
     return kept
+
+
+def _by_action(entries: list[SyncEntry]) -> list[SyncEntry]:
+    """`entries` with each action's entries together, actions in the order they
+    first appear and each one's entries in the order sent. A client that logged
+    several trees' deletes level by level (parent 1, parent 2, child 1, child 2)
+    sent one action's entries apart, and each would have been settled alone,
+    its parent refused for a child it was sent with. Done before the answers are
+    numbered and cut, so answers, `hub_seq`s and the limit all follow this order
+    (the device matches answers by entry id, not by position)."""
+    seen: dict[Any, list[SyncEntry]] = {}
+    for entry in entries:
+        seen.setdefault(entry.op or entry.id, []).append(entry)
+    if len(seen) == sum(1 for _ in _actions(entries)):
+        return entries  # already together (the usual case)
+    return [e for group in seen.values() for e in group]
 
 
 def _actions(entries: list[SyncEntry]) -> list[list[SyncEntry]]:
