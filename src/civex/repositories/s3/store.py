@@ -67,6 +67,9 @@ SINGLE_PUT_MAX = 5 * 1024**3
 MULTIPART_MIN = 32 * 1024**2
 PART_SIZE = 16 * 1024**2
 MAX_PARTS = 10_000  # S3's limit on a multipart upload
+# Parts of a server-side copy past SINGLE_PUT_MAX (bigger parts, fewer calls:
+# nothing travels, so there is no reason to keep them small).
+COPY_PART_SIZE = 512 * 1024**2
 # How long a presigned URL works. Uploads get longer: a big file over a slow
 # link takes a while, and an expired part means asking for a fresh target.
 UPLOAD_SECONDS = 6 * 3600
@@ -88,6 +91,18 @@ def _is_missing(error: Exception) -> bool:
     if isinstance(response, dict):
         code = str(response.get("Error", {}).get("Code", ""))
     return code in ("404", "NoSuchKey", "NotFound")
+
+
+def _read_exactly(reader: BinaryIO, size: int) -> bytes:
+    """`size` bytes from `reader`, fewer only at its end (a read may return
+    less than asked)."""
+    out = bytearray()
+    while len(out) < size:
+        chunk = reader.read(size - len(out))
+        if not chunk:
+            break
+        out += chunk
+    return bytes(out)
 
 
 def _b64(sha256_hex: str) -> str:
@@ -314,6 +329,138 @@ class S3ObjectStore:
             )
             self._register(sha256, size, verified=True)
         return self._ref(sha256, filename, size)
+
+    def copy_from(self, source: S3ObjectStore, sha256: str, size: int) -> None:
+        """Have the bucket copy `source`'s object here itself (`copy_object`,
+        or `upload_part_copy` in parts past S3's 5 GiB limit for one call): no
+        byte passes through this machine. For two buckets one set of
+        credentials reaches (the caller checks). Nothing is read back, so the
+        copy waits for `verify` like a file that came in parts. FileNotFoundError
+        when the source has no such object."""
+        bucket, key = self._cfg.bucket, self.key_of(sha256)
+        origin = {"Bucket": source._cfg.bucket, "Key": source.key_of(sha256)}
+        try:
+            if size <= SINGLE_PUT_MAX:
+                self._call(
+                    self.client.copy_object, Bucket=bucket, Key=key, CopySource=origin
+                )
+            else:
+                self._copy_in_parts(bucket, key, origin, size)
+        except Exception as e:
+            if _is_missing(e):
+                raise FileNotFoundError(f"Object {sha256} is not in the bucket") from e
+            raise
+        found = self._head(sha256)
+        if found != size:
+            self._call(self.client.delete_object, Bucket=bucket, Key=key)
+            raise ValidationError(
+                f"The copy is {found} bytes, not the {size} expected; it was removed"
+            )
+        self._register(sha256, size, verified=False)
+
+    def _copy_in_parts(
+        self, bucket: str, key: str, origin: dict[str, str], size: int
+    ) -> None:
+        part_size = max(COPY_PART_SIZE, math.ceil(size / MAX_PARTS))
+        part_size = math.ceil(part_size / (1024**2)) * 1024**2
+        upload_id = self._call(
+            self.client.create_multipart_upload, Bucket=bucket, Key=key
+        )["UploadId"]
+        done: list[dict[str, Any]] = []
+        try:
+            for n, start in enumerate(range(0, size, part_size), 1):
+                end = min(start + part_size, size) - 1
+                answer = self._call(
+                    self.client.upload_part_copy,
+                    Bucket=bucket,
+                    Key=key,
+                    UploadId=upload_id,
+                    PartNumber=n,
+                    CopySource=origin,
+                    CopySourceRange=f"bytes={start}-{end}",
+                )
+                done.append({"ETag": answer["CopyPartResult"]["ETag"], "PartNumber": n})
+            self._call(
+                self.client.complete_multipart_upload,
+                Bucket=bucket,
+                Key=key,
+                UploadId=upload_id,
+                MultipartUpload={"Parts": done},
+            )
+        except BaseException:
+            with contextlib.suppress(Exception):
+                self.client.abort_multipart_upload(
+                    Bucket=bucket, Key=key, UploadId=upload_id
+                )
+            raise
+
+    def put_reader(self, reader: BinaryIO, sha256: str, size: int) -> bool:
+        """Store the `size` bytes read from `reader` as `sha256`, hashed as
+        they go, with no scratch file: one PUT for a small file, else a
+        multipart upload fed one part at a time (a part of memory, not the
+        file). The object is kept only if its bytes are `sha256` (ValidationError
+        otherwise, and nothing is left in the bucket under that key). False,
+        and nothing sent, when the bucket already holds it."""
+        if self.exists(sha256):
+            return False
+        bucket, key = self._cfg.bucket, self.key_of(sha256)
+        hasher = hashlib.sha256()
+        wrong = ValidationError(
+            f"The source's bytes for {sha256} are not that content; it was not "
+            "stored under that name"
+        )
+        if size <= MULTIPART_MIN:
+            data = _read_exactly(reader, size)
+            if len(data) != size or hashlib.sha256(data).hexdigest() != sha256:
+                raise wrong
+            self._call(
+                self.client.put_object,
+                Bucket=bucket,
+                Key=key,
+                Body=data,
+                ChecksumSHA256=_b64(sha256),
+            )
+        else:
+            part_size = max(PART_SIZE, math.ceil(size / MAX_PARTS))
+            part_size = math.ceil(part_size / (1024**2)) * 1024**2
+            upload_id = self._call(
+                self.client.create_multipart_upload, Bucket=bucket, Key=key
+            )["UploadId"]
+            parts: list[dict[str, Any]] = []
+            try:
+                total = 0
+                while total < size:
+                    data = _read_exactly(reader, min(part_size, size - total))
+                    if not data:
+                        break
+                    hasher.update(data)
+                    total += len(data)
+                    answer = self._call(
+                        self.client.upload_part,
+                        Bucket=bucket,
+                        Key=key,
+                        UploadId=upload_id,
+                        PartNumber=len(parts) + 1,
+                        Body=data,
+                    )
+                    parts.append({"ETag": answer["ETag"], "PartNumber": len(parts) + 1})
+                if total != size or hasher.hexdigest() != sha256:
+                    raise wrong
+                self._call(
+                    self.client.complete_multipart_upload,
+                    Bucket=bucket,
+                    Key=key,
+                    UploadId=upload_id,
+                    MultipartUpload={"Parts": parts},
+                )
+            except BaseException:
+                with contextlib.suppress(Exception):
+                    self.client.abort_multipart_upload(
+                        Bucket=bucket, Key=key, UploadId=upload_id
+                    )
+                raise
+        self._register(sha256, size, verified=True)
+        return True
 
     def _ref(self, sha256: str, filename: str, size: int) -> FileRef:
         return FileRef(sha256=sha256, filename=filename, size=size, volume=self.name)
