@@ -1261,13 +1261,94 @@ class LocalSyncRepository:
         if self._absent is not None:
             self._absent.difference_update(v["id"] for v in every)
 
+    def live_children(self, ids: list[uuid.UUID]) -> set[uuid.UUID]:
+        """Which of these records have a live record directly beneath them."""
+        found: set[uuid.UUID] = set()
+        for at in range(0, len(ids), _ID_CHUNK):
+            found.update(
+                p
+                for p in self._s.scalars(
+                    select(Record.parent_record_id)
+                    .where(
+                        Record.parent_record_id.in_(ids[at : at + _ID_CHUNK]),
+                        Record.deleted_at.is_(None),
+                    )
+                    .distinct()
+                )
+                if p is not None
+            )
+        return found
+
+    def soft_delete_records(self, items: list[tuple[uuid.UUID, datetime]]) -> None:
+        """`soft_delete` of each of these records, which are live and have no
+        record to take with them: one UPDATE per distinct stamp and chunk of
+        ids. Not an edit: each keeps the date it was last changed. The records
+        this push holds are told, so they are not read again."""
+        by_stamp: dict[datetime, list[uuid.UUID]] = {}
+        for rid, stamp in items:
+            by_stamp.setdefault(stamp, []).append(rid)
+        self._s.flush()
+        for stamp, ids in by_stamp.items():
+            for at in range(0, len(ids), _ID_CHUNK):
+                self._s.execute(
+                    update(Record)
+                    .where(Record.id.in_(ids[at : at + _ID_CHUNK]))
+                    .values(deleted_at=stamp, updated_at=Record.updated_at)
+                    .execution_options(synchronize_session=False)
+                )
+        self._told(dict(items))
+
+    def restore_records(self, ids: list[uuid.UUID]) -> None:
+        """`restore` of each of these records (deleted, nothing else to bring
+        back): one UPDATE per chunk of ids, each keeping the date it was last
+        changed."""
+        self._s.flush()
+        for at in range(0, len(ids), _ID_CHUNK):
+            self._s.execute(
+                update(Record)
+                .where(Record.id.in_(ids[at : at + _ID_CHUNK]))
+                .values(deleted_at=None, updated_at=Record.updated_at)
+                .execution_options(synchronize_session=False)
+            )
+        self._told({rid: None for rid in ids})
+
+    def _told(self, stamps: dict[uuid.UUID, datetime | None]) -> None:
+        """Records a bulk UPDATE just deleted or restored: the ones the session
+        has are set to say so (no read), so nothing else of what the push holds
+        is stale and `forget_held` is not needed."""
+        for record in list(self._s.identity_map.values()):
+            if isinstance(record, Record) and record.id in stamps:
+                set_committed_value(record, "deleted_at", stamps[record.id])
+
     def insert_entries(self, rows: list[tuple[SyncEntry, int]]) -> None:
         """Keep entries made elsewhere (each with its number), as
         `insert_entry` does, in one statement; none belongs to a batch."""
         if not rows:
             return
         self._s.flush()
-        self._s.connection().execute(
+        conn = self._s.connection()
+        # An entry of a batch (a bulk delete's) names it: made once, here.
+        batches = {e.batch.id: e.batch for e, _ in rows if e.batch is not None}
+        if batches:
+            known = set(
+                self._s.scalars(
+                    select(AuditBatch.id).where(AuditBatch.id.in_(list(batches)))
+                )
+            )
+            fresh = [
+                {
+                    "id": b.id,
+                    "kind": b.kind,
+                    "label": b.label,
+                    "ref": b.ref,
+                    "created_at": _parse(b.created_at),
+                }
+                for i, b in batches.items()
+                if i not in known
+            ]
+            if fresh:
+                conn.execute(insert(AuditBatch), fresh)
+        conn.execute(
             insert(AuditLog),
             [
                 {
@@ -1281,7 +1362,7 @@ class LocalSyncRepository:
                     "format": 2 if e.delta is not None else 1,
                     "op_id": uuid.UUID(e.op) if e.op else None,
                     "timestamp": _parse(e.timestamp),
-                    "batch_id": None,
+                    "batch_id": e.batch.id if e.batch is not None else None,
                     "actor": e.actor,
                     "device": e.device,
                     "device_id": uuid.UUID(e.device_id) if e.device_id else None,
@@ -1841,7 +1922,8 @@ class LocalSyncRepository:
                 synchronize_session=False,
             )
         self._s.flush()
-        self._s.expire_all()
+        if kind != "record":  # (a record takes no other record with it)
+            self._s.expire_all()
 
     def restore(self, kind: str, id: uuid.UUID) -> None:
         """Undo a delete as a person's restore does: a schema or collection
@@ -1862,7 +1944,8 @@ class LocalSyncRepository:
             if kind == "record":
                 flag_modified(row, "updated_at")
         self._s.flush()
-        self._s.expire_all()
+        if kind != "record":  # (a record brings no other record back)
+            self._s.expire_all()
 
     def delete_view(self, id: uuid.UUID, kind: str = "view") -> None:
         """Remove a thing that has no deleted state (a view, the page)."""

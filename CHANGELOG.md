@@ -46,6 +46,16 @@ from the next tag forward.
   of one action that arrive apart. A 2.3.x device that already splits a tree
   across separate requests is not fixed on the server: update it.
 
+- **Sync: a pushed bulk delete or restore of records is written in bulk.** A run
+  of single-record deletes (or restores), as a bulk action on a device sends
+  them (each with its `op` and `batch`), is checked together (what is held,
+  children, hidden referrers, data rules and keys on a restore, permissions) and
+  written with one UPDATE per stamp, one numbering, and one insert each for
+  history (with its batch) and answers. Anything not certain (not here, already
+  deleted, edited on the server, a record beneath it, a clash) is settled one at
+  a time as before, with the same answers and rows. Settling a record's delete
+  or restore no longer discards everything the push holds. Measured on
+  PostgreSQL, authority only, about 0.3-0.4 ms per record instead of 17-19 ms.
 - **Sync: a refused schema or field change is kept and marked, not put back.**
   When the authority's data or structure refuses a schema or field change (code
   `data`), it answers `rejected`, writes nothing to the feed, and refuses the

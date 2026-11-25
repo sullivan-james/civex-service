@@ -972,6 +972,21 @@ class LocalRecordRepository:
             ids = list({r for r, _, _ in self.referrers_of(target_ids, field_ids)})
             return {rid: p.dataset_id for rid, p in self.placement_of(ids).items()}
 
+    def referrer_places_by_target(
+        self, target_ids: list[uuid.UUID], field_ids: list[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, uuid.UUID, uuid.UUID]]:
+        """(live referrer, target, referrer's collection) for every live record
+        holding a reference to any of these, whatever the caller may see: what
+        `referrer_places_of` finds, with the target each one points at."""
+        with read_scope.unscoped(self._s):
+            held = self.referrers_of(target_ids, field_ids)
+            where = self.placement_of(list({r for r, _, _ in held}))
+        return [
+            (referrer, target, where[referrer].dataset_id)
+            for referrer, _, target in held
+            if referrer in where
+        ]
+
     def dangling_references(
         self, field_ids: list[uuid.UUID]
     ) -> list[tuple[uuid.UUID, str, uuid.UUID, uuid.UUID]]:
