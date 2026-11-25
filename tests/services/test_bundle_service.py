@@ -371,3 +371,34 @@ def test_what_is_not_a_bundle_is_refused(ctx: AppContext, tmp_path: Path) -> Non
         zf.writestr(spec.MANIFEST, json.dumps({"format": spec.FORMAT + 1}))
     with pytest.raises(BundleError, match="newer civex"):
         ctx.bundle_svc.inspect(newer)
+
+
+def test_a_from_filename_rule_listed_before_its_file_field_imports(
+    ctx: AppContext, other: AppContext, tmp_path: Path
+) -> None:
+    """A `from_filename` rule may read a file field the bundle lists after it
+    (fields are exported in the project's own order), so it is set once every
+    field exists."""
+    ctx.schema_svc.create("take")
+    ctx.schema_svc.add_field("take", "recording_file", "file")
+    rule = {"from_filename": {"field": "recording_file", "pattern": r"^(.+)_"}}
+    ctx.schema_svc.add_field("take", "site", "string", restrictions=rule)
+    ctx.commit()
+    path = tmp_path / "b.civex.zip"
+    ctx.bundle_svc.export(path)
+
+    swapped = tmp_path / "swapped.civex.zip"
+    with zipfile.ZipFile(path) as src, zipfile.ZipFile(swapped, "w") as dst:
+        for item in src.infolist():
+            data = src.read(item)
+            if item.filename == spec.MANIFEST:
+                manifest = json.loads(data)
+                (take,) = [s for s in manifest["schemas"] if s["name"] == "take"]
+                take["fields"].reverse()  # the rule first, its file field after
+                data = json.dumps(manifest).encode()
+            dst.writestr(item, data)
+
+    other.bundle_svc.import_bundle(swapped)
+    other.commit()
+    fields = {f.name: f for f in other.schema_svc.get("take").fields}
+    assert fields["site"].restrictions == rule

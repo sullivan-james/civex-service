@@ -59,6 +59,10 @@ IMPORT_BATCH = 1000
 _CHUNK = 1024 * 1024
 
 
+# Restrictions that can name other fields, set once every field exists.
+_DEFERRED_RESTRICTIONS = ("filename_template", "from_filename")
+
+
 @dataclass
 class BundlePlan:
     """What a bundle would (or does) hold."""
@@ -565,6 +569,7 @@ class BundleService:
         has been."""
         created: set[str] = set()
         formula_fields: list[tuple[str, dict[str, Any]]] = []
+        deferred: list[tuple[str, dict[str, Any]]] = []
         for s in spec.sort_schemas(schemas):
             try:
                 self._schemas.create(
@@ -586,7 +591,7 @@ class BundleService:
                 restrictions = {
                     k: v
                     for k, v in (f.get("restrictions") or {}).items()
-                    if k != "filename_template"
+                    if k not in _DEFERRED_RESTRICTIONS
                 }
                 try:
                     self._schemas.add_field(
@@ -603,11 +608,18 @@ class BundleService:
                     self._commit()
                 except AlreadyExistsError:
                     continue
-                if (f.get("restrictions") or {}).get("filename_template"):
-                    self._schemas.update_field(
-                        s["name"], f["name"], restrictions=f["restrictions"]
-                    )
-                    self._commit()
+                if any(
+                    (f.get("restrictions") or {}).get(k) for k in _DEFERRED_RESTRICTIONS
+                ):
+                    deferred.append((s["name"], f))
+        # Each of these can name a field listed after it (a `from_filename` rule
+        # reads a file field that may come later in the bundle), so they are set
+        # once every field exists.
+        for schema_name, f in deferred:
+            self._schemas.update_field(
+                schema_name, f["name"], restrictions=f["restrictions"]
+            )
+            self._commit()
         self._import_formulas(formula_fields)
         for s in schemas:
             if s["name"] in created and s.get("display_template"):
