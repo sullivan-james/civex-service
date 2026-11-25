@@ -171,10 +171,14 @@ class LocalSyncRepository:
         self._stale = False
         self._held: list[Record] = []
         self._meta_held: SyncMeta | None = None
+        # ids `_told` set `deleted_at` of in the session: a rolled-back savepoint
+        # does not expire what `set_committed_value` set, so they are expired too
+        self._told_ids: set[uuid.UUID] = set()
 
     def rollback(self) -> None:
         """Drop what the session holds that was not committed."""
         self._s.rollback()
+        self._told_ids.clear()
 
     @contextmanager
     def savepoint(self) -> Iterator[None]:
@@ -1147,6 +1151,11 @@ class LocalSyncRepository:
         for record in self._held:
             if record in self._s:  # not one the session has let go of
                 self._s.expire(record)
+        if self._told_ids:
+            for obj in list(self._s.identity_map.values()):
+                if isinstance(obj, Record) and obj.id in self._told_ids:
+                    self._s.expire(obj)
+            self._told_ids.clear()
         if self._meta_held is not None and self._meta_held in self._s:
             self._s.expire(self._meta_held)
         if self._absent is not None:
@@ -1316,7 +1325,9 @@ class LocalSyncRepository:
     def _told(self, stamps: dict[uuid.UUID, datetime | None]) -> None:
         """Records a bulk UPDATE just deleted or restored: the ones the session
         has are set to say so (no read), so nothing else of what the push holds
-        is stale and `forget_held` is not needed."""
+        is stale and `forget_held` is not needed (a rolled-back savepoint expires
+        them again, see `forget_held`)."""
+        self._told_ids.update(stamps)
         for record in list(self._s.identity_map.values()):
             if isinstance(record, Record) and record.id in stamps:
                 set_committed_value(record, "deleted_at", stamps[record.id])

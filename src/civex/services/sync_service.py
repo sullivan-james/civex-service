@@ -1785,15 +1785,8 @@ class SyncService:
         }
         trails = self._trails([i for p in where.values() if p for i in p if i])
         for k, placed in where.items():
-            if placed is None:
-                continue
-            record_id, parent_id = placed
-            ids = [i for i in (record_id, parent_id) if i is not None]
-            found[k] = (
-                record_id in above
-                or (parent_id is not None and parent_id in above)
-                or any(trails.get(i, set()) & above for i in ids)
-            )
+            if placed is not None:
+                found[k] = _waits_on(placed, above, trails)
         return found
 
     def _trails(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, set[uuid.UUID]]:
@@ -1832,44 +1825,43 @@ class SyncService:
         kind = entries[start].action
         run: list[SyncEntry] = []
         seen: set[uuid.UUID] = set()
+        odd = 0
         for j in range(start, len(entries)):
             e = entries[j]
+            if e.entity_type != "record" or e.action != kind:
+                break  # (the next kind of change starts a run of its own)
             if (
-                e.entity_type != "record"
-                or e.action != kind
-                or e.hub_seq is None
+                e.hub_seq is None
                 or e.superseded
                 or e.id in owned
                 or e.entity_id in seen
                 or ("record", e.entity_id) in dirty
                 or (e.op and (j >= tail or e.op in waiting))
             ):
+                # not plain: it goes by itself, after the run (and cannot begin
+                # one, so a run too short skips it too)
+                odd = 1
                 break
             seen.add(e.entity_id)
             run.append(e)
-        tried = max(len(run), 1)
         if len(run) < RUN_MIN:
-            return [], tried
+            return [], len(run) + odd
         try:
             # (Reads and writes alike under one savepoint: a database error in
             # either must leave the transaction usable for the one at a time way.)
             with self._repo.savepoint():
-                later = self._repo.record_entries_after(
-                    {e.entity_id: e.hub_seq or 0 for e in run}
-                )
-                for k, e in enumerate(run):
-                    if e.entity_id in later:
-                        run, tried = run[:k], max(k, 1)
-                        break
-                if len(run) < RUN_MIN:
-                    return [], tried
+                if len(run) > 2 * RUN_MIN:
+                    # A run that stops early must not cost a read of all of it,
+                    # again for each change after it: look at its start first.
+                    head = self._plain(kind, run[:RUN_MIN], above, {}, [])
+                    if len(head) < RUN_MIN:
+                        return [], len(head) + 1
                 rows: dict[uuid.UUID, Any] = {}
                 states: list[tuple[uuid.UUID, dict[str, Any]]] = []
-                if kind != "delete":
-                    run = self._run_states(run, above, rows, states)
-                    tried = max(len(run), 1)
-                    if len(run) < RUN_MIN:
-                        return [], tried
+                plain = self._plain(kind, run, above, rows, states)
+                if len(plain) < RUN_MIN:
+                    return [], len(plain) + 1
+                run = plain
                 self._repo.insert_pulled_entries(run)
                 if kind == "delete":
                     self._repo.soft_delete_records(
@@ -1881,8 +1873,31 @@ class SyncService:
                     self._repo.forget_records_lacks([e.entity_id for e in run])
         except Exception:  # noqa: BLE001 - the one at a time way says what is wrong
             log.warning("pull: a run was not applied as a set", exc_info=True)
-            return [], tried
-        return run, tried
+            return [], max(len(run), 1)
+        return run, len(run)
+
+    def _plain(
+        self,
+        kind: str,
+        run: list[SyncEntry],
+        above: set[uuid.UUID],
+        rows: dict[uuid.UUID, Any],
+        states: list[tuple[uuid.UUID, dict[str, Any]]],
+    ) -> list[SyncEntry]:
+        """The start of `run` that is plain to apply as a set: up to the first
+        change the record is later changed by (this device's own, numbered after
+        it), and for makes, edits and restores the first that is not plain
+        (`_run_states`, which fills `rows` and `states`)."""
+        later = self._repo.record_entries_after(
+            {e.entity_id: e.hub_seq or 0 for e in run}
+        )
+        for k, e in enumerate(run):
+            if e.entity_id in later:
+                run = run[:k]
+                break
+        if kind != "delete" and len(run) >= RUN_MIN:
+            run = self._run_states(run, above, rows, states)
+        return run
 
     def _run_states(
         self,
@@ -1920,18 +1935,7 @@ class SyncService:
             where = [p for _, _, p in wanted if p is not None]
             trails = self._trails([i for p in where for i in p if i is not None])
             for k, (_, _, placed) in enumerate(wanted):
-                if placed is None:
-                    continue
-                record_id, parent_id = placed
-                if (
-                    record_id in above
-                    or (parent_id is not None and parent_id in above)
-                    or any(
-                        trails.get(i, set()) & above
-                        for i in (record_id, parent_id)
-                        if i is not None
-                    )
-                ):
+                if placed is not None and _waits_on(placed, above, trails):
                     wanted = wanted[:k]
                     break
         states.extend((e.entity_id, state) for e, state, _ in wanted)
@@ -1957,12 +1961,10 @@ class SyncService:
         placed = self._places(entry)
         if placed is None:
             return False
-        record_id, parent_id = placed
-        if record_id in above or (parent_id is not None and parent_id in above):
-            return True
-        return bool(
-            self._tree([i for i in (record_id, parent_id) if i is not None]) & above
-        )
+        ids = [i for i in placed if i is not None]
+        if any(i in above for i in ids):
+            return True  # (no lookup of the trails needed)
+        return _waits_on(placed, above, self._trails(ids))
 
     def _take(
         self,
@@ -3902,6 +3904,21 @@ def _refused_field(result: Any) -> str | None:
         if problem.get("field"):
             return problem["field"]
     return None
+
+
+def _waits_on(
+    placed: tuple[uuid.UUID, uuid.UUID | None],
+    above: set[uuid.UUID],
+    trails: dict[uuid.UUID, set[uuid.UUID]],
+) -> bool:
+    """Whether a record placed here (itself, its parent) is, or sits beneath, a
+    record with an unsent change (`above`), given the records above each of them
+    (`trails`): the one rule `_waits`, `_waits_many` and `_run_states` share."""
+    return any(
+        i in above or bool(trails.get(i, set()) & above)
+        for i in placed
+        if i is not None
+    )
 
 
 def _sits_under(kind: str, snap: dict[str, Any]) -> str | None:

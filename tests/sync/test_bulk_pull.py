@@ -369,3 +369,153 @@ def test_a_run_the_database_refuses_is_done_one_at_a_time(
     t.catch_up()
     t.same()
     assert spy[id(service(t.new))] <= 12  # (the creates; no delete run stood)
+
+
+def test_a_run_the_database_refuses_leaves_the_records_it_loaded_as_they_are(
+    project, authority, backend, spy, monkeypatch
+):
+    """A refused run is undone, and so is what the delete told the records the
+    session already holds (it must not keep saying they are deleted)."""
+    from civex.domain.exceptions import ValidationError
+    from civex.repositories.local.sync_repo import LocalSyncRepository
+
+    real = LocalSyncRepository.soft_delete_records
+
+    def refuse(self, items):
+        real(self, items)
+        raise ValidationError("refused")
+
+    t = Trio(project, authority, backend, n=12)
+    t.send()
+    t.catch_up()
+    t.laptop.record_svc.delete_many(t.ids)
+    t.laptop.commit()
+    t.send()
+    from civex.db.models import Record
+
+    held = [  # (the session holds each, live, for as long as this list does)
+        phone._session.get(Record, uuid.UUID(rid))
+        for phone in (t.old, t.new)
+        for rid in t.ids
+    ]
+    assert all(r is not None and r.deleted_at is None for r in held)
+    monkeypatch.setattr(LocalSyncRepository, "soft_delete_records", refuse)
+    t.catch_up()
+    t.same()
+    assert not [r for r in dump(t.new)["records"] if r[0] in t.ids and r[-1] == "None"]
+
+
+def test_an_action_of_ten_with_its_last_member_changed_here_is_held_whole(
+    project, authority, backend, spy
+):
+    t = Trio(project, authority, backend, n=0)
+    t.laptop.schema_svc.create("recording", parent="encounter")
+    t.laptop.schema_svc.add_field("recording", "site", "string")
+    t.laptop.schema_svc.add_field("recording", "depth", "float")
+    t.laptop.commit()
+    parent, other = t.add(2)
+    t.send()
+    t.catch_up()
+    kids = [
+        str(
+            t.laptop.record_svc.add(
+                "study",
+                "recording",
+                {"site": f"k{i}", "depth": 2.0},
+                parent_record_id=parent,
+            ).id
+        )
+        for i in range(9)
+    ]
+    t.laptop.commit()
+    t.send()
+    t.catch_up()
+    for phone in (t.old, t.new):
+        phone.record_svc.update(kids[-1], {"site": "mine", "depth": 3.0})
+        phone.commit()
+    t.laptop.record_svc.delete_many([parent, other])  # a tree each: 10 and 1
+    t.laptop.commit()
+    t.send()
+    action = str(uuid.uuid4())
+    mine = {parent.replace("-", ""), *(k.replace("-", "") for k in kids)}
+    for phone in (t.old, t.new):
+        transport = phone.sync_svc._transport()
+        feed = transport.feed
+
+        def with_op(cursor, limit, feed=feed):
+            page = feed(cursor, limit)
+            for e in page.entries:  # (the authority's feed carries no `op`)
+                if e.action == "delete" and e.entity_id.hex in mine:
+                    e.op = action
+            return page
+
+        transport.feed = with_op
+        phone.sync_svc._pull(transport)
+        phone.commit()
+    a, b = dump(t.old), dump(t.new)
+    for d in (a, b):
+        d["records"] = [r[:6] + r[7:] for r in d["records"]]  # (our edit's time)
+    for name in TABLES:
+        assert a[name] == b[name], name
+    held = [r for r in dump(t.new)["audit_log"] if r[-1] == "held"]
+    assert len(held) == 10  # (the other tree went in)
+    live = {r[0] for r in dump(t.new)["records"] if r[-1] == "None"}
+    assert parent.replace("-", "") in live and other.replace("-", "") not in live
+
+
+def test_a_superseded_change_inside_a_run_is_kept_not_applied(
+    project, authority, backend, spy
+):
+    t = Trio(project, authority, backend, n=12)
+    t.send()
+    t.catch_up()
+    t.laptop.record_svc.delete_many(t.ids)
+    t.laptop.commit()
+    t.send()
+    odd = t.ids[5]
+    for phone in (t.old, t.new):
+        transport = phone.sync_svc._transport()
+        feed = transport.feed
+
+        def marked(cursor, limit, feed=feed):
+            page = feed(cursor, limit)
+            for e in page.entries:
+                if str(e.entity_id) == odd and e.action == "delete":
+                    e.superseded = True  # (another device's, settled otherwise)
+            return page
+
+        transport.feed = marked
+        phone.sync_svc._pull(transport)
+        phone.commit()
+    t.same()
+    assert spy[id(service(t.new))] >= 3
+    live = {r[0] for r in dump(t.new)["records"] if r[-1] == "None"}
+    assert odd.replace("-", "") in live and len(live) == 2
+
+
+def test_a_page_of_moves_is_not_read_again_for_each_move(
+    project, authority, backend, spy, monkeypatch
+):
+    from civex.repositories.local.sync_repo import LocalSyncRepository
+
+    n = 40
+    t = Trio(project, authority, backend, n=n)
+    t.laptop.dataset_svc.create("other")
+    t.laptop.commit()
+    t.send()
+    t.catch_up()
+    t.laptop.record_svc.move("other", ids=t.ids)
+    t.laptop.commit()
+    t.send()
+    asked: list[int] = []
+    real = LocalSyncRepository.record_rows
+
+    def counted(self, ids):
+        asked.append(len(ids))
+        return real(self, ids)
+
+    monkeypatch.setattr(LocalSyncRepository, "record_rows", counted)
+    t.catch_up()
+    t.same()
+    # (each move is looked at a few times at most, not once per move after it)
+    assert sum(asked) <= 6 * n, sum(asked)
