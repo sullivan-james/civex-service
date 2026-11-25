@@ -25,6 +25,7 @@ export function useFileLocationDisplay(
     !!location &&
     (unavailable ||
       location.state === 'remote' ||
+      location.state === 'arriving' ||
       location.sent === false ||
       advanced ||
       (multiVolume && location.volume != null))

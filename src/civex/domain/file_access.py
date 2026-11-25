@@ -163,6 +163,7 @@ class FileItem:
 # that holds it (reachable or not), or one of these.
 PLACE_SERVER = "server"  # another device added it; only the server has it
 PLACE_MISSING = "missing"  # on no drive this project knows, and no server
+PLACE_ARRIVING = "arriving"  # a device just sent the record and is uploading it
 # Filters that group places.
 PLACE_HERE = "here"  # on a drive of this computer that can be read now
 PLACE_UNREACHABLE = "unreachable"  # on a drive of this computer that can't
@@ -181,6 +182,8 @@ def place_of(item: FileItem) -> tuple[str, str]:
         return item.volume, ("drive" if item.available else "unreachable")
     if item.state == "remote":
         return PLACE_SERVER, "server"
+    if item.state == "arriving":
+        return PLACE_ARRIVING, "arriving"
     return PLACE_MISSING, "missing"
 
 

@@ -1799,6 +1799,17 @@ class FileAccessService:
             "Opening or exporting it downloads it from the server.",
         )
         lost, lost_fix = not_on_server_yet(None)
+        # Records a device sent lately whose file is on no drive here: that
+        # file is arriving (its device is still uploading), not missing.
+        arriving: set[str] = set()
+        if not following:
+            owners = {
+                uuid.UUID(record_key(h.record_id))
+                for h in held
+                if h.volume is None and not h.stored_on
+            }
+            if owners:
+                arriving = {str(i) for i in self._records.recently_received(owners)}
         out: list[tuple[FileItem, bool, tuple[Any, Any, Any]]] = []
         for h in held:
             record_id = ids.get(h.record_id)
@@ -1864,6 +1875,20 @@ class FileAccessService:
                     waiting_fix,
                     None,
                     h.on_server,
+                )
+            elif record_id in arriving:
+                item = FileItem(
+                    "",
+                    h.sha256,
+                    h.filename,
+                    h.size,
+                    record_id,
+                    "",
+                    h.field,
+                    None,
+                    "arriving",
+                    False,
+                    "Uploading: the computer that added it is still sending it.",
                 )
             else:
                 item = FileItem(
@@ -2571,7 +2596,7 @@ def _remove(dest: Path, path: str) -> None:
 
 def _places(items: list[FileItem]) -> list[PlaceSummary]:
     """Every file of a selection by place, readable drives first, then
-    unreachable drives, the server, and missing (biggest first within each)."""
+    unreachable drives, the server, arriving, and missing (biggest first within each)."""
     out: dict[tuple[str, str], PlaceSummary] = {}
     for item in items:
         place, kind = place_of(item)
@@ -2588,7 +2613,7 @@ def _places(items: list[FileItem]) -> list[PlaceSummary]:
         )
         row.files += 1
         row.bytes += item.size
-    rank = {"drive": 0, "unreachable": 1, "server": 2, "missing": 3}
+    rank = {"drive": 0, "unreachable": 1, "server": 2, "arriving": 3, "missing": 4}
     return sorted(out.values(), key=lambda r: (rank[r.kind], -r.bytes, r.place))
 
 

@@ -803,6 +803,11 @@ class RecordService:
         # Of these files, those the authority hasn't said it holds (set by
         # `context.py`; nothing when the project follows no authority).
         self.not_on_server: Callable[[set[str]], set[str]] = lambda _: set()
+        # Of these records, those a device sent lately (an authority only): a
+        # file of theirs on no drive is `arriving`, its device still uploading.
+        self.recently_received: Callable[[set[uuid.UUID]], set[uuid.UUID]] = lambda _: (
+            set()
+        )
         # Of these files, those the authority said it hasn't got, and (reason,
         # fix) for one neither here nor there (set by `context.py`).
         self.server_lacks: Callable[[set[str]], set[str]] = lambda _: set()
@@ -1204,7 +1209,13 @@ class RecordService:
             for ref in _file_dicts(r.data.get(name))
             if ref.get("sha256") and (r.id, ref["sha256"]) not in used
         }
-        location = self._locator(wanted, used, unpointed)
+        cited_by: dict[str, set[uuid.UUID]] = {}
+        for r, names in zip(records, file_fields):
+            for name in names:
+                for ref in _file_dicts(r.data.get(name)):
+                    if ref.get("sha256") in unpointed:
+                        cited_by.setdefault(ref["sha256"], set()).add(r.id)
+        location = self._locator(wanted, used, unpointed, cited_by)
 
         def decorate(record_id: uuid.UUID, value: Any) -> Any:
             if isinstance(value, dict):
@@ -1247,9 +1258,20 @@ class RecordService:
         wanted: set[str],
         used: dict[tuple[uuid.UUID, str], str],
         unpointed: set[str],
+        cited_by: dict[str, set[uuid.UUID]] | None = None,
     ) -> Callable[[uuid.UUID, str | None], dict[str, Any]]:
         volume_of = self._files.locate_volumes(unpointed) if unpointed else {}
         following = self.files_from_server()
+        # Records a device sent lately that cite a file not here: one lookup
+        # for the batch, and only when there is such a file.
+        arriving: set[uuid.UUID] = set()
+        if cited_by and not following:
+            owners: set[uuid.UUID] = set()
+            for sha, volume in volume_of.items():
+                if volume is None:
+                    owners |= cited_by.get(sha, set())
+            if owners:
+                arriving = self.recently_received(owners)
         from_server = None in volume_of.values() and following
         unsent = self.not_on_server(wanted) if following else set()
         # Not here, and the server said it hasn't got it: nobody can fetch it,
@@ -1291,6 +1313,14 @@ class RecordService:
                     "reason": "Not downloaded to this computer yet.",
                     "fix": "Opening or exporting it downloads it from the server.",
                     "sent": sha not in unsent,
+                }
+            if volume is None and record_id in arriving:
+                return {
+                    "volume": None,
+                    "state": "arriving",
+                    "available": None,
+                    "reason": "Uploading: the computer that added it is still sending it.",
+                    "fix": "",
                 }
             if volume is None:
                 # Not on any volume we know of (yet): don't claim it is gone --
