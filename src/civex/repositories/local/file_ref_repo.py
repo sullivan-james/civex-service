@@ -39,6 +39,29 @@ class LocalFileReferenceRepository:
         with unscoped(self._s):
             return self._s.execute(query).first() is None
 
+    def uses(self, shas: Iterable[str]) -> dict[str, tuple[bool, bool]]:
+        """For each digest: whether a record the caller can see uses it, and
+        whether anything does. What `is_readable` asks of one, for many (two
+        queries per chunk, both always asked): readable is the first, or not
+        the second."""
+        from civex.db.read_scope import scoped, unscoped
+
+        wanted = list(dict.fromkeys(shas))
+        out: dict[str, tuple[bool, bool]] = {}
+        for at in range(0, len(wanted), 500):
+            chunk = wanted[at : at + 500]
+            query = (
+                select(FileReference.sha256)
+                .where(FileReference.sha256.in_(chunk))
+                .distinct()
+            )
+            with scoped(self._s):
+                seen = {sha for (sha,) in self._s.execute(query)}
+            with unscoped(self._s):
+                used = {sha for (sha,) in self._s.execute(query)}
+            out.update({sha: (sha in seen, sha in used) for sha in chunk})
+        return out
+
     def referenced_subset(self, shas: Iterable[str]) -> set[str]:
         """Which of `shas` are referenced by at least one live owner -- a
         single indexed lookup, so GC can check a batch of blobs without

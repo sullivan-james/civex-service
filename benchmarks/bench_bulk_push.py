@@ -20,6 +20,10 @@ its parent, and a reference to a species held in a global collection).
 first upload, so the seed sends them as creates that carry `deleted_at` (the
 client that deletes before it syncs).
 
+`--limited` pushes as a caller who sees only some collections (the study's and
+the global species one; a `vault` collection exists that it cannot see), which
+is judged against its own view of parents, references and files.
+
 `--profile` prints where the authority's time goes (cProfile, by cumulative).
 """
 
@@ -27,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import cProfile
+import dataclasses
 import os
 import pstats
 import tempfile
@@ -37,6 +42,8 @@ from pathlib import Path
 from sqlalchemy import create_engine, text
 
 from bench_push import Counter
+from civex.context import build_context
+from civex.domain.permissions import ADD_FILES, DELETE, READ, WRITE_RECORDS, Permissions
 from civex.services import sync_service
 from civex.testing import Projects
 from civex.testing.peers import build_study, connect, device
@@ -111,6 +118,7 @@ def main() -> None:
     ap.add_argument("--mode", choices=("seed", "pending"), default="seed")
     ap.add_argument("--shape", choices=("flat", "parented"), default="flat")
     ap.add_argument("--deleted", type=int, default=0, metavar="PCT")
+    ap.add_argument("--limited", action="store_true")
     ap.add_argument("--profile", action="store_true")
     args = ap.parse_args()
     base = os.environ["PG_URL"]
@@ -145,8 +153,29 @@ def main() -> None:
                 str(laptop.record_svc.add("taxa", "species", {"latin": f"sp{i}"}).id)
                 for i in range(10)
             ]
+        if args.limited:
+            laptop.dataset_svc.create("vault")
         laptop.commit()
         connect(laptop)  # seeds the one record and the structure
+        limited = None
+        if args.limited:
+            seen = [
+                authority.dataset_svc.get(name).id
+                for name in ("study", "taxa")
+                if name == "study" or args.shape == "parented"
+            ]
+            perms = Permissions.of(
+                READ,
+                WRITE_RECORDS,
+                DELETE,
+                ADD_FILES,
+                collections=seen,
+                read_collections=seen,
+            )
+            limited = build_context(
+                dataclasses.replace(authority.project, permissions=perms)
+            )
+            laptop._holder["inner"]._authority = limited
         t = time.perf_counter()
         _prefill(authority._session.get_bind(), args.prefill)
         print(f"prefilled {args.prefill} rows in {time.perf_counter() - t:.0f}s")
@@ -189,7 +218,7 @@ def main() -> None:
                 laptop.record_svc.delete(rid)
         laptop.commit()
 
-        counts = Counter(authority._session.get_bind())
+        counts = Counter((limited or authority)._session.get_bind())
         mine = Counter(laptop._session.get_bind())
         transport = laptop._holder["inner"]
         real = transport.push
@@ -221,7 +250,7 @@ def main() -> None:
         records = sum(1 for s, _ in results if s == "applied")
         print(
             f"{args.mode} ({args.shape}): {spent['calls']} pushes, {len(results)} entries, "
-            f"{records} applied ({args.deleted}% deleted)\n"
+            f"{records} applied ({args.deleted}% deleted{', limited' if args.limited else ''})\n"
             f"  authority {spent['server'] / n * 1000:6.2f} ms/record\n"
             f"  client    {client / n * 1000:6.2f} ms/record  "
             f"({client / spent['calls'] * 1000:.0f} ms/batch)\n"
