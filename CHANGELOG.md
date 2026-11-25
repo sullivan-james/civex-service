@@ -23,6 +23,16 @@ from the next tag forward.
 
 ## Unreleased
 
+- **Structure changes need unrestricted read; collection delete checks hidden
+  referrers.** `Permissions` now drops `change_structure` whenever read is
+  limited to some collections (kind create/rename/templates, field add/update/
+  restore/delete, collection create/rename/restore), so the services, the data
+  API and a sync push (`refuses`) all meet one rule. Deleting a field also needs
+  `delete` (`action_for`, the service and a push). Deleting a global collection
+  (or making it local) is refused while records the caller cannot see point
+  into it, and so is a pushed collection delete. Documented that revoking a
+  device or narrowing access never wipes what it already synced.
+
 - **Files still being uploaded show as "Uploading", not "missing".** On an
   authority, a file cited by a record a device sent lately, whose bytes have
   not arrived yet, is `arriving` (record location state, `arriving` in the

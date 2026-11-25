@@ -149,7 +149,6 @@ def test_deleting_or_purging_a_kind_is_refused_neutrally(world: World):
     ):
         r = s.request(method, url)
         assert r.status_code == 403, (method, url, r.text)
-        assert "everything" in r.json()["detail"]
     # nothing was touched, hidden records included
     o = build_local_context(load_config_at(world.root))
     try:
@@ -165,16 +164,15 @@ def test_deleting_or_purging_a_kind_is_refused_neutrally(world: World):
 
 def test_a_hidden_collections_name_is_refused_like_any_taken_name(world: World):
     s = _structural(world)
-    taken = s.post("/api/collections", json={"name": "open"})
-    hidden = s.post("/api/collections", json={"name": f"{SECRET.lower()}-vault"})
-    assert hidden.status_code == taken.status_code == 409
-    assert s.post("/api/collections", json={"name": "fresh-name"}).status_code == 201
-    # renaming onto one is the same
-    r = s.patch("/api/collections/open", json={"rename": f"{SECRET.lower()}-vault"})
-    assert r.status_code == 409
-    assert (
-        s.patch("/api/collections/open", json={"rename": "shared"}).status_code == 409
-    )
+    # structure is for someone who sees everything, so a restricted caller
+    # cannot probe names at all: every attempt is the same 403
+    for name in ("open", f"{SECRET.lower()}-vault", "fresh-name"):
+        assert s.post("/api/collections", json={"name": name}).status_code == 403
+    for rename in (f"{SECRET.lower()}-vault", "shared"):
+        r = s.patch("/api/collections/open", json={"rename": rename})
+        assert r.status_code == 403
+    owner = _client(world, Permissions.everything())
+    assert owner.post("/api/collections", json={"name": "open"}).status_code == 409
 
 
 # -- 17: the other doors -------------------------------------------------------------

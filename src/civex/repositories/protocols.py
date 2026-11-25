@@ -482,6 +482,20 @@ class RecordRepository(Protocol):
         number, and (record id, field id) pairs for the first `limit`."""
         ...
 
+    def referrer_collections_into_dataset(
+        self, dataset_id: uuid.UUID, field_ids: list[uuid.UUID]
+    ) -> set[uuid.UUID]:
+        """The collections of the live records, in other collections, that
+        point at a live record in `dataset_id`."""
+        ...
+
+    def hidden_referrers_into_dataset(
+        self, dataset_id: uuid.UUID, field_ids: list[uuid.UUID]
+    ) -> int:
+        """How many records the caller cannot see point into `dataset_id`
+        from other collections."""
+        ...
+
     def dangling_references(
         self, field_ids: list[uuid.UUID]
     ) -> list[tuple[uuid.UUID, str, uuid.UUID, uuid.UUID]]:

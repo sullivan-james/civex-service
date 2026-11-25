@@ -48,6 +48,13 @@ class DatasetService:
         can't be made local or deleted: the references would dangle."""
         if dataset.scope != GLOBAL or self._record_svc is None:
             return
+        if self._record_svc.hidden_collection_referrers(dataset.id):
+            # Something the caller cannot see still points into it: refused,
+            # without saying what (as a record delete does).
+            raise ValidationError(
+                f"Cannot {action} '{dataset.name}': "
+                "still referenced by records you cannot see."
+            )
         total, referrers = self._record_svc.collection_referrers(dataset.id)
         if not total:
             return
