@@ -2699,6 +2699,7 @@ class SyncService:
         since `cursor` for another collection this device may read: the feed
         past the cursor will say they moved, and the device must hold them by
         then or that, and every change after it, would be to a record it lacks."""
+        self._flags_stale = True  # (records come in as the authority has them)
         dirty = {(kind, str(i)) for kind, i in self._repo.dirty_entities()}
         held: set[str] = set()
         passes: list[tuple[str, int | None]] = [
@@ -3343,6 +3344,7 @@ class SyncService:
             self._commit()
             return
         self._repo.resolve_conflict(conflict_id, take)
+        self._flags_stale = True  # (a refusal let go may make this copy level)
         self._commit()
 
     def resolve_many(
@@ -3379,6 +3381,7 @@ class SyncService:
         if take == "theirs":
             report.settled = [c.id for c in offered]
             report.done = self._repo.resolve_conflicts(report.settled, take)
+            self._flags_stale = True
             self._commit()
             return report
         for c in offered:
