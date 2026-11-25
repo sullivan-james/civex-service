@@ -1915,15 +1915,24 @@ class LocalSyncRepository:
             AuditLog.sync_state == "pending", AuditLog.hub_seq.is_(None), _SYNCED
         )
         rows = pending.order_by(*_WRITE_ORDER).limit(limit).all()
-        if len(rows) == limit and rows[-1].op_id is not None:
+        if len(rows) == limit:
+            # Every action with an entry in the page is completed (a call that
+            # logged several trees level by level has each tree's entries
+            # apart), and each action's entries are put together.
             seen = {r.id for r in rows}
-            rows += [
-                r
-                for r in pending.filter(AuditLog.op_id == rows[-1].op_id)
-                .order_by(*_WRITE_ORDER)
-                .all()
-                if r.id not in seen
-            ]
+            ops = {r.op_id for r in rows if r.op_id is not None}
+            if ops:
+                rows += [
+                    r
+                    for r in pending.filter(AuditLog.op_id.in_(ops))
+                    .order_by(*_WRITE_ORDER)
+                    .all()
+                    if r.id not in seen
+                ]
+                first: dict[Any, int] = {}
+                for r in rows:
+                    first.setdefault(r.op_id or r.id, len(first))
+                rows.sort(key=lambda r: first[r.op_id or r.id])
         return self._entries(rows)
 
     def count_pending(self) -> int:

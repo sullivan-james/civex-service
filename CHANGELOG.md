@@ -40,9 +40,11 @@ from the next tag forward.
   half-applies.** A delete (or exact restore) of two or more trees logged its
   entries level by level, so the authority settled each parent alone, refused
   it for the child sent with it (`conflict`: something added beneath it), and
-  left the parents live. Each tree's entries are now logged together, and the
-  authority gathers one action's entries even when an older device sent them
-  apart (answers then follow that order; devices match answers by entry id).
+  left the parents live. Each tree's entries are now logged together, and a
+  device sending a log made level by level (its own, from before) keeps every
+  tree whole within one request, and the authority gathers a push's entries
+  of one action that arrive apart. A 2.3.x device that already splits a tree
+  across separate requests is not fixed on the server: update it.
 
 - **Sync: a refused schema or field change is kept and marked, not put back.**
   When the authority's data or structure refuses a schema or field change (code

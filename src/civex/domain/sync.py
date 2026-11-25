@@ -1321,6 +1321,16 @@ class SyncTransport(Protocol):
 PUSH_BUDGET_BYTES = 2 * 1024 * 1024
 
 
+def group_by_op(entries: list[SyncEntry]) -> list[SyncEntry]:
+    """`entries` with each action's entries (sharing an `op`) together: actions
+    in the order they first appear, entries in the order given. An entry with no
+    `op` is an action of its own."""
+    groups: dict[Any, list[SyncEntry]] = {}
+    for at, entry in enumerate(entries):
+        groups.setdefault(entry.op or at, []).append(entry)
+    return [e for g in groups.values() for e in g]
+
+
 def batch_by_budget(
     entries: list[SyncEntry],
     max_entries: int,
@@ -1333,6 +1343,7 @@ def batch_by_budget(
     alone, and the first action is always taken). Entries with no `op` are each
     an action of their own."""
     size = size_of or (lambda e: len(json.dumps(e.to_dict())))
+    entries = group_by_op(entries)  # an action's entries may have been apart
     taken: list[SyncEntry] = []
     used = 0
     i = 0

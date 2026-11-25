@@ -84,7 +84,7 @@ def test_deleting_several_trees_at_once_goes_in_whole(project, server, levelwise
     assert all(_gone(laptop, everyone))
 
 
-def test_restoring_several_trees_at_once_goes_in_whole(project, server, levelwise):
+def test_restoring_several_trees_at_once_goes_in_whole(project, server):
     laptop, parents, everyone = _study(project, server)
     laptop.record_svc.delete_many(parents)
     laptop.commit()
@@ -117,3 +117,26 @@ def test_an_interleaved_push_is_applied_whole_per_tree(project, server):
     # answered per tree, trees in the order first met
     assert [r.op_id for r in result.results] == [e.id for e in first + second]
     assert all(_gone(server, everyone))
+
+
+@pytest.mark.parametrize("small", ["entries", "bytes"])
+def test_a_level_order_log_is_cut_only_between_trees(
+    project, server, monkeypatch, small
+):
+    """Entries left in level order by an older device (P1, P2, P3, then their
+    children) still go whole per tree when a request carries only a few."""
+    from civex.services import sync_service
+
+    monkeypatch.setattr(record_service, "_by_tree", lambda ids, ops: ids)
+    laptop, parents, everyone = _study(project, server, trees=3, children=2)
+    laptop.record_svc.delete_many(parents)
+    laptop.commit()
+    monkeypatch.setattr(
+        sync_service,
+        "PUSH_BATCH" if small == "entries" else "PUSH_BUDGET_BYTES",
+        4 if small == "entries" else 1,
+    )
+    report = laptop.sync_svc.sync()
+    assert _conflicts(report) == 0
+    assert all(_gone(server, everyone))
+    assert all(_gone(laptop, everyone))
