@@ -1906,8 +1906,11 @@ def _already_done(entry: SyncEntry, head: dict[str, Any]) -> bool:
     if entry.action not in ("restore", "update") or head.get("deleted_at"):
         return False
     _, incoming = _sides(entry, head)
-    return incoming.get("deleted_at") is None and _comparable(incoming) == _comparable(
-        head
+    return (
+        incoming.get("deleted_at") is None
+        and _comparable(incoming) == _comparable(head)
+        # (an edit also dates the thing: a different date is settled as before)
+        and str(incoming.get("updated_at")) == str(head.get("updated_at"))
     )
 
 

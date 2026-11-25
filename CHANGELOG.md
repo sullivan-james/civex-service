@@ -11,8 +11,7 @@ final version's entry or `## Unreleased` instead of one of its own. The version 
   or an edit or move that leaves a live record as it is, is acknowledged and
   writes nothing (no second history entry, no settling entry), and a run of
   deletes or restores that overlaps what is already done stays one bulk write of
-  the rest. A device likewise skips sending a delete or restore that a pulled
-  change already made.
+  the rest.
 - **Sync: a record that breaks a data rule is taken in and flagged.** A required
   field left empty, or a value outside its field's restrictions (min/max,
   choices, length, date range or precision), no longer refuses a pushed record:

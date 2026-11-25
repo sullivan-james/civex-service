@@ -153,3 +153,19 @@ def test_a_delete_made_on_two_devices_is_settled_once_and_both_end_synced(projec
         if e.actor == "sync"
     ]
     assert b.sync_repo.count_pending() == 0
+
+
+def test_an_edit_that_changes_nothing_is_acknowledged_and_not_written(project, spy):
+    from .test_bulk_changes import edit_entry
+
+    ctx, _ = spy
+    f = Flow(project)
+    ids = f.many(1)
+    creates = f.take()
+    send(ctx, f.structure + creates)
+    edit = edit_entry(creates[0])
+    send(ctx, [edit])
+    head = ctx.sync_repo.head_seq()
+    answers, new_head = send(ctx, [dataclasses.replace(edit, id=uuid.uuid4())])
+    assert answers[0][1] == "applied" and new_head == head
+    assert len(history(ctx, ids[0], "update")) == 1
