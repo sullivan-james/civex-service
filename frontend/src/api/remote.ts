@@ -223,6 +223,9 @@ export type ConflictResolution = ConflictTake | 'sent' | 'replaced' | 'retrying'
 /** A value that did not go in as made. */
 export interface SyncConflict {
   id: string
+  /** unfit: the change went in, but the record's values break a data rule
+   * (a required field empty, a value outside its restrictions). Nothing to
+   * send again: fixing the values clears it. */
   /** not_taken: a change to the project's structure (or part of one action)
    * the server did not take; this copy was put back as the server has it. */
   kind:
@@ -230,6 +233,7 @@ export interface SyncConflict {
     | 'rejected'
     | 'edit_vs_delete'
     | 'not_taken'
+    | 'unfit'
     | 'not_applied'
     | string
   entity_type: string

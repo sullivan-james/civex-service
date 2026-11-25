@@ -172,7 +172,7 @@ made is badged *Clashed*, *Refused*, *Met a delete* or *Not taken*.
 civex sync conflicts [--record <id>]
 civex sync resolve <conflict id> --take theirs|mine|delete|retry
 civex sync resolve <conflict id> --take value --value '"M"'
-civex sync resolve --all --take theirs [--kind rejected|conflict|edit_vs_delete]
+civex sync resolve --all --take theirs [--kind rejected|conflict|edit_vs_delete|unfit]
 civex sync reopen <conflict id>...       # take back a "theirs"
 ```
 

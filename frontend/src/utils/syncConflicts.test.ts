@@ -115,3 +115,16 @@ describe('a refused record', () => {
     expect(settledLabel('replaced')).toBe('Replaced by a later attempt')
   })
 })
+
+describe('a record that went in but breaks a rule', () => {
+  it('is labelled, can only be dismissed, and says fixing the value clears it', () => {
+    const said = describeAttempt(
+      c('1', { kind: 'unfit', message: "Required field 'site' is empty" }),
+      (iso) => iso,
+    )
+    expect(said).toContain('went in')
+    expect(said).toContain("'site' is empty")
+    expect(kindLabel('unfit')).toBe('Breaks a rule')
+    expect(takeLabel('unfit', 'theirs')).toBe('Dismiss')
+  })
+})

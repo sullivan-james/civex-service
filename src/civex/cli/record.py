@@ -120,6 +120,8 @@ def _sync_line(ctx, record_id) -> str | None:
         return f"first upload to {where} not finished{files}"
     if s.state == "refused":
         return f"refused by {where}: {s.message or 'see sync conflicts'}{files}"
+    if s.state == "unfit":
+        return f"taken by {where}, but it breaks a rule: {s.message or 'see sync conflicts'}{files}"
     if s.state == "conflict":
         return f"in conflict with {where}: review it with `civex sync conflicts`{files}"
     when = f" at {s.synced_at[:16].replace('T', ' ')}" if s.synced_at else ""

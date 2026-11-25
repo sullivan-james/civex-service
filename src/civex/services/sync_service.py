@@ -56,6 +56,7 @@ from civex.domain.dtos import MissingFileGroupDTO, MissingFilesRemovalDTO
 from civex.domain.sync import (
     PUSH_BUDGET_BYTES,
     REFUSAL_PERMISSION,
+    UNFIT,
     batch_by_budget,
     is_lock_contention,
     Joined,
@@ -235,8 +236,9 @@ class RecordSyncState:
     `state`: `not_connected` (no authority), `held_here` (this project is the
     authority), `synced`, `pending` (changes not yet sent), `first_upload`
     (set aside by a first upload that has not finished), `refused` (the
-    authority would not take a change) or `conflict` (a value both sides
-    changed, for a person to settle)."""
+    authority would not take a change), `unfit` (taken, but its values break a
+    data rule) or `conflict` (a value both sides changed, for a person to
+    settle)."""
 
     state: str
     remote: str | None = None
@@ -476,12 +478,16 @@ class SyncService:
         )
         open_ = self._repo.find_open_conflicts(entity_id=record_id)
         refused = next((c for c in open_ if c.kind == "rejected"), None)
-        clash = next((c for c in open_ if c.kind != "rejected"), None)
+        unfit = next((c for c in open_ if c.kind == UNFIT), None)
+        clash = next((c for c in open_ if c.kind not in ("rejected", UNFIT)), None)
         if clash:
             out.state, out.conflict_id = "conflict", str(clash.id)
         elif refused:
             out.state, out.conflict_id = "refused", str(refused.id)
             out.message = refused.message
+        elif unfit:
+            out.state, out.conflict_id = "unfit", str(unfit.id)
+            out.message = unfit.message
         elif pending:
             out.state = "pending"
         elif seeding:
@@ -2440,7 +2446,7 @@ class SyncService:
                     op_id=result.op_id,
                     device_name=None,
                     message=problem.get("message"),
-                    code=problem.get("code") if kind == "rejected" else None,
+                    code=problem.get("code") if kind in ("rejected", UNFIT) else None,
                 )
                 if kind == "rejected":
                     refused.add(entry.entity_id)
@@ -3384,6 +3390,9 @@ _TAKES: dict[str, tuple[str, ...]] = {
     "conflict": ("theirs", "mine", "value"),
     "edit_vs_delete": ("theirs", "delete"),
     "rejected": ("theirs", "retry"),
+    # Taken as it is: nothing to send again. Fixing the values clears it (see
+    # `_note`); `theirs` only lets the reminder go.
+    "unfit": ("theirs",),
 }
 _RECORD_ONLY = frozenset({"mine", "value", "delete"})
 

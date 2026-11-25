@@ -16,6 +16,7 @@ const SHORT: Record<string, string> = {
   rejected: 'Refused',
   edit_vs_delete: 'Met a delete',
   not_taken: 'Not taken',
+  unfit: 'Breaks a rule',
 }
 
 /** On a history row: that this change did not go in as made, and whether it still

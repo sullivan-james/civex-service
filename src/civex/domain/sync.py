@@ -358,6 +358,14 @@ NOT_SYNCED_MESSAGE = (
     "Releases are published on a civex hub and are not synced: make this one there."
 )
 
+# A change that went in (a record) although its values break a data rule of the
+# project (a required field left empty, a value outside its field's
+# restrictions): the answer's `conflicts` item has kind `UNFIT` and this code. The
+# record is kept and shown by everyone as it is; the flag is a fact about the
+# data, worked out again from it, and the pusher's item is only the nudge.
+UNFIT = "unfit"
+UNFIT_DATA = "data"
+
 ACTIONS = frozenset({"create", "update", "delete", "restore", "purge"})
 # A delete's time becomes the `deleted_at` of what it deletes, so a device whose
 # clock is further ahead than this is refused rather than stamping the future.
@@ -1159,7 +1167,7 @@ class SyncPolicy(Protocol):
 @dataclass
 class SyncConflictDTO:
     id: uuid.UUID
-    kind: str  # conflict | rejected | edit_vs_delete
+    kind: str  # conflict | rejected | edit_vs_delete | unfit
     entity_type: str
     entity_id: uuid.UUID
     field: str | None

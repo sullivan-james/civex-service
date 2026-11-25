@@ -250,7 +250,7 @@ class RemoteUpdateRequest(BaseModel):
 
 class ConflictResponse(BaseModel):
     id: str
-    kind: str = Field(description="conflict, rejected or edit_vs_delete.")
+    kind: str = Field(description="conflict, rejected, edit_vs_delete or unfit.")
     entity_type: str
     entity_id: str
     field: str | None
@@ -349,7 +349,7 @@ class ResolveManyRequest(BaseModel):
     )
     kind: str | None = Field(
         default=None,
-        description="Only this kind: conflict, rejected or edit_vs_delete.",
+        description="Only this kind: conflict, rejected, edit_vs_delete or unfit.",
     )
     record_id: str | None = Field(
         default=None, description="Only conflicts about this record."

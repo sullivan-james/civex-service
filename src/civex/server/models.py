@@ -1402,7 +1402,7 @@ class DeletedFieldValue(BaseModel):
 class RecordSyncResponse(BaseModel):
     state: str = Field(
         description="not_connected, held_here, synced, pending, first_upload, "
-        "refused or conflict."
+        "refused, unfit or conflict."
     )
     remote: str | None = Field(default=None, description="The authority's address.")
     pending: int = Field(default=0, description="Changes not yet sent.")

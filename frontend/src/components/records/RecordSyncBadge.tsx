@@ -12,7 +12,10 @@ export default function RecordSyncBadge({ recordId }: { recordId: string }) {
   })
   const text = data ? recordSyncText(data) : null
   if (!data || !text) return null
-  const needsReview = data.state === 'refused' || data.state === 'conflict'
+  const needsReview =
+    data.state === 'refused' ||
+    data.state === 'unfit' ||
+    data.state === 'conflict'
   const tone = needsReview
     ? 'text-danger'
     : data.state === 'synced'
