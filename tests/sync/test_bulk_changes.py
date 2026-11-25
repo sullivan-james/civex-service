@@ -355,6 +355,133 @@ def test_a_limited_caller_is_judged_as_one_at_a_time(project, pair, spy):
     assert got[2][0] == "rejected" and got[-1][0] == "rejected"
 
 
+def test_restores_by_a_limited_caller_are_judged_as_one_at_a_time(project, pair, spy):
+    f = Flow(project)
+    sp = f.make("taxa", "species", {"latin": "a"})
+    hidden = f.make("secret", "encounter", {"site": "h"})
+    mine = f.many(3)
+    first = f.structure + f.take()
+    for a in pair:
+        send(a, first)
+    ids = [sp, hidden] + mine
+    gone = f.deleted(ids)
+    both(pair, [gone])  # (by callers that may)
+    back = {e.entity_id: e for e in f.restored(ids)}
+    limited = _limited(pair, ("mine", "taxa"))
+    batch = [back[i] for i in ids]
+    answers = [send(c, batch) for c in limited]
+    assert answers[0] == answers[1]
+    assert rows(pair[0]) == rows(pair[1])
+    got = [r[1] for r in answers[0][0]]
+    assert got[0] == "applied" and got[1] == "rejected" and got[2:] == ["applied"] * 3
+
+
+def _limited(pair, names):
+    out = []
+    for a, bulk in zip(pair, (True, False)):
+        where = [a.dataset_svc.get(n).id for n in names]
+        perms = Permissions.of(
+            p.READ,
+            p.WRITE_RECORDS,
+            p.DELETE,
+            collections=where,
+            read_collections=where,
+        )
+        ctx = build_context(dataclasses.replace(a.project, permissions=perms))
+        ctx.authority_svc._bulk = bulk
+        out.append(ctx)
+    return out
+
+
+def test_a_delete_after_a_replayed_restore_is_still_guarded(project, pair, spy):
+    f = Flow(project)
+    enc = f.make("mine", "encounter", {"site": "a"})
+    first = f.structure + f.take()
+    for a in pair:
+        send(a, first)
+    gone = f.deleted([enc])
+    back = f.restored([enc])
+    both(pair, [gone, back])
+    kid = f.make("mine", "recording", {"label": "x", "must": "m"}, str(enc))
+    both(pair, [f.take()])  # a record now lives beneath it
+    again = dataclasses.replace(gone[0], id=uuid.uuid4(), op=None)
+    answers = both(pair, [[back[0], again]])
+    assert answers[0][0][5] is True  # replayed
+    assert answers[0][1][1] == "conflict"  # the child is still there
+    assert kid
+
+
+def test_a_delete_after_a_run_of_creates_sees_the_child_it_made(project, pair, spy):
+    f = Flow(project)
+    enc = f.make("mine", "encounter", {"site": "a"})
+    made = f.take()
+    kid = f.make("mine", "recording", {"label": "x", "must": "m"}, str(enc))
+    kid_create = next(e for e in f.take() if e.entity_id == kid)
+    for a in pair:
+        send(a, f.structure + made)
+    gone = next(e for e in f.deleted([enc]) if e.entity_id == enc)
+    malformed = dataclasses.replace(gone, id=uuid.uuid4(), op=None, delta={"x": 1})
+    valid = dataclasses.replace(gone, id=uuid.uuid4(), op=None)
+    answers = both(pair, [[malformed, kid_create, valid]])
+    assert [r[1] for r in answers[0]] == ["rejected", "applied", "conflict"]
+
+
+def test_a_delete_after_a_refused_restore_still_sees_hidden_referrers(
+    project, pair, spy
+):
+    f = Flow(project)
+    sp = f.make("taxa", "species", {"latin": "held"})
+    f.make("secret", "encounter", {"site": "s", "seen": str(sp)})
+    first = f.structure + f.take()
+    for a in pair:
+        send(a, first)
+    gone = next(e for e in f.deleted([sp]) if e.entity_id == sp)
+    secret = str(pair[0].dataset_svc.get("secret").id)
+    forged = dataclasses.replace(
+        gone,
+        id=uuid.uuid4(),
+        action="restore",
+        old_data=None,
+        new_data={**gone.old_data, "dataset_id": secret},
+        op=None,
+    )
+    limited = _limited(pair, ("mine", "taxa"))
+    batch = [forged, gone]
+    answers = [send(c, batch) for c in limited]
+    assert answers[0] == answers[1]
+    assert rows(pair[0]) == rows(pair[1])
+    assert [r[1] for r in answers[0][0]] == ["rejected", "rejected"]
+    assert answers[0][0][1][2] == "Records you cannot see still reference this record."
+
+
+@pytest.mark.parametrize("kind", ["delete", "restore"])
+def test_a_run_the_database_refuses_is_settled_on_its_own(
+    project, pair, spy, monkeypatch, kind
+):
+    f = Flow(project)
+    ids = f.many(5)
+    first = f.structure + f.take()
+    for a in pair:
+        send(a, first)
+    gone = f.deleted(ids)
+    back = f.restored(ids)
+    both(pair, [gone] if kind == "restore" else [])
+    batch = back if kind == "restore" else gone
+    real = pair[0].sync_repo.insert_entries
+    failed = []
+
+    def refuse(rows):
+        if not failed:
+            failed.append(1)
+            raise ValueError("refused")
+        return real(rows)
+
+    monkeypatch.setattr(pair[0].sync_repo, "insert_entries", refuse)
+    answers = both(pair, [batch])
+    assert failed and [r[1] for r in answers[0]] == ["applied"] * 5
+    assert len(rows(pair[0])["sync_ops"]) == len(rows(pair[1])["sync_ops"])
+
+
 def test_a_run_cut_at_its_size_still_guards_what_follows(project, pair, spy):
     from civex.services.sync_authority import RUN_MAX
 
