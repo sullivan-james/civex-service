@@ -938,39 +938,39 @@ class LocalRecordRepository:
     def referrer_collections_into_dataset(
         self, dataset_id: uuid.UUID, field_ids: list[uuid.UUID]
     ) -> set[uuid.UUID]:
+        """The collections of the live records, in other collections, that
+        point at a live record in `dataset_id`. Whatever the caller may see:
+        the rule that asks says which of them it may not."""
         if not field_ids:
             return set()
         rr = RecordReference
         target, referrer = Record.__table__.alias(), Record.__table__.alias()
-        return set(
-            self._s.scalars(
-                select(referrer.c.dataset_id)
-                .select_from(rr)
-                .join(referrer, referrer.c.id == rr.record_id)
-                .join(target, target.c.id == rr.target_id)
-                .where(
-                    target.c.dataset_id == dataset_id,
-                    target.c.deleted_at.is_(None),
-                    referrer.c.dataset_id != dataset_id,
-                    referrer.c.deleted_at.is_(None),
-                    rr.field_id.in_(field_ids),
-                )
-                .distinct()
-            )
-        )
-
-    def hidden_referrers_into_dataset(
-        self, dataset_id: uuid.UUID, field_ids: list[uuid.UUID]
-    ) -> int:
-        """How many records the caller cannot see, in other collections, point
-        at a live record in `dataset_id` (0 for one who sees everything): what
-        deleting or localising that collection must still respect."""
-        if not read_scope.restricted(self._s):
-            return 0
-        seen, _ = self.referrers_into_dataset(dataset_id, field_ids, 0)
         with read_scope.unscoped(self._s):
-            every, _ = self.referrers_into_dataset(dataset_id, field_ids, 0)
-        return max(every - seen, 0)
+            return set(
+                self._s.scalars(
+                    select(referrer.c.dataset_id)
+                    .select_from(rr)
+                    .join(referrer, referrer.c.id == rr.record_id)
+                    .join(target, target.c.id == rr.target_id)
+                    .where(
+                        target.c.dataset_id == dataset_id,
+                        target.c.deleted_at.is_(None),
+                        referrer.c.dataset_id != dataset_id,
+                        referrer.c.deleted_at.is_(None),
+                        rr.field_id.in_(field_ids),
+                    )
+                    .distinct()
+                )
+            )
+
+    def referrer_places_of(
+        self, target_ids: list[uuid.UUID], field_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, uuid.UUID]:
+        """Each live record holding a reference to any of these, with its
+        collection, whatever the caller may see."""
+        with read_scope.unscoped(self._s):
+            ids = list({r for r, _, _ in self.referrers_of(target_ids, field_ids)})
+            return {rid: p.dataset_id for rid, p in self.placement_of(ids).items()}
 
     def dangling_references(
         self, field_ids: list[uuid.UUID]

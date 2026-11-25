@@ -38,6 +38,7 @@ from civex.domain.exceptions import ValidationError
 from civex.domain.permissions import FILE_UNAVAILABLE, file_changes
 from civex.domain.merge import LIFECYCLE_KEYS, DERIVED_KEYS, merge
 from civex.domain.permissions import ReadScope
+from civex.domain.scopes import GLOBAL, LOCAL
 from civex.services.sync_scope import FeedShaper
 from civex.domain.sync_page import json_size, take
 from civex.domain.sync import (
@@ -664,22 +665,8 @@ class SyncAuthorityService:
             # change to a record that is not here at all, in the same words and
             # with the same (absent) code.
             return NOT_HERE, None
-        if (
-            self._sees is not None
-            and entry.entity_type == "dataset"
-            and entry.action in ("delete", "purge")
-            and any(
-                not self._sees(where)
-                for where in self._records.referrer_collections_into(entry.entity_id)
-            )
-        ):
-            # Records this device may not see still point into the collection:
-            # deleting it would leave them dangling (as a delete made here is
-            # refused), said without telling what they are.
-            return (
-                "Records you cannot see still reference this collection.",
-                REFUSAL_PERMISSION,
-            )
+        if refusal := self._referrer_problem(entry):
+            return refusal, REFUSAL_PERMISSION
         if (
             self._policy
             and entry.entity_type == "dataset"
@@ -1128,6 +1115,44 @@ class SyncAuthorityService:
             )
             if refusal:
                 raise ValidationError(refusal)
+
+    def _referrer_problem(self, entry: SyncEntry) -> str | None:
+        """Why deleting a record, or deleting a global collection or making it
+        local, is not allowed while other records point into it: the same
+        rules the services apply (a delete is refused, forced or not, while a
+        record the caller cannot see points at it; a global collection that
+        records in other collections reference cannot go or become local).
+        Nothing is said of what the records are."""
+        sees = self._sees or (lambda _where: True)
+        if entry.entity_type == "record" and entry.action in ("delete", "purge"):
+            if self._sees is not None and self._records.hidden_referrers_of_records(
+                {entry.entity_id},
+                self._sees,
+                {rid for kind, rid in self._covered if kind == "record"},
+            ):
+                return "Records you cannot see still reference this record."
+            return None
+        if entry.entity_type != "dataset":
+            return None
+        new = getattr(entry, "new_data", None) or {}
+        delta = getattr(entry, "delta", None) or {}
+        moved = delta.get("scope")
+        to_local = (
+            entry.action == "update"
+            and (moved.get("after") if isinstance(moved, dict) else new.get("scope"))
+            == LOCAL
+        )
+        if entry.action not in ("delete", "purge") and not to_local:
+            return None
+        head = self._applier.head("dataset", entry.entity_id)
+        if not head or head.get("scope") != GLOBAL:
+            return None
+        blocked = self._records.collection_referrer_block(entry.entity_id, sees)
+        if blocked == "hidden":
+            return "Records you cannot see still reference this collection."
+        if blocked:
+            return "Records in other collections still reference this collection."
+        return None
 
     def _added_beneath(self, record_id: uuid.UUID) -> bool:
         """Whether a live record sits under this one that the action being

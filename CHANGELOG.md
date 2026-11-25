@@ -30,7 +30,7 @@ from the next tag forward.
   API and a sync push (`refuses`) all meet one rule. Deleting a field also needs
   `delete` (`action_for`, the service and a push). Deleting a global collection
   (or making it local) is refused while records the caller cannot see point
-  into it, and so is a pushed collection delete. Documented that revoking a
+  into it. A push follows the same rules: a record delete or purge with hidden referrers, and a collection delete or global-to-local change with any live referrers (one shared rule, `RecordService.collection_referrer_block`), is refused. An explicit `release` grant is withheld from restricted readers too. Documented that revoking a
   device or narrowing access never wipes what it already synced.
 
 - **Files still being uploaded show as "Uploading", not "missing".** On an

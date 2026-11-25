@@ -1985,21 +1985,38 @@ class RecordService:
         records = {r.id: r for r in self._records.list_by_ids(list(fields))}
         return total, [(records[rid], f) for rid, f in fields.items() if rid in records]
 
-    def referrer_collections_into(self, dataset_id: uuid.UUID) -> set[uuid.UUID]:
-        """The collections holding a live record, other than one in this
-        collection, that points into it: what the sync authority asks (it sees
-        every collection) to learn whether a hidden one does."""
+    def collection_referrer_block(
+        self, dataset_id: uuid.UUID, sees: Callable[[Any], bool]
+    ) -> str | None:
+        """The one rule for deleting a global collection or making it local:
+        "hidden" when a record the caller cannot see (`sees` says which
+        collections they can) in another collection points into it, "visible"
+        when only records they can see do, else None. The service and the sync
+        authority both ask it."""
         field_map = self._reference_field_map()
-        return self._records.referrer_collections_into_dataset(
+        where = self._records.referrer_collections_into_dataset(
             dataset_id, [uuid.UUID(f) for f in field_map]
         )
+        if any(not sees(w) for w in where):
+            return "hidden"
+        return "visible" if where else None
 
-    def hidden_collection_referrers(self, dataset_id: uuid.UUID) -> int:
-        """How many records the caller cannot see, in other collections, point
-        into this one: what deleting it or making it local must respect."""
+    def hidden_referrers_of_records(
+        self,
+        target_ids: set[uuid.UUID],
+        sees: Callable[[Any], bool],
+        exclude: set[uuid.UUID],
+    ) -> bool:
+        """Whether a record the caller cannot see, and that is not in
+        `exclude` (what is deleted with them), points at any of these."""
         field_map = self._reference_field_map()
-        return self._records.hidden_referrers_into_dataset(
-            dataset_id, [uuid.UUID(f) for f in field_map]
+        if not field_map or not target_ids:
+            return False
+        holders = self._records.referrer_places_of(
+            list(target_ids), [uuid.UUID(f) for f in field_map]
+        )
+        return any(
+            not sees(where) for rid, where in holders.items() if rid not in exclude
         )
 
     def patched_data(
