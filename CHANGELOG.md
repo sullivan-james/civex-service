@@ -34,6 +34,13 @@ from the next tag forward.
 
 ## Unreleased
 
+- **Sync: a device applies a bulk delete, restore or edit from the feed as a set.**
+  A pulled page's runs of like record changes (deletes, restores, makes, edits)
+  are written in a few statements for the run (one history insert, one
+  `UPDATE ... IN` per stamp for deletes, one read of the records) instead of
+  six to eight per change; a change that is not plain (held, ours, repeated,
+  moving a record, arriving) goes one at a time in its place. Results, holds
+  and conflicts are unchanged. `benchmarks/bench_bulk_pull.py` measures it.
 - **Sync: a refused schema or field change is kept and marked, not put back.**
   When the authority's data or structure refuses a schema or field change (code
   `data`), it answers `rejected`, writes nothing to the feed, and refuses the
