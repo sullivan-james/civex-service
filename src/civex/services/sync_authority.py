@@ -729,11 +729,11 @@ class SyncAuthorityService:
     ) -> None:
         """A run of deletes or restores is written: what the push has read
         says so, without reading again (`places` for what comes next; the
-        records' states, children and hidden referrers are dropped)."""
+        records' states, children and hidden referrers were dropped by
+        `_flush_run`)."""
         if cache is None:
             return
         for f in taken:
-            cache.heads.pop(f.entry.entity_id, None)
             place = cache.places.get(f.entry.entity_id)
             if place is not None:
                 cache.places[f.entry.entity_id] = place._replace(
@@ -760,7 +760,6 @@ class SyncAuthorityService:
             self._cache.read.clear()
             self._cache.children.clear()
             self._cache.hidden.clear()
-            self._stretch_left = 0
         items, run[:] = list(run), []
         taken = [f for f in items if f.refused is None]
         if not taken:

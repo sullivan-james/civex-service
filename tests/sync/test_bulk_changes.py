@@ -343,7 +343,10 @@ def test_a_limited_caller_is_judged_as_one_at_a_time(project, pair, spy):
     ordered = [sp_free, sp_held, hidden] + mine
     by_id = {e.entity_id: e for e in f.deleted(ordered)}
     gone = [by_id[i] for i in ordered]
-    absent = dataclasses.replace(gone[0], id=uuid.uuid4(), entity_id=uuid.uuid4())
+    # (its own action: sharing gone[0]'s `op` would make the two one action)
+    absent = dataclasses.replace(
+        gone[0], id=uuid.uuid4(), entity_id=uuid.uuid4(), op=str(uuid.uuid4())
+    )
     batch = gone + [absent]
     answers = [send(c, batch) for c in limited]
     assert answers[0] == answers[1]
@@ -487,7 +490,7 @@ def test_a_run_cut_at_its_size_still_guards_what_follows(project, pair, spy):
 
     f = Flow(project)
     enc = f.make("mine", "encounter", {"site": "a"})
-    f.make("mine", "recording", {"label": "x", "must": "m"}, str(enc))
+    kid = f.make("mine", "recording", {"label": "x", "must": "m"}, str(enc))
     others = f.many(RUN_MAX + 40)
     first = f.structure + f.take()
     for a in pair:
@@ -495,6 +498,9 @@ def test_a_run_cut_at_its_size_still_guards_what_follows(project, pair, spy):
     gone = f.deleted([enc] + others)
     parent = dataclasses.replace(next(e for e in gone if e.entity_id == enc), op=None)
     rest = [e for e in gone if e.entity_id != enc]
+    # a tree is logged parent first; the child goes last, so the parent is sent
+    # while it still has a live child
+    rest.sort(key=lambda e: e.entity_id == kid)
     batch = rest[: RUN_MAX + 20] + [parent] + rest[RUN_MAX + 20 :]
     answers = both(pair, [batch])
     assert answers[0][RUN_MAX + 20][1] == "conflict"  # a child is still live
@@ -504,7 +510,7 @@ def test_a_run_cut_at_its_size_still_guards_what_follows(project, pair, spy):
 def test_a_resent_change_inside_a_run_does_not_unguard_the_next(project, pair, spy):
     f = Flow(project)
     enc = f.make("mine", "encounter", {"site": "a"})
-    f.make("mine", "recording", {"label": "x", "must": "m"}, str(enc))
+    kid = f.make("mine", "recording", {"label": "x", "must": "m"}, str(enc))
     others = f.many(3)
     first = f.structure + f.take()
     for a in pair:
@@ -512,6 +518,9 @@ def test_a_resent_change_inside_a_run_does_not_unguard_the_next(project, pair, s
     gone = f.deleted([enc] + others)
     parent = dataclasses.replace(next(e for e in gone if e.entity_id == enc), op=None)
     rest = [e for e in gone if e.entity_id != enc]
+    # a tree is logged parent first; the child goes last, so the parent is sent
+    # while it still has a live child
+    rest.sort(key=lambda e: e.entity_id == kid)
     both(pair, [[rest[1]]])
     answers = both(pair, [[rest[0], rest[1], parent, rest[2]]])
     assert [r[1] for r in answers[0]] == ["applied", "applied", "conflict", "applied"]
