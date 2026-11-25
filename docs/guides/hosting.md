@@ -108,7 +108,7 @@ is held to nothing.
 |---|---|
 | `read` | see the project's records, history and files |
 | `write_records` | add, change and restore records |
-| `change_structure` | change kinds of record, fields and collections |
+| `change_structure` | change kinds of record, fields and collections; available only to a caller who can read every collection (`Permissions` drops it when `read` is limited). Deleting a field also needs `delete` |
 | `add_files` | cite or upload a file a record did not hold |
 | `delete_files` | let go of a file a record held |
 | `delete` | delete records, collections and kinds of record |
@@ -184,7 +184,9 @@ not a check each route remembers. What it does *not* hide, by design:
 - A record moved out of a hidden collection carries its earlier history with it.
 - Deleting a record that records in a hidden collection still refer to is refused
   ("referenced by records you cannot see"), forced or not, so nothing is left
-  dangling and nothing hidden is touched.
+  dangling and nothing hidden is touched. Deleting a global collection, or making
+  it local, is refused the same way while records the caller cannot see point into it
+  (a push that deletes it too).
 - Content with no use by any record (just uploaded, or left behind until clean-up)
   is not tied to a collection, so anyone who knows its hash can fetch it.
 - **Citing a file you cannot download.** A save through the API that cites a file

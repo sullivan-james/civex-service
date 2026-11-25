@@ -665,6 +665,22 @@ class SyncAuthorityService:
             # with the same (absent) code.
             return NOT_HERE, None
         if (
+            self._sees is not None
+            and entry.entity_type == "dataset"
+            and entry.action in ("delete", "purge")
+            and any(
+                not self._sees(where)
+                for where in self._records.referrer_collections_into(entry.entity_id)
+            )
+        ):
+            # Records this device may not see still point into the collection:
+            # deleting it would leave them dangling (as a delete made here is
+            # refused), said without telling what they are.
+            return (
+                "Records you cannot see still reference this collection.",
+                REFUSAL_PERMISSION,
+            )
+        if (
             self._policy
             and entry.entity_type == "dataset"
             and entry.action == "create"

@@ -1179,6 +1179,9 @@ class SchemaService:
     @_one_action
     def delete_field(self, schema_name: str, field_name: str) -> None:
         self._permissions.require(permissions.CHANGE_STRUCTURE)
+        # Deleting a field can destroy every value held in it: it takes the
+        # right to delete too, not only to change the structure.
+        self._permissions.require(permissions.DELETE)
         schema = self.get(schema_name)
         field = next((f for f in schema.fields if f.name == field_name), None)
         if field is None:

@@ -267,14 +267,15 @@ def test_a_collection_one_cannot_read_cannot_be_changed_or_deleted_by_a_push():
         new_data={"id": str(C1)},
         timestamp="2026-01-01T00:00:00+00:00",
     )
-    assert builder.refuses(Who(), seen) is None
+    # changing a collection is structure, which needs unrestricted read
+    assert builder.refuses(Who(), seen)
+    seen_gone = dataclasses.replace(seen, action="delete")
+    assert builder.refuses(Who(), seen_gone) is None
     hidden = dataclasses.replace(seen, entity_id=C2, new_data={"id": str(C2)})
     assert builder.refuses(Who(), hidden)
     assert builder.refuses(Who(), dataclasses.replace(hidden, action="delete"))
     made = dataclasses.replace(hidden, action="create")
-    assert (
-        builder.refuses(Who(), made) is None
-    )  # a new collection is a structure matter
+    assert builder.refuses(Who(), made)
 
 
 def test_a_collection_id_spelled_another_way_is_the_same_collection():
