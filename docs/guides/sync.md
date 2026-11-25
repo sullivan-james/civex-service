@@ -42,7 +42,9 @@ civex sync connect https://… --invite civex_inv_…   # an existing project
 - **Keys:** joining makes the device a key pair. It then signs in with its key for
   short sessions, and checks the authority's key, so a different server at the
   same address gets nothing. `civex sync device revoke <name>` stops a device at
-  once.
+  once. Revoking stops the device syncing; it does **not** wipe what it already
+  copied: those records and files stay on that computer (the same holds when a
+  person's access is narrowed, below).
 - **HTTPS or SSH only.** Devices refuse `http://` except to this computer. Use
   [Tailscale](../how-to/set-up-sync.md), or bind `civex serve --sync-only` to
   `127.0.0.1` behind a reverse proxy (Caddy, nginx). `--sync-only` serves only
@@ -199,6 +201,15 @@ shows the control switched off, saying why.
 
 ### A device that may not read everything
 
+Changing the project's structure (kinds of record, their fields, collections)
+reaches the records of every collection, so it is for someone who can read them all:
+`change_structure` is unavailable (in `Permissions` itself, so for every route,
+service and push alike) when read is limited to some collections. Deleting a field
+takes `delete` as well, since it destroys the values held in it. A push that does
+either without the right is refused, and so is deleting a collection that records
+the device cannot see still reference. On the device itself everything stays
+possible locally: this is the authority's judgement on a push.
+
 When its person may not read some collections, their device holds a **partial
 copy**: it simply never has those collections. The authority leaves them out of
 everything it sends that device (the feed, the copy a joining device reads, the
@@ -241,7 +252,8 @@ page with `more` and `through`, and the device asks again from there.
 
 If the person is **given less**, the authority stops sending, and that is all it
 can do: **what the device already holds cannot be taken back.** The records it
-copied stay on that computer, and its person can read them there. A copy made
+copied stay on that computer, and its person can read them there. Revoking the
+device or removing the person is the same: it ends syncing, never the copy. A copy made
 again from the authority (an authority that pruned its history does this) drops
 what the device may no longer read. A host that needs a person never to keep
 data it once showed them should not give it to a device at all.
