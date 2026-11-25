@@ -21,7 +21,7 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
-## Unreleased
+## v2.3.2 — bundle import fix (2026-11-25)
 
 ### Fixed
 
