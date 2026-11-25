@@ -32,8 +32,9 @@ from the next tag forward.
   change, does not start the wait; after it, or once the file is uploaded, it
   is as before. One batched lookup per page of records, only when one cites a
   file not here. The push path does no extra work beyond one more index on
-  `sync_ops` (migration `a4e9c2b7d6f1`); on PostgreSQL it is built
-  `CONCURRENTLY`, so a big authority keeps taking writes while it builds.
+  `sync_ops` (migration `a4e9c2b7d6f1`). Building it blocks writes to
+  `sync_ops` while it runs, which on an authority with a very large change
+  history can take a while: run the upgrade when pushes are quiet.
 - **Records created and then deleted before their first upload no longer slow a
   push 15-fold.** The authority took a record that arrives already deleted one
   at a time (about 9 ms each); it now writes it in bulk with the rest of its

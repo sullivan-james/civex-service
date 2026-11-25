@@ -22,39 +22,15 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def _create(concurrently: bool = False) -> None:
+def upgrade() -> None:
+    # A plain build, as every civex migration: it blocks writes to `sync_ops`
+    # while it runs (a big authority: seconds to minutes).
     op.create_index(
         "ix_sync_ops_entity",
         "sync_ops",
         ["entity_id", "received_at"],
         if_not_exists=True,
-        postgresql_concurrently=concurrently,
     )
-
-
-def upgrade() -> None:
-    bind = op.get_bind()
-    if bind.dialect.name != "postgresql":
-        _create()
-        return
-    # Built without blocking writes (a big authority keeps taking pushes):
-    # CONCURRENTLY cannot run inside a transaction.
-    try:
-        with op.get_context().autocommit_block():
-            _create(concurrently=True)
-    except AssertionError:
-        # `civex.db.migrate` hands alembic a connection whose transaction it
-        # owns, so alembic has none to step out of: commit it (what ran so far
-        # is whole, and recorded in the same transaction), build the index
-        # outside any transaction, and let the next statement begin another.
-        bind.commit()
-        previous = bind.get_isolation_level()
-        bind.execution_options(isolation_level="AUTOCOMMIT")
-        try:
-            _create(concurrently=True)
-        finally:
-            bind.commit()  # ends the no-op transaction the statement began
-            bind.execution_options(isolation_level=previous)
 
 
 def downgrade() -> None:
