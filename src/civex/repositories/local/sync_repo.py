@@ -1909,16 +1909,14 @@ class LocalSyncRepository:
 
     def pending_entries(self, limit: int) -> list[SyncEntry]:
         """Changes made here that the authority has not been sent, oldest first:
-        `limit` of them, and the rest of the action the last one belongs to, so
-        an action is never split across two pushes (it is taken whole or not)."""
+        `limit` of them, and the rest of every action with an entry among them (a
+        call that logged several trees level by level has each tree's entries
+        apart), so an action is never split across two pushes."""
         pending = self._s.query(AuditLog).filter(
             AuditLog.sync_state == "pending", AuditLog.hub_seq.is_(None), _SYNCED
         )
         rows = pending.order_by(*_WRITE_ORDER).limit(limit).all()
         if len(rows) == limit:
-            # Every action with an entry in the page is completed (a call that
-            # logged several trees level by level has each tree's entries
-            # apart), and each action's entries are put together.
             seen = {r.id for r in rows}
             ops = {r.op_id for r in rows if r.op_id is not None}
             if ops:
@@ -1929,10 +1927,6 @@ class LocalSyncRepository:
                     .all()
                     if r.id not in seen
                 ]
-                first: dict[Any, int] = {}
-                for r in rows:
-                    first.setdefault(r.op_id or r.id, len(first))
-                rows.sort(key=lambda r: first[r.op_id or r.id])
         return self._entries(rows)
 
     def count_pending(self) -> int:

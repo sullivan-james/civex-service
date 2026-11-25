@@ -69,7 +69,7 @@ def _gone(ctx, ids):
 
 
 def _conflicts(report):
-    return getattr(report, "conflicts", 0)
+    return report.conflicts
 
 
 def test_deleting_several_trees_at_once_goes_in_whole(project, server, levelwise):
@@ -80,7 +80,8 @@ def test_deleting_several_trees_at_once_goes_in_whole(project, server, levelwise
     assert _conflicts(report) == 0
     assert all(_gone(server, everyone))
     assert all(_gone(laptop, everyone))
-    assert laptop.sync_svc.sync() is not None
+    again = laptop.sync_svc.sync()
+    assert _conflicts(again) == 0 and not again.waiting
     assert all(_gone(laptop, everyone))
 
 
