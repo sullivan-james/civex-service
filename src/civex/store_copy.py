@@ -75,8 +75,9 @@ def copy_objects(
     total = len(wanted)
     result = CopyResult()
     have = destination.exists_many(wanted)
-    if have and hasattr(destination, "confirm_held"):
-        # A bucket's inventory can be stale: believe only what the bucket says.
+    if have and getattr(destination, "has_inventory", False):
+        # A bucket's inventory can be stale: believe only what the bucket says
+        # (without one, exists_many has already asked the bucket).
         have = destination.confirm_held(have)
     if have and commit:
         commit()  # looking found (and recorded) files the inventory didn't know
@@ -146,10 +147,8 @@ def _copy_one(source: Any, destination: Any, sha: str) -> tuple[str, int] | None
             if path is None:
                 return None
             if dst_drive:
-                how = destination.import_object(sha, path)
-                if how == "absent":
-                    return None
-                return how, (0 if how == "present" else path.stat().st_size)
+                how, size = destination.import_object(sha, path)
+                return None if how == "absent" else (how, size)
             if dst_s3:
                 return "stream", destination.put_path_expecting(path, sha)
         elif src_s3:
@@ -192,6 +191,8 @@ def _copy_one(source: Any, destination: Any, sha: str) -> tuple[str, int] | None
     if reader is None:
         return None
     with reader:
+        if not (hasattr(reader, "seekable") and reader.seekable()):
+            raise ValidationError("A store's reader must be seekable to be copied")
         hasher = hashlib.sha256()
         size = 0
         while chunk := reader.read(_CHUNK):
@@ -199,7 +200,16 @@ def _copy_one(source: Any, destination: Any, sha: str) -> tuple[str, int] | None
             size += len(chunk)
         _same_content(hasher.hexdigest(), sha)
         reader.seek(0)
-        destination.put_chunks(iter(lambda: reader.read(_CHUNK), b""), sha)
+        again = hashlib.sha256()
+
+        def chunks() -> Any:
+            while chunk := reader.read(_CHUNK):
+                again.update(chunk)
+                yield chunk
+
+        ref = destination.put_chunks(chunks(), sha)
+    _same_content(again.hexdigest(), sha)  # it changed between the two reads
+    _same_content(ref.sha256, sha)
     return "stream", size
 
 
