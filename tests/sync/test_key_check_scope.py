@@ -46,7 +46,8 @@ def test_a_new_key_over_records_that_share_it_is_refused(project, monkeypatch):
     b.laptop.schema_svc.set_unique_keys("sample", [["tag"]])
     b.laptop.commit()
     answers, _ = send(authority, b.take())
-    assert [r[1] for r in answers] == ["conflict"]
+    assert [r[1] for r in answers] == ["rejected"]
+    # (refused, not put back: the laptop keeps what it made)
     assert calls  # a change of the keys asks
 
 

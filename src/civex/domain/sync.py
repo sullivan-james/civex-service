@@ -366,6 +366,12 @@ NOT_SYNCED_MESSAGE = (
 UNFIT = "unfit"
 UNFIT_DATA = "data"
 
+# What a device keeps when the authority's rules refuse it, marked (`rejected`),
+# to send again or let go: never put back where the authority has it. Until it
+# is settled the thing counts as changed here, so the authority's later changes
+# to it wait (and do not quietly overwrite it).
+KEPT_STRUCTURE = frozenset({"schema", "field"})
+
 ACTIONS = frozenset({"create", "update", "delete", "restore", "purge"})
 # A delete's time becomes the `deleted_at` of what it deletes, so a device whose
 # clock is further ahead than this is refused rather than stamping the future.

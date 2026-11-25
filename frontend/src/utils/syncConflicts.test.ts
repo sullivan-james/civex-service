@@ -93,6 +93,17 @@ describe('a change that was not taken', () => {
   })
 })
 
+describe('a refused schema or field', () => {
+  it('is labelled by what it is, to retry or discard', () => {
+    expect(kindLabel('rejected', 'field')).toBe('Field refused')
+    expect(kindLabel('rejected', 'schema')).toBe('Schema refused')
+    expect(kindLabel('rejected', 'record')).toBe('Refused')
+    expect(takeLabel('rejected', 'retry', 'field')).toBe('Retry')
+    expect(takeLabel('rejected', 'theirs', 'schema')).toBe('Discard')
+    expect(takeLabel('rejected', 'theirs', 'record')).toBe('Let it go')
+  })
+})
+
 describe('a refused record', () => {
   it('says it is not on the server yet, why, and that saving a fix sends it', () => {
     const said = describeAttempt(

@@ -48,6 +48,7 @@ from civex.domain.sync import (
     CONFLICT,
     DEFERRED,
     ENTITY_ORDER,
+    KEPT_STRUCTURE,
     MERGED,
     NOT_SYNCED_KINDS,
     NOT_SYNCED_MESSAGE,
@@ -68,6 +69,7 @@ from civex.domain.sync import (
     Principal,
     SyncEntry,
     SyncPolicy,
+    UNFIT_DATA,
     problem_with,
     snapshot_cursor,
 )
@@ -666,6 +668,10 @@ class SyncAuthorityService:
             head = self._applier.head(entry.entity_type, entry.entity_id)
             if isinstance(e, _Denied):
                 return self._refuse(who, entry, str(e), code=REFUSAL_PERMISSION)
+            if entry.entity_type in KEPT_STRUCTURE:
+                # The device keeps what it made, marked, to retry or let go:
+                # a rule here never undoes work there.
+                return self._refuse_structure(who, entry, str(e))
             if (
                 head is not None
                 and (entry.entity_type != "record" or _moves(entry, head))
@@ -863,12 +869,22 @@ class SyncAuthorityService:
     ) -> list[OpResult]:
         message = f"Part of one change that could not go in whole: {why}"
         return [
-            self._put_back(who, entry, message)
+            self._refuse_structure(who, entry, message)
+            if entry.entity_type in KEPT_STRUCTURE
+            else self._put_back(who, entry, message)
             if self._applier.head(entry.entity_type, entry.entity_id) is not None
             and not self._unseen(entry)
             else self._refuse(who, entry, message, code=code)
             for entry in action
         ]
+
+    def _refuse_structure(self, who: Principal, entry: SyncEntry, why: str) -> OpResult:
+        """Refuse a change to a schema or a field for what the data or the
+        structure here says. Nothing is written to the feed and the device is
+        not rolled back: it keeps its version, marked, and sends it again once
+        the cause is put right, or lets it go (and then takes this copy's)."""
+        field = f"field.{entry.entity_id}" if entry.entity_type == "field" else None
+        return self._refuse(who, entry, why, field, code=UNFIT_DATA)
 
     def _may_cite(self, sha: str, cache: IncomingCache | None) -> bool:
         """Whether this device could download the file (`readable`: used by a

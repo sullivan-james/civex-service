@@ -265,7 +265,12 @@ export const schemasApi = {
   checkField: (
     name: string,
     fieldName: string,
-    body: { restrictions?: Record<string, unknown> | null; required?: boolean },
+    body: {
+      restrictions?: Record<string, unknown> | null
+      required?: boolean
+      /** Count the records holding a value for it (deleting the field). */
+      deleting?: boolean
+    },
   ) =>
     api.post<FieldCheck>(
       `/schemas/${encodeURIComponent(name)}/fields/${encodeURIComponent(fieldName)}/check`,
@@ -283,5 +288,9 @@ export interface FieldCheck {
   field: string
   breaks_rule: number
   blank: number
+  /** Records holding a value for the field (asked with `deleting`). */
+  holding: number
+  /** This copy holds only some of the records: the server may find more. */
+  partial: boolean
   examples: { record_id: string; record_name: string | null; message: string }[]
 }

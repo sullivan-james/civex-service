@@ -64,6 +64,7 @@ from civex.domain.audit_diff import entry_snapshots
 from civex.domain.merge import value_at
 from civex.domain.sync_page import ACTION_ENTRIES_MAX, budget, take
 from civex.domain.sync import (
+    KEPT_STRUCTURE,
     NOT_SYNCED_KINDS,
     LoginRequestDTO,
     APPLIED,
@@ -2002,7 +2003,8 @@ class LocalSyncRepository:
 
     def dirty_entities(self) -> set[tuple[str, uuid.UUID]]:
         """Things with a change here still waiting to be sent (set aside by an
-        unfinished first upload too): what a pull must not overwrite."""
+        unfinished first upload too), or a refused one of structure kept for
+        review: what a pull must not overwrite."""
         rows = (
             self._s.query(AuditLog.entity_type, AuditLog.entity_id)
             .filter(
@@ -2011,7 +2013,15 @@ class LocalSyncRepository:
             )
             .distinct()
         )
-        return {(t, i) for t, i in rows}
+        found = {(t, i) for t, i in rows}
+        # Structure the authority refused is kept here, marked, until the
+        # person settles it: what the authority says of it meanwhile waits.
+        kept = self._s.query(SyncConflict.entity_type, SyncConflict.entity_id).filter(
+            SyncConflict.status == "open",
+            SyncConflict.kind == "rejected",
+            SyncConflict.entity_type.in_(KEPT_STRUCTURE),
+        )
+        return found | {(t, i) for t, i in kept}
 
     def mark_sent(self, results: list[OpResult]) -> None:
         for result in results:

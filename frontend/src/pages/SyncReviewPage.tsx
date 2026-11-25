@@ -44,7 +44,7 @@ interface Undo {
 function what(c: SyncConflict): string {
   return c.kind === 'conflict'
     ? (c.field_label ?? c.field ?? '')
-    : kindLabel(c.kind)
+    : kindLabel(c.kind, c.entity_type)
 }
 
 /** A thing with no record page to settle it on (a schema's refused change, a
@@ -67,7 +67,7 @@ function RowActions({ conflict: c }: { conflict: SyncConflict }) {
           disabled={resolve.isPending}
           onClick={() => resolve.mutate({ id: c.id, take: t })}
         >
-          {takeLabel(c.kind, t)}
+          {takeLabel(c.kind, t, c.entity_type)}
         </Button>
       ))}
       {resolve.error && (

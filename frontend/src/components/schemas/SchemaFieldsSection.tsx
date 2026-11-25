@@ -2,7 +2,11 @@ import { useCallback, useState } from 'react'
 import { Link } from 'react-router'
 import { errorMessage } from '../../lib/errors'
 import type { Field, FieldKind, Schema } from '../../api/schemas'
-import { useDeleteField, useReorderFields } from '../../hooks/useSchemas'
+import {
+  useDeleteField,
+  useFieldCheck,
+  useReorderFields,
+} from '../../hooks/useSchemas'
 import { useFieldTypes } from '../../hooks/useFieldTypes'
 import { usePermissions } from '../../hooks/useMe'
 import {
@@ -46,6 +50,22 @@ export function SchemaFieldsSection({
     null,
   )
   const deleteField = useDeleteField(schema.name)
+  const deleteCheck = useFieldCheck(
+    schema.name,
+    confirmDeleteField ?? '',
+    confirmDeleteField ? { deleting: true } : null,
+  )
+  // Warns, never blocks: what the field holds here, and that a partial copy
+  // sees only some of it.
+  const holding = deleteCheck.data?.holding ?? 0
+  const deleteNote = [
+    holding > 0 &&
+      `${holding.toLocaleString()} record${holding === 1 ? '' : 's'} hold a value for it.`,
+    deleteCheck.data?.partial &&
+      'This copy holds only some of the records; the server may find more.',
+  ]
+    .filter(Boolean)
+    .join(' ')
   const reorderFields = useReorderFields(schema.name)
   const descriptors = useFieldTypes()
   const typeLabel = (t: string) =>
@@ -289,7 +309,9 @@ export function SchemaFieldsSection({
           confirmLabel="Remove field"
           variant="danger"
           warning={
-            deleteField.error ? errorMessage(deleteField.error) : undefined
+            deleteField.error
+              ? errorMessage(deleteField.error)
+              : deleteNote || undefined
           }
           onConfirm={() =>
             deleteField.mutate(confirmDeleteField, {

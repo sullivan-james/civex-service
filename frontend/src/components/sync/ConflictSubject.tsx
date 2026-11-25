@@ -5,7 +5,11 @@ import { Badge } from '../ui'
 /** The record a conflict is about, as a person knows it: its name, where it is,
  * and a link to settle it, instead of an id. */
 export function ConflictSubject({ conflict: c }: { conflict: SyncConflict }) {
-  const name = c.record_name ?? `${c.entity_type} ${c.entity_id.slice(0, 8)}`
+  const structure = c.entity_type === 'schema' || c.entity_type === 'field'
+  const name =
+    c.record_name ??
+    (structure ? (c.field_label ?? c.schema_name) : null) ??
+    `${c.entity_type} ${c.entity_id.slice(0, 8)}`
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
       {c.entity_type === 'record' && !c.record_deleted ? (
@@ -18,7 +22,9 @@ export function ConflictSubject({ conflict: c }: { conflict: SyncConflict }) {
       ) : (
         <span className="font-medium">{name}</span>
       )}
-      {c.schema_name && <Badge variant="accent">{c.schema_name}</Badge>}
+      {c.schema_name && !(c.entity_type === 'schema') && (
+        <Badge variant="accent">{c.schema_name}</Badge>
+      )}
       {c.dataset_name && (
         <span className="text-xs text-fg-muted">in {c.dataset_name}</span>
       )}

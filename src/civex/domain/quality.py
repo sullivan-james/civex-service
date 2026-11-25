@@ -280,4 +280,9 @@ class FieldCheck:
     field: str
     breaks_rule: int = 0
     blank: int = 0
+    # Deleting the field: how many records hold a value for it.
+    holding: int = 0
+    # This copy holds only some of the project's records, so the counts are
+    # for those: the authority may find more.
+    partial: bool = False
     examples: list[Example] = _field(default_factory=list)

@@ -390,6 +390,11 @@ function FieldCheckWarning({
           ))}
         </ul>
       )}
+      {check.partial && (
+        <p className="text-fg-muted">
+          This copy holds only some of the records; the server may find more.
+        </p>
+      )}
       <p className="text-fg-muted">
         Once saved,{' '}
         <Link className="text-accent hover:underline" to={seeAll}>

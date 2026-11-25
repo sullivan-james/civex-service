@@ -93,16 +93,23 @@ def test_a_field_rename_and_the_templates_it_rewrote_go_in_together_or_not_at_al
     held = authority.schema_svc.get("site")
     assert held.display_template == "{name} / {code}"
     assert "code" in [f.name for f in held.fields]  # not renamed: not half done
-    parts = [c for c in a.sync_svc.conflicts() if c.kind == "not_taken"]
+    parts = [c for c in a.sync_svc.conflicts() if c.kind == "rejected"]
     assert {c.entity_type for c in parts} == {"field", "schema"}
     assert all("could not go in whole" in c.message for c in parts)
-    # A is put back where the server is, not left half way through.
+    # A keeps what it made, marked: the server's version waits (not half done).
     a.sync_svc.sync()
+    mine = a.schema_svc.get("site")
+    assert "ref" in [f.name for f in mine.fields]
+    assert mine.display_template == "{name} ({ref})"
+    # Letting one part go lets the whole go: A takes the server's version.
+    a.sync_svc.resolve_conflict(parts[0].id, "theirs")
+    a.commit()
     mine = a.schema_svc.get("site")
     assert (mine.display_template, [f.name for f in mine.fields]) == (
         held.display_template,
         [f.name for f in held.fields],
     )
+    assert a.sync_svc.conflicts() == []
 
 
 def test_deleting_a_tree_part_of_which_was_edited_elsewhere_keeps_all_of_it(
@@ -165,12 +172,12 @@ def test_an_action_that_did_not_go_in_is_done_again_on_what_is_there_now(
     b.commit()
     b.sync_svc.sync()
     a.sync_svc.sync()
-    a.sync_svc.sync()  # back where the server is
+    a.sync_svc.sync()  # (kept as it is, marked)
 
     # The person sees it did not go in, and renames again: this time the
     # rename rewrites the template the server has, and goes in whole.
-    for c in a.sync_svc.conflicts():
-        a.sync_svc.resolve_conflict(c.id, "theirs")
+    a.sync_svc.resolve_conflict(a.sync_svc.conflicts()[0].id, "theirs")  # all parts
+    assert a.sync_svc.conflicts() == []
     a.schema_svc.update_field("site", "code", new_name="ref")
     a.commit()
     a.sync_svc.sync()
@@ -197,3 +204,66 @@ def test_a_record_is_not_deleted_from_under_a_child_added_elsewhere_meanwhile(
     assert record(authority, new.id)["deleted_at"] is None
     (kept,) = {c.message for c in a.sync_svc.conflicts() if c.entity_id == site.id}
     assert "added beneath it" in kept
+
+
+def test_a_refused_schema_change_is_kept_and_the_servers_later_change_waits(
+    project, authority
+):
+    a, b, _, _ = setup(project, authority)
+    b.record_svc.add("survey", "site", {"name": "x", "code": "2"})
+    b.commit()
+    a.schema_svc.set_unique_keys("site", [["name"]])
+    a.commit()
+    b.sync_svc.sync()
+    a.sync_svc.sync()
+    (refused,) = refusals(a)
+    assert refused.kind == "rejected" and refused.schema_name == "site"
+    assert set(refused.takes) == {"theirs", "retry"}
+    assert a.schema_svc.get("site").unique_keys  # kept, not rolled back
+
+    b.schema_svc.update("site", display_template="{code}")
+    b.commit()
+    b.sync_svc.sync()
+    a.sync_svc.sync()
+    kept = a.schema_svc.get("site")
+    assert kept.unique_keys and kept.display_template != "{code}"  # waits
+
+    a.sync_svc.resolve_conflict(refused.id, "theirs")
+    a.commit()
+    taken = a.schema_svc.get("site")
+    assert taken.unique_keys == [] and taken.display_template == "{code}"
+
+
+def test_a_refused_schema_change_goes_in_when_sent_again_after_the_cause_is_gone(
+    project, authority
+):
+    a, b, _, _ = setup(project, authority)
+    dup = b.record_svc.add("survey", "site", {"name": "x", "code": "2"})
+    b.commit()
+    a.schema_svc.set_unique_keys("site", [["name"]])
+    a.commit()
+    b.sync_svc.sync()
+    a.sync_svc.sync()
+    (refused,) = refusals(a)
+    b.record_svc.update(str(dup.id), {"name": "y", "code": "2"})
+    b.commit()
+    b.sync_svc.sync()
+    a.sync_svc.resolve_conflict(refused.id, "retry")
+    a.commit()
+    a.sync_svc.sync()
+    assert authority.schema_svc.get("site").unique_keys
+    assert a.sync_svc.conflicts() == []
+
+
+def test_an_open_item_exempts_the_thing_from_the_convergence_check(project, authority):
+    from civex.testing.convergence import differences, open_items, snapshots
+
+    a, b, _, _ = setup(project, authority)
+    b.record_svc.add("survey", "site", {"name": "x", "code": "2"})
+    b.commit()
+    a.schema_svc.set_unique_keys("site", [["name"]])
+    a.commit()
+    b.sync_svc.sync()
+    a.sync_svc.sync()
+    assert differences(snapshots(authority), snapshots(a))
+    assert not differences(snapshots(authority), snapshots(a), open_items(a))

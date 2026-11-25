@@ -344,6 +344,7 @@ export function useFieldCheck(
   body: {
     restrictions?: Record<string, unknown> | null
     required?: boolean
+    deleting?: boolean
   } | null,
 ) {
   const key = useDebouncedValue(

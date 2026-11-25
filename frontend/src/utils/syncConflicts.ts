@@ -15,7 +15,16 @@ const LABELS: Record<string, Partial<Record<ConflictTake, string>>> = {
   unfit: { theirs: 'Dismiss' },
 }
 
-export function takeLabel(kind: string, take: ConflictTake): string {
+/** A schema or field the server refused is kept here: let go means discard. */
+const STRUCTURE = new Set(['schema', 'field'])
+
+export function takeLabel(
+  kind: string,
+  take: ConflictTake,
+  entityType?: string,
+): string {
+  if (kind === 'rejected' && entityType && STRUCTURE.has(entityType))
+    return take === 'theirs' ? 'Discard' : 'Retry'
   return LABELS[kind]?.[take] ?? (take === 'theirs' ? 'Dismiss' : take)
 }
 
@@ -28,7 +37,9 @@ const KINDS: Record<string, string> = {
   unfit: 'Breaks a rule',
 }
 
-export function kindLabel(kind: string): string {
+export function kindLabel(kind: string, entityType?: string): string {
+  if (kind === 'rejected' && entityType && STRUCTURE.has(entityType))
+    return entityType === 'field' ? 'Field refused' : 'Schema refused'
   return KINDS[kind] ?? kind
 }
 

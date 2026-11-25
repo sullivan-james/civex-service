@@ -742,6 +742,10 @@ def build_context(
 
     release_repo = LocalReleaseRepository(session)
     sync_repo = LocalSyncRepository(session)
+    quality_svc = QualityService(record_svc, schema_svc, permissions=may)
+    # A copy that was told it may read only some collections holds only some
+    # of the records: what it finds says nothing of the rest.
+    quality_svc.partial = lambda: sync_repo.readable() is not None
     applier = SyncApplier(sync_repo, audit_repo)
     device_keys = DeviceKeys(sync_repo)
     authority_svc = SyncAuthorityService(
@@ -890,7 +894,7 @@ def build_context(
             audit_repo,
             LocalDbSpace(engine, may_vacuum_full=features.DB_ADMIN in project.features),
         ),
-        quality_svc=QualityService(record_svc, schema_svc, permissions=may),
+        quality_svc=quality_svc,
         index_svc=index_svc,
         retention_svc=retention_svc,
         ai_svc=ai_svc,

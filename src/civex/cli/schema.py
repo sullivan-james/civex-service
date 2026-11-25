@@ -1032,11 +1032,26 @@ def schema_remove_field(
     value it held for it. Bring it back with `civex schema restore-field`
     (find its ID with `civex trash list --kind field`).
     """
+    ctx = _ctx()
+    try:
+        # A warning, never a block: what the field holds, here.
+        check = ctx.quality_svc.check_field(schema_name, field_name, deleting=True)
+        if check.holding:
+            console.print(
+                f"[warning]{check.holding} record(s) hold a value for "
+                f"'{field_name}'.[/warning]"
+            )
+        if check.partial:
+            console.print(
+                "[warning]This copy holds only some of the records; the "
+                "server may find more.[/warning]"
+            )
+    except (NotFoundError, ValidationError):
+        pass  # (the removal itself says what is wrong)
     if not yes:
         typer.confirm(
             f"Remove field '{field_name}' from schema '{schema_name}'?", abort=True
         )
-    ctx = _ctx()
     try:
         ctx.schema_svc.delete_field(schema_name, field_name)
         ctx.commit()

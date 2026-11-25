@@ -64,12 +64,25 @@ def act(ctx, rng: random.Random, step: int) -> None:
         ctx._session.rollback()  # a thing a person couldn't do right now
 
 
-def differences(expected: dict, actual: dict) -> list[str]:
-    """What differs between two projects, thing by thing and value by value."""
+def open_items(ctx) -> set[str]:
+    """The ids of what a device keeps for a person to settle (a refused change,
+    a flag): it is meant to differ from the authority until they do."""
+    return {
+        str(c.entity_id)
+        for c in ctx.sync_svc.conflicts()
+        if c.status == "open" and c.kind in ("rejected", "unfit")
+    }
+
+
+def differences(
+    expected: dict, actual: dict, kept: frozenset[str] | set[str] = frozenset()
+) -> list[str]:
+    """What differs between two projects, thing by thing and value by value.
+    Things in `kept` (see `open_items`) are left out."""
     out: list[str] = []
     for kind in expected:
-        want = {x["id"]: x for x in expected[kind]}
-        have = {x["id"]: x for x in actual[kind]}
+        want = {x["id"]: x for x in expected[kind] if x["id"] not in kept}
+        have = {x["id"]: x for x in actual[kind] if x["id"] not in kept}
         for missing in sorted(set(want) - set(have)):
             out.append(f"{kind} {missing[:8]} is missing")
         for extra in sorted(set(have) - set(want)):
@@ -138,6 +151,6 @@ def scenario(project, authority, seed, steps: int = 40) -> list[str]:
         name = ctx.config.project_root.name
         problems += [
             f"{name} differs from the authority: {d}"
-            for d in differences(expected, snapshots(ctx))
+            for d in differences(expected, snapshots(ctx), open_items(ctx))
         ]
     return problems

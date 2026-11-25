@@ -54,6 +54,7 @@ from civex.domain.file_refs import without_file_locations
 from civex.domain.hosts import is_loopback
 from civex.domain.dtos import MissingFileGroupDTO, MissingFilesRemovalDTO
 from civex.domain.sync import (
+    KEPT_STRUCTURE,
     PUSH_BUDGET_BYTES,
     REFUSAL_PERMISSION,
     UNFIT,
@@ -737,7 +738,7 @@ class SyncService:
                 takes.insert(takes.index("retry"), "restore_above")
             v = values.get((str(c.entity_id), _field_id(c) or ""))
             if v is None:
-                out.append(replace(c, takes=takes, sits_under=under))
+                out.append(replace(c, takes=takes, sits_under=under, **self._named(c)))
                 continue
             current = without_file_locations(v.value) if c.field else None
             also = [
@@ -786,6 +787,24 @@ class SyncService:
                 )
             )
         return out
+
+    def _named(self, c: SyncConflictDTO) -> dict[str, Any]:
+        """What a refused schema or field is called, for a person: the schema's
+        name, and the field's (as `field_label`)."""
+        if c.entity_type not in KEPT_STRUCTURE:
+            return {}
+        snap = self._repo.snapshot(c.entity_type, c.entity_id) or {}
+        if c.entity_type == "schema":
+            return {"schema_name": snap.get("name")}
+        parent = (
+            self._repo.snapshot("schema", uuid.UUID(str(snap["schema_id"])))
+            if snap.get("schema_id")
+            else None
+        )
+        return {
+            "schema_name": (parent or {}).get("name"),
+            "field_label": snap.get("label") or snap.get("name"),
+        }
 
     def _attempt(
         self, conflict: SyncConflictDTO
@@ -3344,8 +3363,57 @@ class SyncService:
             self._commit()
             return
         self._repo.resolve_conflict(conflict_id, take)
+        if take == "theirs" and self._keeps_structure(conflict):
+            self._let_structure_go(conflict)
         self._flags_stale = True  # (a refusal let go may make this copy level)
         self._commit()
+
+    @staticmethod
+    def _keeps_structure(conflict: SyncConflictDTO) -> bool:
+        return conflict.kind == "rejected" and conflict.entity_type in KEPT_STRUCTURE
+
+    def _let_structure_go(self, conflict: SyncConflictDTO) -> None:
+        """A refused change to a schema or a field is let go: this copy goes
+        back to the version the change started from, and then takes what the
+        authority said of it meanwhile (held while it was kept: see
+        `dirty_entities`). The other parts of the action it was one of go with
+        it, since they can't be kept by halves. A thing with a change of its
+        own still to send keeps waiting: that push settles it."""
+        original = self._repo.get_entry(conflict.op_id) if conflict.op_id else None
+        parts = (
+            self._repo.entries_of_action(original.op)
+            if original and original.op
+            else []
+        )
+        ids = {e.id for e in parts}
+        entries = {(conflict.entity_type, conflict.entity_id): original}
+        for other in self._repo.find_open_conflicts(kind="rejected"):
+            if other.op_id in ids and other.id != conflict.id:
+                self._repo.resolve_conflict(other.id, "theirs")
+                entries[(other.entity_type, other.entity_id)] = self._repo.get_entry(
+                    other.op_id
+                )
+        free = set(entries) - self._repo.dirty_entities()
+        for thing in free:
+            entry = entries[thing]
+            if entry is None or entry.action not in ("update", "restore", "create"):
+                continue
+            start = entry.old_data
+            current = self._repo.snapshot(*thing)
+            if entry.delta is not None and current is not None:
+                start = apply_delta(current, entry.delta, BEFORE)
+            if start:
+                self._applier.apply_state(thing[0], thing[1], start)
+        held = [
+            e for e in self._repo.held_entries() if (e.entity_type, e.entity_id) in free
+        ]
+        first: dict[tuple[str, uuid.UUID], int] = {}
+        for e in held:
+            thing = (e.entity_type, e.entity_id)
+            first[thing] = min(first.get(thing, e.hub_seq or 0), e.hub_seq or 0)
+        for thing, seq in first.items():
+            self._replay(thing, seq)
+        self._repo.mark_applied([e.id for e in held])
 
     def resolve_many(
         self,
@@ -3381,6 +3449,9 @@ class SyncService:
         if take == "theirs":
             report.settled = [c.id for c in offered]
             report.done = self._repo.resolve_conflicts(report.settled, take)
+            for c in offered:
+                if self._keeps_structure(c):
+                    self._let_structure_go(c)
             self._flags_stale = True
             self._commit()
             return report
