@@ -2090,6 +2090,8 @@ class SyncService:
             pending = self._repo.pending_entries(PUSH_BATCH)
             if not pending:
                 return total
+            if self._drop_done(pending):
+                continue  # (settled here: what is left is read again)
             if pending[0].id == last_first:
                 # The same change is still first: the last answer took nothing
                 # off the queue, and asking again would only repeat it.
@@ -2125,6 +2127,30 @@ class SyncService:
                 return total
             # Anything the answer left (it may answer fewer than were sent, to
             # keep its own request short) is sent in the next round.
+
+    def _drop_done(self, pending: list[SyncEntry]) -> bool:
+        """A pulled change already says what a pending delete or restore of
+        this device says (the last change held for that record is the same, and
+        this is the only one of this device's to it): there is nothing to send,
+        as a rebase drops a change already in what it is put onto. Returns
+        whether any was settled."""
+        mine = [e for e in pending if e.action in ("delete", "restore")]
+        if not mine:
+            return False
+        count: dict[uuid.UUID, int] = {}
+        for e in pending:
+            count[e.entity_id] = count.get(e.entity_id, 0) + 1
+        latest = {
+            (e.entity_type, e.entity_id): e.action for e in self._repo.held_entries()
+        }
+        done = [
+            e.id
+            for e in mine
+            if count[e.entity_id] == 1
+            and latest.get((e.entity_type, e.entity_id)) == e.action
+        ]
+        self._repo.mark_folded(done, "synced")
+        return bool(done)
 
     def _send_whole(
         self, pending: list[SyncEntry]

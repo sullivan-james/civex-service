@@ -680,6 +680,9 @@ class SyncAuthorityService:
                 self._refuse(who, entry, problem[0], code=problem[1]),
                 kind=kind,
             )
+        if _already_done(entry, head):
+            self._in_run.update((entry.id, entry.entity_id))
+            return _Fast(entry, None, head=head, kind=kind, done=True)
         if kind == "delete":
             if (
                 head.get("deleted_at")
@@ -765,29 +768,37 @@ class SyncAuthorityService:
         if not taken:
             return [f.refused for f in items if f.refused]
         kind = items[0].kind
+        # A change already done here is answered and written no more (`done`).
+        writes = [f for f in taken if not f.done]
         try:
             with self._repo.savepoint():
                 self._repo.sequence_local_entries()
-                first = self._repo.reserve_hub_seqs(len(taken))
+                first = self._repo.reserve_hub_seqs(len(writes)) if writes else 0
                 self._seed(who.device_id)
+                numbers = iter(range(first, first + len(writes)))
                 answered = [
-                    OpResult(f.entry.id, APPLIED, None, f.unfit, first + k)
-                    for k, f in enumerate(taken)
+                    OpResult(f.entry.id, APPLIED, replayed=True)
+                    if f.done
+                    else OpResult(f.entry.id, APPLIED, None, f.unfit, next(numbers))
+                    for f in taken
                 ]
-                if kind == "delete":
+                if not writes:
+                    pass
+                elif kind == "delete":
                     self._repo.soft_delete_records(
-                        [(f.entry.entity_id, stamp_of(f.entry)) for f in taken]
+                        [(f.entry.entity_id, stamp_of(f.entry)) for f in writes]
                     )
                 elif kind == "restore":
-                    self._repo.restore_records([f.entry.entity_id for f in taken])
+                    self._repo.restore_records([f.entry.entity_id for f in writes])
                 else:
                     self._repo.insert_records(
-                        [f.final for f in taken if f.final is not None]
+                        [f.final for f in writes if f.final is not None]
                     )
                 self._repo.insert_entries(
                     [
-                        (self._stored(who, f.entry, f.final, f.head), first + k)
-                        for k, f in enumerate(taken)
+                        (self._stored(who, f.entry, f.final, f.head), r.hub_seq or 0)
+                        for f, r in zip(taken, answered)
+                        if not f.done
                     ]
                 )
                 self._repo.save_ops(
@@ -797,9 +808,9 @@ class SyncAuthorityService:
                 )
                 if kind != "create":
                     # (a record's collection and its parent's are the same)
-                    self._rules.check([("record", f.entry.entity_id) for f in taken])
+                    self._rules.check([("record", f.entry.entity_id) for f in writes])
             if kind != "create":
-                self._written(kind, taken, self._cache)
+                self._written(kind, writes, self._cache)
             done = iter(answered)
             return [f.refused or next(done) for f in items]
         except (ValidationError, ValueError, TypeError, KeyError, AttributeError):
@@ -1309,6 +1320,10 @@ class SyncAuthorityService:
             # here is refused as one that is held out of its sight is: the two
             # are told apart by nothing in the answer.
             raise ValidationError(NOT_HERE)
+        if kind == "record" and head is not None and _already_done(entry, head):
+            # Another device (or a person) got there first: acknowledged, and
+            # nothing is written (no second entry, no settling one).
+            return OpResult(entry.id, APPLIED, replayed=True)
         cascade = self._cascade_before(entry, head)
         conflicts: list[dict[str, Any]] = []
         unfit: list[dict[str, Any]] = []
@@ -1704,6 +1719,8 @@ class _Fast:
     # A delete or restore: what the record was held as (a create has no head).
     head: dict[str, Any] | None = None
     kind: str = "create"
+    # Already so on the authority: answered, nothing written.
+    done: bool = False
 
 
 @dataclasses.dataclass
@@ -1878,6 +1895,20 @@ def _now_ms() -> int:
 def _comparable(state: dict[str, Any]) -> dict[str, Any]:
     skip = LIFECYCLE_KEYS | DERIVED_KEYS
     return {k: v for k, v in state.items() if k not in skip}
+
+
+def _already_done(entry: SyncEntry, head: dict[str, Any]) -> bool:
+    """A record change that is already true of the state held here (a delete of
+    a deleted record; a restore, edit or move that leaves a live record as it
+    is): there is nothing to take or to write down."""
+    if entry.action == "delete":
+        return bool(head.get("deleted_at"))
+    if entry.action not in ("restore", "update") or head.get("deleted_at"):
+        return False
+    _, incoming = _sides(entry, head)
+    return incoming.get("deleted_at") is None and _comparable(incoming) == _comparable(
+        head
+    )
 
 
 def _edited_since(base: dict[str, Any] | None, head: dict[str, Any]) -> bool:
