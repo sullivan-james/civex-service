@@ -209,6 +209,7 @@ class S3ObjectStore:
         self._cfg = config
         self._session = session
         self._client = client
+        self._injected = client is not None
         self.name = S3_VOLUME
         self._gc = threading.Lock()
 
@@ -329,6 +330,40 @@ class S3ObjectStore:
             )
             self._register(sha256, size, verified=True)
         return self._ref(sha256, filename, size)
+
+    def put_path_expecting(self, path: Path, sha256: str) -> int:
+        """Send the file at `path` as `sha256`, hashing it first: ValidationError
+        (nothing sent, nothing recorded) if its bytes are not `sha256`. Returns
+        its size."""
+        hasher = hashlib.sha256()
+        with path.open("rb") as f:
+            while chunk := f.read(_CHUNK):
+                hasher.update(chunk)
+        if hasher.hexdigest() != sha256:
+            raise ValidationError(
+                f"The source's bytes for {sha256} are not that content; it was "
+                "not stored under that name"
+            )
+        size = path.stat().st_size
+        self._upload(path, sha256, size, sha256)
+        return size
+
+    def confirm_held(self, shas: Iterable[str]) -> set[str]:
+        """Which of these the bucket really holds, asked of the bucket itself
+        (a HEAD each, a few at once) rather than the inventory, which can be
+        stale. A recorded copy the bucket has lost is forgotten."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        wanted = list(dict.fromkeys(shas))
+        if not wanted:
+            return set()
+        with ThreadPoolExecutor(max_workers=min(8, len(wanted))) as pool:
+            sizes = list(pool.map(self._head, wanted))
+        held = {sha for sha, size in zip(wanted, sizes) if size is not None}
+        for sha in wanted:
+            if sha not in held:
+                self._unregister(sha)
+        return held
 
     def copy_from(self, source: S3ObjectStore, sha256: str, size: int) -> None:
         """Have the bucket copy `source`'s object here itself (`copy_object`,
