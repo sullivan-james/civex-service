@@ -1607,8 +1607,9 @@ def _by_action(entries: list[SyncEntry]) -> list[SyncEntry]:
     numbered and cut, so answers, `hub_seq`s and the limit all follow this order
     (the device matches answers by entry id, not by position)."""
     seen: dict[Any, list[SyncEntry]] = {}
-    for entry in entries:
-        seen.setdefault(entry.op or entry.id, []).append(entry)
+    for at, entry in enumerate(entries):
+        # (an entry with no op is an action of its own, even if sent twice)
+        seen.setdefault(entry.op or at, []).append(entry)
     if len(seen) == sum(1 for _ in _actions(entries)):
         return entries  # already together (the usual case)
     return [e for group in seen.values() for e in group]
