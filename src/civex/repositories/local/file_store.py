@@ -942,6 +942,64 @@ class VolumeAwareFileObjectStore:
             sha256=sha256, filename=original_filename, size=size, volume=vol_name
         )
 
+    def import_object(self, sha256: str, source: Path) -> str:
+        """Take the file at `source` (another store's copy of `sha256`) in as
+        this store's own: a hard link when `source` is on the same filesystem as
+        the drive it goes to (no bytes move, no room needed), else a copy, hashed
+        as it is written so a source whose bytes are not `sha256` is refused
+        (ValidationError) and never stored. Returns "link", "copy" or
+        "present" (already held). Recorded in the inventory like any put; no
+        name is known, so no manifest line is written."""
+        if self._existing_copy(sha256) is not None:
+            return "present"
+        size = source.stat().st_size
+        reasons: list[str] = []
+        for vol_name in self._write_candidates(None):
+            can, reason = self._can_write(vol_name, 0)
+            if not can:
+                reasons.append(f"{vol_name}: {reason}")
+                continue
+            try:
+                tmp_path = self._scratch_path(vol_name)
+            except VolumeUnavailableError as e:
+                reasons.append(f"{vol_name}: {e}")
+                continue
+            how = "link"
+            try:
+                try:
+                    os.link(source, tmp_path)
+                except OSError:  # another filesystem, or a drive without links
+                    how = "copy"
+                    can, reason = self._can_write(vol_name, size)
+                    if not can:
+                        reasons.append(f"{vol_name}: {reason}")
+                        continue
+                    hasher = hashlib.sha256()
+                    with source.open("rb") as src, tmp_path.open("wb") as dst:
+                        while chunk := src.read(_COPY_CHUNK):
+                            hasher.update(chunk)
+                            dst.write(chunk)
+                    if hasher.hexdigest() != sha256:
+                        raise ValidationError(
+                            f"The source's bytes for {sha256} hash to "
+                            f"{hasher.hexdigest()}; it was not stored under that name"
+                        )
+                dest = self._object_path(sha256, vol_name)
+                dest.parent.mkdir(exist_ok=True)
+                file_modes.replace(tmp_path, dest)
+            except OSError as e:
+                if e.errno == errno.ENOSPC:
+                    reasons.append(f"{vol_name}: no space left on device")
+                    continue
+                raise VolumeUnavailableError(
+                    f"Cannot write to volume '{vol_name}': {e}"
+                ) from e
+            finally:
+                tmp_path.unlink(missing_ok=True)
+            self._register(vol_name, sha256, size)
+            return how
+        raise self._all_volumes_full(size, reasons, None)
+
     def get(self, sha256: str) -> bytes:
         path = self._find_object(sha256)
         if path is None:

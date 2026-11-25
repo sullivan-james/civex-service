@@ -772,3 +772,14 @@ def test_scope_with_a_created_range_round_trips_and_selects(ctx, study):
     made = _make(ctx, "recent", scope=scope)
     assert made.counts["records"] == 2
     assert made.scope["query"]["created_after"].startswith("2000-01-01")
+
+
+def test_write_copy_reports_bytes_written(ctx: AppContext, study, tmp_path: Path):
+    release = _make(ctx)
+    seen: list[tuple[int, int]] = []
+    out = tmp_path / "copy.zip"
+    ctx.release_svc.write_copy(
+        release.name, out, on_progress=lambda d, t: seen.append((d, t))
+    )
+    assert seen and seen[-1] == (out.stat().st_size, release.bundle_size)
+    assert [d for d, _ in seen] == sorted(d for d, _ in seen)

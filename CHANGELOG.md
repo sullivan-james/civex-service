@@ -34,6 +34,19 @@ from the next tag forward.
 
 ## Unreleased
 
+- **Store-to-store file copy for hosts.** `civex.context.copy_objects(source,
+  destination, shas, on_progress=, commit=)` copies content-addressed files
+  between two stores from `make_store` and returns a `CopyResult` (`copied`,
+  `skipped`, `absent`, `bytes_copied`, `methods`). Drive to drive hard-links
+  on one filesystem, else copies; bucket to bucket on the same endpoint,
+  profile and region is a server-side `copy_object` (`upload_part_copy` past
+  5 GiB); anything else streams with no temp file (multipart from the ranged
+  reader into a bucket). Shas are validated, files the destination holds are
+  skipped, a source whose bytes don't match its name is refused, and the
+  destination's inventory is written as a put writes it.
+  `ReleaseService.write_copy` takes an optional `on_progress(done, total)` in
+  bytes.
+
 - **Structure changes need unrestricted read; collection delete checks hidden
   referrers.** `Permissions` now drops `change_structure` whenever read is
   limited to some collections (kind create/rename/templates, field add/update/

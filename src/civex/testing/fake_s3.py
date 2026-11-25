@@ -91,6 +91,30 @@ class FakeS3:
         with open(Filename, "rb") as f:
             self.objects[(Bucket, Key)] = (f.read(), _now())
 
+    def copy_object(
+        self, Bucket: str, Key: str, CopySource: dict[str, str]
+    ) -> dict[str, Any]:
+        self.calls.append("copy_object")
+        data = self._get(CopySource["Bucket"], CopySource["Key"])
+        self.objects[(Bucket, Key)] = (data, _now())
+        return {"CopyObjectResult": {"ETag": _etag(data)}}
+
+    def upload_part_copy(
+        self,
+        Bucket: str,
+        Key: str,
+        UploadId: str,
+        PartNumber: int,
+        CopySource: dict[str, str],
+        CopySourceRange: str,
+    ) -> dict[str, Any]:
+        self.calls.append("upload_part_copy")
+        data = self._get(CopySource["Bucket"], CopySource["Key"])
+        start, _, end = CopySourceRange.removeprefix("bytes=").partition("-")
+        part = data[int(start) : int(end) + 1]
+        self.uploads[UploadId]["parts"][int(PartNumber)] = part
+        return {"CopyPartResult": {"ETag": _etag(part)}}
+
     def get_object(self, Bucket: str, Key: str, Range: str | None = None) -> dict:
         self.calls.append("get_object")
         data = self._get(Bucket, Key)
