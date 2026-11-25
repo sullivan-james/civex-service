@@ -6340,10 +6340,11 @@ def _by_tree(ids: list[uuid.UUID], ops: dict[uuid.UUID, uuid.UUID]) -> list[uuid
     """`ids` with each tree together (trees in the order first met, each tree's
     own order kept): the authority settles consecutive entries of one action as
     one, so trees logged level by level would each be settled alone."""
+    group = {rid: ops.get(rid, rid) for rid in ids}
     first: dict[uuid.UUID, int] = {}
     for rid in ids:
-        first.setdefault(ops.get(rid, rid), len(first))
-    return sorted(ids, key=lambda rid: first[ops.get(rid, rid)])
+        first.setdefault(group[rid], len(first))
+    return sorted(ids, key=lambda rid: first[group[rid]])
 
 
 def _place(row: RestoreRow, deleted_at: _dt | None) -> dict[str, Any]:
