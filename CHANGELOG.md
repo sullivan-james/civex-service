@@ -23,6 +23,10 @@ from the next tag forward.
 
 ## Unreleased
 
+### Fixed
+
+- Importing a bundle no longer fails with "from_filename: there is no field '…'" when a field's `from_filename` rule reads a file field listed after it. The rule is now set once every field exists, as `filename_template` already was. This also fixes copying a hub release.
+
 ## v2.3.1 — release screens left to the host (2026-11-24)
 
 - **civex no longer has a release wizard.** The "New release" page and button
