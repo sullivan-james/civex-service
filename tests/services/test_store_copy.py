@@ -163,8 +163,9 @@ def test_a_huge_object_is_copied_in_parts_server_side(session, monkeypatch):
 @pytest.mark.parametrize("size", [300, 3 * 1024**2])
 def test_other_credentials_stream_without_a_temp_file(session, monkeypatch, size):
     fake = FakeS3()
+    fake_b = FakeS3()
     a = _bucket(fake, "a")
-    b = _bucket(fake, "b", session, profile="other")
+    b = _bucket(fake_b, "b", session, profile="other")
     data = os.urandom(size)
     a.put(data, "d")
     monkeypatch.setattr(s3_module, "MULTIPART_MIN", 1024**2)
@@ -172,11 +173,10 @@ def test_other_credentials_stream_without_a_temp_file(session, monkeypatch, size
     monkeypatch.setattr(
         "tempfile.mkstemp", lambda *a, **k: pytest.fail("a temp file was made")
     )
-    fake.calls.clear()
     res = copy_objects(a, b, [_sha(data)])
     assert res.methods == {"stream": 1}
-    assert "copy_object" not in fake.calls
-    assert ("create_multipart_upload" in fake.calls) == (size > 1024**2)
+    assert "copy_object" not in fake.calls + fake_b.calls
+    assert ("create_multipart_upload" in fake_b.calls) == (size > 1024**2)
     assert b.get(_sha(data)) == data
     assert _sha(data) in _inventory(session)
 
@@ -197,8 +197,9 @@ def test_a_failed_server_side_copy_falls_back_to_streaming(session):
 
 def test_streaming_refuses_wrong_bytes_and_leaves_nothing(session):
     fake = FakeS3()
+    fake_b = FakeS3()
     a = _bucket(fake, "a")
-    b = _bucket(fake, "b", session, profile="other")
+    b = _bucket(fake_b, "b", session, profile="other")
     data = b"right"
     a.put(data, "d")
     fake.objects[("a", a.key_of(_sha(data)))] = (
@@ -207,7 +208,7 @@ def test_streaming_refuses_wrong_bytes_and_leaves_nothing(session):
     )
     with pytest.raises(ValidationError):
         copy_objects(a, b, [_sha(data)])
-    assert not any(k[0] == "b" for k in fake.objects)
+    assert not fake_b.objects
 
 
 def test_across_kinds_both_ways(tmp_path, session):
@@ -223,3 +224,139 @@ def test_across_kinds_both_ways(tmp_path, session):
     assert d.get(_sha(two)) == two
     missing = copy_objects(s, d, [_sha(b"zz")])
     assert missing.absent == [_sha(b"zz")]
+
+
+def test_a_symlink_source_is_never_followed(tmp_path):
+    a, b = _drive(tmp_path / "a"), _drive(tmp_path / "b")
+    secret = tmp_path / "secret"
+    secret.write_bytes(b"secret")
+    sha = _sha(b"secret")
+    link = a.path_on(sha, "main")
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(secret)
+    res = copy_objects(a, b, [sha])
+    assert res.absent == [sha] and not b.exists(sha)
+
+
+def test_a_source_that_vanishes_is_absent_not_an_error(tmp_path, monkeypatch):
+    a, b = _drive(tmp_path / "a"), _drive(tmp_path / "b")
+    one, two = b"one", b"two"
+    a.put(one, "1")
+    a.put(two, "2")
+    real = os.link
+
+    def gone(src, dst, *args, **kw):
+        if Path(src) == a.object_path(_sha(one)):
+            Path(src).unlink()
+            raise FileNotFoundError(errno.ENOENT, "gone", str(src))
+        return real(src, dst, *args, **kw)
+
+    monkeypatch.setattr(os, "link", gone)
+    res = copy_objects(a, b, [_sha(one), _sha(two)])
+    assert res.absent == [_sha(one)] and res.copied == 1 and b.exists(_sha(two))
+
+
+def test_a_cross_device_source_that_vanishes_is_absent(tmp_path, monkeypatch):
+    a, b = _drive(tmp_path / "a"), _drive(tmp_path / "b")
+    a.put(b"vanish", "v")
+    sha = _sha(b"vanish")
+
+    def gone(src, dst, *args, **kw):
+        Path(src).unlink()
+        raise OSError(errno.EXDEV, "x")
+
+    monkeypatch.setattr(os, "link", gone)
+    assert copy_objects(a, b, [sha]).absent == [sha]
+
+
+def test_wrong_bytes_leave_nothing_cross_kind(tmp_path, session):
+    fake = FakeS3()
+    d = _drive(tmp_path / "d")
+    dest_drive = _drive(tmp_path / "e", session)
+    s = _bucket(fake, "a")
+    dst_bucket = _bucket(fake, "z", session)
+    sha = _sha(b"right")
+    # drive -> bucket
+    p = d.path_on(sha, "main")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(b"wrong")
+    with pytest.raises(ValidationError):
+        copy_objects(d, dst_bucket, [sha])
+    assert not any(k[0] == "z" for k in fake.objects)
+    # bucket -> drive
+    s.put(b"wrong", "w")
+    fake.objects[("a", s.key_of(sha))] = fake.objects.pop(
+        ("a", s.key_of(_sha(b"wrong")))
+    )
+    with pytest.raises(ValidationError):
+        copy_objects(s, dest_drive, [sha])
+    assert not dest_drive.exists(sha) and not _inventory(session)
+    objects = tmp_path / "e" / "objects"
+    assert not [f for f in objects.rglob("*") if f.is_file()]
+
+
+def test_a_stale_bucket_inventory_is_not_trusted(session):
+    fake = FakeS3()
+    a, b = _bucket(fake, "a"), _bucket(fake, "b", session)
+    data = b"stale" * 10
+    a.put(data, "s")
+    b.put(data, "s")
+    session.flush()
+    fake.objects.pop(("b", b.key_of(_sha(data))))  # lost behind the inventory's back
+    res = copy_objects(a, b, [_sha(data)])
+    assert res.copied == 1 and res.skipped == 0
+    assert ("b", b.key_of(_sha(data))) in fake.objects
+    # and when the source has lost it too, it is absent
+    fake.objects.pop(("b", b.key_of(_sha(data))))
+    fake.objects.pop(("a", a.key_of(_sha(data))))
+    res = copy_objects(a, b, [_sha(data)])
+    assert res.absent == [_sha(data)]
+
+
+def test_an_injected_client_is_a_different_account_unless_the_same_object(session):
+    fake1, fake2 = FakeS3(), FakeS3()
+    a, b = _bucket(fake1, "a"), _bucket(fake2, "b", session)
+    data = b"two accounts"
+    a.put(data, "d")
+    res = copy_objects(a, b, [_sha(data)])
+    assert (
+        res.methods == {"stream": 1} and "copy_object" not in fake1.calls + fake2.calls
+    )
+
+
+def test_failed_multipart_uploads_are_aborted(monkeypatch, session):
+    fake = FakeS3()
+    fake_b = FakeS3()
+    a = _bucket(fake, "a")
+    b = _bucket(fake_b, "b", session, profile="other")
+    data = os.urandom(3 * 1024**2)
+    a.put(data, "d")
+    fake.objects[("a", a.key_of(_sha(data)))] = (
+        b"x" * len(data),
+        fake.objects[("a", a.key_of(_sha(data)))][1],
+    )
+    monkeypatch.setattr(s3_module, "MULTIPART_MIN", 1024**2)
+    monkeypatch.setattr(s3_module, "PART_SIZE", 1024**2)
+    with pytest.raises(ValidationError):
+        copy_objects(a, b, [_sha(data)])
+    assert "abort_multipart_upload" in fake_b.calls and not fake_b.uploads
+
+
+def test_commit_runs_per_stored_file_and_progress_counts_distinct_shas(tmp_path):
+    a, b = _drive(tmp_path / "a"), _drive(tmp_path / "b")
+    items = [b"c1", b"c2", b"c3"]
+    for i in items:
+        a.put(i, "f")
+    b.put(items[2], "f")
+    commits: list[int] = []
+    seen: list[tuple[int, int]] = []
+    shas = [_sha(i) for i in items]
+    copy_objects(
+        a,
+        b,
+        shas + shas,
+        on_progress=lambda d, t: seen.append((d, t)),
+        commit=lambda: commits.append(1),
+    )
+    assert seen == [(1, 3), (2, 3), (3, 3)]
+    assert len(commits) == 3  # one per stored file, one after finding c3
