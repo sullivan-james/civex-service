@@ -753,6 +753,11 @@ def build_context(
         # policy about each thing: a hidden collection must not look empty to it.
         unscoped=lambda: read_scope.unscoped(session),
         readable=(None if may.read_scope().unrestricted else file_svc.readable),
+        uses=(
+            None
+            if may.read_scope().unrestricted
+            else LocalFileReferenceRepository(session).uses
+        ),
         sees=(None if may.read_scope().unrestricted else may.read_scope().sees),
         scope=may.read_scope,
         # The same answer a person at a browser gets, asked of each change a

@@ -35,6 +35,7 @@ from civex.domain.audit_diff import (
     identity,
 )
 from civex.domain.exceptions import ValidationError
+from civex.domain.file_refs import collect_sha256_refs
 from civex.domain.permissions import FILE_UNAVAILABLE, file_changes
 from civex.domain.merge import LIFECYCLE_KEYS, DERIVED_KEYS, merge
 from civex.domain.permissions import ReadScope
@@ -120,6 +121,7 @@ class SyncAuthorityService:
         readable: Callable[[str], bool] | None = None,
         sees: Callable[[Any], bool] | None = None,
         scope: Callable[[], ReadScope] | None = None,
+        uses: Callable[[list[str]], dict[str, tuple[bool, bool]]] | None = None,
     ) -> None:
         self._repo = repo
         # Whether the device may see a collection, None when it may see all.
@@ -128,6 +130,10 @@ class SyncAuthorityService:
         # every one: a file it may not read is neither cited by it nor said to
         # be here (`missing_files`).
         self._readable = readable
+        # For each of many files, whether a record the device sees uses it and
+        # whether anything does (what `readable` asks of one): None when the
+        # host cannot say, and `_fast` then leaves a record citing a file alone.
+        self._uses = uses
         # Lifts the host's limit on which collections a query can see, for the
         # work that settles a push or serves a device: those see the whole
         # project and ask `policy` about each thing, never the query layer.
@@ -347,9 +353,9 @@ class SyncAuthorityService:
         # What the push will ask about one change at a time (was it sent
         # before; the record it names) is read once, now the feed is locked.
         cache = self._records.incoming_cache()
-        # (a caller who sees only some collections has its own view of the
-        # records: asked each time, never from what was read at once)
-        cache.use_records = self._scope().unrestricted
+        # (a caller who sees only some collections is answered from the whole
+        # project's records only where the question is its own: see `sees`)
+        cache.sees = self._sees
         self._cache = cache
         position = 0
         self._push_started = time.monotonic()
@@ -386,6 +392,14 @@ class SyncAuthorityService:
                         cache,
                         self._next_creates(taken[position:]),
                     )
+                if (
+                    self._bulk
+                    and len(action) == 1
+                    and cache.sees is not None
+                    and self._uses is not None
+                    and position >= cache.uses_upto
+                ):
+                    self._prefetch_uses(cache, taken, position)
                 position += len(action)
                 fast = (
                     self._fast(who, action[0], run, cache)
@@ -438,6 +452,27 @@ class SyncAuthorityService:
                     break
         return out
 
+    def _prefetch_uses(
+        self, cache: IncomingCache, taken: list[SyncEntry], position: int
+    ) -> None:
+        """For a caller who sees only some collections: how the files the next
+        records cite are used (by a record it sees, by anything), two queries
+        for all of them whether or not any is hidden, so `_fast` can answer
+        what `_readable` would, one file at a time, without asking again."""
+        assert self._uses is not None
+        shas: set[str] = set()
+        scanned = 0
+        for e in taken[position:]:
+            scanned += 1
+            if _makes(e) and e.new_data:
+                shas |= collect_sha256_refs(e.new_data.get("data"))
+                if scanned >= PREFETCH_MAX:
+                    break
+        shas -= cache.uses.keys()
+        if shas:
+            cache.uses.update(self._uses(sorted(shas)))
+        cache.uses_upto = position + scanned
+
     def _fast(
         self,
         who: Principal,
@@ -470,8 +505,16 @@ class SyncAuthorityService:
         if stamp is not None and hlc.is_ahead(stamp, _now_ms()):
             return None  # the authority issues one: that is for `_settle`
         final = dict(entry.new_data)
+        cited = collect_sha256_refs(final.get("data"))
+        if cache.sees is not None and cited:
+            # What a file's use says depends on the run so far (an earlier
+            # member may be its only use, in a collection hidden from the
+            # caller): only what was read for it, and kept up with the run,
+            # answers; anything else is settled as it would be alone.
+            if any(sha not in cache.uses or sha in cache.dirty for sha in cited):
+                return None
         try:
-            if problem := self._problem(who, entry):
+            if problem := self._problem(who, entry, cache):
                 # Refused whatever else is held: answered now, in its place in
                 # the run (nothing in the run can change that answer).
                 return _Fast(
@@ -486,13 +529,6 @@ class SyncAuthorityService:
             # reserves a unique mark nor needs its references read; it still
             # needs the parent it sits under, as `_settle` asks.
             marks = [] if gone else self._records.unique_marks(final, shape)
-            if not cache.use_records and (
-                final.get("parent_record_id")
-                or marks
-                or (not gone and self._records.cites_records(final, shape))
-            ):
-                return None  # (what it sits under, points at or must differ from
-                # is read through the caller's own view)
             if any(m in cache.made for m in marks):
                 return None  # a record of this push shares its key: settled alone
             if final.get("parent_record_id"):
@@ -505,6 +541,14 @@ class SyncAuthorityService:
         # Later changes of the push are judged with this one there (it is
         # written, in its place, before any of them is settled).
         self._records.note_made(cache, final, shape)
+        if cache.sees is not None and cited:
+            # Its files are now used by it: by a record the caller sees or not.
+            for sha in cited:
+                if gone:
+                    cache.dirty.add(sha)
+                    continue
+                seen, _ = cache.uses[sha]
+                cache.uses[sha] = (seen or cache.sees(final.get("dataset_id")), True)
         return _Fast(entry, final)
 
     def _flush_run(self, who: Principal, run: list[_Fast]) -> list[OpResult]:
@@ -637,7 +681,10 @@ class SyncAuthorityService:
         return result
 
     def _problem(
-        self, who: Principal, entry: SyncEntry
+        self,
+        who: Principal,
+        entry: SyncEntry,
+        cache: IncomingCache | None = None,
     ) -> tuple[str, str | None] | None:
         """Why a change can't be taken whatever is held, with the code of the
         refusal (`REFUSAL_INVALID` for its shape, `REFUSAL_PERMISSION` for what
@@ -654,7 +701,7 @@ class SyncAuthorityService:
             # Citing a file makes it the record's, readable by whoever reads
             # the record: only one this device could download may be cited.
             added, _ = file_changes(entry)
-            if any(not self._readable(sha) for sha in sorted(added)):
+            if any(not self._may_cite(sha, cache) for sha in sorted(added)):
                 return FILE_UNAVAILABLE, REFUSAL_PERMISSION
         if (
             entry.entity_type == "record"
@@ -799,6 +846,16 @@ class SyncAuthorityService:
             for entry in action
         ]
 
+    def _may_cite(self, sha: str, cache: IncomingCache | None) -> bool:
+        """Whether this device could download the file (`readable`: used by a
+        record it sees, or by nothing): from what `_prefetch_uses` read and the
+        run has kept up when `_fast` asks, else asked of the database."""
+        assert self._readable is not None
+        if cache is not None and cache.sees is not None and sha in cache.uses:
+            seen, used = cache.uses[sha]
+            return seen or not used
+        return self._readable(sha)
+
     def _unseen(self, entry: SyncEntry) -> bool:
         """Whether the thing an entry is about is held here in a collection the
         device may not see. It is answered as a thing that is not here at all
@@ -930,7 +987,9 @@ class SyncAuthorityService:
             raise ValidationError(PARENT_GONE) from None
         found: Any
         if cache is not None and wanted in cache.places:
-            found = cache.places[wanted]  # (the caller sees all: use_records)
+            found = cache.places[wanted]
+            if found is not None and cache.sees and not cache.sees(found.dataset_id):
+                found = None  # (held where the caller cannot see: not there)
         else:
             with self._records.as_caller():
                 found = self._records.records_repo.get_by_id(

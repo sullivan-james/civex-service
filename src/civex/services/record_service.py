@@ -753,12 +753,24 @@ class IncomingCache:
         self._resolver = resolver
         self.shapes = resolver()
         self.datasets: dict[uuid.UUID, Any] = {}
-        # Whether records may be answered from here: not for a caller who sees
-        # only some collections (what it finds is its own view of them).
-        self.use_records = False
+        # Which collections the caller sees (None: all). `places` is the whole
+        # project, as the sync authority settles it; a caller who sees only
+        # some collections is answered from it only where the question is the
+        # caller's own (the record a reference or a parent names: one in a
+        # collection it does not see is not there), never through a second
+        # lookup that would differ for hidden and missing.
+        self.sees: Callable[[Any], bool] | None = None
         # Record id -> where it is (None: not there), for every record the
         # run names: read at once, and kept up with what the run writes.
         self.places: dict[uuid.UUID, RecordPlace | None] = {}
+        # For a caller who sees only some collections: file digest -> (used by
+        # a record it sees, used by anything), read at once for the files a run
+        # cites (`SyncAuthorityService._prefetch_uses`) and kept up with what
+        # the run writes; `dirty` are digests whose answer a run member made
+        # uncertain. `uses_upto` is how far into the push they were read.
+        self.uses: dict[str, tuple[bool, bool]] = {}
+        self.dirty: set[str] = set()
+        self.uses_upto = 0
         # Uniqueness keys (see `RecordService.unique_marks`) that no stored
         # record held when they were read, and those the run has since made.
         self.free: set[tuple[Any, ...]] = set()
@@ -777,6 +789,9 @@ class IncomingCache:
         self.places.clear()
         self.free.clear()
         self.made.clear()
+        self.uses.clear()
+        self.dirty.clear()
+        self.uses_upto = 0
         self.stale = True
 
 
@@ -1899,7 +1914,13 @@ class RecordService:
         if found:
             # (what a run has read already is not asked for again)
             held = cache.places if cache is not None else {}
-            targets = {i: held[i] for i in found if held.get(i) is not None}
+            sees = cache.sees if cache is not None else None
+            targets = {}
+            for i in found:
+                place = held.get(i)
+                # (one in a collection the caller does not see is not there)
+                if place is not None and (sees is None or sees(place.dataset_id)):
+                    targets[i] = place
             asked = [i for i in found if i not in held]
             targets.update({t.id: t for t in self._records.list_by_ids(asked)})
         owners = {} if owners is None else owners
@@ -2165,8 +2186,6 @@ class RecordService:
         holds (one per collection and schema). Records the run writes are
         added with `note_made`; a write by anything else is `clear_records`."""
         cache.stale = False
-        if not cache.use_records:
-            return
         want: set[uuid.UUID] = set()
         keys: dict[tuple[uuid.UUID, uuid.UUID], list[tuple[Any, ...]]] = {}
         places: dict[tuple[Any, ...], tuple[uuid.UUID | None, dict[str, Any]]] = {}
@@ -2224,8 +2243,6 @@ class RecordService:
     ) -> None:
         """A record state the run is about to write: it is there for what comes
         after it (a record under it, one pointing at it, one sharing its key)."""
-        if not cache.use_records:
-            return
         record_id = uuid.UUID(str(state["id"]))
         gone = state.get("deleted_at")
         cache.places[record_id] = RecordPlace(
