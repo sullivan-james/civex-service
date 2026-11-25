@@ -430,3 +430,77 @@ def test_an_explicit_release_grant_is_withheld_from_a_restricted_reader():
         assert not restricted.can(p.RELEASE)
         assert not restricted.lacking(p.NOTES).can(p.RELEASE)
     assert Permissions.of(p.READ, p.RELEASE).can(p.RELEASE)
+
+
+@pytest.mark.parametrize("action", ["restore", "create"])
+def test_no_action_name_gets_a_collection_made_local_past_its_referrers(
+    world, project, action
+):
+    authority, limited, open_, vault = world
+    shared, target = _refs_world(authority, referrer_in="open")
+    clone, _ = _forced_clone(project, authority, target, "clone")
+    clone.dataset_svc.update("shared", scope="local")
+    entries = [
+        dataclasses.replace(e, action=action) if e.entity_type == "dataset" else e
+        for e in _pending(clone)
+    ]
+    assert any(e.entity_type == "dataset" and e.action == action for e in entries)
+    perms = Permissions.of(p.READ, p.WRITE_RECORDS, p.DELETE, p.CHANGE_STRUCTURE)
+    result = _push(limited, perms, entries, "a")
+    authority.commit()
+    assert "applied" not in statuses(result)
+    assert authority.dataset_svc.get("shared").scope == "global"
+
+
+def _answers(result):
+    return [(r.status, r.message) for r in result.results]
+
+
+def _absent(entry):
+    gone = uuid.uuid4()
+    old = {**(entry.old_data or {}), "id": str(gone)}
+    return dataclasses.replace(entry, id=uuid.uuid4(), entity_id=gone, old_data=old)
+
+
+def _one_action(entries, op="one"):
+    """The entries as one action, each with an id of its own this time."""
+    return [dataclasses.replace(e, id=uuid.uuid4(), op=op) for e in entries]
+
+
+def test_a_hidden_record_in_an_action_answers_as_an_absent_one(world, project):
+    authority, limited, open_, vault = world
+    shared, target = _refs_world(authority)
+    ((hidden, _),) = authority.record_svc._find_referrers({target.id}, set())
+    clone = project("clone")
+    join(authority, clone)
+    clone.record_svc.delete(str(hidden.id))
+    clone.record_svc.delete(str(target.id))
+    entries = _pending(clone)
+    (gone,) = [e for e in entries if e.entity_id == hidden.id]
+    (tgt,) = [e for e in entries if e.entity_id == target.id]
+    perms = _deleter(open_, shared)
+    # the guess is right (the hidden record) or wrong (nothing there): the
+    # same answer, so a refusal cannot tell which
+    right = _push(limited, perms, _one_action([gone, tgt], "a"), "a")
+    wrong = _push(limited, perms, _one_action([_absent(gone), tgt], "b"), "a")
+    assert _answers(right) == _answers(wrong)
+    assert "applied" not in statuses(right)
+
+
+def test_a_hidden_record_does_not_change_which_other_refusal_is_given(world, project):
+    authority, limited, open_, vault = world
+    hidden = authority.record_svc.add("vault", "encounter", {"site": "h"})
+    authority.commit()
+    clone = project("clone")
+    join(authority, clone)
+    clone.record_svc.delete(str(hidden.id))
+    (gone,) = _pending(clone)
+    bad = _entries(project, authority, CHANGES["new field"], "c2")
+    perms = Permissions.of(
+        p.READ, p.WRITE_RECORDS, p.DELETE, read_collections=[open_.id]
+    )
+    answers = []
+    for name, first in (("a", gone), ("b", _absent(gone))):
+        batch = _one_action([first, *bad], name)
+        answers.append(_answers(_push(limited, perms, batch, "a")))
+    assert answers[0] == answers[1]

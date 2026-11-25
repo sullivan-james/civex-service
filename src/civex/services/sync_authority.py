@@ -151,6 +151,7 @@ class SyncAuthorityService:
         self._rules = rules
         # The things the action being settled has entries for itself.
         self._covered: set[tuple[str, uuid.UUID]] = set()
+        self._covered_seen: set[tuple[str, uuid.UUID]] = set()
         # What the push being settled has read (see `RecordService.incoming_cache`),
         # for the changes `_take` settles one at a time; None outside a push.
         self._cache: IncomingCache | None = None
@@ -608,6 +609,7 @@ class SyncAuthorityService:
             # sent before: the same answer, nothing done again
             return dataclasses.replace(prior, replayed=True)
         self._covered = {(entry.entity_type, entry.entity_id)}
+        self._covered_seen = set() if self._unseen(entry) else set(self._covered)
         if problem := self._problem(who, entry):
             return self._refuse(who, entry, problem[0], code=problem[1])
         try:
@@ -637,11 +639,15 @@ class SyncAuthorityService:
         return result
 
     def _problem(
-        self, who: Principal, entry: SyncEntry
+        self, who: Principal, entry: SyncEntry, as_absent: bool = False
     ) -> tuple[str, str | None] | None:
         """Why a change can't be taken whatever is held, with the code of the
         refusal (`REFUSAL_INVALID` for its shape, `REFUSAL_PERMISSION` for what
-        the caller may change: a person may be given that later)."""
+        the caller may change: a person may be given that later).
+
+        `as_absent`: the thing is held where the caller may not look. It is then
+        judged as an absent one would be; what only a held one would say (that
+        it is not here, what points at it) is left to a call without it."""
         if entry.entity_type in NOT_SYNCED_KINDS:
             # Whatever the protocol the device speaks: a release is published
             # on a host, so one sent here is never taken (and never sent again).
@@ -659,13 +665,13 @@ class SyncAuthorityService:
         if (
             entry.entity_type == "record"
             and entry.action in ("update", "restore", "delete", "purge")
-            and self._unseen(entry)
+            and (not as_absent and self._unseen(entry))
         ):
             # Held here, where the device may not look: answered as the same
             # change to a record that is not here at all, in the same words and
             # with the same (absent) code.
             return NOT_HERE, None
-        if refusal := self._referrer_problem(entry):
+        if not as_absent and (refusal := self._referrer_problem(entry)):
             return refusal, REFUSAL_PERMISSION
         if (
             self._policy
@@ -746,7 +752,22 @@ class SyncAuthorityService:
             # sent before
             return [dataclasses.replace(p, replayed=True) for p in priors if p]
         self._covered = {(e.entity_type, e.entity_id) for e in action}
+        # What the caller may see decides what its answers can say: a thing
+        # held where it may not look is answered as one that is not here, so
+        # it is set aside first. Only what it can see counts as part of the
+        # action when a rule asks what else is being deleted with a thing, and
+        # no other refusal may depend on it, or the answer would tell a held
+        # thing from an absent one.
+        hidden = [e for e in action if self._unseen(e)]
+        self._covered_seen = {
+            (e.entity_type, e.entity_id) for e in action if e not in hidden
+        }
         for entry in action:
+            # Every entry meets the checks an absent one would meet, in order;
+            # what only a held one would say waits for the end.
+            if problem := self._problem(who, entry, as_absent=entry in hidden):
+                return self._refuse_action(who, action, problem[0], code=problem[1])
+        for entry in hidden:
             if problem := self._problem(who, entry):
                 return self._refuse_action(who, action, problem[0], code=problem[1])
         # What one of its entries writes is read by the next: nothing is
@@ -1123,26 +1144,20 @@ class SyncAuthorityService:
         record the caller cannot see points at it; a global collection that
         records in other collections reference cannot go or become local).
         Nothing is said of what the records are."""
+        if self._unseen(entry):
+            return None  # answered as absent, whatever it would say of referrers
         sees = self._sees or (lambda _where: True)
         if entry.entity_type == "record" and entry.action in ("delete", "purge"):
             if self._sees is not None and self._records.hidden_referrers_of_records(
                 {entry.entity_id},
                 self._sees,
-                {rid for kind, rid in self._covered if kind == "record"},
+                {rid for kind, rid in self._covered_seen if kind == "record"},
             ):
                 return "Records you cannot see still reference this record."
             return None
         if entry.entity_type != "dataset":
             return None
-        new = getattr(entry, "new_data", None) or {}
-        delta = getattr(entry, "delta", None) or {}
-        moved = delta.get("scope")
-        to_local = (
-            entry.action == "update"
-            and (moved.get("after") if isinstance(moved, dict) else new.get("scope"))
-            == LOCAL
-        )
-        if entry.action not in ("delete", "purge") and not to_local:
+        if entry.action not in ("delete", "purge") and not _makes_local(entry):
             return None
         head = self._applier.head("dataset", entry.entity_id)
         if not head or head.get("scope") != GLOBAL:
@@ -1428,6 +1443,16 @@ def _makes(entry: SyncEntry) -> bool:
 def _plain_record_write(entry: SyncEntry) -> bool:
     """A record made or edited: it reaches no other record by itself."""
     return entry.entity_type == "record" and entry.action in ("create", "update")
+
+
+def _makes_local(entry: SyncEntry) -> bool:
+    """Whether a change to a collection (a create, update or restore alike:
+    they merge the same way) would leave it local. Judged on what it carries,
+    not on its action, so no action name gets one past the rule."""
+    moved = (getattr(entry, "delta", None) or {}).get("scope")
+    if isinstance(moved, dict):
+        return moved.get("after") == LOCAL
+    return (getattr(entry, "new_data", None) or {}).get("scope") == LOCAL
 
 
 def _scope(entry: SyncEntry) -> dict[str, uuid.UUID]:
