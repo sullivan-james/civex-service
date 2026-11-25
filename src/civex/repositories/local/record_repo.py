@@ -5,6 +5,7 @@ import math
 import sqlite3
 import uuid
 from datetime import datetime, timezone
+from collections.abc import Collection
 from typing import Any
 
 from sqlalchemy import (
@@ -1257,18 +1258,28 @@ class LocalRecordRepository:
             groups.setdefault(marker, []).append(rid)
         return [ids for ids in groups.values() if len(ids) > 1]
 
-    def has_key_duplicate(self, schema_id: uuid.UUID, field_ids: list[str]) -> bool:
+    def has_key_duplicate(
+        self,
+        schema_id: uuid.UUID,
+        field_ids: list[str],
+        number_fields: Collection[str] = (),
+    ) -> bool:
         """Whether `key_duplicates` would find any group: the database narrows
         the records to those that share what the key holds (a window count,
         so nothing else is read), and the first group confirmed ends it. The
-        database's equality is never narrower than ours (a number is a number
-        however written), so it can only name more candidates, which are then
-        judged exactly as `key_duplicates` does."""
+        database's equality is never narrower than ours: a number field
+        (`number_fields`) is compared as the float `_canonical` makes of it
+        (so 2**53 and 2**53 + 1 share), anything else as the JSON it is, so
+        it can only name more candidates, which are then judged exactly as
+        `key_duplicates` does."""
         from civex.domain.uniqueness import key_values
 
         if not field_ids:
             return False
-        values = [field_json(Record, f) for f in field_ids]
+        values = [
+            self._as_number(Record, f) if f in number_fields else field_json(Record, f)
+            for f in field_ids
+        ]
         sharing = func.count().over(
             partition_by=[Record.dataset_id, Record.parent_record_id, *values]
         )
@@ -1302,6 +1313,26 @@ class LocalRecordRepository:
         finally:
             rows.close()
         return False
+
+    def _as_number(self, entity: Any, field_id: str) -> Any:
+        """`field_id` as a float where it holds a number, else NULL (such
+        values only group with each other, more widely than `_canonical`)."""
+        raw = field_json(entity, field_id)
+        if self._pg:
+            return case(
+                (
+                    func.jsonb_typeof(raw) == "number",
+                    field_value(entity, field_id, "number"),
+                ),
+                else_=None,
+            )
+        return case(
+            (
+                func.typeof(raw).in_(("integer", "real")),
+                field_value(entity, field_id, "number"),
+            ),
+            else_=None,
+        )
 
     def subtree_levels(
         self, root_ids: list[uuid.UUID], deleted: bool | None = None

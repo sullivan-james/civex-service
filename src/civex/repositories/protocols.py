@@ -13,6 +13,7 @@ from contextlib import AbstractContextManager
 import uuid
 from datetime import date, datetime
 from pathlib import Path
+from collections.abc import Collection
 from typing import (
     Any,
     AsyncIterable,
@@ -369,7 +370,12 @@ class RecordRepository(Protocol):
     def key_duplicates(
         self, schema_id: uuid.UUID, field_ids: list[str]
     ) -> list[list[uuid.UUID]]: ...
-    def has_key_duplicate(self, schema_id: uuid.UUID, field_ids: list[str]) -> bool: ...
+    def has_key_duplicate(
+        self,
+        schema_id: uuid.UUID,
+        field_ids: list[str],
+        number_fields: Collection[str] = (),
+    ) -> bool: ...
     def list_deleted(
         self,
         dataset_id: uuid.UUID | None = None,

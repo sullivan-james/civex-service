@@ -39,11 +39,12 @@ CASES: list[tuple[str, list[tuple[int, int | None, dict[str, Any], bool]], bool]
     ("blank beside real", [(0, None, {K: " "}, False), (0, None, {K: "a"}, False), (0, None, {K: "a"}, False)], True),
     ("second key field differs", [(0, None, {K: "a", L: 1}, False), (0, None, {K: "a", L: 2}, False)], False),
     ("both key fields", [(0, None, {K: "a", L: 1}, False), (0, None, {K: "a", L: 1.0}, False)], True),
+    ("beyond 2**53", [(0, None, {K: 2**53}, False), (0, None, {K: 2**53 + 1}, False)], True),
     ("key with a quote", [(0, None, {K: "it's"}, False), (0, None, {K: "it's"}, False)], True),
 ]  # fmt: skip
 
 
-def _check(session: Session, name: str, records, expect: bool) -> None:
+def _check(session: Session, name: str, records, expect: bool, numbers=()) -> None:
     from datetime import datetime, timezone
 
     schema = Schema(name=f"s_{uuid.uuid4().hex[:8]}")
@@ -72,7 +73,7 @@ def _check(session: Session, name: str, records, expect: bool) -> None:
     )
     for key in ([K], [K, L]):
         had = bool(repo.key_duplicates(schema.id, key))
-        assert repo.has_key_duplicate(schema.id, key) == had, (name, key)
+        assert repo.has_key_duplicate(schema.id, key, numbers) == had, (name, key)
         if key == [K] and not any(L in d for _, _, d, _ in records):
             assert had == expect, name
 
@@ -80,7 +81,10 @@ def _check(session: Session, name: str, records, expect: bool) -> None:
 @pytest.mark.parametrize("name,records,expect", CASES, ids=[c[0] for c in CASES])
 def test_sqlite(name, records, expect, ctx):
     session = ctx._session
-    _check(session, name, records, expect)
+    if "2**53" not in name:  # only a number field can share these
+        _check(session, name, records, expect)
+    if "number" in name or "2**53" in name:
+        _check(session, name, records, expect, numbers=(K, L))
 
 
 _PG_URL = os.environ.get("CIVEX_TEST_POSTGRES_URL")
@@ -93,7 +97,10 @@ def test_postgres(name, records, expect):
     ensure_schema_current(engine)
     try:
         with Session(engine) as session:
-            _check(session, name, records, expect)
+            if "2**53" not in name:
+                _check(session, name, records, expect)
+            if "number" in name or "2**53" in name:
+                _check(session, name, records, expect, numbers=(K, L))
             session.rollback()
     finally:
         engine.dispose()

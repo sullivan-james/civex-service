@@ -110,7 +110,12 @@ class ProjectRules:
                     f"A uniqueness rule of '{schema.name}' would name a field it "
                     "no longer has"
                 )
-            if duplicates and self._records.has_key_duplicate(schema.id, list(key)):
+            numbers = {
+                str(f.id) for f in schema.fields if f.dtype in ("integer", "float")
+            }
+            if duplicates and self._records.has_key_duplicate(
+                schema.id, list(key), numbers
+            ):
                 raise ValidationError(
                     f"Records of '{schema.name}' already share the values a "
                     "uniqueness rule would make unique"
