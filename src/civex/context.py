@@ -32,6 +32,8 @@ from civex.domain.exceptions import FeatureUnavailableError
 from civex.domain.permissions import Permissions
 from civex.domain.query import RecordQuery
 from civex.project import Project
+from civex.store_copy import CopyResult as CopyResult
+from civex.store_copy import copy_objects as copy_objects
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Engine

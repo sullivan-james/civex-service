@@ -693,12 +693,25 @@ class ReleaseService:
         with self._bundle(release) as f:
             yield release, f
 
-    def write_copy(self, name: str, path: Path) -> ReleaseDTO:
+    def write_copy(
+        self,
+        name: str,
+        path: Path,
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> ReleaseDTO:
         """Write the release's bundle of records to `path` (fetched from the
-        server first on a copy that hasn't got it)."""
+        server first on a copy that hasn't got it). `on_progress(bytes_done,
+        bytes_total)` is called after each chunk written."""
         with self.open_bundle(name) as (release, source):
             with open(path, "wb") as out:
-                shutil.copyfileobj(source, out)
+                if on_progress is None:
+                    shutil.copyfileobj(source, out)
+                else:
+                    done = 0
+                    while chunk := source.read(1024 * 1024):
+                        out.write(chunk)
+                        done += len(chunk)
+                        on_progress(done, release.bundle_size)
         return release
 
     def full_bundle(self, name: str) -> FullBundle:
