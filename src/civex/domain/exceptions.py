@@ -70,6 +70,13 @@ class FieldValueError(ValidationError):
         self.path = path
 
 
+class RuleBroken(ValidationError):
+    """A value that breaks a rule its field was given (a minimum, a list of
+    choices, a length, a date's range or precision), as opposed to one that is
+    not a value of that kind at all. Both refuse a person's own write; a record
+    that arrives by sync with such a value is taken in and flagged instead."""
+
+
 class ConflictMovedError(CivexError):
     """The value being put back has changed since the conflict was recorded, so
     what a person was shown is no longer what is there. `current` is what is

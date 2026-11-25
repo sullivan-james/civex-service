@@ -230,6 +230,7 @@ def test_a_still_forbidden_change_waits_longer_each_time(pair, authority, monkey
     assert laptop.sync_svc.sync().retried == 1
 
 
+@pytest.mark.usefixtures("rules_refuse")
 def test_a_validation_refusal_is_not_sent_again(pair, authority):
     laptop, record = pair
     authority.schema_svc.update_field(

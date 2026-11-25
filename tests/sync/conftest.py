@@ -38,3 +38,23 @@ def pair(project, authority):
     phone = device(project, authority, "phone")
     connect(phone)
     return laptop, phone, record
+
+
+@pytest.fixture()
+def rules_refuse(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stand-in for an authority that refuses what breaks a data rule, for the
+    tests of what a refusal does (kept for review, sent again, fixed, ...).
+    A real authority takes such a record in and flags it (`test_data_rules`);
+    what it still refuses is shape, which a person cannot make here."""
+    from civex.domain.exceptions import FieldValueError
+    from civex.services.record_service import RecordService
+
+    real = RecordService._rule_findings
+
+    def strict(self, *args, **kwargs):
+        found = real(self, *args, **kwargs)
+        if found:
+            raise FieldValueError(found[0]["message"], found[0]["field"])
+        return found
+
+    monkeypatch.setattr(RecordService, "_rule_findings", strict)

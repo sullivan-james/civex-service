@@ -63,6 +63,7 @@ def test_an_unfinished_first_upload_is_said(project, authority, monkeypatch):
     assert laptop.sync_svc.record_sync(rec.id).state == "first_upload"
 
 
+@pytest.mark.usefixtures("rules_refuse")
 def test_a_refused_record_gives_the_authoritys_reason(project, authority):
     laptop = device(project, authority, "laptop")
     laptop.schema_svc.create("call")

@@ -27,6 +27,7 @@ def _refusals(ctx):
     return [c for c in ctx.sync_svc.conflicts() if c.kind == "rejected"]
 
 
+@pytest.mark.usefixtures("rules_refuse")
 def test_a_refused_record_is_one_item_and_fixing_it_sends_it(calls, authority):
     laptop, phone = calls
     # The laptop adds a record with a free-text annotation...
@@ -65,6 +66,7 @@ def test_a_refused_record_is_one_item_and_fixing_it_sends_it(calls, authority):
     assert snapshots(laptop)["record"] == snapshots(authority)["record"]
 
 
+@pytest.mark.usefixtures("rules_refuse")
 def test_a_record_refused_while_filling_a_new_server_can_be_sent_again_and_fixed(
     project, authority
 ):
@@ -131,6 +133,7 @@ def test_following_another_server_forgets_the_old_ones_numbers(pair, project):
     assert replacement.record_svc.get(str(record.id)).data["site"] == "after"
 
 
+@pytest.mark.usefixtures("rules_refuse")
 def test_a_new_servers_refusal_of_what_filling_it_sent_is_kept(project, authority):
     """The first server's refusal is settled when the laptop moves on; the
     new server, filled with the same record, refuses it too, and that refusal

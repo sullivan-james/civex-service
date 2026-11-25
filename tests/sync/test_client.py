@@ -72,6 +72,7 @@ def test_seeding_sends_what_a_record_needs_before_the_record(project, authority)
     assert laptop.sync_repo.count_pending() == 0
 
 
+@pytest.mark.usefixtures("rules_refuse")
 def test_something_the_server_refuses_while_seeding_is_kept_for_review(
     project, authority
 ):
@@ -102,6 +103,7 @@ def test_something_the_server_refuses_while_seeding_is_kept_for_review(
     assert connect(laptop) == "resumed"  # connected, not stranded
 
 
+@pytest.mark.usefixtures("rules_refuse")
 def test_following_a_different_authority_forgets_the_old_ones_cursor_and_items(
     project, authority
 ):

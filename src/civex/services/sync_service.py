@@ -57,6 +57,9 @@ from civex.domain.sync import (
     PUSH_BUDGET_BYTES,
     REFUSAL_PERMISSION,
     UNFIT,
+    APPLIED,
+    CONFLICT,
+    MERGED,
     batch_by_budget,
     is_lock_contention,
     Joined,
@@ -2430,7 +2433,20 @@ class SyncService:
                 kind = problem.get("kind", "conflict")
                 if self._repo.has_conflict(result.op_id, problem.get("field"), kind):
                     continue
-                if result.status != REJECTED:
+                if kind == UNFIT:
+                    # One flag per field of a record: a newer one replaces the
+                    # one before. (It is no clash: nothing to pull again.)
+                    self._repo.resolve_conflicts(
+                        [
+                            c.id
+                            for c in self._repo.find_open_conflicts(
+                                kind=UNFIT, entity_id=entry.entity_id
+                            )
+                            if c.field == problem.get("field")
+                        ],
+                        "replaced",
+                    )
+                elif result.status != REJECTED:
                     report.conflicts += 1
                 self._repo.add_conflict(
                     kind=kind,
@@ -2450,7 +2466,42 @@ class SyncService:
                 )
                 if kind == "rejected":
                     refused.add(entry.entity_id)
+        self._clear_fixed(results, sent)
         return held
+
+    def _clear_fixed(
+        self, results: list[Any], sent: dict[uuid.UUID, SyncEntry]
+    ) -> None:
+        """A flag (`unfit`) is a fact about the record's values, so it goes when
+        they are put right: for each record this push took in that has one open,
+        its values are judged again as they are now (the same rules the authority
+        applied), and each flag whose field no longer breaks one is settled.
+        Judged by the data, not by the push coming back clean: an edit to
+        something else says nothing of an old problem."""
+        open_ = self._repo.find_open_conflicts(kind=UNFIT)
+        if not open_:
+            return
+        taken = {
+            e.entity_id
+            for r in results
+            if r.status in (APPLIED, MERGED, CONFLICT)
+            and (e := sent.get(r.op_id)) is not None
+            and e.entity_type == "record"
+        }
+        by_record: dict[uuid.UUID, list[SyncConflictDTO]] = {}
+        for c in open_:
+            if c.entity_type == "record" and c.entity_id in taken:
+                by_record.setdefault(c.entity_id, []).append(c)
+        for record_id, flags in by_record.items():
+            state = self._repo.snapshot("record", record_id)
+            broken = (
+                {f["field"] for f in self._records.rule_findings(state)}
+                if state is not None
+                else set()
+            )
+            self._repo.resolve_conflicts(
+                [c.id for c in flags if c.field not in broken], "fixed"
+            )
 
     # ------------------------------------------------------------------
     # Joining and seeding

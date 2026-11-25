@@ -536,7 +536,7 @@ class SyncAuthorityService:
                 self._check_parent(final, cache)
                 if self._records.placed_with_parent(final, cache) is not final:
                     return None  # it follows its parent to another collection
-            self._records.check_incoming(final, None, cache)
+            unfit = self._records.check_incoming(final, None, cache)
         except (ValidationError, ValueError, TypeError, KeyError, AttributeError):
             return None
         # Later changes of the push are judged with this one there (it is
@@ -550,7 +550,9 @@ class SyncAuthorityService:
                     continue
                 seen, _ = cache.uses[sha]
                 cache.uses[sha] = (seen or cache.sees(final.get("dataset_id")), True)
-        return _Fast(entry, final)
+        # (a record that breaks a data rule is taken as it is, like any other:
+        # only its answer carries what it breaks)
+        return _Fast(entry, final, unfit=unfit)
 
     def _flush_run(self, who: Principal, run: list[_Fast]) -> list[OpResult]:
         """Write a run of records `_fast` took, in one go: numbered together,
@@ -569,7 +571,7 @@ class SyncAuthorityService:
                 first = self._repo.reserve_hub_seqs(len(taken))
                 self._seed(who.device_id)
                 answered = [
-                    OpResult(f.entry.id, APPLIED, None, [], first + k)
+                    OpResult(f.entry.id, APPLIED, None, f.unfit, first + k)
                     for k, f in enumerate(taken)
                 ]
                 self._repo.insert_records(
@@ -1054,6 +1056,7 @@ class SyncAuthorityService:
             raise ValidationError(NOT_HERE)
         cascade = self._cascade_before(entry, head)
         conflicts: list[dict[str, Any]] = []
+        unfit: list[dict[str, Any]] = []
         final: dict[str, Any] | None = None  # the state the thing ends in, if it exists
         incoming: dict[str, Any] | None = None  # what the change made, as a whole
         message: str | None = None
@@ -1111,7 +1114,7 @@ class SyncAuthorityService:
                 if placed is not final:
                     self._check_placement(who, entry, placed)
                 final = placed
-                self._records.check_incoming(final, head, self._cache)
+                unfit = self._records.check_incoming(final, head, self._cache)
             elif kind == "note" and self._notes is not None:
                 self._check_note(who, final)
             self._applier.apply_state(kind, eid, final)
@@ -1173,6 +1176,9 @@ class SyncAuthorityService:
             self._write_cascade(entry, cascade)
             self._repo.forget_held()
         status = self._status(entry, final, conflicts, incoming)
+        # What breaks a data rule rides on the answer of a change that went in:
+        # it is no clash, so it neither changes the status nor fails an action.
+        conflicts = conflicts + unfit
         if conflicts and any(c["kind"] == "edit_vs_delete" for c in conflicts):
             message = next(
                 c.get("message") for c in conflicts if c["kind"] == "edit_vs_delete"
@@ -1429,6 +1435,7 @@ class _Fast:
     entry: SyncEntry
     final: dict[str, Any] | None
     refused: OpResult | None = None  # or, if it was refused, the answer
+    unfit: list[dict[str, Any]] = dataclasses.field(default_factory=list)
 
 
 class _Denied(ValidationError):

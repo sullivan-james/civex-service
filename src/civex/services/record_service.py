@@ -19,7 +19,7 @@ from civex.domain import notes as note_rules
 from civex.domain.permissions import EVERYTHING, Permissions
 from civex.domain.file_refs import without_file_locations
 from civex.domain.file_access import arriving_location
-from civex.domain.sync import not_on_server_yet
+from civex.domain.sync import UNFIT, UNFIT_DATA, not_on_server_yet
 from civex.domain.dtos import (
     OrphanDTO,
     DERIVED_FILE_KEYS,
@@ -63,6 +63,7 @@ from civex.domain.exceptions import (
     CoercionError,
     DuplicateRecordError,
     NotFoundError,
+    RuleBroken,
     ValidationError,
 )
 from civex.domain.filters import (
@@ -216,7 +217,7 @@ def _check_restrictions(
                     value, (restrictions or {}).get("precision", "day")
                 )
             except ValidationError as e:
-                raise ValidationError(f"Field '{field_name}': {e}") from None
+                raise RuleBroken(f"Field '{field_name}': {e}") from None
 
     if dtype in ("file", "file_list"):
         # The shape is checked whatever the restrictions, like a geometry's.
@@ -240,37 +241,33 @@ def _check_restrictions(
         mn = restrictions.get("min")
         mx = restrictions.get("max")
         if mn is not None and value < mn:
-            raise ValidationError(
-                f"Field '{field_name}': {value} is below minimum ({mn})"
-            )
+            raise RuleBroken(f"Field '{field_name}': {value} is below minimum ({mn})")
         if mx is not None and value > mx:
-            raise ValidationError(
-                f"Field '{field_name}': {value} exceeds maximum ({mx})"
-            )
+            raise RuleBroken(f"Field '{field_name}': {value} exceeds maximum ({mx})")
 
     elif dtype == "string":
         choices = restrictions.get("choices")
         max_length = restrictions.get("max_length")
         if choices is not None and value not in choices:
-            raise ValidationError(
+            raise RuleBroken(
                 f"Field '{field_name}': '{value}' must be one of: {', '.join(str(c) for c in choices)}"
             )
         if max_length is not None and len(value) > int(max_length):
-            raise ValidationError(
+            raise RuleBroken(
                 f"Field '{field_name}': value length {len(value)} exceeds max_length {max_length}"
             )
 
     elif dtype == "longtext":
         max_length = restrictions.get("max_length")
         if max_length is not None and len(value) > int(max_length):
-            raise ValidationError(
+            raise RuleBroken(
                 f"Field '{field_name}': value length {len(value)} exceeds max_length {max_length}"
             )
 
     elif dtype == "enum":
         choices = restrictions.get("choices")
         if choices is not None and value not in choices:
-            raise ValidationError(
+            raise RuleBroken(
                 f"Field '{field_name}': '{value}' must be one of: {', '.join(str(c) for c in choices)}"
             )
 
@@ -282,7 +279,7 @@ def _check_restrictions(
         except ValueError:
             problem = None  # malformed value or bound; see the datetime branch
         if problem:
-            raise ValidationError(f"Field '{field_name}': {problem}")
+            raise RuleBroken(f"Field '{field_name}': {problem}")
 
     elif dtype in ("date", "datetime"):
         mn = restrictions.get("min")
@@ -298,11 +295,11 @@ def _check_restrictions(
                 mn_cmp = _dt.fromisoformat(str(mn)) if mn is not None else None
                 mx_cmp = _dt.fromisoformat(str(mx)) if mx is not None else None
             if mn_cmp is not None and v_cmp < mn_cmp:
-                raise ValidationError(
+                raise RuleBroken(
                     f"Field '{field_name}': {value} is before minimum ({mn})"
                 )
             if mx_cmp is not None and v_cmp > mx_cmp:
-                raise ValidationError(
+                raise RuleBroken(
                     f"Field '{field_name}': {value} is after maximum ({mx})"
                 )
         except (ValueError, TypeError):
@@ -495,6 +492,18 @@ def _file_dicts(value: Any) -> list[dict[str, Any]]:
     if isinstance(value, list):
         return [item for item in value if isinstance(item, dict)]
     return []
+
+
+def _unfit(field_id: Any, message: str, value: Any = None) -> dict[str, Any]:
+    """One finding of the data rules, as an answer's `conflicts` item carries it
+    (nothing here is a query: no one else's value is named)."""
+    return {
+        "kind": UNFIT,
+        "field": f"data.{field_id}",
+        "code": UNFIT_DATA,
+        "yours": value,
+        "message": message,
+    }
 
 
 def _changed_values(
@@ -774,6 +783,8 @@ class IncomingCache:
         # Uniqueness keys (see `RecordService.unique_marks`) that no stored
         # record held when they were read, and those the run has since made.
         self.free: set[tuple[Any, ...]] = set()
+        # Schema id -> its required fields (name, id, label), read from the shape.
+        self.required: dict[uuid.UUID, list[tuple[str, str, str]]] = {}
         self.made: set[tuple[Any, ...]] = set()
         # Records were changed since `places` was read: to be read again.
         self.stale = True
@@ -781,6 +792,7 @@ class IncomingCache:
     def clear(self) -> None:
         """Forget what was read (a schema or a collection may have changed)."""
         self.shapes = self._resolver()
+        self.required.clear()
         self.datasets.clear()
         self.clear_records()
 
@@ -2260,23 +2272,31 @@ class RecordService:
         state: dict[str, Any],
         head: dict[str, Any] | None,
         cache: IncomingCache | None = None,
-    ) -> None:
+    ) -> list[dict[str, Any]]:
         """Refuse a record state sent by another device that a person's own write
-        would have refused: values outside their field's restrictions,
+        would have refused: values that are not values of their field's kind,
         references to records that aren't there or can't be referenced, a
         uniqueness key already taken, a collection that doesn't hold its schema,
         a parent that isn't right. The same checks as `add`/`update`, so sync
         can't bring in what an edit here couldn't.
 
+        The project's data rules are the exception: a required field left
+        empty or a value outside its field's restrictions (`RuleBroken`) does
+        not refuse. They are returned, one `unfit` item per field (`data.<field
+        id>`, the shape of an answer's `conflicts` item), for the record to be
+        taken in and flagged. A new record, or one brought back, is judged in
+        full; an edit by what it changed and the required fields it emptied, so
+        it is never flagged for an old problem. Nothing is returned when
+        anything else refuses.
+
         `state` is the record as it would become (values keyed by field id, as
         stored) and `head` what is held now, or None for a record not held. What
         `head` already holds is not checked again, so an unrelated edit is never
-        refused over an old problem. Required fields are not checked: they were
-        when the change was made, and the schema may have moved on since.
+        refused over an old problem.
         Writing is not done here (that is `SyncRepository.apply_snapshot`), and
         neither are history or triggers: the change is already in the feed."""
         if state.get("deleted_at"):
-            return  # a record going away has nothing to satisfy
+            return []  # a record going away has nothing to satisfy
         try:
             record_id = uuid.UUID(str(state["id"]))
             dataset_id = uuid.UUID(str(state["dataset_id"]))
@@ -2348,7 +2368,7 @@ class RecordService:
         before = head.get("data") or {} if head and not head.get("deleted_at") else None
         named = self._ids_to_names(data, shape)
         before_named = self._ids_to_names(before, shape) if before is not None else None
-        self._validate_data(_changed_values(named, before_named), shape)
+        unfit = self._rule_findings(named, before_named, shape, schema_id, cache)
         with self.as_caller():
             self._check_references(
                 named, shape, dataset, unchanged=before_named, cache=cache
@@ -2362,6 +2382,62 @@ class RecordService:
             unchanged=before,
             cache=cache,
         )
+        return unfit
+
+    def rule_findings(self, state: dict[str, Any]) -> list[dict[str, Any]]:
+        """What a record state, as it is held, breaks of the data rules, in
+        full: what `check_incoming` returns for a new record. For a copy
+        working out whether a flag it was told of is still true."""
+        if state.get("deleted_at") or not isinstance(state.get("data") or {}, dict):
+            return []
+        schema_id = uuid.UUID(str(state["schema_id"]))
+        shape = self._schema_svc.resolver()(schema_id)
+        if shape is None or shape.schema.deleted_at is not None:
+            return []
+        named = self._ids_to_names(state.get("data") or {}, shape)
+        return self._rule_findings(named, None, shape, schema_id, None)
+
+    def _rule_findings(
+        self,
+        named: dict[str, Any],
+        before: dict[str, Any] | None,
+        shape: ResolvedSchema,
+        schema_id: uuid.UUID,
+        cache: IncomingCache | None,
+    ) -> list[dict[str, Any]]:
+        """The data rules `named` (values by field name) breaks, against
+        `before` (what is held, or None: judge everything). Only the shape is
+        read, so a run of them asks the database nothing. A value that is not
+        one of its field's kind raises, as `_validate_data` does."""
+        found: list[dict[str, Any]] = []
+        for name, value in _changed_values(named, before).items():
+            field = shape.by_name.get(name)
+            if field is None or value is None:
+                continue
+            try:
+                _check_restrictions(value, field.dtype, field.restrictions, name)
+            except RuleBroken as e:
+                found.append(_unfit(field.id, str(e), value))
+            except FieldValueError:
+                raise
+            except ValidationError as e:
+                raise FieldValueError(str(e), f"data.{field.id}") from e
+        required = cache.required.get(schema_id) if cache else None
+        if required is None:
+            # (a child record holds its own fields: the rest live on its parent)
+            required = [
+                (rf.field.name, str(rf.field.id), rf.field.display_name)
+                for rf in shape.fields
+                if rf.field.required and rf.source_schema_name == shape.schema.name
+            ]
+            if cache is not None:
+                cache.required[schema_id] = required
+        for name, fid, label in required:
+            if _is_blank_value(named.get(name)) and (
+                before is None or not _is_blank_value(before.get(name))
+            ):
+                found.append(_unfit(fid, f"'{label}' is required and has no value"))
+        return found
 
     def _validate_data(
         self, data: dict[str, Any], shape: ResolvedSchema | None

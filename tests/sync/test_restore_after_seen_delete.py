@@ -14,6 +14,7 @@ def _open(ctx) -> list:
     return [c for c in ctx.sync_svc.conflicts() if c.status == "open"]
 
 
+@pytest.mark.usefixtures("rules_refuse")
 @pytest.mark.parametrize("refused_by", ["filling", "push"])
 def test_restoring_a_pulled_delete_of_a_once_refused_record_goes_in(
     project, authority, refused_by
@@ -80,6 +81,7 @@ def test_restoring_a_pulled_delete_of_a_once_refused_record_goes_in(
     assert [c.kind for c in _open(laptop)] == []
 
 
+@pytest.mark.usefixtures("rules_refuse")
 def test_a_never_taken_record_deleted_and_restored_here_still_goes_whole(
     project, authority
 ):
@@ -141,6 +143,7 @@ def _delete_there_and_restore_here(laptop, server, call) -> None:
     laptop.sync_svc.sync()
 
 
+@pytest.mark.usefixtures("rules_refuse")
 def test_a_refusal_a_person_let_go_stays_theirs_after_a_fill(project, authority):
     """Settling a refusal is a person's: a later fill that takes the thing
     leaves it settled as they did (so it can still be undone), and the restore
@@ -181,6 +184,7 @@ def _a_reset_server(project, laptop, name):
     return server
 
 
+@pytest.mark.usefixtures("rules_refuse")
 @pytest.mark.parametrize("again", ["taken", "refused"])
 def test_filling_the_same_server_again_after_a_reset(
     project, authority, monkeypatch, again
