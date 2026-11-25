@@ -240,10 +240,15 @@ class Permissions:
         they are valid. Someone who cannot see them all would do it blind, so
         `CHANGE_STRUCTURE` is available only with unrestricted read: the one
         rule, so every route, service and sync push meets it the same way."""
-        if CHANGE_STRUCTURE in self.allowed and not self.read_scope().unrestricted:
-            allowed = dict(self.allowed)
-            allowed[CHANGE_STRUCTURE] = frozenset()
-            object.__setattr__(self, "allowed", allowed)
+        if self.read_scope().unrestricted:
+            return
+        allowed = dict(self.allowed)
+        # A release bundles the whole structure and every record: the same
+        # reach, so it is withheld too, granted or derived.
+        for action in (CHANGE_STRUCTURE, RELEASE):
+            if action in allowed:
+                allowed[action] = frozenset()
+        object.__setattr__(self, "allowed", allowed)
 
     def lacking(self, *actions: str) -> Permissions:
         """These permissions, but `actions` may be done nowhere (stated, so a

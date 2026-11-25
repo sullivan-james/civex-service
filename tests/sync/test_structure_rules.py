@@ -253,12 +253,180 @@ def test_deleting_or_localising_a_collection_respects_hidden_referrers(world):
         authority.dataset_svc.delete("shared")
 
 
-def test_a_pushed_collection_delete_respects_hidden_referrers(world):
-    authority, limited, open_, vault = world
-    shared = _global_with_hidden_referrer(authority)
-    ctx = limited(Permissions.of(p.READ, p.DELETE, read_collections=[shared.id]))
-    entry = _entry("dataset", "delete", shared.id, shared.to_dict())
-    result = ctx.authority_svc.push(principal(ctx, "dev"), [entry])
-    assert statuses(result) == ["rejected"]
+# -- pushes that would leave references dangling or break structure ---------------
+
+
+def _push(limited, perms, entries, name):
+    ctx = limited(perms)
+    result = ctx.authority_svc.push(principal(ctx, name), entries)
+    ctx.commit()
+    return result
+
+
+def _refs_world(authority, *, referrer_in="vault"):
+    """A global collection `shared` whose record `target` a record in
+    `referrer_in` points at (None: no referrer, the control)."""
+    shared = authority.dataset_svc.create("shared", scope="global")
+    authority.schema_svc.add_field(
+        "encounter", "friend", "reference", restrictions={"schema": "encounter"}
+    )
+    target = authority.record_svc.add("shared", "encounter", {"site": "t"})
+    if referrer_in:
+        authority.record_svc.add(
+            referrer_in, "encounter", {"site": "p", "friend": str(target.id)}
+        )
     authority.commit()
-    assert authority.dataset_svc.get("shared").deleted_at is None
+    return shared, target
+
+
+def _forced_clone(project, authority, target, name):
+    """A clone that force-deleted the target (clearing what pointed at it) and
+    then sent that: the cleared references are not in what is pushed next."""
+    clone = project(name)
+    join(authority, clone)
+    clone.record_svc.delete(str(target.id), force=True)
+    clone.commit()
+    first = [
+        SyncEntry.from_dict(wire(e.to_dict()))
+        for e in clone.sync_repo.pending_entries(1000)
+    ]
+    clone.sync_repo.mark_all_synced()
+    clone.commit()
+    return clone, first
+
+
+def _pending(clone):
+    clone.commit()
+    return [
+        SyncEntry.from_dict(wire(e.to_dict()))
+        for e in clone.sync_repo.pending_entries(1000)
+    ]
+
+
+def _deleter(open_, shared):
+    return Permissions.of(
+        p.READ, p.WRITE_RECORDS, p.DELETE, read_collections=[open_.id, shared.id]
+    )
+
+
+@pytest.mark.parametrize("referrer_in", ["vault", None])
+def test_a_pushed_record_delete_respects_hidden_referrers(world, project, referrer_in):
+    authority, limited, open_, vault = world
+    shared, target = _refs_world(authority, referrer_in=referrer_in)
+    _, first = _forced_clone(project, authority, target, "clone")
+    only = [e for e in first if e.entity_id == target.id]
+    assert only and only[0].action == "delete"
+    result = _push(limited, _deleter(open_, shared), only, "a")
+    expected = "rejected" if referrer_in else "applied"
+    assert set(statuses(result)) == {expected}
+    authority.commit()
+    gone = authority.record_svc._records.get_by_prefix(
+        str(target.id), include_deleted=True
+    )
+    assert (gone.deleted_at is not None) == (referrer_in is None)
+
+
+@pytest.mark.parametrize("referrer_in", ["vault", None])
+def test_deleting_the_referenced_records_first_does_not_get_past_the_collection_check(
+    world, project, referrer_in
+):
+    authority, limited, open_, vault = world
+    shared, target = _refs_world(authority, referrer_in=referrer_in)
+    clone, first = _forced_clone(project, authority, target, "clone")
+    clone.dataset_svc.delete("shared")
+    second = _pending(clone)
+    assert any(e.entity_type == "dataset" and e.action == "delete" for e in second)
+    perms = _deleter(open_, shared)
+    one = _push(limited, perms, [e for e in first if e.entity_id == target.id], "a")
+    two = _push(limited, perms, second, "b")
+    expected = "rejected" if referrer_in else "applied"
+    assert expected in statuses(two) or not referrer_in
+    if referrer_in:
+        assert set(statuses(one)) == {"rejected"}
+        assert "applied" not in statuses(two)
+        authority.commit()
+        assert authority.dataset_svc.get("shared").deleted_at is None
+    else:
+        assert set(statuses(two)) == {"applied"}
+
+
+@pytest.mark.parametrize("change", ["delete", "local"])
+@pytest.mark.parametrize("referrer_in", ["open", None])
+def test_a_full_reader_cannot_push_a_collection_away_from_its_referrers(
+    world, project, change, referrer_in
+):
+    authority, limited, open_, vault = world
+    shared, target = _refs_world(authority, referrer_in=referrer_in)
+    clone, _ = _forced_clone(project, authority, target, "clone")
+    if change == "delete":
+        clone.dataset_svc.delete("shared")
+    else:
+        clone.dataset_svc.update("shared", scope="local")
+    entries = _pending(clone)
+    assert any(e.entity_type == "dataset" for e in entries)
+    perms = Permissions.of(p.READ, p.WRITE_RECORDS, p.DELETE, p.CHANGE_STRUCTURE)
+    result = _push(limited, perms, entries, "a")
+    authority.commit()
+    if referrer_in:
+        kept = authority.dataset_svc.get("shared")
+        assert "applied" not in statuses(result)
+        assert kept.deleted_at is None and kept.scope == "global"
+    else:
+        assert set(statuses(result)) == {"applied"}
+
+
+def _lifecycle(authority, kind):
+    if kind == "dataset restore" or kind == "dataset purge":
+        authority.dataset_svc.create("scratch")
+        authority.dataset_svc.delete("scratch")
+    elif kind == "schema restore" or kind == "schema purge":
+        authority.schema_svc.create("scratch")
+        authority.schema_svc.delete("scratch")
+    else:
+        authority.schema_svc.delete_field("encounter", "site")
+    authority.commit()
+
+
+LIFECYCLE = {
+    "dataset restore": lambda c: c.dataset_svc.restore("scratch"),
+    "dataset purge": lambda c: c.dataset_svc.purge("scratch"),
+    "schema restore": lambda c: c.schema_svc.restore("scratch"),
+    "schema purge": lambda c: c.schema_svc.purge("scratch"),
+    "field restore": lambda c: c.schema_svc.restore_field(
+        "encounter",
+        next(
+            f.id
+            for f in c.schema_svc._repo.get_by_name(
+                "encounter", include_deleted=True
+            ).deleted_fields
+            if f.name == "site"
+        ),
+    ),
+}
+
+
+@pytest.mark.parametrize("kind", LIFECYCLE)
+def test_restoring_or_purging_structure_follows_the_same_rule(world, project, kind):
+    authority, limited, open_, vault = world
+    _lifecycle(authority, kind)
+    entries = _entries(project, authority, LIFECYCLE[kind], "c1")
+    assert entries
+    restricted = Permissions.of(
+        p.READ, p.DELETE, p.CHANGE_STRUCTURE, read_collections=[open_.id]
+    )
+    result = _push(limited, restricted, entries, "a")
+    assert "applied" not in statuses(result), kind
+    entries = _entries(project, authority, LIFECYCLE[kind], "c2")
+    whole = Permissions.of(p.READ, p.DELETE, p.CHANGE_STRUCTURE)
+    result = _push(limited, whole, entries, "b")
+    assert set(statuses(result)) == {"applied"}, (kind, result)
+
+
+def test_an_explicit_release_grant_is_withheld_from_a_restricted_reader():
+    for restricted in (
+        Permissions.of(p.READ, p.RELEASE, read_collections=[C1]),
+        Permissions.of(p.READ, p.RELEASE).without([p.READ], [C1]),
+    ):
+        assert not restricted.can(p.RELEASE)
+        assert not restricted.lacking(p.NOTES).can(p.RELEASE)
+    assert Permissions.of(p.READ, p.RELEASE).can(p.RELEASE)
