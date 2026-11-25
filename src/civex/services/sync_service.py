@@ -102,6 +102,8 @@ from civex.services import ssh_tunnel
 # PostgreSQL the authority's cost per change grows with the batch, so this
 # sits between 100 and that limit.
 PUSH_BATCH = 250
+# How many flagged records are read, and flags settled, per statement.
+FLAG_CHUNK = 500
 # How many referenced files are checked against the authority per request.
 FILE_CHECK_PAGE = 1000
 # A file above this many bytes is sent alone, one at a time, and confirmed and
@@ -374,9 +376,11 @@ class SyncService:
         config_store: ConfigStore,
     ) -> None:
         self._config = config
-        # Whether this pass's last pull (or copy) reached the authority's head
-        # (`_settle_flags`); nothing else of a pass is carried to the next.
+        # Whether this pass's last pull reached the authority's head, and
+        # whether anything came in, was answered or changed since the flags were
+        # last judged (a new service judges once): `_settle_flags`.
         self._at_head = False
+        self._flags_stale = True
         # Where `[sync]` is saved (config.toml for a local project); never
         # written to directly, so a hosted project's settings live elsewhere.
         self._config_store = config_store
@@ -1494,6 +1498,8 @@ class SyncService:
                             if entry.entity_type == "record":
                                 touched.append(entry.entity_id)
                         cursor = entry.hub_seq
+                    if entries:
+                        self._flags_stale = True  # (something came in)
                     if arriving is not None and not page.more:
                         self._settle_arriving(arriving, to_hold, dirty, start)
                         arriving, to_hold = None, False
@@ -2368,6 +2374,8 @@ class SyncService:
         goes in as a whole (`whole`), its refusal is settled by that. Returns
         how many changes it held back."""
         held = 0
+        if results:
+            self._flags_stale = True  # (answers may open, or settle, a flag)
         # Which things have a refusal waiting: asked once, not of each (almost
         # none do), and kept up as refusals are added below.
         refused = self._repo.with_open_refusals(
@@ -2480,55 +2488,81 @@ class SyncService:
             self._judge_flags()
         except Exception:  # noqa: BLE001 - a flag is a reminder, never a reason to fail
             log.warning("sync: could not judge the flags again", exc_info=True)
-            self._repo.rollback()
+            try:
+                self._repo.rollback()
+            except Exception:  # noqa: BLE001 - nothing more to do about it
+                log.warning("sync: could not undo the flag pass", exc_info=True)
 
     def _judge_flags(self) -> None:
         """A flag is the authority's judgement of a record's values by its
         rules, so a copy shows what the authority says: it goes only when this
-        copy is level with the authority (nothing unsent, no refused change of
-        structure, the feed read to its head), where the schemas and values it
-        holds are the authority's. Then every open flag (there are few, so
-        nothing is carried between passes) is judged again with one resolver,
-        and those whose field no longer breaks a rule, or whose record is
-        deleted or gone, are settled. Kept as they are: a record with a refused
-        change of its own (the fix may not have been taken), one in a collection
-        this copy may no longer read, and one that cannot be judged here."""
+        copy is level with the authority (nothing unsent, no change of its own
+        structure refused, none of the server's structure it could not apply,
+        the feed read to its head), where the schemas and values it holds are
+        the authority's. Then every open flag (there are few) is judged again,
+        with one resolver and the records read in chunks, and those whose field
+        no longer breaks a rule, or whose record is deleted or gone, are
+        settled. Nothing is done when nothing came in, was answered or was
+        copied since the last time they were judged. Kept as they are: a record
+        with a refused change of its own, one in a collection this copy may no
+        longer read, and one that cannot be judged here."""
         if not (self._at_head and self._repo.count_pending() == 0):
+            return
+        if not self._flags_stale:
             return
         flags: dict[uuid.UUID, list[SyncConflictDTO]] = {}
         for c in self._repo.find_open_conflicts(kind=UNFIT):
             if c.entity_type == "record":
                 flags.setdefault(c.entity_id, []).append(c)
         if not flags:
+            self._flags_stale = False
             return
-        refused = [
-            c
-            for kind in ("rejected", "not_taken")
-            for c in self._repo.find_open_conflicts(kind=kind)
-        ]
-        if any(c.entity_type in ("schema", "field") for c in refused):
-            return  # the rules here may be ahead of the authority's
+        # (a change of this copy's structure the authority refused, or one of
+        # the authority's it could not apply: the rules here are not its)
+        refused = self._repo.find_open_conflicts(kind="rejected")
+        if any(c.entity_type in ("schema", "field") for c in refused) or any(
+            c.entity_type in ("schema", "field")
+            for c in self._repo.find_open_conflicts(kind="not_applied")
+        ):
+            return
         refused_records = {c.entity_id for c in refused}
         readable = self._repo.readable()
         cache = self._records.incoming_cache()
         done: list[uuid.UUID] = []
-        for record_id, items in flags.items():
-            if record_id in refused_records:
-                continue
-            state = self._repo.snapshot("record", record_id)
-            if state is None:
-                done += [c.id for c in items]  # (purged here or there)
-                continue
-            if readable is not None and str(state.get("dataset_id")) not in readable:
-                continue
-            try:
-                broken = {f["field"] for f in self._records.rule_findings(state, cache)}
-            except (ValidationError, ValueError, TypeError, KeyError, AttributeError):
-                continue
-            done += [c.id for c in items if c.field not in broken]
+        ids = [r for r in flags if r not in refused_records]
+        for at in range(0, len(ids), FLAG_CHUNK):
+            chunk = ids[at : at + FLAG_CHUNK]
+            held = {
+                uuid.UUID(str(st["id"])): st
+                for st in self._repo.record_snapshots([str(i) for i in chunk])
+            }
+            for record_id in chunk:
+                state = held.get(record_id)
+                if state is None:
+                    done += [c.id for c in flags[record_id]]  # (purged here or there)
+                    continue
+                if (
+                    readable is not None
+                    and str(state.get("dataset_id")) not in readable
+                ):
+                    continue
+                try:
+                    broken = {
+                        f["field"] for f in self._records.rule_findings(state, cache)
+                    }
+                except (
+                    ValidationError,
+                    ValueError,
+                    TypeError,
+                    KeyError,
+                    AttributeError,
+                ):
+                    continue
+                done += [c.id for c in flags[record_id] if c.field not in broken]
         if done:
             self._repo.resolve_conflicts(done, "fixed")
             self._commit()
+        self._flags_stale = False
 
     # ------------------------------------------------------------------
     # Joining and seeding
@@ -2745,8 +2779,7 @@ class SyncService:
         if hello.readable is not None:
             self._repo.set_readable({c["id"] for c in hello.readable})
         self._commit()
-        self._at_head = True  # (it holds the authority as of `head`)
-        self._settle_flags()
+        self._flags_stale = True  # (everything was rewritten as the authority has it)
 
     @_closes_transports
     def fetch_history(

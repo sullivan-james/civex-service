@@ -1535,20 +1535,23 @@ class LocalSyncRepository:
 
     def resolve_conflicts(self, ids: list[uuid.UUID], resolution: str) -> int:
         """Mark open conflicts settled, in one statement. Returns how many were."""
-        if not ids:
-            return 0
-        n = (
-            self._s.query(SyncConflict)
-            .filter(SyncConflict.id.in_(ids), SyncConflict.status == "open")
-            .update(
-                {
-                    "status": "resolved",
-                    "resolution": resolution,
-                    "resolved_at": datetime.now(timezone.utc),
-                },
-                synchronize_session=False,
+        n = 0
+        for at in range(0, len(ids), 500):  # (under a database's variable limit)
+            n += (
+                self._s.query(SyncConflict)
+                .filter(
+                    SyncConflict.id.in_(ids[at : at + 500]),
+                    SyncConflict.status == "open",
+                )
+                .update(
+                    {
+                        "status": "resolved",
+                        "resolution": resolution,
+                        "resolved_at": datetime.now(timezone.utc),
+                    },
+                    synchronize_session=False,
+                )
             )
-        )
         self._s.flush()
         return n
 

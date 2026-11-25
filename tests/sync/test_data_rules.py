@@ -549,7 +549,7 @@ def test_a_later_pass_judges_flags_a_pass_that_was_not_level_left(
     assert (
         laptop.sync_svc._at_head is True
     )  # (it was level at the head; the flag was kept for the push)
-    laptop.sync_svc._at_head = False  # (a new pass starts knowing nothing)
+    laptop.sync_svc._svc._at_head = False  # (a new pass starts knowing nothing)
     laptop.sync_svc.sync()
     assert _open_flags(laptop) == []
 
@@ -562,18 +562,18 @@ def test_a_refused_change_or_lost_read_or_unjudgeable_record_keeps_its_flag(
     phone.schema_svc.update_field("call", "annotation", restrictions={})
     phone.commit()
     phone.sync_svc.sync()
-    svc = laptop.sync_svc
+    svc = laptop.sync_svc._svc
     with monkeypatch.context() as m:  # (the laptop learns the relaxed rule only)
         m.setattr(sync_service.SyncService, "_push", lambda *a, **k: 0)
         laptop.record_svc.add("survey", "call", {"annotation": "Y"})
         laptop.commit()
-        svc.sync()
+        laptop.sync_svc.sync()
     assert [c.entity_id for c in _open_flags(laptop)] == [made.id]
     laptop.sync_svc._repo.mark_all_synced()  # (nothing of its own is unsent)
     laptop.commit()
 
     def level():
-        svc._at_head = True
+        svc._at_head = svc._flags_stale = True
         svc._settle_flags()  # never raises
         return [c.entity_id for c in _open_flags(laptop)]
 
@@ -632,3 +632,126 @@ def test_re_copying_drops_a_purged_record_and_its_flag(laptop_and_phone, authori
     laptop.sync_svc.sync()  # copies again
     assert laptop.sync_repo.snapshot("record", made.id) is None
     assert _open_flags(laptop) == []
+
+
+def _level(laptop):
+    svc = laptop.sync_svc._svc  # (the service itself, not its wrapper)
+    svc._at_head, svc._flags_stale = True, True
+    svc._settle_flags()
+    return [c.entity_id for c in _open_flags(laptop)]
+
+
+def _relaxed_laptop(laptop, phone, monkeypatch):
+    """A flagged record, the rule relaxed and known here, nothing unsent."""
+    made = _flagged_laptop(laptop, phone)
+    phone.schema_svc.update_field("call", "annotation", restrictions={})
+    phone.commit()
+    phone.sync_svc.sync()
+    with monkeypatch.context() as m:
+        m.setattr(sync_service.SyncService, "_push", lambda *a, **k: 0)
+        laptop.record_svc.add("survey", "call", {"annotation": "Y"})
+        laptop.commit()
+        laptop.sync_svc.sync()
+    laptop.sync_svc._repo.mark_all_synced()
+    laptop.commit()
+    return made
+
+
+def _item(laptop, kind, entity_type, entity_id):
+    laptop.sync_svc._repo.add_conflict(
+        kind=kind,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        field=None,
+        yours=None,
+        theirs=None,
+        op_id=None,
+        device_name=None,
+        message="x",
+    )
+    laptop.commit()
+
+
+def test_structure_the_copy_could_not_take_or_the_authority_refused_is_not_level(
+    laptop_and_phone, monkeypatch
+):
+    laptop, phone = laptop_and_phone
+    made = _relaxed_laptop(laptop, phone, monkeypatch)
+    schema = laptop.schema_svc.get("call").id
+    # Both directions of a structure refusal keep the flag...
+    _item(laptop, "not_applied", "schema", schema)  # a server change not applied
+    assert _level(laptop) == [made.id]
+    for c in laptop.sync_svc.conflicts():
+        if c.kind == "not_applied":
+            laptop.sync_svc._repo.resolve_conflicts([c.id], "theirs")
+    _item(laptop, "rejected", "field", schema)  # one of ours the server refused
+    assert _level(laptop) == [made.id]
+    for c in laptop.sync_svc.conflicts():
+        if c.kind == "rejected":
+            laptop.sync_svc._repo.resolve_conflicts([c.id], "theirs")
+    # ...but a put-back (`not_taken`) already matches the authority's.
+    _item(laptop, "not_taken", "schema", schema)
+    assert _level(laptop) == []
+
+
+def test_more_than_a_thousand_flags_are_judged_in_chunks_and_a_quiet_pass_costs_nothing(
+    laptop_and_phone, monkeypatch
+):
+    laptop, phone = laptop_and_phone
+    made = _relaxed_laptop(laptop, phone, monkeypatch)
+    for _ in range(1100):  # (records the authority no longer holds)
+        _item(laptop, "unfit", "record", uuid.uuid4())
+    repo = laptop.sync_svc._repo
+    assert len(repo.find_open_conflicts(kind="unfit")) == 1101
+    assert _level(laptop) == []
+    assert (
+        repo.find_open_conflicts(kind="unfit") == []
+    )  # all settled: fixed, and the 1100 gone
+    # Nothing came in, was answered or was copied since: nothing is read.
+    _item(laptop, "unfit", "record", made.id)
+    svc = laptop.sync_svc._svc
+    svc._at_head = True
+    with monkeypatch.context() as m:
+        m.setattr(
+            type(svc._repo),
+            "record_snapshots",
+            lambda *a, **k: (_ for _ in ()).throw(AssertionError("read")),
+        )
+        svc._settle_flags()
+    assert [c.entity_id for c in _open_flags(laptop)] == [made.id]
+
+
+def test_re_copying_keeps_a_flagged_record_with_an_unsent_edit(
+    laptop_and_phone, authority, monkeypatch
+):
+    from datetime import datetime, timedelta, timezone
+
+    laptop, phone = laptop_and_phone
+    made = _flagged_laptop(laptop, phone)
+    phone.sync_svc.sync()
+    phone.record_svc.delete(str(made.id), force=True)
+    phone.record_svc.purge(str(made.id))
+    phone.commit()
+    phone.sync_svc.sync()
+    authority.audit_svc.prune(datetime.now(timezone.utc) + timedelta(days=1), False)
+    authority.commit()
+    laptop.record_svc.update(str(made.id), {"annotation": "Y"})  # unsent
+    laptop.commit()
+    with monkeypatch.context() as m:
+        m.setattr(sync_service.SyncService, "_push", lambda *a, **k: 0)
+        laptop.sync_svc.sync()  # copies again
+    assert laptop.sync_repo.snapshot("record", made.id) is not None
+    assert [c.entity_id for c in _open_flags(laptop)] == [made.id]
+
+
+def test_a_malformed_date_on_a_restricted_field_is_refused_locally_too(project):
+    w = Rules(project)
+    for field, value in (
+        ("seen", "2020-13"),
+        ("seen", 123),
+        ("when", "2020-13-01T00:00"),
+        ("when", ["x"]),
+    ):
+        with pytest.raises(sync_service.ValidationError):
+            w.laptop.record_svc.add("mine", "encounter", {"site": "s", field: value})
+    w.laptop.record_svc.add("mine", "encounter", {"site": "s", "note": 123})  # free

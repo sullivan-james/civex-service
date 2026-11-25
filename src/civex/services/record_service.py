@@ -189,6 +189,12 @@ def _check_restrictions(
     if value is None:
         return
 
+    # A value that is not of its field's kind is no broken rule: refused with
+    # any other type error (only where there are restrictions; none, as ever,
+    # takes what a person writes). Sync judges the same way (`_rule_findings`).
+    if restrictions and (problem := _kind_problem(value, dtype, field_name)):
+        raise ValidationError(problem)
+
     # URL format is always validated regardless of restrictions.
     if dtype == "url":
         s = str(value)
@@ -2443,10 +2449,6 @@ class RecordService:
             # Only a value of its field's kind can break a rule: anything else
             # (and a file's or a geometry's restrictions, which `_check_restrictions`
             # mixes with their shape) refuses as it always did.
-            if field.restrictions and (
-                problem := _kind_problem(value, field.dtype, name)
-            ):
-                raise FieldValueError(problem, f"data.{field.id}")
             try:
                 _check_restrictions(value, field.dtype, field.restrictions, name)
             except RuleBroken as e:
