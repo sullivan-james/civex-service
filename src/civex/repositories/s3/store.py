@@ -331,22 +331,19 @@ class S3ObjectStore:
             self._register(sha256, size, verified=True)
         return self._ref(sha256, filename, size)
 
+    @property
+    def has_inventory(self) -> bool:
+        return self._session is not None
+
     def put_path_expecting(self, path: Path, sha256: str) -> int:
-        """Send the file at `path` as `sha256`, hashing it first: ValidationError
-        (nothing sent, nothing recorded) if its bytes are not `sha256`. Returns
-        its size."""
-        hasher = hashlib.sha256()
+        """Send the file at `path` as `sha256`: ValidationError (nothing kept,
+        nothing recorded) if its bytes are not `sha256`. The bytes sent are the
+        bytes hashed (one open handle, read once; a single PUT also carries the
+        checksum for S3 to check). Returns its size."""
         with path.open("rb") as f:
-            while chunk := f.read(_CHUNK):
-                hasher.update(chunk)
-        if hasher.hexdigest() != sha256:
-            raise ValidationError(
-                f"The source's bytes for {sha256} are not that content; it was "
-                "not stored under that name"
-            )
-        size = path.stat().st_size
-        self._upload(path, sha256, size, sha256)
-        return size
+            size = os.fstat(f.fileno()).st_size
+            self.put_reader(cast(BinaryIO, f), sha256, size)
+            return size
 
     def confirm_held(self, shas: Iterable[str]) -> set[str]:
         """Which of these the bucket really holds, asked of the bucket itself

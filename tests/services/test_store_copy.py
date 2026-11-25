@@ -360,3 +360,55 @@ def test_commit_runs_per_stored_file_and_progress_counts_distinct_shas(tmp_path)
     )
     assert seen == [(1, 3), (2, 3), (3, 3)]
     assert len(commits) == 3  # one per stored file, one after finding c3
+
+
+def test_a_symlink_swapped_in_after_the_check_is_refused(tmp_path, monkeypatch):
+    a, b = _drive(tmp_path / "a"), _drive(tmp_path / "b")
+    data = b"swap me"
+    a.put(data, "s")
+    sha = _sha(data)
+    src = a.object_path(sha)
+    secret = tmp_path / "secret"
+    secret.write_bytes(b"secret")
+    real = os.link
+
+    def swap(s, d, *args, **kw):
+        if Path(s) == src:
+            src.unlink()
+            src.symlink_to(secret)
+        return real(s, d, *args, **kw)
+
+    monkeypatch.setattr(os, "link", swap)
+    res = copy_objects(a, b, [sha])
+    assert res.absent == [sha] and not b.exists(sha)
+    assert not [f for f in (tmp_path / "b" / "objects").rglob("*") if f.is_file()]
+
+
+def test_a_source_removed_after_the_copy_still_counts(tmp_path, monkeypatch):
+    a, b = _drive(tmp_path / "a"), _drive(tmp_path / "b")
+    data = b"gc'd later" * 10
+    a.put(data, "g")
+    sha = _sha(data)
+    src = a.object_path(sha)
+    real = os.link
+
+    def link_then_gc(s, d, *args, **kw):
+        real(s, d, *args, **kw)
+        Path(s).unlink()
+
+    monkeypatch.setattr(os, "link", link_then_gc)
+    commits: list[int] = []
+    res = copy_objects(a, b, [sha], commit=lambda: commits.append(1))
+    assert (res.copied, res.bytes_copied, res.absent) == (1, len(data), [])
+    assert commits == [1] and not src.exists() and b.get(sha) == data
+
+
+def test_without_an_inventory_each_sha_is_asked_of_the_bucket_once():
+    fake = FakeS3()
+    a, b = _bucket(fake, "a"), _bucket(fake, "b")
+    data = b"head once"
+    a.put(data, "h")
+    b.put(data, "h")
+    fake.calls.clear()
+    assert copy_objects(a, b, [_sha(data)]).skipped == 1
+    assert fake.calls.count("head_object") == 1

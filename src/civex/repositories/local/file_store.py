@@ -943,24 +943,27 @@ class VolumeAwareFileObjectStore:
             sha256=sha256, filename=original_filename, size=size, volume=vol_name
         )
 
-    def import_object(self, sha256: str, source: Path) -> str:
+    def import_object(self, sha256: str, source: Path) -> tuple[str, int]:
         """Take the file at `source` (another store's copy of `sha256`) in as
         this store's own: a hard link when `source` is on the same filesystem as
         the drive it goes to (no bytes move, no room needed), else a copy, hashed
         as it is written so a source whose bytes are not `sha256` is refused
-        (ValidationError) and never stored. Returns "link", "copy", "present"
-        (already held) or "absent" (the source is gone, or is not a regular
-        file: a symlink is never followed). Recorded in the inventory like any
-        put; no name is known, so no manifest line is written."""
+        (ValidationError) and never stored. Returns (how, size): how is "link",
+        "copy", "present" (already held) or "absent" (the source is gone, or is
+        not a regular file: a symlink is never followed, not even one swapped in
+        while this runs); size is that of the stored inode. Recorded in the
+        inventory like any put; no name is known, so no manifest line is
+        written."""
         if self._existing_copy(sha256) is not None:
-            return "present"
+            return "present", 0
         try:
-            st = os.lstat(source)
+            before = os.lstat(source)
         except FileNotFoundError:
-            return "absent"
-        if not stat.S_ISREG(st.st_mode):
-            return "absent"
-        size = st.st_size
+            return "absent", 0
+        if not stat.S_ISREG(before.st_mode):
+            return "absent", 0
+        same = (before.st_dev, before.st_ino)
+        size = before.st_size
         reasons: list[str] = []
         for vol_name in self._write_candidates(None):
             can, reason = self._can_write(vol_name, 0)
@@ -975,31 +978,49 @@ class VolumeAwareFileObjectStore:
             how = "link"
             try:
                 try:
-                    os.link(source, tmp_path)
+                    os.link(source, tmp_path, follow_symlinks=False)
                 except OSError:  # another filesystem, or a drive without links
                     if not os.path.lexists(source):
-                        return "absent"
+                        return "absent", 0
                     how = "copy"
-                    can, reason = self._can_write(vol_name, size)
+                    can, reason = self._can_write(vol_name, before.st_size)
                     if not can:
                         reasons.append(f"{vol_name}: {reason}")
                         continue
+                    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
                     hasher = hashlib.sha256()
-                    with source.open("rb") as src, tmp_path.open("wb") as dst:
+                    size = 0
+                    fd = os.open(source, flags)
+                    with os.fdopen(fd, "rb") as src, tmp_path.open("wb") as dst:
+                        opened = os.fstat(src.fileno())
+                        if (
+                            not stat.S_ISREG(opened.st_mode)
+                            or (opened.st_dev, opened.st_ino) != same
+                        ):
+                            return "absent", 0
                         while chunk := src.read(_COPY_CHUNK):
                             hasher.update(chunk)
                             dst.write(chunk)
+                            size += len(chunk)
                     if hasher.hexdigest() != sha256:
                         raise ValidationError(
                             f"The source's bytes for {sha256} hash to "
                             f"{hasher.hexdigest()}; it was not stored under that name"
                         )
+                else:
+                    linked = os.lstat(tmp_path)
+                    if (
+                        not stat.S_ISREG(linked.st_mode)
+                        or (linked.st_dev, linked.st_ino) != same
+                    ):
+                        return "absent", 0  # swapped for something else
+                    size = linked.st_size
                 dest = self._object_path(sha256, vol_name)
                 dest.parent.mkdir(exist_ok=True)
                 file_modes.replace(tmp_path, dest)
             except FileNotFoundError:
                 if not os.path.lexists(source):  # taken away while it was read
-                    return "absent"
+                    return "absent", 0
                 raise VolumeUnavailableError(
                     f"Cannot write to volume '{vol_name}'"
                 ) from None
@@ -1007,13 +1028,15 @@ class VolumeAwareFileObjectStore:
                 if e.errno == errno.ENOSPC:
                     reasons.append(f"{vol_name}: no space left on device")
                     continue
+                if e.errno == errno.ELOOP:  # a symlink swapped in
+                    return "absent", 0
                 raise VolumeUnavailableError(
                     f"Cannot write to volume '{vol_name}': {e}"
                 ) from e
             finally:
                 tmp_path.unlink(missing_ok=True)
             self._register(vol_name, sha256, size)
-            return how
+            return how, size
         raise self._all_volumes_full(size, reasons, None)
 
     def import_chunks(
