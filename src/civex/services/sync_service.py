@@ -58,6 +58,7 @@ from civex.domain.sync import (
     PUSH_BUDGET_BYTES,
     REFUSAL_PERMISSION,
     UNFIT,
+    UNFIT_DATA,
     batch_by_budget,
     is_lock_contention,
     Joined,
@@ -3362,58 +3363,85 @@ class SyncService:
             self._repo.mark_retrying(conflict_id)
             self._commit()
             return
-        self._repo.resolve_conflict(conflict_id, take)
         if take == "theirs" and self._keeps_structure(conflict):
-            self._let_structure_go(conflict)
+            self._let_structure_go(conflict)  # (settles it, or says why not)
+        else:
+            self._repo.resolve_conflict(conflict_id, take)
         self._flags_stale = True  # (a refusal let go may make this copy level)
         self._commit()
 
     @staticmethod
     def _keeps_structure(conflict: SyncConflictDTO) -> bool:
-        return conflict.kind == "rejected" and conflict.entity_type in KEPT_STRUCTURE
+        return (
+            conflict.kind == "rejected"
+            and conflict.entity_type in KEPT_STRUCTURE
+            and conflict.code == UNFIT_DATA
+        )
 
     def _let_structure_go(self, conflict: SyncConflictDTO) -> None:
-        """A refused change to a schema or a field is let go: this copy goes
-        back to the version the change started from, and then takes what the
-        authority said of it meanwhile (held while it was kept: see
-        `dirty_entities`). The other parts of the action it was one of go with
-        it, since they can't be kept by halves. A thing with a change of its
-        own still to send keeps waiting: that push settles it."""
+        """A refused change to a schema or a field is let go: this copy becomes
+        what the authority holds now (what it holds of the thing, read from it;
+        a thing it never had is put in the trash here, with what went with it),
+        and takes what it said meanwhile (held while the change was kept). The
+        other parts of the action go with it: it can't be kept by halves.
+        Refused, the item left open, when the thing has another change still
+        to send (letting go would drop it) or the authority can't be reached."""
         original = self._repo.get_entry(conflict.op_id) if conflict.op_id else None
-        parts = (
-            self._repo.entries_of_action(original.op)
+        ids = (
+            {e.id for e in self._repo.entries_of_action(original.op)}
             if original and original.op
-            else []
+            else set()
         )
-        ids = {e.id for e in parts}
-        entries = {(conflict.entity_type, conflict.entity_id): original}
-        for other in self._repo.find_open_conflicts(kind="rejected"):
-            if other.op_id in ids and other.id != conflict.id:
-                self._repo.resolve_conflict(other.id, "theirs")
-                entries[(other.entity_type, other.entity_id)] = self._repo.get_entry(
-                    other.op_id
-                )
-        free = set(entries) - self._repo.dirty_entities()
-        for thing in free:
-            entry = entries[thing]
-            if entry is None or entry.action not in ("update", "restore", "create"):
-                continue
-            start = entry.old_data
-            current = self._repo.snapshot(*thing)
-            if entry.delta is not None and current is not None:
-                start = apply_delta(current, entry.delta, BEFORE)
-            if start:
-                self._applier.apply_state(thing[0], thing[1], start)
-        held = [
-            e for e in self._repo.held_entries() if (e.entity_type, e.entity_id) in free
+        mine = (conflict.entity_type, conflict.entity_id)
+        open_ = [
+            c
+            for c in self._repo.find_open_conflicts(kind="rejected")
+            if c.id == conflict.id
+            or (c.op_id in ids)
+            or (c.entity_type, c.entity_id) == mine
         ]
-        first: dict[tuple[str, uuid.UUID], int] = {}
-        for e in held:
-            thing = (e.entity_type, e.entity_id)
-            first[thing] = min(first.get(thing, e.hub_seq or 0), e.hub_seq or 0)
-        for thing, seq in first.items():
-            self._replay(thing, seq)
-        self._repo.mark_applied([e.id for e in held])
+        things = {(c.entity_type, c.entity_id) for c in open_}
+        structure = {t for t in things if t[0] in KEPT_STRUCTURE}
+        for kind, thing_id in sorted(things, key=str):
+            if self._repo.has_unsent(kind, thing_id):
+                named = self._named(conflict)
+                name = named.get("field_label") or named.get("schema_name") or kind
+                raise ValidationError(f"Send or undo your other change to {name} first")
+        held = self._authority_holds(structure)
+        for (kind, thing_id), state in held.items():
+            if state is not None:
+                self._applier.apply_state(kind, thing_id, state)
+            elif not (self._repo.snapshot(kind, thing_id) or {}).get("deleted_at"):
+                self._applier.apply_delete(kind, thing_id, datetime.now(timezone.utc))
+        self._repo.resolve_conflicts([c.id for c in open_], "theirs")
+        self._replay_held(self._repo.dirty_entities())
+
+    def _authority_holds(
+        self, things: set[tuple[str, uuid.UUID]]
+    ) -> dict[tuple[str, uuid.UUID], dict[str, Any] | None]:
+        """What the authority holds of each of these schemas and fields now
+        (None: nothing), read from it page by page, as a copy of it is."""
+        try:
+            transport = self._transport()
+            out: dict[tuple[str, uuid.UUID], dict[str, Any] | None] = {
+                t: None for t in things
+            }
+            for kind in {k for k, _ in things}:
+                wanted = {str(i) for k, i in things if k == kind}
+                after: str | None = None
+                while True:
+                    page = transport.snapshot(kind, after, SNAPSHOT_PAGE)
+                    for snap in page.items:
+                        if snap["id"] in wanted:
+                            out[(kind, uuid.UUID(snap["id"]))] = snap
+                    if not page.more:
+                        break
+                    after = page.next
+            return out
+        except SyncError as e:
+            raise ValidationError(
+                f"The server can't be reached to take its version: {e}"
+            ) from None
 
     def resolve_many(
         self,
@@ -3447,11 +3475,19 @@ class SyncService:
             report.done = len(offered)
             return report
         if take == "theirs":
-            report.settled = [c.id for c in offered]
+            kept = [c for c in offered if self._keeps_structure(c)]
+            plain = [c for c in offered if c not in kept]
+            report.settled = [c.id for c in plain]
             report.done = self._repo.resolve_conflicts(report.settled, take)
-            for c in offered:
-                if self._keeps_structure(c):
+            for c in kept:
+                if self._repo.get_conflict(c.id).status != "open":  # type: ignore[union-attr]
+                    continue  # (settled with an earlier part of its action)
+                try:
                     self._let_structure_go(c)
+                    report.done += 1
+                    report.settled.append(c.id)
+                except CivexError as e:
+                    report.failed.append((c.id, str(e)))
             self._flags_stale = True
             self._commit()
             return report

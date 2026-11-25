@@ -34,6 +34,13 @@ from the next tag forward.
 
 ## Unreleased
 
+- **Sync: a refused schema or field change is kept and marked, not put back.**
+  When the authority's data or structure refuses a schema or field change (code
+  `data`), it answers `rejected`, writes nothing to the feed, and refuses the
+  whole action it was part of. The device keeps its version until the person
+  sends it again or discards it (which takes the server's version). No protocol
+  bump: an older device given `rejected` for a structure change keeps its
+  version but does not hold the server's later changes to it, by design.
 - **Store-to-store file copy for hosts.** `civex.context.copy_objects(source,
   destination, shas, on_progress=, commit=)` copies content-addressed files
   between two stores from `make_store` and returns a `CopyResult` (`copied`,

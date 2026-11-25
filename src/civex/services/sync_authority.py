@@ -868,23 +868,32 @@ class SyncAuthorityService:
         code: str | None = None,
     ) -> list[OpResult]:
         message = f"Part of one change that could not go in whole: {why}"
+        if code is None and any(e.entity_type in KEPT_STRUCTURE for e in action):
+            # The data or the structure here refuses a part of it: the whole
+            # action is refused and kept by the device (the records a schema
+            # delete took with it too), never half put back.
+            return [
+                self._refuse_structure(who, entry, message, UNFIT_DATA)
+                for entry in action
+            ]
         return [
-            self._refuse_structure(who, entry, message)
-            if entry.entity_type in KEPT_STRUCTURE
-            else self._put_back(who, entry, message)
+            self._put_back(who, entry, message)
             if self._applier.head(entry.entity_type, entry.entity_id) is not None
             and not self._unseen(entry)
             else self._refuse(who, entry, message, code=code)
             for entry in action
         ]
 
-    def _refuse_structure(self, who: Principal, entry: SyncEntry, why: str) -> OpResult:
-        """Refuse a change to a schema or a field for what the data or the
-        structure here says. Nothing is written to the feed and the device is
-        not rolled back: it keeps its version, marked, and sends it again once
-        the cause is put right, or lets it go (and then takes this copy's)."""
+    def _refuse_structure(
+        self, who: Principal, entry: SyncEntry, why: str, code: str = UNFIT_DATA
+    ) -> OpResult:
+        """Refuse a change for what the data or the structure here says (never
+        for a permission or a shape: those keep their own path). Nothing is
+        written to the feed and the device is not rolled back: it keeps its
+        version, marked, and sends it again once the cause is put right, or
+        lets it go (and then takes this copy's). `field.<id>` names a field."""
         field = f"field.{entry.entity_id}" if entry.entity_type == "field" else None
-        return self._refuse(who, entry, why, field, code=UNFIT_DATA)
+        return self._refuse(who, entry, why, field, code=code)
 
     def _may_cite(self, sha: str, cache: IncomingCache | None) -> bool:
         """Whether this device could download the file (`readable`: used by a

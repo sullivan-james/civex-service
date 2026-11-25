@@ -2019,9 +2019,24 @@ class LocalSyncRepository:
         kept = self._s.query(SyncConflict.entity_type, SyncConflict.entity_id).filter(
             SyncConflict.status == "open",
             SyncConflict.kind == "rejected",
+            SyncConflict.code == "data",
             SyncConflict.entity_type.in_(KEPT_STRUCTURE),
         )
         return found | {(t, i) for t, i in kept}
+
+    def has_unsent(self, kind: str, entity_id: uuid.UUID) -> bool:
+        """Whether a change to this thing is still waiting to be sent."""
+        return (
+            self._s.query(AuditLog.id)
+            .filter(
+                AuditLog.entity_type == kind,
+                AuditLog.entity_id == entity_id,
+                AuditLog.sync_state.in_(("pending", "seeding")),
+                AuditLog.hub_seq.is_(None),
+            )
+            .first()
+            is not None
+        )
 
     def mark_sent(self, results: list[OpResult]) -> None:
         for result in results:
