@@ -408,7 +408,7 @@ class SyncAuthorityService:
                     if any(r.status == DEFERRED for r in flushed):
                         break
                 if self._bulk and kind in ("delete", "restore"):
-                    if action[0].entity_id not in cache.heads:
+                    if cache.read.get(action[0].entity_id) != kind:
                         self._prefetch_changes(cache, taken, position, kind)
                 elif self._bulk and len(action) == 1 and cache.stale:
                     # What the changes to come ask of the records is read
@@ -609,12 +609,14 @@ class SyncAuthorityService:
             e.entity_id: self._repo.snapshot("record", e.entity_id) for e in stretch
         }
         cache.heads.update(heads)
+        cache.read.update(dict.fromkeys(heads, kind))
         if kind == "delete":
             live = [rid for rid, head in heads.items() if head is not None]
             cache.children |= self._repo.live_children(live)
             if self._sees is not None:
                 cache.hidden |= self._records.hidden_referrer_targets(live, self._sees)
         else:
+            stale = cache.stale  # (what creates to come read is another thing)
             self._records.prefetch_incoming(
                 cache,
                 [
@@ -623,6 +625,7 @@ class SyncAuthorityService:
                     if head is not None and head.get("deleted_at")
                 ],
             )
+            cache.stale = stale
 
     def _fast_change(
         self,
@@ -648,6 +651,8 @@ class SyncAuthorityService:
             or (entry.hlc is not None and hlc.is_ahead(entry.hlc, _now_ms()))
         ):
             return None
+        if cache.read.get(entry.entity_id) != kind:
+            return None  # (not read for this: `_settle` judges it)
         head = cache.heads[entry.entity_id]
         if head is None:
             return None  # not here: `_settle` says what that means
@@ -729,12 +734,6 @@ class SyncAuthorityService:
                 cache.places[f.entry.entity_id] = place._replace(
                     deleted_at=stamp_of(f.entry) if kind == "delete" else None
                 )
-        # The rest of the stretch was read before this run was written: read
-        # again when judged, so nothing is decided on what it has changed.
-        cache.heads.clear()
-        cache.children.clear()
-        cache.hidden.clear()
-        self._stretch_left = 0
         if cache.sees is not None:
             # (what a file's use says depends on which records are live)
             cache.uses.clear()
@@ -749,6 +748,14 @@ class SyncAuthorityService:
         if not run:
             return []
         self._in_run.clear()
+        if self._cache is not None:
+            # Whatever the run writes (or what a refused one says) changes what
+            # a delete's guards were read from: read again when judged.
+            self._cache.heads.clear()
+            self._cache.read.clear()
+            self._cache.children.clear()
+            self._cache.hidden.clear()
+            self._stretch_left = 0
         items, run[:] = list(run), []
         taken = [f for f in items if f.refused is None]
         if not taken:

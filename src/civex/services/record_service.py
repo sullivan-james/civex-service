@@ -819,6 +819,9 @@ class IncomingCache:
         # live record beneath them, and those a record the caller cannot see
         # points at.
         self.heads: dict[uuid.UUID, dict[str, Any] | None] = {}
+        # Which kind of change (delete or restore) each record's state was read
+        # for: what is read for one is not what the other asks.
+        self.read: dict[uuid.UUID, str] = {}
         self.children: set[uuid.UUID] = set()
         self.hidden: set[uuid.UUID] = set()
         # Records were changed since `places` was read: to be read again.
@@ -840,6 +843,7 @@ class IncomingCache:
         self.dirty.clear()
         self.uses_upto = 0
         self.heads.clear()
+        self.read.clear()
         self.children.clear()
         self.hidden.clear()
         self.stale = True
