@@ -103,7 +103,7 @@ describe('ConnectPage', () => {
     collections = [{ id: 'c1', name: 'Humpbacks', record_count: 3 }]
     renderPage()
     expect(await screen.findByTestId('plan')).toHaveTextContent(
-      /has data.*only connect to a repo with nothing in it/,
+      /has data.*only connect to a project with nothing in it/,
     )
     // Sending data away needs a yes that names the host.
     const button = screen.getByRole('button', { name: /^Connect/ })

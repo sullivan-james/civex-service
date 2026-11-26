@@ -22,7 +22,7 @@ import {
 } from '../components/ui'
 import { formatTime } from '../utils/dates'
 
-/** "Connect to a hub": a full page that joins this project to a repository on
+/** "Connect to a hub": a full page that joins this project to a project on
  * a host. `?url=` fills the address in (the host's "open in the app" link).
  * It uses the same connect as Settings -> Sync; this page only says what will
  * happen first and then follows it through to the end. */
@@ -157,7 +157,7 @@ export default function ConnectPage() {
               <p className="text-fg-muted">
                 {empty
                   ? `This project is empty. It will become a copy of ${parsed.name} on ${parsed.host}.`
-                  : `This project has data. It can only connect to a repo with nothing in it, and then fills ${parsed.name} on ${parsed.host} with it. If that repo has data, nothing changes.`}
+                  : `This project has data. It can only connect to a project with nothing in it, and then fills ${parsed.name} on ${parsed.host} with it. If that project has data, nothing changes.`}
               </p>
               {!empty && (
                 <label className="flex items-start gap-2">
