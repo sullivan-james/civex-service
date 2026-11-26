@@ -63,3 +63,34 @@ def test_only_the_named_columns_are_read(wf_ctx) -> None:
 def test_without_as_written_numbers_are_still_worked_out(wf_ctx) -> None:
     df = _read(wf_ctx, CSV, "t.csv")
     assert df["id"].tolist()[0] == 7
+
+
+BLANKS = b"id,v\na,1\n\nb,2\nc,3\n\nd,4\ne,5\nf,6\n"
+
+
+def test_parts_of_a_text_file_with_blank_lines_hold_every_row_once(wf_ctx) -> None:
+    """Skipping counts rows of data, not lines: a blank line before a part
+    boundary must not move the boundary."""
+    seen: list[str] = []
+    for start in range(0, 8, 2):
+        df = _read(wf_ctx, BLANKS, "t.csv", as_text=True, skip_rows=start, max_rows=2)
+        seen += df["id"].tolist()
+    assert seen == ["a", "b", "c", "d", "e", "f"]
+    assert _read(wf_ctx, BLANKS, "t.csv", as_text=True, skip_rows=6).empty
+
+
+def test_parts_of_an_excel_sheet_with_a_blank_row_hold_every_row_once(wf_ctx) -> None:
+    import openpyxl
+
+    book = openpyxl.Workbook()
+    for row in (["id", "v"], ["a", 1], [None, None], ["b", 2], ["c", 3], ["d", 4]):
+        book.active.append(row)
+    out = io.BytesIO()
+    book.save(out)
+    seen: list[str] = []
+    for start in range(0, 6, 2):
+        df = _read(
+            wf_ctx, out.getvalue(), "t.xlsx", as_text=True, skip_rows=start, max_rows=2
+        )
+        seen += [i for i in df["id"].tolist() if i != ""]
+    assert seen == ["a", "b", "c", "d"]

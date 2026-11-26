@@ -3865,14 +3865,6 @@ class ReleaseScopeRequest(BaseModel):
         )
 
 
-class ImportInspectRequest(BaseModel):
-    sha256: str = Field(description="The uploaded spreadsheet (a stored file).")
-    filename: str = Field(description="Its name, which says if it is Excel or text.")
-    sheet: str | None = Field(
-        default=None, description="Which sheet of an Excel file; the first if left out."
-    )
-
-
 class ImportColumnResponse(BaseModel):
     heading: str = Field(description="The column as the reader names it.")
     label: str = Field(description="The heading to show.")

@@ -257,14 +257,47 @@ def _options(pd: Any, config: Any) -> dict[str, Any]:
     opts: dict[str, Any] = {}
     if config.as_text:
         opts.update(dtype=str, keep_default_na=False)
-    if config.skip_rows:
-        opts["skiprows"] = range(1, config.skip_rows + 1)
-    if config.max_rows is not None:
-        opts["nrows"] = config.max_rows
+    # Rows to skip and to read are counted in rows of data, never in lines of
+    # the file (a text file may have blank lines, which hold no row): see
+    # `_read_part`. Excel rows are rows already, blank ones included.
     if config.only_columns:
         wanted = set(config.only_columns)
         opts["usecols"] = lambda name: str(name) in wanted
     return opts
+
+
+#: Rows of a text file passed over at a time when skipping to a part.
+_SKIP_CHUNK = 50_000
+
+
+def _read_part(pd: Any, read: Any, config: Any) -> Any:
+    """The rows `skip_rows` to `skip_rows + max_rows` of a text file. The parser
+    drops blank lines, so rows are counted as it hands them over, not by line:
+    skipping by line would shift every part after a blank line."""
+    if not config.skip_rows:
+        return read(nrows=config.max_rows)
+    columns = read(nrows=0).columns
+    frames: list[Any] = []
+    with read(chunksize=_SKIP_CHUNK) as reader:
+        skipped, taken = 0, 0
+        limit = config.max_rows
+        while limit is None or taken < limit:
+            if skipped < config.skip_rows:
+                size = min(config.skip_rows - skipped, _SKIP_CHUNK)
+            else:
+                size = _SKIP_CHUNK if limit is None else min(limit - taken, _SKIP_CHUNK)
+            try:
+                chunk = reader.get_chunk(size)
+            except StopIteration:
+                break
+            if skipped < config.skip_rows:
+                skipped += len(chunk)
+            else:
+                frames.append(chunk)
+                taken += len(chunk)
+    if not frames:
+        return pd.DataFrame(columns=columns)
+    return pd.concat(frames, ignore_index=True)
 
 
 def _sample_text(path: Any, encoding: str) -> str:
@@ -282,8 +315,13 @@ def _read_one(pd: Any, ctx: Ctx, ref: FileRef, config: Any) -> Any:
         opts = _options(pd, config)
         if filename.lower().endswith(_EXCEL):
             try:
+                extra: dict[str, Any] = {}
+                if config.skip_rows:
+                    extra["skiprows"] = range(1, config.skip_rows + 1)
+                if config.max_rows is not None:
+                    extra["nrows"] = config.max_rows
                 return pd.read_excel(
-                    path, sheet_name=config.sheet or 0, engine=None, **opts
+                    path, sheet_name=config.sheet or 0, engine=None, **opts, **extra
                 )
             except ImportError as e:
                 raise ValidationError(
@@ -309,7 +347,13 @@ def _read_one(pd: Any, ctx: Ctx, ref: FileRef, config: Any) -> Any:
             log.info("Read '%s' as separated by %r", filename, delimiter)
         else:
             delimiter = resolve_delimiter(config.delimiter, single_char=False)
-        return pd.read_csv(path, sep=delimiter, encoding=encoding, **opts)
+        return _read_part(
+            pd,
+            lambda **kw: pd.read_csv(
+                path, sep=delimiter, encoding=encoding, **opts, **kw
+            ),
+            config,
+        )
     except UnicodeDecodeError as e:
         raise ValidationError(
             f"Could not decode '{filename}' as {config.encoding}: {e}"

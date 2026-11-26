@@ -30,8 +30,8 @@ def test_a_spreadsheet_is_looked_into_and_brought_in(client: TestClient) -> None
     assert client.post("/api/collections", json={"name": "study"}).status_code == 201
     sha = _upload(client)
 
-    seen = client.post(
-        "/api/import/inspect", json={"sha256": sha, "filename": "people.csv"}
+    seen = client.get(
+        "/api/import/inspect", params={"sha256": sha, "filename": "people.csv"}
     )
     assert seen.status_code == 200, seen.text
     sheet = seen.json()
@@ -67,8 +67,8 @@ def test_a_spreadsheet_is_looked_into_and_brought_in(client: TestClient) -> None
 
 
 def test_a_missing_file_or_collection_is_refused_plainly(client: TestClient) -> None:
-    r = client.post(
-        "/api/import/inspect", json={"sha256": "0" * 64, "filename": "a.csv"}
+    r = client.get(
+        "/api/import/inspect", params={"sha256": "0" * 64, "filename": "a.csv"}
     )
     assert r.status_code == 404
     sha = _upload(client)
