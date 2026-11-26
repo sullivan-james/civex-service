@@ -1398,8 +1398,11 @@ class SyncAuthorityService:
         cascade = self._cascade_before(entry, head)
         # A record's delete that finds it deleted already: written down, but
         # the answer says so, so the device shows it as the earlier change's.
+        # Not one of an action's entries: its own earlier entries (a parent's
+        # delete takes the records beneath) may be what deleted it.
         found_deleted = bool(
-            kind == "record"
+            alone
+            and kind == "record"
             and entry.action == "delete"
             and head is not None
             and head.get("deleted_at")
