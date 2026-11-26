@@ -21,7 +21,7 @@ import threading
 import time
 import urllib.parse
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
@@ -4079,7 +4079,7 @@ def _waits_on(
 
 def _pages(
     transport: SyncTransport, kind: str, size: list[int]
-) -> Iterator[SnapshotPage]:
+) -> Generator[SnapshotPage, None, None]:
     """The pages of one kind, in order. The next is asked for while the caller
     writes the one in hand, so the wire and the database work at once (one
     request in flight, and the transport is used by no one else meanwhile).
