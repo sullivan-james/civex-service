@@ -521,3 +521,106 @@ def test_a_collection_is_made_from_the_spreadsheet_when_asked(ctx):
     ctx.commit()
     assert [d.name for d in ctx.dataset_svc.list_all()] == ["People list"]
     assert ctx.import_svc.run(spec, 0, 100).created == 3  # parts find it made
+
+
+# -- limits and streaming -------------------------------------------------------
+
+
+def test_a_file_over_the_size_limit_is_refused_with_the_limit(ctx):
+    ctx.config.import_.max_file_mb = 1
+    sha, name = _csv(ctx, "a\n" + "x" * 1_100_000 + "\n")
+    with pytest.raises(ValidationError, match=r"most that can be brought in is 1 MB"):
+        ctx.import_svc.inspect(sha, name)
+
+
+def test_a_zip_bomb_spreadsheet_is_refused_before_it_is_parsed(ctx):
+    import zipfile
+
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("xl/worksheets/sheet1.xml", b"0" * 30_000_000)
+    ref = ctx.file_svc.store_bytes(out.getvalue(), "bomb.xlsx")
+    with pytest.raises(ValidationError, match="packed far tighter"):
+        ctx.import_svc.inspect(ref.sha256, ref.filename)
+    ctx.config.import_.max_unpacked_mb = 10
+    ctx.config.import_.max_ratio = 10**9
+    with pytest.raises(ValidationError, match=r"unpacks to .*10 MB"):
+        ctx.import_svc.inspect(ref.sha256, ref.filename)
+
+
+def test_too_many_rows_or_columns_is_refused_with_the_limit(ctx, study, monkeypatch):
+    monkeypatch.setattr("civex.services.import_service.SAMPLE_ROWS", 20)
+    ctx.config.import_.max_rows = 100
+    sha, name = _csv(ctx, "a,b\n" + "\n".join(f"{i},x" for i in range(150)) + "\n")
+    with pytest.raises(ValidationError, match=r"more than 100 rows"):
+        ctx.import_svc.inspect(sha, name)
+    x_sha, x_name = _xlsx(ctx, {"S": [["a"]] + [[i] for i in range(150)]})
+    with pytest.raises(ValidationError, match=r"more than 100 rows"):
+        ctx.import_svc.inspect(x_sha, x_name)
+    ctx.config.import_.max_rows = 1000
+    ctx.config.import_.max_columns = 3
+    wide, wname = _csv(ctx, "a,b,c,d\n1,2,3,4\n")
+    with pytest.raises(ValidationError, match=r"4 columns; the most .* is 3"):
+        ctx.import_svc.inspect(wide, wname)
+    ok = ctx.import_svc.inspect(sha, name)  # within the column limit
+    assert ok.total == 150
+
+
+def test_a_short_preview_reads_no_further_than_it_needs(ctx, monkeypatch):
+    def refuse(*a, **k):
+        raise AssertionError("passed over the whole file for a preview")
+
+    monkeypatch.setattr("civex.services.import_service.ImportService._passes", refuse)
+    sha, name = _csv(ctx, "a,b\n" + "\n".join(f"{i},x" for i in range(50)) + "\n")
+    assert ctx.import_svc.inspect(sha, name).total == 50
+    x_sha, x_name = _xlsx(ctx, {"S": [["a"]] + [[i] for i in range(50)]})
+    assert ctx.import_svc.inspect(x_sha, x_name).total == 50
+
+
+def test_streamed_xlsx_rows_equal_what_pandas_reads(ctx):
+    import datetime
+
+    import pandas as pd
+
+    from civex.services.import_service import _excel_rows
+
+    rows = [
+        ["id", "n", "d", "b", "t"],
+        ["007", 1.0, datetime.datetime(2020, 1, 2), True, "x"],
+        [None, 2.5, None, False, ""],
+        [None, None, None, None, None],
+        ["3", 10**6, datetime.datetime(2021, 5, 6, 7, 8), None, "y z"],
+        [None, None, None, None, None],
+    ]
+    sha, name = _xlsx(ctx, {"S": rows})
+    path = ctx.file_svc.local_path(sha)
+    got = [r for part in _excel_rows(path, None, sha, None, name) for r in part]
+    want = pd.read_excel(
+        path, sheet_name=0, dtype=str, keep_default_na=False, engine="openpyxl"
+    ).values.tolist()
+    assert got == want
+
+
+def test_batches_resume_from_the_file_without_rereading_it(ctx, study, monkeypatch):
+    import civex.services.import_service as mod
+
+    monkeypatch.setattr(mod, "_BLOCK", 7)
+    rows = ["ID,Name"] + [f"{i},n{i}" for i in range(60)]
+    sha, name = _csv(ctx, "\n".join(rows) + "\n")
+    seen = ctx.import_svc.inspect(sha, name)
+    spec = _spec(sha, name, seen, match=["id"])
+    passes = []
+    real = mod.ImportService._passes
+
+    def counting(self, *a, **k):
+        passes.append(1)
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(mod.ImportService, "_passes", counting)
+    done = []
+    for start in range(0, 60, 11):
+        part = ctx.import_svc.run(spec, start, 11)
+        done.append((part.start, part.read, part.created))
+    assert done == [(s, min(11, 60 - s), min(11, 60 - s)) for s in range(0, 60, 11)]
+    assert len(passes) == 1  # the file was passed over once, not once per batch
+    assert len(_people(ctx)) == 60

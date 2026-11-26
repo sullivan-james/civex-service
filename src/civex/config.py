@@ -88,6 +88,22 @@ class ProjectConfig:
 
 
 @dataclass
+class ImportConfig:
+    """How large a spreadsheet the import wizard will read (`[import]`). A file
+    over any limit is refused with the limit named, before it is parsed."""
+
+    # Largest file, in megabytes.
+    max_file_mb: int = 50
+    # Largest an Excel file may be once unpacked (it is a zip), in megabytes,
+    # and the most it may expand by, so a small file can't unpack into memory.
+    max_unpacked_mb: int = 500
+    max_ratio: int = 100
+    # Most rows (under the headings) and columns.
+    max_rows: int = 1_000_000
+    max_columns: int = 1000
+
+
+@dataclass
 class SyncConfig:
     """Keeping this project in step with other copies of it (CIVEX-305): one
     instance is the *authority* and every other device follows it."""
@@ -371,6 +387,7 @@ class Config:
     retention: RetentionConfig = field(default_factory=RetentionConfig)
     automation: AutomationConfig = field(default_factory=AutomationConfig)
     sync: SyncConfig = field(default_factory=SyncConfig)
+    import_: ImportConfig = field(default_factory=ImportConfig)
     identity: IdentityConfig = field(default_factory=IdentityConfig)
     project: ProjectConfig = field(default_factory=ProjectConfig)
 
@@ -559,6 +576,14 @@ def parse_config(data: dict, root: Path) -> Config:
     project_cfg = ProjectConfig(
         read_only=bool(data.get("project", {}).get("read_only", False))
     )
+    import_data = data.get("import", {})
+    _imp = ImportConfig()
+    import_cfg = ImportConfig(
+        **{
+            name: max(1, int(import_data.get(name, getattr(_imp, name))))
+            for name in _imp.__dataclass_fields__
+        }
+    )
     sync_data = data.get("sync", {})
     sync_cfg = SyncConfig(
         remote=(str(sync_data["remote"]).rstrip("/") or None)
@@ -606,6 +631,7 @@ def parse_config(data: dict, root: Path) -> Config:
         plugins=plugins_cfg,
         ui=ui_cfg,
         map=map_cfg,
+        import_=import_cfg,
         retention=retention_cfg,
         automation=automation_cfg,
         sync=sync_cfg,
@@ -776,6 +802,14 @@ def render_config(config: Config) -> str:
         lines.append("\n[sync.collection_files]\n")
         for cid, mode in sorted(sync.collection_files.items()):
             lines.append(f"{_tv(cid)} = {_tv(mode)}\n")
+
+    import_lines = [
+        f"{name} = {getattr(config.import_, name)}\n"
+        for name in ImportConfig.__dataclass_fields__
+        if getattr(config.import_, name) != getattr(ImportConfig(), name)
+    ]
+    if import_lines:
+        lines += ["\n[import]\n", *import_lines]
 
     retention = config.retention
     retention_lines = []
