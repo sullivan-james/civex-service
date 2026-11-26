@@ -195,12 +195,30 @@ def _pair(project, n, extra=()):
     pushes: list[int] = []
     real = hub.authority_svc.push
 
+    hub._done = []  # answers of a change already so there
+    hub._align = False  # make each edit carry the date the hub's record holds
+
     def counted(who, entries):
         pushes.append(len(entries))
-        return real(who, entries)
+        if hub._align:
+            entries = [_dated_as_held(hub, e) for e in entries]
+        out = real(who, entries)
+        hub._done += [r for r in out.results if r.replayed and r.hub_seq is None]
+        return out
 
     hub.authority_svc.push = counted
     return hub, a, b, ids, pushes
+
+
+def _dated_as_held(hub, e):
+    """An edit as another device would have made it at the very moment the hub's
+    record was last changed: the same values and the same date."""
+    held = hub.sync_repo.snapshot("record", e.entity_id)["updated_at"]
+    new = {**e.new_data, "updated_at": held}
+    delta = e.delta
+    if delta and "updated_at" in delta:
+        delta = {**delta, "updated_at": {**delta["updated_at"], "after": held}}
+    return dataclasses.replace(e, new_data=new, delta=delta)
 
 
 def _level(hub, b, ids, pushes):
@@ -215,7 +233,7 @@ def _level(hub, b, ids, pushes):
     for rid in ids:
         h = hub.sync_repo.snapshot("record", uuid.UUID(rid))
         d = b.sync_repo.snapshot("record", uuid.UUID(rid))
-        assert bool(h["deleted_at"]) == bool(d["deleted_at"])
+        assert h["deleted_at"] == d["deleted_at"]
         assert h["dataset_id"] == d["dataset_id"] and h["data"] == d["data"]
 
 
@@ -240,8 +258,10 @@ def test_a_device_whose_edit_was_already_made_ends_synced_and_sends_nothing(proj
         if ctx is a:
             a.sync_svc.sync()
     pushes.clear()
+    hub._align = True
     b.sync_svc.sync()
-    assert sum(pushes) >= 1
+    hub._align = False
+    assert hub._done  # it was answered as already so, and written no more
     _level(hub, b, ids, pushes)
 
 
@@ -253,8 +273,10 @@ def test_a_device_whose_move_was_already_made_ends_synced_and_sends_nothing(proj
         if ctx is a:
             a.sync_svc.sync()
     pushes.clear()
+    hub._align = True
     b.sync_svc.sync()
-    assert sum(pushes) >= 1
+    hub._align = False
+    assert hub._done
     _level(hub, b, ids, pushes)
 
 
