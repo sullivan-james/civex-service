@@ -8,6 +8,13 @@ final version's entry or `## Unreleased` instead of one of its own. The version 
 
 ## Unreleased
 
+- **Two people deleting the same records no longer double-count.** When a
+  push and another person's bulk delete (or two bulk deletes) hit the same
+  records at once, both wrote a delete in history, so undoing one batch also
+  brought back records the other had deleted. A delete or restore now puts in
+  history only the records its own write changed (the second is a no-op for
+  records already deleted or restored), so undoing a batch restores exactly
+  what that batch deleted. PostgreSQL and SQLite.
 - **Sync: a blank copy only downloads.** A computer that copies a project owes
   the server only files it stored itself; files that came with the records it
   pulled were counted as owed, so the copy flipped between "Copying the

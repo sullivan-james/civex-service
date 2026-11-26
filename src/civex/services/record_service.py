@@ -4413,20 +4413,28 @@ class RecordService:
         with _audit_batch(self._audit, "delete", len(every) > 1):
             for start in range(0, len(every), _APPLY_CHUNK):
                 chunk = every[start : start + _APPLY_CHUNK]
+                held = (
+                    {r.id: r for r in self._records.list_by_ids(chunk)}
+                    if self._audit
+                    else {}
+                )
+                # Written first, and history gets only what THIS statement
+                # deleted: a record another writer deleted meanwhile (a push,
+                # another person's bulk delete) is theirs, so undoing this
+                # batch never brings it back.
+                won = self._records.delete_many(chunk, stamp)
                 if self._audit:
-                    held = {r.id: r for r in self._records.list_by_ids(chunk)}
                     self._audit.log_changes(
                         "delete",
                         "record",
                         (
                             (i, self._snapshot(held[i]), None)
                             for i in chunk
-                            if i in held
+                            if i in held and i in won
                         ),
                         timestamp=stamp,
                         ops=ops,
                     )
-                self._records.delete_many(chunk, stamp)
         return sum(1 for rid in set(ids) if rid in links and links[rid] not in doomed)
 
     def list_deleted(
@@ -5990,8 +5998,9 @@ class RecordService:
         go together or not at all; a tree refused when sent splits nothing
         else). The one place a record is brought back."""
         self._require_restore(ids, rows)
-        self._records.restore_many(ids)
-        if not self._audit:
+        won = self._records.restore_many(ids)
+        ids = [i for i in ids if i in won]  # only what this write brought back
+        if not self._audit or not ids:
             return
         ops = _tree_ops({i: rows[i].parent_record_id for i in ids})
         ids = _by_tree(ids, ops)  # a tree's entries together, parents first

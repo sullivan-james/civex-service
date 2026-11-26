@@ -1426,18 +1426,28 @@ class LocalRecordRepository:
             ]
         return levels
 
-    def delete_many(self, ids: list[uuid.UUID], stamp: datetime | None = None) -> None:
+    def delete_many(
+        self, ids: list[uuid.UUID], stamp: datetime | None = None
+    ) -> set[uuid.UUID]:
         """Soft-delete every live record in `ids`. Not an edit: each keeps the
-        date it was last changed."""
+        date it was last changed. Returns the ids THIS statement deleted: one
+        another transaction deleted first (its UPDATE holds the row; ours waits
+        and re-checks `deleted_at IS NULL`) is not returned, so only the writer
+        that really deleted a record puts a delete in history for it."""
         now = stamp or datetime.now(timezone.utc)
+        won: set[uuid.UUID] = set()
         for chunk in _chunks(ids):
-            self._s.execute(
-                update(Record)
-                .where(Record.id.in_(chunk), Record.deleted_at.is_(None))
-                .values(deleted_at=now, updated_at=Record.updated_at)
-                .execution_options(synchronize_session=False)
+            won.update(
+                self._s.scalars(
+                    update(Record)
+                    .where(Record.id.in_(chunk), Record.deleted_at.is_(None))
+                    .values(deleted_at=now, updated_at=Record.updated_at)
+                    .returning(Record.id)
+                    .execution_options(synchronize_session=False)
+                )
             )
         self._s.expire_all()
+        return won
 
     def references_of(
         self, record_ids: list[uuid.UUID]
@@ -1597,15 +1607,23 @@ class LocalRecordRepository:
             out.extend((rid, pid) for rid, pid in self._s.execute(q) if pid is not None)
         return out
 
-    def restore_many(self, ids: list[uuid.UUID]) -> None:
+    def restore_many(self, ids: list[uuid.UUID]) -> set[uuid.UUID]:
+        """Bring back the deleted records in `ids`; returns the ids THIS
+        statement restored (the mirror of `delete_many`: a record someone else
+        restored first is not returned, so it is not put in history twice)."""
+        won: set[uuid.UUID] = set()
         for chunk in _bulk_chunks(self._s, ids):
-            self._s.execute(
-                update(Record)
-                .where(Record.id.in_(chunk))
-                .values(deleted_at=None, updated_at=Record.updated_at)
-                .execution_options(synchronize_session=False)
+            won.update(
+                self._s.scalars(
+                    update(Record)
+                    .where(Record.id.in_(chunk), Record.deleted_at.is_not(None))
+                    .values(deleted_at=None, updated_at=Record.updated_at)
+                    .returning(Record.id)
+                    .execution_options(synchronize_session=False)
+                )
             )
         self._s.expire_all()
+        return won
 
     def purge_many(self, ids: list[uuid.UUID]) -> None:
         """Permanently remove records and their workflow jobs. Parent links
