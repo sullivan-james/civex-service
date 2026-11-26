@@ -1,6 +1,13 @@
 import { useEffect, useState, type MouseEvent, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import type { FileRef } from '../../api/files'
+import { hostedFilesNow, useHostedFiles } from '../../hooks/useFeatures'
+import {
+  hostedMessage,
+  hostedState,
+  notOnHub,
+  TEMPORARILY_UNAVAILABLE,
+} from '../../utils/hostedFiles'
 import { useFileLocationDisplay } from '../../hooks/useFileLocationDisplay'
 import { formatSize } from '../../utils/storage'
 import { PlaceStatus, VolumeStatus } from '../files/Where'
@@ -15,7 +22,12 @@ type FileLike = Pick<
 > &
   Partial<Pick<FileRef, 'size'>>
 
-function whyUnavailable(file: FileLike): string {
+function whyUnavailable(file: FileLike, hosted: boolean): string {
+  if (hosted)
+    return (
+      hostedMessage(hostedState(file.location), file.location?.reason) ??
+      TEMPORARILY_UNAVAILABLE
+    )
   const where = file.location?.volume
     ? `drive '${file.location.volume}'`
     : 'its drive'
@@ -39,11 +51,13 @@ export function FileLink({
   /** What to show in place of the link when the file can't be opened. */
   whenUnavailable?: ReactNode
 }) {
+  // Read, not subscribed: a plain link makes no request of its own.
+  const hosted = hostedFilesNow()
   if (file.location?.available === false)
     return (
       <span
         aria-disabled="true"
-        title={whyUnavailable(file)}
+        title={whyUnavailable(file, hosted)}
         className="text-fg-muted"
       >
         {whenUnavailable ?? children}
@@ -95,7 +109,7 @@ function DownloadLink({
       return
     e.preventDefault()
     setNote(
-      file.location?.state === 'remote'
+      file.location?.state === 'remote' && !hostedFilesNow()
         ? { tone: 'info', text: 'Downloading it from the server first…' }
         : null,
     )
@@ -110,6 +124,18 @@ function DownloadLink({
       })
       if (!res.ok && res.type !== 'opaqueredirect') {
         const body = await res.json().catch(() => null)
+        // On a host the server's words may name a drive or a store: say it
+        // as the hub does.
+        if (hostedFilesNow() && (res.status === 404 || res.status === 503)) {
+          setNote({
+            tone: 'attention',
+            text:
+              res.status === 404
+                ? notOnHub(body?.detail)
+                : TEMPORARILY_UNAVAILABLE,
+          })
+          return
+        }
         setNote({
           tone:
             res.status === 404 || res.status === 503 ? 'attention' : 'error',
@@ -216,8 +242,10 @@ export function FileLocationChip({ file }: { file: FileLike }) {
 
 function LocationChip({ file }: { file: FileLike }) {
   const { show, advanced, unavailable } = useFileLocationDisplay(file.location)
+  const hosted = useHostedFiles()
   if (!show) return null
   const name = file.resolved_filename ?? file.filename
+  if (hosted) return <HostedChip file={file} name={name} />
 
   return (
     <TriggerPopover
@@ -246,6 +274,31 @@ function LocationChip({ file }: { file: FileLike }) {
     >
       <FileLocationPanel file={file} startOpen={advanced} />
     </TriggerPopover>
+  )
+}
+
+/** On a host: only that a file isn't on the hub yet, is uploading, or can't be
+ * had right now, as a chip whose hover says the same in full. */
+function HostedChip({ file, name }: { file: FileLike; name: string }) {
+  const state = hostedState(file.location)
+  const full = hostedMessage(state, file.location?.reason) ?? ''
+  const short =
+    state === 'missing'
+      ? 'not on the hub yet'
+      : state === 'unavailable'
+        ? 'temporarily unavailable'
+        : 'uploading'
+  return (
+    <span title={full} role="status" aria-label={`${name}: ${full}`}>
+      <Chip warning={state !== 'arriving'} className="shrink-0">
+        {state === 'arriving' ? (
+          <Upload size={11} aria-hidden="true" />
+        ) : (
+          <AlertTriangle size={11} aria-hidden="true" />
+        )}
+        {short}
+      </Chip>
+    </span>
   )
 }
 

@@ -1,3 +1,4 @@
+import { useHostedFiles } from '../../hooks/useFeatures'
 import { formatSize } from '../../utils/storage'
 
 /** Said before anything is made: some of the files are only on the server and
@@ -9,7 +10,9 @@ export function ToDownloadNotice({
 }: {
   toFetch: { files: number; bytes: number } | undefined | null
 }) {
-  if (!toFetch || toFetch.files === 0) return null
+  const hosted = useHostedFiles()
+  // On a host every file is the host's to serve: nothing is fetched first.
+  if (hosted || !toFetch || toFetch.files === 0) return null
   const n = toFetch.files
   return (
     <p

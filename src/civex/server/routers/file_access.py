@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from civex import fs_open
-from civex.domain.features import OPEN_FOLDER, SERVER_PATH_EXPORT
+from civex.domain.features import OPEN_FOLDER, SERVER_PATH_EXPORT, VOLUMES
 from civex.context import AppContext
 from civex.domain.exceptions import CivexError, NotFoundError, ValidationError
 from civex.domain.hosts import is_loopback
@@ -302,7 +302,7 @@ def export_files(
     return {**result.to_dict(), "opened": bool(opened)}
 
 
-@router.post("/gather", status_code=202)
+@router.post("/gather", status_code=202, dependencies=[requires(VOLUMES)])
 def gather_files(
     body: FileGatherRequest,
     dry_run: bool = Query(

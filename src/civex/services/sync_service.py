@@ -95,7 +95,7 @@ from civex.repositories.protocols import (
     SyncRepository,
 )
 from civex.services.record_service import RecordService
-from civex.services.sync_applier import SyncApplier
+from civex.services.sync_applier import SyncApplier, stamp_of
 from civex.services.sync_lock import sync_lock, sync_running
 from civex.services import ssh_tunnel
 
@@ -129,6 +129,12 @@ PACKS_IN_FLIGHT = 4
 # still on their way (the authority answers up to 5000 per request).
 PACKED_CHECK_PAGE = 4000
 FEED_PAGE = 200
+# The fewest changes of one kind in a row that a pulled page applies as a set.
+RUN_MIN = 3
+# The actions that put a record somewhere (a place is checked before they apply).
+PLACING = ("create", "update", "restore")
+# What a pulled run applies as a set (record changes of these actions).
+RUN_ACTIONS = ("delete", "restore", "create", "update")
 SNAPSHOT_PAGE = 200
 
 # Stands for "the value on the record now" in an attempt's fields, until it is read.
@@ -395,6 +401,9 @@ class SyncService:
         # What a person does about a conflict is an ordinary edit, made by the
         # record service like any other: validated, in the history, synced.
         self._records = records
+        # Whether a pulled page applies runs of like changes as a set; off, every
+        # change goes one at a time (what the equivalence tests compare with).
+        self._bulk_pull = True
 
     # ------------------------------------------------------------------
     # Status
@@ -1475,34 +1484,96 @@ class SyncService:
             # waits with that one (a tree moved to another collection can't
             # be half moved: a child's collection is its parent's).
             above = self._above_dirty(dirty)
-            waiting = {
-                e.op
-                for i, e in enumerate(entries)
-                if e.op
-                and i < tail
-                and e.op != arriving
-                and self._waits(e, dirty, above)
-            }
+            if self._bulk_pull:
+                waited = [
+                    e
+                    for i, e in enumerate(entries)
+                    if e.op and i < tail and e.op != arriving
+                ]
+                waiting = {
+                    e.op
+                    for e, w in zip(
+                        waited, self._waits_many(waited, dirty, above), strict=True
+                    )
+                    if w
+                }
+                ids = [e.id for e in entries]
+                # (A page that repeats an entry is left to the one-at-a-time path.)
+                owned: set[uuid.UUID] | None = (
+                    self._repo.existing_entry_ids(ids)
+                    if len(set(ids)) == len(ids)
+                    else None
+                )
+            else:
+                waiting = {
+                    e.op
+                    for i, e in enumerate(entries)
+                    if e.op
+                    and i < tail
+                    and e.op != arriving
+                    and self._waits(e, dirty, above)
+                }
+                owned = None
+            skip = 0  # the entries before this one were applied as a run
+            no_run = 0  # a run that failed: its entries go one at a time
             touched: list[uuid.UUID] = []
             settled = False
             try:
                 with self._repo.savepoint():
+                    numbered: list[tuple[uuid.UUID, int, str | None]] = []
                     for i, entry in enumerate(entries):
+                        if i < skip:
+                            continue
+                        if numbered and (
+                            owned is None
+                            or entry.id not in owned
+                            or arriving is not None
+                        ):
+                            # (Ours, now numbered, are written together; before
+                            # anything else reads or writes, in their place.)
+                            self._repo.mark_seqs(numbered)
+                            numbered = []
                         if entry.hub_seq is None:
                             raise SyncError("The server sent a change without a number")
                         if arriving is not None and entry.op != arriving:
                             self._settle_arriving(arriving, to_hold, dirty, start)
                             arriving, to_hold = None, False
                             settled = True
+                        if (
+                            owned is not None
+                            and arriving is None
+                            and i >= no_run
+                            and entry.entity_type == "record"
+                            and entry.action in RUN_ACTIONS
+                        ):
+                            taken, tried = self._run(
+                                entries, i, tail, dirty, above, waiting, owned
+                            )
+                            if taken:
+                                applied += len(taken)
+                                touched.extend(e.entity_id for e in taken)
+                                skip = i + len(taken)
+                                cursor = taken[-1].hub_seq or cursor
+                                continue
+                            no_run = i + tried
                         if entry.entity_type in NOT_SYNCED_KINDS:
                             # An authority on protocol 5 or older still feeds
                             # releases: they are never taken (published on a
                             # host), only read past.
                             pass
-                        elif self._repo.has_entry(entry.id):
+                        elif (
+                            entry.id in owned
+                            if owned is not None
+                            else self._repo.has_entry(entry.id)
+                        ):
                             # Ours, now numbered, and stamped with the device
                             # it came through.
-                            self._repo.mark_seq(entry.id, entry.hub_seq, entry.device)
+                            if owned is not None:
+                                numbered.append((entry.id, entry.hub_seq, entry.device))
+                            else:
+                                self._repo.mark_seq(
+                                    entry.id, entry.hub_seq, entry.device
+                                )
                         elif entry.op and (entry.op == arriving or i >= tail):
                             arriving = entry.op
                             to_hold = self._stage(entry, dirty, above, to_hold)
@@ -1518,6 +1589,8 @@ class SyncService:
                             if entry.entity_type == "record":
                                 touched.append(entry.entity_id)
                         cursor = entry.hub_seq
+                    if numbered:
+                        self._repo.mark_seqs(numbered)
                     if entries:
                         self._flags_stale = True  # (something came in)
                     if arriving is not None and not page.more:
@@ -1674,42 +1747,19 @@ class SyncService:
         )
         return {above.id for trail in trails.values() for above in trail}
 
-    def _waits(
-        self,
-        entry: SyncEntry,
-        dirty: set[tuple[str, uuid.UUID]],
-        above: set[uuid.UUID],
-    ) -> bool:
-        """Whether a change from the authority must wait for a push of this
-        device's own: it is to a thing with an unsent change here, or it
-        places a record (makes, moves or brings one back) where an unsent
-        change is at or beneath: the record itself, where it is, or where it
-        goes. A child's collection is its parent's, so neither can go
-        without the other; the push settles where the unsent change ends
-        up, and the placement follows."""
-        if (entry.entity_type, entry.entity_id) in dirty:
-            return True
-        placed = self._places(entry)
-        if placed is None:
-            return False
-        record_id, parent_id = placed
-        if record_id in above or (parent_id is not None and parent_id in above):
-            return True
-        return bool(
-            self._tree([i for i in (record_id, parent_id) if i is not None]) & above
-        )
-
     def _places(self, entry: SyncEntry) -> tuple[uuid.UUID, uuid.UUID | None] | None:
         """The record and the parent it would sit under, when applying `entry`
         puts a record somewhere: a new record, or one moved to another
         collection or under another record. None for anything else."""
-        if entry.entity_type != "record" or entry.action not in (
-            "create",
-            "update",
-            "restore",
-        ):
+        if entry.entity_type != "record" or entry.action not in PLACING:
             return None
-        current = self._repo.snapshot("record", entry.entity_id)
+        return self._placed(entry, self._repo.snapshot("record", entry.entity_id))
+
+    @staticmethod
+    def _placed(
+        entry: SyncEntry, current: dict[str, Any] | None
+    ) -> tuple[uuid.UUID, uuid.UUID | None] | None:
+        """`_places`, given the record as it is here now (None: not here)."""
         if entry.delta is not None and current is not None:
             state = apply_delta(current, entry.delta, AFTER)
         else:
@@ -1727,6 +1777,219 @@ class SyncService:
         ):
             return entry.entity_id, parent_id
         return None
+
+    def _waits_many(
+        self,
+        entries: list[SyncEntry],
+        dirty: set[tuple[str, uuid.UUID]],
+        above: set[uuid.UUID],
+    ) -> list[bool]:
+        """`_waits` of each of these, as the records are now, with the reads
+        done once for all: the records' current state in one query, and the
+        records above every one that places a record in one trail lookup."""
+        found = [(e.entity_type, e.entity_id) in dirty for e in entries]
+        if not above:
+            # Nothing unsent is at or beneath any record: placing one can't
+            # wait (only an unsent change to the thing itself does).
+            return found
+        placing = [
+            k
+            for k, e in enumerate(entries)
+            if not found[k] and e.entity_type == "record" and e.action in PLACING
+        ]
+        if not placing:
+            return found
+        _, current = self._repo.record_rows([entries[k].entity_id for k in placing])
+        where = {
+            k: self._placed(entries[k], current.get(entries[k].entity_id))
+            for k in placing
+        }
+        trails = self._trails([i for p in where.values() if p for i in p if i])
+        for k, placed in where.items():
+            if placed is not None:
+                found[k] = _waits_on(placed, above, trails)
+        return found
+
+    def _trails(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, set[uuid.UUID]]:
+        """The ids of the records above each of these (the ones here; deleted
+        ones too), from one lookup of the trails."""
+        if not ids:
+            return {}
+        trails = self._records.ancestor_trails(
+            self._records.labels([str(i) for i in dict.fromkeys(ids)])
+        )
+        return {rid: {a.id for a in trail} for rid, trail in trails.items()}
+
+    def _run(
+        self,
+        entries: list[SyncEntry],
+        start: int,
+        tail: int,
+        dirty: set[tuple[str, uuid.UUID]],
+        above: set[uuid.UUID],
+        waiting: set[str | None],
+        owned: set[uuid.UUID],
+    ) -> tuple[list[SyncEntry], int]:
+        """Apply the run of changes from `start` that are of one kind (deletes,
+        restores, makes or edits of records) as a set, if they are plain: what
+        `_take` does for each of them, with the reads and writes done once for
+        the run. Answers the entries it took (none: the first goes the ordinary
+        way) and how many it looked at.
+
+        A run ends before a change that is anything but plain: one already here
+        (ours, numbered now), to a record already in the run, to a thing with an
+        unsent change, held, superseded, of an action still arriving, one that
+        moves a record or sits under another of the run, or one the record is
+        later changed by (this device's own, numbered after it). Those go one at
+        a time, in their place, after the run. Any doubt (a write the database
+        refuses, a change that can't be read) undoes the run and does the same."""
+        kind = entries[start].action
+        run: list[SyncEntry] = []
+        seen: set[uuid.UUID] = set()
+        odd = 0
+        for j in range(start, len(entries)):
+            e = entries[j]
+            if e.entity_type != "record" or e.action != kind:
+                break  # (the next kind of change starts a run of its own)
+            if e.entity_id in seen:
+                break  # (a repeat: it may begin the next run)
+            if (
+                e.hub_seq is None
+                or e.superseded
+                or e.id in owned
+                or ("record", e.entity_id) in dirty
+                or (e.op and (j >= tail or e.op in waiting))
+            ):
+                # not plain: it goes by itself, after the run (and cannot begin
+                # one, so a run too short skips it too)
+                odd = 1
+                break
+            seen.add(e.entity_id)
+            run.append(e)
+        if len(run) < RUN_MIN:
+            return [], len(run) + odd
+        try:
+            # (Reads and writes alike under one savepoint: a database error in
+            # either must leave the transaction usable for the one at a time way.)
+            with self._repo.savepoint():
+                # A run that stops early must not cost a read of all of it, again
+                # for each change after it: look at its start first, in growing
+                # steps, and stop at the first that is cut.
+                size = RUN_MIN
+                while size * 2 < len(run):
+                    head = self._plain(kind, run[:size], above, {}, [])
+                    if len(head) < size:
+                        return [], len(head) + 1
+                    size *= 4
+                rows: dict[uuid.UUID, Any] = {}
+                states: list[tuple[uuid.UUID, dict[str, Any]]] = []
+                plain = self._plain(kind, run, above, rows, states)
+                if len(plain) < RUN_MIN:
+                    return [], len(plain) + 1
+                run = plain
+                self._repo.insert_pulled_entries(run)
+                if kind == "delete":
+                    self._repo.soft_delete_records(
+                        [(e.entity_id, stamp_of(e)) for e in run]
+                    )
+                else:
+                    self._repo.apply_record_states(rows, states)
+                if self.fetches_files:
+                    self._repo.forget_records_lacks([e.entity_id for e in run])
+        except Exception:  # noqa: BLE001 - the one at a time way says what is wrong
+            log.warning("pull: a run was not applied as a set", exc_info=True)
+            return [], max(len(run), 1)
+        return run, len(run)
+
+    def _plain(
+        self,
+        kind: str,
+        run: list[SyncEntry],
+        above: set[uuid.UUID],
+        rows: dict[uuid.UUID, Any],
+        states: list[tuple[uuid.UUID, dict[str, Any]]],
+    ) -> list[SyncEntry]:
+        """The start of `run` that is plain to apply as a set: up to the first
+        change the record is later changed by (this device's own, numbered after
+        it), and for makes, edits and restores the first that is not plain
+        (`_run_states`, which fills `rows` and `states`)."""
+        later = self._repo.record_entries_after(
+            {e.entity_id: e.hub_seq or 0 for e in run}
+        )
+        for k, e in enumerate(run):
+            if e.entity_id in later:
+                run = run[:k]
+                break
+        if kind != "delete" and len(run) >= RUN_MIN:
+            run = self._run_states(run, above, rows, states)
+        return run
+
+    def _run_states(
+        self,
+        run: list[SyncEntry],
+        above: set[uuid.UUID],
+        rows: dict[uuid.UUID, Any],
+        states: list[tuple[uuid.UUID, dict[str, Any]]],
+    ) -> list[SyncEntry]:
+        """Where each record of a run of makes, edits or restores ends up, and
+        the shorter run (up to the first change that is not plain: one that moves
+        a record, sits under one of the run, must wait for an unsent change here,
+        or says nothing to apply). Fills `rows` (the records here) and `states`."""
+        found, current = self._repo.record_rows([e.entity_id for e in run])
+        rows.update(found)
+        made: set[uuid.UUID] = set()
+        wanted: list[
+            tuple[SyncEntry, dict[str, Any], tuple[uuid.UUID, uuid.UUID | None] | None]
+        ] = []
+        for e in run:
+            here = current.get(e.entity_id)
+            if e.delta is not None:
+                if here is None:
+                    break
+                state = apply_delta(here, e.delta, AFTER)
+            elif e.new_data:
+                state = e.new_data
+            else:
+                break
+            placed = self._placed(e, here)
+            if placed is not None and (here is not None or placed[1] in made):
+                break  # moved, or put beneath a record of this run
+            made.add(e.entity_id)
+            wanted.append((e, state, placed))
+        if above:
+            where = [p for _, _, p in wanted if p is not None]
+            trails = self._trails([i for p in where for i in p if i is not None])
+            for k, (_, _, placed) in enumerate(wanted):
+                if placed is not None and _waits_on(placed, above, trails):
+                    wanted = wanted[:k]
+                    break
+        states.extend((e.entity_id, state) for e, state, _ in wanted)
+        return [e for e, _, _ in wanted]
+
+    def _waits(
+        self,
+        entry: SyncEntry,
+        dirty: set[tuple[str, uuid.UUID]],
+        above: set[uuid.UUID],
+    ) -> bool:
+        """Whether a change from the authority must wait for a push of this
+        device's own: it is to a thing with an unsent change here, or it
+        places a record (makes, moves or brings one back) where an unsent
+        change is at or beneath: the record itself, where it is, or where it
+        goes. A child's collection is its parent's, so neither can go
+        without the other; the push settles where the unsent change ends
+        up, and the placement follows."""
+        if (entry.entity_type, entry.entity_id) in dirty:
+            return True
+        if self._bulk_pull and not above:
+            return False  # nothing unsent is at or beneath any record
+        placed = self._places(entry)
+        if placed is None:
+            return False
+        ids = [i for i in placed if i is not None]
+        if any(i in above for i in ids):
+            return True  # (no lookup of the trails needed)
+        return _waits_on(placed, above, self._trails(ids))
 
     def _take(
         self,
@@ -3666,6 +3929,21 @@ def _refused_field(result: Any) -> str | None:
         if problem.get("field"):
             return problem["field"]
     return None
+
+
+def _waits_on(
+    placed: tuple[uuid.UUID, uuid.UUID | None],
+    above: set[uuid.UUID],
+    trails: dict[uuid.UUID, set[uuid.UUID]],
+) -> bool:
+    """Whether a record placed here (itself, its parent) is, or sits beneath, a
+    record with an unsent change (`above`), given the records above each of them
+    (`trails`): the one rule `_waits`, `_waits_many` and `_run_states` share."""
+    return any(
+        i in above or bool(trails.get(i, set()) & above)
+        for i in placed
+        if i is not None
+    )
 
 
 def _sits_under(kind: str, snap: dict[str, Any]) -> str | None:

@@ -48,7 +48,8 @@ import {
   type DataTableColumn,
 } from '../components/ui'
 import { useDriveChoice } from '../hooks/useDriveChoice'
-import { useFeatures } from '../hooks/useFeatures'
+import { useFeatures, useHostedFiles } from '../hooks/useFeatures'
+import { UnreachableList } from '../components/files/UnreachableList'
 import { usePermissions } from '../hooks/useMe'
 import {
   useRelease,
@@ -84,6 +85,7 @@ export default function ReleasePage() {
   const [saving, setSaving] = useState(false)
   const [moving, setMoving] = useState(false)
   const features = useFeatures()
+  const hosted = useHostedFiles()
   const flow = useFlow()
   const allowed = can('release')
   const yanked = !!release?.yanked_at
@@ -107,11 +109,15 @@ export default function ReleasePage() {
                       label: 'Copy to another project…',
                       onClick: () => setSaving(true),
                     },
-                    {
-                      label: 'Change storage drive…',
-                      onClick: () => setMoving(true),
-                      disabled: !features.has('volumes'),
-                    },
+                    ...(hosted
+                      ? []
+                      : [
+                          {
+                            label: 'Change storage drive…',
+                            onClick: () => setMoving(true),
+                            disabled: !features.has('volumes'),
+                          },
+                        ]),
                   ]),
               {
                 label: allowed
@@ -466,6 +472,7 @@ function Verify({ name }: { name: string }) {
  * enough), with the records beside the files in the form civex reads back. */
 function Files({ release }: { release: Release }) {
   const flow = useFlow()
+  const hosted = useHostedFiles()
   const plan = useReleaseFilePlan(release.name)
   const [exporting, setExporting] = useState(false)
   const [method, setMethod] = useState<Method>('link')
@@ -495,13 +502,20 @@ function Files({ release }: { release: Release }) {
         <Spinner />
       ) : (
         <div className="space-y-1 text-sm">
-          <p>{p.summary}</p>
-          {p.unavailable.map((g) => (
-            <p key={g.volume ?? '-'} className="text-attention">
-              {pluralise(g.files, 'file')} on {g.volume ?? 'no drive here'}:{' '}
-              {g.reason} {g.fix}
-            </p>
-          ))}
+          {hosted ? (
+            // No drives to name on a host.
+            <UnreachableList groups={p.unavailable} />
+          ) : (
+            <>
+              <p>{p.summary}</p>
+              {p.unavailable.map((g) => (
+                <p key={g.volume ?? '-'} className="text-attention">
+                  {pluralise(g.files, 'file')} on {g.volume ?? 'no drive here'}:{' '}
+                  {g.reason} {g.fix}
+                </p>
+              ))}
+            </>
+          )}
         </div>
       )}
       {exporting && (

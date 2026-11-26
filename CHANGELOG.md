@@ -6,6 +6,22 @@ One section per tagged release: `## vX.Y.Z — <label> (YYYY-MM-DD)`. Every
 PRODUCTION_READINESS.md §4a). A pre-release tag (`v1.3.0rc1`) may use the
 final version's entry or `## Unreleased` instead of one of its own. The version itself has one source of truth,
 
+- **Sync: failed joins are counted per project.** The limit on failed joins and
+  sign-ins was one per process, keyed by caller address alone, so on a host
+  serving many projects junk joins on one made joins on another answer 429
+  (and callers behind one proxy address locked out every project). It is now
+  counted per project and caller; the limit is unchanged.
+- **Sync: a device's push bookkeeping is written in bulk.** After a push the
+  device recorded each answer (and, when its own changes came back in the feed,
+  each number) with a read and a write per change; it now writes them together.
+  Same values recorded, same order of effects; a 70k-record bulk delete pushes
+  about 35% faster end to end.
+- **Sync: a change already true is dropped, not written again.** A pushed delete
+  of a record already deleted on the authority, a restore of one already live,
+  or an edit or move that leaves a live record as it is, is acknowledged and
+  writes nothing (no second history entry, no settling entry), and a run of
+  deletes or restores that overlaps what is already done stays one bulk write of
+  the rest.
 - **Sync: a record that breaks a data rule is taken in and flagged.** A required
   field left empty, or a value outside its field's restrictions (min/max,
   choices, length, date range or precision), no longer refuses a pushed record:
@@ -38,6 +54,18 @@ from the next tag forward.
 
 - Importing a bundle no longer fails with "from_filename: there is no field '…'" when a field's `from_filename` rule reads a file field listed after it. The rule is now set once every field exists, as `filename_template` already was. This also fixes copying a hub release.
 
+### Changed
+
+- **Files on a host have no drives.** Where a host offers accounts and no drives
+  (a hub), the Files tab, a record's files and exports show no drive, volume or
+  storage location, and no way to change a drive, free up space or manage
+  folders. A file that isn't there says "Not on the hub yet. It will appear
+  when the device that added it next syncs." (naming the device when known); one
+  that can't be reached right now says "Temporarily unavailable. Try again
+  shortly." Moving files between drives (`/file-access/gather`, a release's
+  `files/gather`) answers 501 where there are no drives. Desktop and self-hosted
+  projects are unchanged.
+
 ### Fixed
 
 - **Sync: deleting several records that have children in one call no longer
@@ -60,6 +88,13 @@ from the next tag forward.
   a time as before, with the same answers and rows. Settling a record's delete
   or restore no longer discards everything the push holds. Measured on
   PostgreSQL, authority only, about 0.3-0.4 ms per record instead of 17-19 ms.
+- **Sync: a device applies a bulk delete, restore or edit from the feed as a set.**
+  A pulled page's runs of like record changes (deletes, restores, makes, edits)
+  are written in a few statements for the run (one history insert, one
+  `UPDATE ... IN` per stamp for deletes, one read of the records) instead of
+  six to eight per change; a change that is not plain (held, ours, repeated,
+  moving a record, arriving) goes one at a time in its place. Results, holds
+  and conflicts are unchanged. `benchmarks/bench_bulk_pull.py` measures it.
 - **Sync: a refused schema or field change is kept and marked, not put back.**
   When the authority's data or structure refuses a schema or field change (code
   `data`), it answers `rejected`, writes nothing to the feed, and refuses the

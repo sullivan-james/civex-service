@@ -235,3 +235,99 @@ def test_serve_sync_only_refuses_a_project_that_is_not_an_authority(project_dir)
     result = CliRunner().invoke(app, ["serve", "--sync-only"])
     assert result.exit_code == 1
     assert "civex sync authority enable" in result.output
+
+
+def _asking(db_url: str, host: str = "10.0.0.1"):
+    """A request for a project on `db_url`, from `host`."""
+    from types import SimpleNamespace
+
+    project = SimpleNamespace(config=SimpleNamespace(db=SimpleNamespace(url=db_url)))
+    return SimpleNamespace(
+        client=SimpleNamespace(host=host), state=SimpleNamespace(project=project)
+    )
+
+
+def test_two_projects_do_not_share_a_lockout():
+    from fastapi import HTTPException
+
+    from civex.server.routers.sync_peer import _Attempts
+
+    attempts = _Attempts()
+    a, b = (
+        _asking("postgresql://h/db?search_path=repo_a"),
+        _asking("postgresql://h/db?search_path=repo_b"),
+    )
+    for _ in range(_Attempts.LIMIT):
+        attempts.failed(a)
+    with pytest.raises(HTTPException) as locked:
+        attempts.check(a)
+    assert locked.value.status_code == 429
+    attempts.check(b)  # same caller address, another project: not slowed
+    attempts.failed(b)
+    attempts.check(b)
+
+
+def test_one_project_still_locks_a_caller_out_and_others_callers_are_free():
+    from fastapi import HTTPException
+
+    from civex.server.routers.sync_peer import _Attempts
+
+    attempts = _Attempts()
+    url = "postgresql://h/db?search_path=repo_a"
+    for _ in range(_Attempts.LIMIT):
+        attempts.failed(_asking(url))
+    with pytest.raises(HTTPException):
+        attempts.check(_asking(url))
+    attempts.check(_asking(url, host="10.0.0.2"))
+
+
+def test_projects_sharing_one_engine_are_still_counted_apart(tmp_path):
+    """A host hands every project one engine: only the settings' URL (with the
+    project's schema) tells them apart."""
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+    from sqlalchemy import create_engine
+
+    from civex.config import Config, DBConfig
+    from civex.project import Project
+    from civex.server.routers.sync_peer import _Attempts
+
+    shared = create_engine("sqlite://")
+
+    def project(schema: str) -> Project:
+        url = f"postgresql://u:s3cret@h/db?options=-csearch_path%3D{schema}"
+        cfg = Config(project_root=tmp_path, db=DBConfig(url=url))
+        return Project(config=cfg, config_store=SimpleNamespace(), engine=shared)
+
+    def asking(schema: str):
+        return SimpleNamespace(
+            client=SimpleNamespace(host="10.0.0.1"),
+            state=SimpleNamespace(project=project(schema)),
+        )
+
+    attempts = _Attempts()
+    for _ in range(_Attempts.LIMIT):
+        attempts.failed(asking("repo_a"))
+    with pytest.raises(HTTPException):
+        attempts.check(asking("repo_a"))
+    attempts.check(asking("repo_b"))
+    attempts.failed(asking("repo_b"))
+    assert not any("s3cret" in str(k) for k in attempts._failed)
+
+
+def test_the_failed_attempts_stay_bounded_and_expire(monkeypatch):
+    from civex.server.routers import sync_peer
+    from civex.server.routers.sync_peer import _Attempts
+
+    attempts = _Attempts()
+    monkeypatch.setattr(_Attempts, "MAX_KEYS", 100)
+    for n in range(1000):
+        attempts.failed(_asking(f"postgresql://h/db?schema=repo_{n}"))
+        assert len(attempts._failed) <= 100
+    # what expired goes, even when nobody asks about it again
+    now = sync_peer.time.monotonic()
+    monkeypatch.setattr(sync_peer.time, "monotonic", lambda: now + 3600)
+    for n in range(1000, 1012):
+        attempts.failed(_asking(f"postgresql://h/db?schema=repo_{n}"))
+    assert len(attempts._failed) == 12  # (only the new ones are left)

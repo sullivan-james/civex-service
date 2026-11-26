@@ -14,11 +14,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import (
+    event,
     BigInteger,
     String,
     Text,
     Uuid,
     and_,
+    bindparam,
+    case,
     cast,
     delete,
     exists,
@@ -171,10 +174,15 @@ class LocalSyncRepository:
         self._stale = False
         self._held: list[Record] = []
         self._meta_held: SyncMeta | None = None
+        # ids `_told` set `deleted_at` of in the session: a rolled-back savepoint
+        # does not expire what `set_committed_value` set, so they are expired too
+        self._told_ids: set[uuid.UUID] = set()
+        event.listen(session, "after_commit", lambda _s: self._told_ids.clear())
 
     def rollback(self) -> None:
         """Drop what the session holds that was not committed."""
         self._s.rollback()
+        self._told_ids.clear()
 
     @contextmanager
     def savepoint(self) -> Iterator[None]:
@@ -1147,6 +1155,11 @@ class LocalSyncRepository:
         for record in self._held:
             if record in self._s:  # not one the session has let go of
                 self._s.expire(record)
+        if self._told_ids:
+            for obj in list(self._s.identity_map.values()):
+                if isinstance(obj, Record) and obj.id in self._told_ids:
+                    self._s.expire(obj)
+            self._told_ids.clear()
         if self._meta_held is not None and self._meta_held in self._s:
             self._s.expire(self._meta_held)
         if self._absent is not None:
@@ -1282,8 +1295,9 @@ class LocalSyncRepository:
     def soft_delete_records(self, items: list[tuple[uuid.UUID, datetime]]) -> None:
         """`soft_delete` of each of these records, which are live and have no
         record to take with them: one UPDATE per distinct stamp and chunk of
-        ids. Not an edit: each keeps the date it was last changed. The records
-        this push holds are told, so they are not read again."""
+        ids. A record already deleted ends deleted at the stamp, one not here is
+        left. Not an edit: each keeps the date it was last changed. The records
+        the session holds are told, so they are not read again."""
         by_stamp: dict[datetime, list[uuid.UUID]] = {}
         for rid, stamp in items:
             by_stamp.setdefault(stamp, []).append(rid)
@@ -1315,7 +1329,9 @@ class LocalSyncRepository:
     def _told(self, stamps: dict[uuid.UUID, datetime | None]) -> None:
         """Records a bulk UPDATE just deleted or restored: the ones the session
         has are set to say so (no read), so nothing else of what the push holds
-        is stale and `forget_held` is not needed."""
+        is stale and `forget_held` is not needed (a rolled-back savepoint expires
+        them again, see `forget_held`)."""
+        self._told_ids.update(stamps)
         for record in list(self._s.identity_map.values()):
             if isinstance(record, Record) and record.id in stamps:
                 set_committed_value(record, "deleted_at", stamps[record.id])
@@ -1374,6 +1390,166 @@ class LocalSyncRepository:
                 for e, seq in rows
             ],
         )
+
+    # ------------------------------------------------------------------
+    # A pulled page of record changes, applied as a set (`SyncService._run`)
+    # ------------------------------------------------------------------
+
+    def existing_entry_ids(self, ids: list[uuid.UUID]) -> set[uuid.UUID]:
+        """Which of these history entries are here: `has_entry` for many."""
+        found: set[uuid.UUID] = set()
+        for at in range(0, len(ids), 500):
+            found.update(
+                self._s.scalars(
+                    select(AuditLog.id).where(AuditLog.id.in_(ids[at : at + 500]))
+                )
+            )
+        return found
+
+    def record_entries_after(self, wanted: dict[uuid.UUID, int]) -> set[uuid.UUID]:
+        """Of these records (each with the number of the change that is arriving
+        for it), the ones that already have a numbered change of their own from
+        that number on: what `numbered_entries` would read, for many at once.
+        Those are applied one at a time (the steps after the arriving one are
+        taken again after it)."""
+        if not wanted:
+            return set()
+        low = min(wanted.values())
+        ids = list(wanted)
+        found: set[uuid.UUID] = set()
+        for at in range(0, len(ids), 500):
+            rows = self._s.execute(
+                select(AuditLog.entity_id, AuditLog.hub_seq).where(
+                    AuditLog.entity_type == "record",
+                    AuditLog.entity_id.in_(ids[at : at + 500]),
+                    AuditLog.hub_seq >= low,
+                    AuditLog.apply_state.notin_(("superseded", "arriving", "arrhold")),
+                )
+            )
+            found.update(i for i, seq in rows if seq is not None and seq >= wanted[i])
+        return found
+
+    def insert_pulled_entries(self, entries: list[SyncEntry]) -> None:
+        """`insert_entry` (as applied, synced, each with its number) for many, in
+        a few statements: the history rows of changes from the authority that
+        are applied here at once. Their batches are made once."""
+        if not entries:
+            return
+        self._s.flush()
+        conn = self._s.connection()
+        batches = {e.batch.id: e.batch for e in entries if e.batch is not None}
+        if batches:
+            ids = list(batches)
+            have = set(
+                self._s.scalars(select(AuditBatch.id).where(AuditBatch.id.in_(ids)))
+            )
+            fresh = [
+                {
+                    "id": b.id,
+                    "kind": b.kind,
+                    "label": b.label,
+                    "ref": b.ref,
+                    "created_at": _parse(b.created_at),
+                }
+                for i, b in batches.items()
+                if i not in have
+            ]
+            if fresh:
+                conn.execute(insert(AuditBatch), fresh)
+        conn.execute(
+            insert(AuditLog),
+            [
+                {
+                    "id": e.id,
+                    "action": e.action,
+                    "entity_type": e.entity_type,
+                    "entity_id": e.entity_id,
+                    "old_data": e.old_data,
+                    "new_data": e.new_data,
+                    "delta": e.delta,
+                    "format": 2 if e.delta is not None else 1,
+                    "op_id": uuid.UUID(e.op) if e.op else None,
+                    "timestamp": _parse(e.timestamp),
+                    "batch_id": e.batch.id if e.batch is not None else None,
+                    "actor": e.actor,
+                    "device": e.device,
+                    "device_id": uuid.UUID(e.device_id) if e.device_id else None,
+                    "hlc": e.hlc,
+                    "hub_seq": e.hub_seq,
+                    "sync_state": "synced",
+                    "apply_state": "applied",
+                }
+                for e in entries
+            ],
+        )
+
+    def record_rows(
+        self, ids: list[uuid.UUID]
+    ) -> tuple[dict[uuid.UUID, Any], dict[uuid.UUID, dict[str, Any]]]:
+        """The records of these ids that are here (deleted ones too), and each
+        as `snapshot` gives it, in one query."""
+        rows: dict[uuid.UUID, Any] = {}
+        for at in range(0, len(ids), 500):
+            rows.update(
+                {
+                    r.id: r
+                    for r in self._s.query(Record).filter(
+                        Record.id.in_(ids[at : at + 500])
+                    )
+                }
+            )
+        listed = list(rows.values())
+        return rows, {
+            r.id: d for r, d in zip(listed, self._dicts("record", listed), strict=True)
+        }
+
+    def apply_record_states(
+        self,
+        rows: dict[uuid.UUID, Any],
+        states: list[tuple[uuid.UUID, dict[str, Any]]],
+    ) -> None:
+        """What `SyncApplier.apply_state` does for each of these records (the
+        row from `record_rows`, or None), for all of them. A record that is not
+        here is made; one that is here is set field by field the way
+        `apply_snapshot` sets it (only what differs is written, so the
+        database's own triggers see what they would see for one at a time)."""
+        made: list[dict[str, Any]] = []
+        for rid, state in states:
+            row = rows.get(rid)
+            if row is None:
+                made.append(state)
+                continue
+            values = record_values(state)
+            was, now = row.deleted_at is not None, bool(state.get("deleted_at"))
+            if was and not now:
+                row.deleted_at = None
+                flag_modified(row, "updated_at")
+            elif now and not was:
+                stamp = datetime.fromisoformat(str(state["deleted_at"]))
+                row.deleted_at = (
+                    stamp if stamp.tzinfo else stamp.replace(tzinfo=timezone.utc)
+                )
+                flag_modified(row, "updated_at")
+            for name, value in values.items():
+                setattr(row, name, value)
+            if "updated_at" in values:
+                flag_modified(row, "updated_at")
+        self._s.flush()
+        self.insert_records(made)
+
+    def forget_records_lacks(self, record_ids: list[uuid.UUID]) -> None:
+        """`forget_record_lacks` for many records."""
+        shas: set[str] = set()
+        for at in range(0, len(record_ids), 500):
+            shas.update(
+                self._s.scalars(
+                    select(FileReference.sha256).where(
+                        FileReference.record_id.in_(record_ids[at : at + 500])
+                    )
+                )
+            )
+        if shas:
+            self.forget_lacks(shas)
 
     def save_ops(
         self,
@@ -2145,19 +2321,45 @@ class LocalSyncRepository:
         )
 
     def mark_sent(self, results: list[OpResult]) -> None:
+        """Record what the authority answered for each change sent, as
+        answering them one at a time would (a change answered twice keeps what
+        each said, the later winning; one not held here is skipped), written
+        together."""
+        merged: dict[uuid.UUID, dict[str, Any]] = {}
         for result in results:
-            row = self._s.get(AuditLog, result.op_id)
-            if row is None:
-                continue
             if result.status == "rejected":
-                row.sync_state = "rejected"
+                values: dict[str, Any] = {"sync_state": "rejected"}
             elif result.status != "deferred":
-                row.sync_state = "synced"
+                values = {"sync_state": "synced"}
                 if result.hub_seq is not None:
-                    row.hub_seq = result.hub_seq
+                    values["hub_seq"] = result.hub_seq
                 if result.status in ("merged", "conflict"):
-                    row.apply_state = "superseded"
-        self._s.flush()
+                    values["apply_state"] = "superseded"
+            else:
+                continue
+            merged.setdefault(result.op_id, {}).update(values)
+        shapes: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+        for op_id, values in merged.items():
+            shapes.setdefault(tuple(sorted(values)), []).append(
+                {"b_id": op_id, **{f"b_{k}": v for k, v in values.items()}}
+            )
+        table: Any = AuditLog.__table__
+        for keys, batch in shapes.items():
+            self._s.execute(
+                update(table)
+                .where(table.c.id == bindparam("b_id"))
+                .values({k: bindparam(f"b_{k}") for k in keys})
+                .execution_options(synchronize_session=False),
+                batch,
+            )
+        if shapes:
+            self._expire_entries()
+
+    def _expire_entries(self) -> None:
+        """History rows this session holds are stale after a bulk write."""
+        for obj in list(self._s.identity_map.values()):
+            if isinstance(obj, AuditLog):
+                self._s.expire(obj)
 
     def forget_numbers(self) -> None:
         """Clear the numbers another authority gave this project's history (it
@@ -2304,6 +2506,34 @@ class LocalSyncRepository:
             if row.sync_state == "pending":
                 row.sync_state = "synced"
             self._s.flush()
+
+    def mark_seqs(self, items: list[tuple[uuid.UUID, int, str | None]]) -> None:
+        """`mark_seq` for each of these (id, number, device), in one statement
+        (a change given twice keeps the later number, and a device once named)."""
+        merged: dict[uuid.UUID, dict[str, Any]] = {}
+        for entry_id, seq, device in items:
+            row = merged.setdefault(entry_id, {"b_seq": seq, "b_dev": None})
+            row["b_seq"] = seq
+            if device:
+                row["b_dev"] = device
+        if not merged:
+            return
+        table: Any = AuditLog.__table__
+        self._s.execute(
+            update(table)
+            .where(table.c.id == bindparam("b_id"))
+            .values(
+                hub_seq=bindparam("b_seq"),
+                device=func.coalesce(bindparam("b_dev"), table.c.device),
+                sync_state=case(
+                    (table.c.sync_state == "pending", "synced"),
+                    else_=table.c.sync_state,
+                ),
+            )
+            .execution_options(synchronize_session=False),
+            [{"b_id": i, **v} for i, v in merged.items()],
+        )
+        self._expire_entries()
 
     def latest_hlc(self) -> str | None:
         return self._s.query(func.max(AuditLog.hlc)).scalar()

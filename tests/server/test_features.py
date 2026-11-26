@@ -304,3 +304,15 @@ def test_a_local_import_installs_code_as_before(client: TestClient):
     assert body["plugins"] == 1 and body["workflows"] == 1
     assert body["plugins_dropped"] == 0 and body["workflows_dropped"] == 0
     assert client.get("/api/remote").status_code == 200
+
+
+def test_moving_files_between_drives_answers_501_where_there_are_none(
+    hosted: TestClient,
+):
+    detail = f.unavailable_message(f.VOLUMES)
+    gather = hosted.post("/api/file-access/gather", json={"volume": "x"})
+    assert gather.status_code == 501
+    assert gather.json()["detail"] == detail
+    release = hosted.post("/api/releases/r/files/gather", json={"volume": "x"})
+    assert release.status_code == 501
+    assert release.json()["detail"] == detail

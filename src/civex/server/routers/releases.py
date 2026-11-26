@@ -30,7 +30,7 @@ from civex.domain.file_access import (
     LinksNotPossibleError,
     safe_segment,
 )
-from civex.domain.features import OPEN_FOLDER, SERVER_PATH_EXPORT
+from civex.domain.features import OPEN_FOLDER, SERVER_PATH_EXPORT, VOLUMES
 from civex.server.deps import get_ctx, reads_whole_project, requires
 from civex.server.downloads import new_temp_dir, serve, temp_paths
 from civex.server.models import ReleaseScopeRequest
@@ -540,7 +540,11 @@ def zip_release_files(
             return serve(download.path, download.media_type, download.filename, scratch)
 
 
-@router.post("/releases/{name}/files/gather", status_code=202)
+@router.post(
+    "/releases/{name}/files/gather",
+    status_code=202,
+    dependencies=[requires(VOLUMES)],
+)
 def gather_release_files(
     name: str, body: ReleaseGatherRequest, ctx: AppContext = Depends(get_ctx)
 ):

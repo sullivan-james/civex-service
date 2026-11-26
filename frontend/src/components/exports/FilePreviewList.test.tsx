@@ -1,7 +1,15 @@
-import { render, screen, within } from '@testing-library/react'
+import { render as rtlRender, screen, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactElement } from 'react'
 import { describe, expect, it } from 'vitest'
 import type { FilePreview } from '../../api/fileAccess'
 import { FilePreviewList } from './FilePreviewList'
+
+// The components read what the server offers (a query), so they need a client.
+const render = (ui: ReactElement) =>
+  rtlRender(
+    <QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>,
+  )
 
 const preview = (over: Partial<FilePreview> = {}): FilePreview =>
   ({
