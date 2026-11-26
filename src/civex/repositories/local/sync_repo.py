@@ -287,8 +287,8 @@ class LocalSyncRepository:
         )
 
     def _referenced_unordered(self, after: str, unconfirmed: bool):  # type: ignore[no-untyped-def]
-        """The references after `after` (optionally only those the authority
-        hasn't confirmed), one row each, ungrouped: for a page (grouped,
+        """The references after `after` (optionally only those this computer
+        owes the authority: stored here, not confirmed there), one row each, ungrouped: for a page (grouped,
         ordered and limited) or an aggregate (grouped, nothing else)."""
         sha = FileReference.sha256
         # An EXISTS per candidate row, not a join: the planner can then walk
@@ -302,8 +302,14 @@ class LocalSyncRepository:
             sha > after, FileReference.record_id.is_not(None) & live_owner
         )
         if unconfirmed:
+            # Owed by this computer: the authority hasn't confirmed it AND this
+            # project has stored it (an inventory row on some drive). A file
+            # that only arrived by a pulled record was never here to send: it
+            # is fetched, or it is the authority's to receive from the device
+            # that added it (`files_lacked`).
             query = query.where(
-                ~select(ServerFile.sha256).where(ServerFile.sha256 == sha).exists()
+                ~select(ServerFile.sha256).where(ServerFile.sha256 == sha).exists(),
+                select(StoredObject.sha256).where(StoredObject.sha256 == sha).exists(),
             )
         return query
 
@@ -598,6 +604,9 @@ class LocalSyncRepository:
                 FileReference.sha256.label("sha"),
                 # PostgreSQL has no min(uuid): pick one as text, cast back.
                 cast(func.min(cast(Record.dataset_id, String)), Uuid).label("cid"),
+                # When a record citing it last changed (for telling a file
+                # still arriving from one that has stayed missing).
+                func.max(Record.updated_at).label("latest"),
             )
             .outerjoin(Record, Record.id == FileReference.record_id)
             .outerjoin(stored, stored.c.sha == FileReference.sha256)
@@ -645,6 +654,23 @@ class LocalSyncRepository:
     ) -> int:
         q = self._not_here(collections, lacks)
         return int(self._s.execute(select(func.count()).select_from(q)).scalar_one())
+
+    def count_files_lacked(self, since: datetime | None) -> tuple[int, int]:
+        """(arriving, missing): the files live records here cite that no drive
+        here holds and the authority said it hasn't got (less those a person
+        ignored), split by whether a record citing one changed since `since`
+        (the device that added it may still be uploading: arriving) or not
+        (missing). `since` None: all are missing."""
+        q = self._not_here(None, "only")
+        total = int(self._s.execute(select(func.count()).select_from(q)).scalar_one())
+        if since is None:
+            return 0, total
+        new = int(
+            self._s.execute(
+                select(func.count()).select_from(q).where(q.c.latest >= since)
+            ).scalar_one()
+        )
+        return new, total - new
 
     def added_by(self, shas: list[str]) -> dict[str, str | None]:
         """Which device added each of these files (its name, as the authority

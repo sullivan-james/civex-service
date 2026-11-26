@@ -105,7 +105,7 @@ class SyncConfig:
     # How often the background sync looks for changes, in seconds. 0 = never:
     # it syncs only when asked (Sync now, `civex sync`).
     interval_seconds: int = 60
-    # Serving: how long a file cited by a pushed record counts as `arriving`
+    # How long a file cited by a pushed (or pulled) record counts as `arriving`
     # (its device is still uploading) before it is reported missing, in hours.
     # 0: never arriving, a file not here is missing at once.
     arriving_hours: int = 24
@@ -113,7 +113,7 @@ class SyncConfig:
     # every file the project's records cite in the background, a few at a time;
     # "opened" fetches one only when it is opened or exported (for a computer
     # short of space). Either way a file is fetched on demand.
-    download_files: str = "all"
+    download_files: str = "opened"
     # Per collection (by id), overriding `download_files` for its files: "keep"
     # (a copy stays on this computer, fetched in the background) or "opened"
     # (fetched when opened or exported; its copies can be removed to free
@@ -569,7 +569,7 @@ def parse_config(data: dict, root: Path) -> Config:
         download_files=(
             str(sync_data.get("download_files"))
             if sync_data.get("download_files") in DOWNLOAD_MODES
-            else "all"
+            else "opened"
         ),
         collection_files={
             str(cid): str(mode)
@@ -752,7 +752,7 @@ def render_config(config: Config) -> str:
         or sync.paused
         or sync.interval_seconds != 60
         or sync.arriving_hours != 24
-        or sync.download_files != "all"
+        or sync.download_files != "opened"
         or sync.library != "workflows"
     ):
         lines.append("\n[sync]\n")
@@ -766,7 +766,7 @@ def render_config(config: Config) -> str:
             lines.append(f"interval_seconds = {sync.interval_seconds}\n")
         if sync.arriving_hours != 24:
             lines.append(f"arriving_hours = {sync.arriving_hours}\n")
-        if sync.download_files != "all":
+        if sync.download_files != "opened":
             lines.append(f"download_files = {_tv(sync.download_files)}\n")
         if sync.library != "workflows":
             lines.append(f"library = {_tv(sync.library)}\n")

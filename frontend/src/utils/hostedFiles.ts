@@ -14,13 +14,21 @@ export function addedOn(reason: string | null | undefined): string | null {
   return m ? m[1] : null
 }
 
-/** A file that isn't on the hub: where the data says which device added it,
- * that device is the one that has to upload it. */
+/** A file still arriving (within the wait for its device to upload it): where
+ * the data says which device added it, that device is the one to upload it. */
 export function notOnHub(reason?: string | null): string {
   const device = addedOn(reason)
   return device
     ? `Not on the hub yet. It will appear when ‘${device}’ next syncs.`
     : 'Not on the hub yet. It will appear when the device that added it next syncs.'
+}
+
+/** A file past the wait: it is missing. */
+export function missingOnHub(reason?: string | null): string {
+  const device = addedOn(reason)
+  return device
+    ? `Missing. It was added on ‘${device}’ and never uploaded.`
+    : 'Missing. The device that added it never uploaded it.'
 }
 
 export type HostedFileState = 'ok' | 'missing' | 'unavailable' | 'arriving'
@@ -45,7 +53,8 @@ export const HOSTED_STATE_TEXT: Record<
   string
 > = {
   unavailable: TEMPORARILY_UNAVAILABLE,
-  arriving: 'Uploading to the hub.',
+  arriving:
+    'Not on the hub yet. It will appear when the device that added it next syncs.',
 }
 
 /** The sentence for a hosted file's state; null when nothing is wrong. */
@@ -54,6 +63,6 @@ export function hostedMessage(
   reason?: string | null,
 ): string | null {
   if (state === 'ok') return null
-  if (state === 'missing') return notOnHub(reason)
+  if (state === 'missing') return missingOnHub(reason)
   return HOSTED_STATE_TEXT[state]
 }

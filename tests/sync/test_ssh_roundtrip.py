@@ -90,6 +90,7 @@ def test_files_travel_both_ways_over_ssh(project, lab):
     _, invite2 = authority.device_keys.invite("tablet")
     authority.commit()
     tablet = project("tablet")
+    tablet.config.sync.download_files = "all"
     tablet.sync_svc.connect(url, invite2)
     tablet.commit()
     tablet.sync_svc.fetch_files()

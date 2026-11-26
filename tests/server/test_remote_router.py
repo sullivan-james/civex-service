@@ -141,12 +141,12 @@ def test_files_on_this_computer_per_collection(client, make_collection):
     make_collection("study")
     rows = client.get("/api/remote/files").json()
     assert [(r["name"], r["mode"], r["chosen"]) for r in rows] == [
-        ("study", "keep", False)
+        ("study", "opened", False)
     ]
-    rows = client.patch("/api/remote/files/study", json={"mode": "opened"}).json()
-    assert (rows[0]["mode"], rows[0]["chosen"]) == ("opened", True)
+    rows = client.patch("/api/remote/files/study", json={"mode": "keep"}).json()
+    assert (rows[0]["mode"], rows[0]["chosen"]) == ("keep", True)
     rows = client.patch("/api/remote/files/study", json={"mode": None}).json()
-    assert (rows[0]["mode"], rows[0]["chosen"]) == ("keep", False)
+    assert (rows[0]["mode"], rows[0]["chosen"]) == ("opened", False)
     assert (
         client.patch("/api/remote/files/nope", json={"mode": "keep"}).status_code == 404
     )

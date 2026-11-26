@@ -135,13 +135,13 @@ def test_ignoring_silences_the_warning_and_survives_a_restart(study):
     laptop, _, first, _ = study
     sha = _cite_lost_file(laptop, first, b"one")
     laptop.sync_svc.sync()
-    laptop.sync_svc.send_files()
-    assert laptop.sync_svc.status().files_waiting.missing == 1
+    laptop.sync_svc.missing_files(with_groups=False)  # asks the server
+    laptop.config.sync.arriving_hours = 0
+    assert laptop.sync_svc.files_lacked() == (0, 1)
 
     assert laptop.sync_svc.ignore_missing([sha]) == 1
     status = laptop.sync_svc.status()
-    assert status.files_ignored == 1
-    assert status.files_waiting is None or status.files_waiting.missing == 0
+    assert status.files_ignored == 1 and status.files_missing == 0
     report = laptop.sync_svc.missing_files()
     assert report.shas == [] and report.ignored == [sha]
     # The references stay.

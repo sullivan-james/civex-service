@@ -39,7 +39,7 @@ describe('files and the server, as their own task', () => {
     expect(missing.title).toBe('1 file missing')
     expect(missing.tone).toBe('attention')
     expect(missing.detail).toBe(
-      'It isn’t on this computer, and the server hasn’t got it, so nothing here can send it.',
+      'It is no longer on this computer, and the server hasn’t got it.',
     )
     expect(missing.actions?.[0]).toMatchObject({
       label: 'See which',
@@ -99,5 +99,62 @@ describe('files and the server, as their own task', () => {
     ).toBe(
       '2 files will go up in the background. 1 file is on the drive “a”, which can’t be read; it goes once it is plugged in.',
     )
+  })
+})
+
+describe('a blank copy only downloads', () => {
+  it('says files the server lacks are the other device’s, never ours to send', () => {
+    const tasks = serverFilesTasks(
+      status({ files_arriving: 2, files_missing: 1 }),
+      send,
+    )
+    expect(tasks.map((t) => t.title)).toEqual([
+      '2 files aren’t on the server yet',
+      '1 file missing',
+    ])
+    expect(tasks[0].detail).toBe(
+      'The device that added them hasn’t uploaded them.',
+    )
+    const said = JSON.stringify(tasks)
+    expect(said).not.toMatch(/nothing here can send|Ignore|Send now/)
+  })
+
+  it('holds the counts back until the copy is done', () => {
+    const tasks = serverFilesTasks(
+      status({
+        files_arriving: 2,
+        files_missing: 1,
+        progress: { phase: 'copying', done: 5, total: 100, kind: 'record' },
+      }),
+      send,
+    )
+    expect(tasks).toEqual([])
+  })
+
+  it('offers to download every file once, with how many', () => {
+    const keepAll = { disabled: false, onClick: vi.fn(), bytes: 2_000_000_000 }
+    const [offer] = serverFilesTasks(
+      status({
+        download_files: 'opened',
+        files_not_here: 3854,
+        serving: false,
+      }),
+      send,
+      undefined,
+      keepAll,
+    )
+    expect(offer.actions?.[0].label).toMatch(
+      /^Download all files \(3,854 files, [\d.]+ GB\)$/,
+    )
+    offer.actions?.[0].onClick?.()
+    expect(keepAll.onClick).toHaveBeenCalled()
+    expect(
+      serverFilesTasks(
+        status({ download_files: 'all', files_not_here: 3854 }),
+        send,
+        undefined,
+        keepAll,
+      ),
+    ).toEqual([])
   })
 })

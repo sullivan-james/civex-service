@@ -147,3 +147,30 @@ def test_a_refused_change_does_not_make_a_file_arrive(pair, authority):
 
 def _scan(laptop, record):
     return laptop.record_svc.get(str(record.id)).data["scan"]
+
+
+def test_the_inventory_counts_arriving_and_missing_apart(pair, authority):
+    """What a host's Files page leads with: how many files are stored, arriving
+    (within `sync.arriving_hours`) and missing, and which records cite each."""
+    from civex.domain.file_access import FileSelection
+
+    laptop, _, record = pair
+    _cite(laptop, record, b"one")
+    laptop.sync_svc.sync()
+    sel = FileSelection(
+        query=RecordQuery(), record_ids=None, fields=["scan"], base=None
+    )
+    svc = authority.file_access_svc
+
+    def kinds():
+        return {p.kind: p.files for p in svc.listing(sel).summary}
+
+    assert kinds() == {"arriving": 1}
+    listed = svc.listing(sel)
+    (item,) = listed.items
+    assert [u.record_id for u in listed.uses[f"{item.sha256}@"]] == [str(record.id)]
+    _with_old_receipt(authority, days=2)
+    assert kinds() == {"missing": 1}
+    laptop.sync_svc.send_files()
+    authority.sync_repo._s.expire_all()
+    assert kinds() == {"drive": 1}

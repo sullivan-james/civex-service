@@ -331,10 +331,15 @@ class AsDevice:
         return call
 
 
-def device(project, authority, name, *, flaky: bool = False):
+def device(
+    project, authority, name, *, flaky: bool = False, download_files: str = "all"
+):
     """A new, empty project that syncs to `authority` over a loopback, invited
-    as `name`. The transport is the Flaky wrapper if asked."""
+    as `name`. The transport is the Flaky wrapper if asked. It keeps every file
+    (`download_files`) unless told otherwise, so a test of what a device does
+    with files need not choose; the product default is `opened`."""
     ctx = project(name)
+    ctx.config.sync.download_files = download_files
     _, invite = authority.device_keys.invite(name)
     authority.commit()
     ctx._holder = {}  # type: ignore[attr-defined]

@@ -5,7 +5,7 @@ import { hostedFilesNow, useHostedFiles } from '../../hooks/useFeatures'
 import {
   hostedMessage,
   hostedState,
-  notOnHub,
+  missingOnHub,
   TEMPORARILY_UNAVAILABLE,
 } from '../../utils/hostedFiles'
 import { useFileLocationDisplay } from '../../hooks/useFileLocationDisplay'
@@ -131,7 +131,7 @@ function DownloadLink({
             tone: 'attention',
             text:
               res.status === 404
-                ? notOnHub(body?.detail)
+                ? missingOnHub(body?.detail)
                 : TEMPORARILY_UNAVAILABLE,
           })
           return
@@ -284,10 +284,10 @@ function HostedChip({ file, name }: { file: FileLike; name: string }) {
   const full = hostedMessage(state, file.location?.reason) ?? ''
   const short =
     state === 'missing'
-      ? 'not on the hub yet'
+      ? 'missing'
       : state === 'unavailable'
         ? 'temporarily unavailable'
-        : 'uploading'
+        : 'not on the hub yet'
   return (
     <span title={full} role="status" aria-label={`${name}: ${full}`}>
       <Chip warning={state !== 'arriving'} className="shrink-0">

@@ -289,9 +289,17 @@ class SyncStatus:
     files_waiting: FilesWaiting | None = None
     # Missing files a person chose to stop being told about.
     files_ignored: int = 0
-    # files records here cite that the server said it hasn't got and no drive
-    # here holds (less the ignored): missing everywhere, not downloading
+    # Files records here cite that the server said it hasn't got and no drive
+    # here holds (less the ignored): not downloading, and not this computer's
+    # to send. Those a record changed lately cites are `files_arriving` (the
+    # device that added them may still be uploading, `sync.arriving_hours`);
+    # the rest, `files_missing`.
     files_missing: int = 0
+    files_arriving: int = 0
+    # Files records here cite that no drive here holds and that can be
+    # downloaded (the authority hasn't said it lacks them): what choosing to
+    # keep every file would fetch, whatever the collections' own settings.
+    files_not_here: int = 0
 
 
 @dataclass
@@ -442,6 +450,7 @@ class SyncService:
         meta = self._repo.meta()
         # Files the server hasn't got, and why (asked only when there are any).
         owed = self._repo.count_unconfirmed() if self.fetches_files else 0
+        arriving, missing = self.files_lacked()
         waiting = self.files_waiting() if owed else None
         return SyncStatus(
             configured=self.configured,
@@ -465,7 +474,9 @@ class SyncService:
             download_files=self._config.sync.download_files,
             files_ignored=len(self._repo.ignored_missing()),
             files_to_fetch=self.files_to_fetch(),
-            files_missing=self.files_missing(),
+            files_missing=missing,
+            files_arriving=arriving,
+            files_not_here=self.files_not_here(),
             files_to_send=(
                 waiting.ready + sum(n for _, n, _ in waiting.offline) if waiting else 0
             ),
@@ -3148,14 +3159,34 @@ class SyncService:
             return 0
         return self._repo.count_files_not_here(self._kept_collections(), "wait")
 
+    def files_lacked(self) -> tuple[int, int]:
+        """(arriving, missing): the files records here cite that no drive here
+        holds and the server said it hasn't got (less the ignored), so nothing
+        is downloading them (`civex files missing` lists them). Arriving: a
+        record citing one changed within `sync.arriving_hours`, so the device
+        that added it may still be uploading it; missing: the rest. They are
+        not this computer's to send: it never had them."""
+        if not self.fetches_files:
+            return 0, 0
+        hours = self._config.sync.arriving_hours
+        since = (
+            datetime.now(timezone.utc) - timedelta(hours=hours) if hours > 0 else None
+        )
+        return self._repo.count_files_lacked(since)
+
     def files_missing(self) -> int:
         """How many files records here cite that no drive here holds and the
-        server said it hasn't got: missing everywhere, so nothing is
-        downloading them (`civex files missing` lists them). Files a person
-        chose to ignore are not counted."""
+        server said it hasn't got, past the wait for the device that added
+        them to upload them (`files_lacked`)."""
+        return self.files_lacked()[1]
+
+    def files_not_here(self) -> int:
+        """How many files records here cite that no drive here holds and that
+        the authority hasn't said it lacks: what keeping every file would
+        download (the offer after joining)."""
         if not self.fetches_files:
             return 0
-        return self._repo.count_files_not_here(None, "only")
+        return self._repo.count_files_not_here(None)
 
     def collection_mode(self, collection_id: str) -> str:
         """Whether a collection's files are kept on this computer (`keep`) or

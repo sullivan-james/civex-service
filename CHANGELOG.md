@@ -6,6 +6,29 @@ One section per tagged release: `## vX.Y.Z — <label> (YYYY-MM-DD)`. Every
 PRODUCTION_READINESS.md §4a). A pre-release tag (`v1.3.0rc1`) may use the
 final version's entry or `## Unreleased` instead of one of its own. The version itself has one source of truth,
 
+## Unreleased
+
+- **Sync: a blank copy only downloads.** A computer that copies a project owes
+  the server only files it stored itself; files that came with the records it
+  pulled were counted as owed, so the copy flipped between "Copying the
+  project" and "Sending files to the server" (really asking about files it
+  never had) and blamed the computer for files the server lacks. They are now
+  never sent or asked about. Files the server doesn't hold are reported apart:
+  `files_arriving` (a record citing them changed within `sync.arriving_hours`:
+  the device that added them may still be uploading) and `files_missing`
+  (after that), neither this computer's to send. The status also carries
+  `files_not_here`, what keeping every file would download.
+- **Sync: files are fetched when opened by default.** `sync.download_files` now
+  defaults to `opened` (it was `all`); choosing `all` still downloads every
+  file in the background.
+- **Sync: file download progress counts the whole run.** The bytes and speed
+  shown while downloading restarted with each pass of the run, so a finished
+  download could show a few kilobytes beside hundreds of files.
+- **Files: a release plan counts the files the store lacks.**
+  `POST /releases/{name}/files/plan` carries `missing: {files, bytes}`, the
+  files neither reachable here nor fetchable from a server.
+- **Files: a file past the arriving window is "Missing"** in the app on a host;
+  "not uploaded yet" is said only while a file is still arriving.
 - **Sync: failed joins are counted per project.** The limit on failed joins and
   sign-ins was one per process, keyed by caller address alone, so on a host
   serving many projects junk joins on one made joins on another answer 429

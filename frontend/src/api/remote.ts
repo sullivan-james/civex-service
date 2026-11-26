@@ -16,6 +16,12 @@ export interface RemoteStatus {
   /** Files records here cite that nothing can supply: not on a drive here, and
    * the server said it hasn't got them either. Not downloading. */
   files_missing?: number
+  /** Like `files_missing`, but a record citing them changed lately: the
+   * device that added them may still be uploading them. */
+  files_arriving?: number
+  /** Files records here cite that aren't on this computer and can be
+   * downloaded: what keeping every file would fetch. */
+  files_not_here?: number
   /** Files records here cite that the server hasn't said it holds yet. */
   files_to_send: number
   /** Why those haven't gone; null when there are none. */

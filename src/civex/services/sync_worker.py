@@ -136,6 +136,10 @@ class SyncWorker:
         # progress shown (the number to fetch when it began, and done since).
         self._files_total = 0
         self._files_done = 0
+        # Bytes downloaded over the same run (every pass of it, not the last
+        # one alone) and the speed over them.
+        self._files_bytes = 0
+        self._files_rate = RateWindow()
         # The run of uploads under way, over as many passes as it takes, so
         # its bar carries on from pass to pass instead of starting again.
         self._send_run: _SendRun | None = None
@@ -152,6 +156,7 @@ class SyncWorker:
         read rather than after the first file has arrived."""
         if total > 0:
             self._files_total, self._files_done = total, 0
+            self._files_bytes, self._files_rate = 0, RateWindow()
             self._on_files(SyncProgress(FILES, 0, total))
         self._files_asked.set()
         self._files_wake.set()
@@ -317,13 +322,18 @@ class SyncWorker:
             return
         if not self._files_total:
             self._files_total, self._files_done = left, 0
+            self._files_bytes, self._files_rate = 0, RateWindow()
         base = self._files_done
         # Said before the first file starts (one can take minutes), so a person
         # sees at once that it is under way and how many there are.
-        self._on_files(SyncProgress(FILES, base, max(self._files_total, base)))
-
-        rate = RateWindow()
-        got = [0]  # bytes so far in this pass
+        self._on_files(
+            SyncProgress(
+                FILES,
+                base,
+                max(self._files_total, base),
+                bytes_done=self._files_bytes,
+            )
+        )
 
         def say() -> None:
             total = max(self._files_total, self._files_done)
@@ -332,8 +342,8 @@ class SyncWorker:
                     FILES,
                     self._files_done,
                     total,
-                    bytes_done=got[0],
-                    rate=rate.add(self._clock(), got[0]),
+                    bytes_done=self._files_bytes,
+                    rate=self._files_rate.add(self._clock(), self._files_bytes),
                 )
             )
 
@@ -342,7 +352,7 @@ class SyncWorker:
             say()
 
         def arrived(n: int) -> None:
-            got[0] += n
+            self._files_bytes += n
             say()
 
         try:

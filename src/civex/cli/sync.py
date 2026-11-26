@@ -564,6 +564,11 @@ def status() -> None:
         console.print(f"[warning]Last problem  {escape(s.last_error)}[/warning]")
     if s.files_waiting and s.files_waiting.missing:
         _files_owed_missing(s.files_waiting)
+    if s.files_arriving:
+        console.print(
+            f"Arriving    {s.files_arriving} file(s) aren't on the server yet: "
+            "the device that added them hasn't uploaded them"
+        )
     if s.files_missing:
         console.print(
             f"Missing     {s.files_missing} file(s) the server hasn't got either "

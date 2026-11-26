@@ -26,7 +26,8 @@ export function RecordStorageSummary({
   const places = data?.summary ?? []
   const files = places.reduce((n, p) => n + p.files, 0)
   const attention = places.some(
-    (p) => p.kind === 'unreachable' || p.kind === 'missing',
+    (p) =>
+      p.kind === 'unreachable' || p.kind === 'missing' || p.kind === 'arriving',
   )
   // Said only when it matters: a file that can't be reached or is missing.
   // Where files are, when all is well, is under Files in the page's menu.
@@ -36,16 +37,23 @@ export function RecordStorageSummary({
     const n = (kind: string) =>
       places.filter((p) => p.kind === kind).reduce((a, p) => a + p.files, 0)
     const missing = n('missing')
+    const arriving = n('arriving')
     const unreachable = n('unreachable')
     return (
       <div
         role="status"
         className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border bg-canvas-subtle px-3 py-2 text-xs text-attention"
       >
+        {arriving > 0 && (
+          <span>
+            {arriving.toLocaleString()}{' '}
+            {arriving === 1 ? 'file is' : 'files are'} not on the hub yet.
+          </span>
+        )}
         {missing > 0 && (
           <span>
             {missing.toLocaleString()} {missing === 1 ? 'file is' : 'files are'}{' '}
-            not on the hub yet.
+            missing.
           </span>
         )}
         {unreachable > 0 && (

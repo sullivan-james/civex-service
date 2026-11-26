@@ -1,6 +1,6 @@
 import type { UnavailableGroup } from '../../api/fileAccess'
 import { useHostedFiles } from '../../hooks/useFeatures'
-import { notOnHub, TEMPORARILY_UNAVAILABLE } from '../../utils/hostedFiles'
+import { missingOnHub, TEMPORARILY_UNAVAILABLE } from '../../utils/hostedFiles'
 
 const plural = (n: number, word: string) =>
   `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`
@@ -18,7 +18,7 @@ export function UnreachableList({ groups }: { groups: UnavailableGroup[] }) {
             <>
               <p className="font-medium text-fg">{plural(g.files, 'file')}</p>
               <p className="text-fg-muted">
-                {g.volume ? TEMPORARILY_UNAVAILABLE : notOnHub(g.reason)}
+                {g.volume ? TEMPORARILY_UNAVAILABLE : missingOnHub(g.reason)}
               </p>
             </>
           ) : (

@@ -112,6 +112,7 @@ def test_counts_and_status_separate_missing_from_downloading(pair):
     laptop, phone, record = pair
     _cite_unsent(laptop, record)
     phone.sync_svc.sync()
+    phone.config.sync.arriving_hours = 0  # missing at once, not arriving
     assert phone.sync_svc.status().files_to_fetch == 1
     assert phone.sync_svc.status().files_missing == 0
 
@@ -173,6 +174,7 @@ def test_an_edit_to_the_record_keeps_it_missing_and_its_wait_growing(pair):
     laptop.sync_svc.sync()
     phone.sync_svc.sync()
 
+    phone.config.sync.arriving_hours = 0
     assert phone.sync_svc.files_missing() == 1  # not back to "downloading"
     assert phone.sync_svc.files_to_fetch() == 0
     assert phone.sync_svc.fetch_files().absent == [ref.sha256]

@@ -475,6 +475,14 @@ class FilePlan:
                 "files": len(self.to_fetch),
                 "bytes": sum(i.size for i in self.to_fetch),
             },
+            # Files neither reachable here nor fetchable from a server: what
+            # the store lacks (a release's citation is complete only without).
+            "missing": {
+                "files": self.total - self.available - len(self.to_fetch),
+                "bytes": self.bytes
+                - self.available_bytes
+                - sum(i.size for i in self.to_fetch),
+            },
             "tables": [t.to_dict() for t in self.tables],
             "summary": self.summary(),
             "unavailable": [
