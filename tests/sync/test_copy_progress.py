@@ -17,6 +17,7 @@ from civex.testing.peers import build_study, connect, device, flaky, snapshots
 def study(project, authority, monkeypatch):
     """An authority holding a study of 30 records, filled by a laptop."""
     monkeypatch.setattr(sync_service, "SNAPSHOT_PAGE", 7)
+    monkeypatch.setattr(sync_service, "SNAPSHOT_PAGE_BIG", 7)
     monkeypatch.setattr(sync_service, "FEED_PAGE", 5)
     laptop = device(project, authority, "laptop")
     build_study(laptop)

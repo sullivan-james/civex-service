@@ -45,6 +45,8 @@ from civex.domain.sync_page import json_size, take
 from civex.domain.sync import (
     APPLIED,
     CAPABILITIES,
+    SNAPSHOT_PAGE_BYTES,
+    SNAPSHOT_PAGE_MAX,
     CONFLICT,
     DEFERRED,
     ENTITY_ORDER,
@@ -84,7 +86,6 @@ FEED_MAX = 500
 # The most raw entries one request to a restricted device looks at, whatever it
 # may see of them (`feed`).
 FEED_SCAN_MAX = 2000
-SNAPSHOT_MAX = 500
 PUSH_MAX = 500
 # The wall-clock time one push may spend settling: past it the push finishes
 # the action it is in and answers for what it has settled (a short answer, as
@@ -256,7 +257,11 @@ class SyncAuthorityService:
             # Asked for by a device on protocol 5 or older, which still lists
             # releases among what it joins with: there are none to give.
             return SnapshotPage(kind, [], False, head, None)
-        limit = max(1, min(limit, SNAPSHOT_MAX))
+        # A snapshot page is cut by bytes (`SNAPSHOT_PAGE_BYTES`) more than by
+        # count: a device that asked for many (capability `snapshot_pages`)
+        # gets as many as fit; one that asked for 200 gets 200.
+        limit = max(1, min(limit, SNAPSHOT_PAGE_MAX))
+        budget = SNAPSHOT_PAGE_BYTES if limit > 500 else None
         if left_after is not None:
             # Never before what this authority still holds history of: a request
             # to look back over all of it is not a thing a device needs.
@@ -272,7 +277,7 @@ class SyncAuthorityService:
         except ValueError as e:
             raise ValidationError(f"Not a page cursor: {after!r}") from e
         # By count and by bytes, `more` decided with the feed's (sync_page).
-        page, more = take(items, [json_size(i) for i in items], limit)
+        page, more = take(items, [json_size(i) for i in items], limit, budget)
         return SnapshotPage(
             kind, page, more, head, snapshot_cursor(page[-1]) if more else None
         )

@@ -56,6 +56,9 @@ from civex.domain.dtos import MissingFileGroupDTO, MissingFilesRemovalDTO
 from civex.domain.sync import (
     KEPT_STRUCTURE,
     PUSH_BUDGET_BYTES,
+    SnapshotPage,
+    SNAPSHOT_PAGE_MAX,
+    SNAPSHOT_PAGES,
     REFUSAL_PERMISSION,
     UNFIT,
     UNFIT_DATA,
@@ -136,6 +139,8 @@ PLACING = ("create", "update", "restore")
 # What a pulled run applies as a set (record changes of these actions).
 RUN_ACTIONS = ("delete", "restore", "create", "update")
 SNAPSHOT_PAGE = 200
+# What a joining device asks for of an authority that cuts pages by bytes.
+SNAPSHOT_PAGE_BIG = SNAPSHOT_PAGE_MAX
 
 # Stands for "the value on the record now" in an attempt's fields, until it is read.
 _NOW: Any = object()
@@ -2888,21 +2893,20 @@ class SyncService:
         done = 0
         head: int | None = None
         held: dict[str, set[str]] = {}
+        size = (
+            SNAPSHOT_PAGE_BIG if SNAPSHOT_PAGES in hello.capabilities else SNAPSHOT_PAGE
+        )
         for kind in kinds_for(hello.protocol_version):
             # Things that sit under another of their kind that has not arrived
             # yet (it was made later, on a clock that was ahead): the database
             # refuses them until it has, so they wait for it, by its id.
             waiting: dict[str, list[dict[str, Any]]] = {}
             seen = held.setdefault(kind, set())
-            after: str | None = None
-            while True:
-                page = transport.snapshot(kind, after, SNAPSHOT_PAGE)
+            for page in _pages(transport, kind, size):
                 head = page.head_seq if head is None else head
-                above = {p for snap in page.items if (p := _sits_under(kind, snap))}
-                present = self._repo.existing_ids(kind, above)
                 for snap in page.items:
                     seen.add(snap["id"])
-                    self._join_one(kind, snap, present, waiting)
+                self._join_page(kind, page.items, waiting)
                 self._commit()
                 done += len(page.items)
                 if progress:
@@ -2910,9 +2914,6 @@ class SyncService:
                     progress(
                         SyncProgress(COPYING, done, total and max(total, done), kind)
                     )
-                if not page.more:
-                    break
-                after = page.next
             if waiting:
                 # What they sit under was removed for good while the copy was
                 # read, and they went with it there.
@@ -3431,6 +3432,57 @@ class SyncService:
                 if progress:
                     progress(report.fetched)
         return report
+
+    def _join_page(
+        self,
+        kind: str,
+        snaps: list[dict[str, Any]],
+        waiting: dict[str, list[dict[str, Any]]],
+    ) -> None:
+        """Write a page of the copy. Records none of which is held yet go in
+        together (`insert_records`: a few statements for the page, not one
+        read and flush each); anything else, and what is held already, is
+        written one at a time (`_join_one`), which is what makes a copy that
+        stopped part way safe to run again."""
+        ids = {s["id"] for s in snaps}
+        above = {p for s in snaps if (p := _sits_under(kind, s))}
+        present = self._repo.existing_ids(kind, ids | above)
+        if kind != "record" or len(snaps) < 2:
+            for snap in snaps:
+                self._join_one(kind, snap, present, waiting)
+            return
+        fresh = [s for s in snaps if s["id"] not in present]
+        for snap in snaps:
+            if snap["id"] in present:
+                self._join_one(kind, snap, present, waiting)
+        # What goes in at once sits under something held, or under another of
+        # these (put first); the rest waits for its parent as ever.
+        batch: list[dict[str, Any]] = []
+        inbound = {s["id"] for s in fresh}
+        arriving: set[str] = set()
+        queue = list(fresh)
+        while queue:
+            late: list[dict[str, Any]] = []
+            for snap in queue:
+                parent = _sits_under(kind, snap)
+                if parent is None or parent in present or parent in arriving:
+                    batch.append(snap)
+                    arriving.add(snap["id"])
+                elif parent in inbound:
+                    late.append(snap)
+                else:
+                    waiting.setdefault(parent, []).append(snap)
+            if len(late) == len(queue):  # a circle: one at a time
+                for snap in late:
+                    self._join_one(kind, snap, present, waiting)
+                break
+            queue = late
+        if batch:
+            self._repo.insert_records(batch)
+            present.update(arriving)
+            for snap in batch:
+                for held in waiting.pop(snap["id"], ()):
+                    self._join_one(kind, held, present, waiting)
 
     def _join_one(
         self,
@@ -3988,6 +4040,27 @@ def _waits_on(
         for i in placed
         if i is not None
     )
+
+
+def _pages(transport: SyncTransport, kind: str, size: int) -> Iterator[SnapshotPage]:
+    """The pages of one kind, in order. The next is asked for while the caller
+    writes the one in hand, so the wire and the database work at once (one
+    request in flight, and the transport is used by no one else meanwhile)."""
+    pool = ThreadPoolExecutor(1)
+    try:
+        page = transport.snapshot(kind, None, size)
+        while True:
+            ahead = (
+                pool.submit(transport.snapshot, kind, page.next, size)
+                if page.more
+                else None
+            )
+            yield page
+            if ahead is None:
+                return
+            page = ahead.result()
+    finally:
+        pool.shutdown(wait=True, cancel_futures=True)
 
 
 def _sits_under(kind: str, snap: dict[str, Any]) -> str | None:

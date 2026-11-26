@@ -48,6 +48,7 @@ from civex.domain.exceptions import (
 )
 from civex.domain.library import MAX_BUNDLE, MAX_BYTES, LibraryItemDTO
 from civex.domain.sync import (
+    SNAPSHOT_PAGE_MAX,
     DIRECT_FILES,
     FILE_PART_BYTES,
     FILE_PART_MAX,
@@ -666,7 +667,7 @@ def snapshot(
     after: str | None = Query(
         default=None, description="The previous page's `next`; omit for the first."
     ),
-    limit: int = Query(default=200, ge=1, le=500),
+    limit: int = Query(default=200, ge=1, le=SNAPSHOT_PAGE_MAX),
     dataset: str | None = Query(
         default=None,
         description="Only this collection's own things (the collection, its "

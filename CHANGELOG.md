@@ -8,6 +8,16 @@ final version's entry or `## Unreleased` instead of one of its own. The version 
 
 ## Unreleased
 
+- **Sync: copying a project onto a new computer is much faster.** The copy
+  read the project 200 records per request, one request after another, and
+  wrote each record on its own. Now an authority that says it cuts snapshot
+  pages by size (capability `snapshot_pages`, no protocol change; older
+  authorities and devices are served as before) sends up to 8 MB per page, the
+  next page is read while the current one is written, and a page of records is
+  written in a few statements instead of one by one. A new migration adds an
+  index on `records (created_at, id)`, the order a copy is read in, so reading
+  page after page no longer re-sorts what is left. A copy cut short is still
+  finished by copying again.
 - **Sync: a blank copy only downloads.** A computer that copies a project owes
   the server only files it stored itself; files that came with the records it
   pulled were counted as owed, so the copy flipped between "Copying the

@@ -123,6 +123,7 @@ def test_a_record_that_left_a_newly_readable_collection_for_a_new_parent_arrives
     study: Study, monkeypatch: pytest.MonkeyPatch
 ):
     monkeypatch.setattr(sync_service, "SNAPSHOT_PAGE", 2)
+    monkeypatch.setattr(sync_service, "SNAPSHOT_PAGE_BIG", 2)
     authority, limited = study.authority, study.limited
     authority.schema_svc.create("kid", parent="encounter")
     authority.schema_svc.add_field("kid", "site", "string")
