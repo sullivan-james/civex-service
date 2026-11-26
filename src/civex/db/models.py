@@ -1313,6 +1313,10 @@ class SyncOp(Base):
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
     conflicts: Mapped[list[Any]] = mapped_column(_JSON, default=list)
     hub_seq: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # A delete that found the record already deleted (`OpResult.already_done`).
+    already_done: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
     received_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
 
 

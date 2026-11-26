@@ -2536,6 +2536,11 @@ class AuditPart(BaseModel):
     count: int
 
 
+class AuditAlreadyDone(BaseModel):
+    count: int
+    by: list[str] = Field(default_factory=list)
+
+
 class AuditEventResponse(BaseModel):
     id: str = Field(description="The entry's id, or the batch's.")
     kind: str = Field(description="entry (a single change) or batch.")
@@ -2562,6 +2567,12 @@ class AuditEventResponse(BaseModel):
         description="For a synced change, the device it came through (verified "
         "by the authority).",
     )
+    already_done: AuditAlreadyDone | None = Field(
+        default=None,
+        description="For a synced batch, how many of its deletes the authority "
+        "found already made by another change, and who made those. They are "
+        "not counted in `count` and `parts`.",
+    )
 
     @classmethod
     def from_dto(cls, dto: AuditEventDTO) -> AuditEventResponse:
@@ -2575,6 +2586,9 @@ class AuditEventResponse(BaseModel):
             parts=[AuditPart(**p) for p in dto.parts],
             actor=dto.actor,
             device=dto.device,
+            already_done=AuditAlreadyDone(**dto.already_done)
+            if dto.already_done
+            else None,
         )
 
 

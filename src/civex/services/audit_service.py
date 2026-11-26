@@ -156,6 +156,7 @@ class AuditService:
             count=sum(p["count"] for p in parts),
             batch=batch,
             parts=parts,
+            already_done=self._audit.already_done(batch_id),
         )
 
     def batch(self, kind: str, label: str | None = None, ref: str | None = None):

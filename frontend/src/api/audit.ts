@@ -276,6 +276,9 @@ export interface AuditEvent {
   actor?: string | null
   /** The device it came through, when synced. */
   device?: string | null
+  /** Deletes the authority found already made by another change (not counted
+   * in `count` and `parts`), and who made those. */
+  already_done?: { count: number; by: string[] } | null
 }
 
 export interface PaginatedAuditEvents {

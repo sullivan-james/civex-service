@@ -1396,6 +1396,14 @@ class SyncAuthorityService:
             # nothing is written (no second entry, no settling one).
             return OpResult(entry.id, APPLIED, replayed=True)
         cascade = self._cascade_before(entry, head)
+        # A record's delete that finds it deleted already: written down, but
+        # the answer says so, so the device shows it as the earlier change's.
+        found_deleted = bool(
+            kind == "record"
+            and entry.action == "delete"
+            and head is not None
+            and head.get("deleted_at")
+        )
         conflicts: list[dict[str, Any]] = []
         unfit: list[dict[str, Any]] = []
         final: dict[str, Any] | None = None  # the state the thing ends in, if it exists
@@ -1524,7 +1532,14 @@ class SyncAuthorityService:
             message = next(
                 c.get("message") for c in conflicts if c["kind"] == "edit_vs_delete"
             )
-        return OpResult(entry.id, status, message, conflicts, seq)
+        return OpResult(
+            entry.id,
+            status,
+            message,
+            conflicts,
+            seq,
+            already_done=found_deleted and not conflicts,
+        )
 
     def _check_note(self, who: Principal, state: dict[str, Any]) -> None:
         """A note goes in only on a record held here, with text a person's note

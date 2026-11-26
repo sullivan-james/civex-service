@@ -679,6 +679,12 @@ class LocalAuditRepository:
             )
         }
         parts = self._parts(base, list(batches))
+        done = self._already_done(base, keys)
+        counts = {key: n for key, _, n in rows}
+        for key in batches:
+            if key in done:
+                counts[key] -= done[key]["count"]
+                _take_off(parts.get(key, []), done[key]["count"])
         # A batch is made in one go by one person: any of its entries' actors.
         batch_actor: dict[uuid.UUID | None, tuple[str | None, str | None]] = {}
         if batches:
@@ -696,7 +702,7 @@ class LocalAuditRepository:
             AuditEventDTO(
                 id=key,
                 timestamp=ts,
-                count=n,
+                count=counts[key],
                 entry=entries.get(key),
                 batch=batches.get(key),
                 parts=parts.get(key, []),
@@ -710,6 +716,7 @@ class LocalAuditRepository:
                     if key in entries
                     else batch_actor.get(key, (None, None))[1]
                 ),
+                already_done=done.get(key),
             )
             for key, ts, n in rows
         ]
@@ -1021,9 +1028,62 @@ class LocalAuditRepository:
         return [(t, i) for t, i in rows[:limit]], len(rows) > limit
 
     def batch_parts(self, batch_id: uuid.UUID) -> list[dict]:
-        """What a batch holds, by kind of thing and action, with counts."""
+        """What a batch holds, by kind of thing and action, with counts: its own
+        deletes only, not the ones the authority found already made (those are
+        `already_done`)."""
         base = self._s.query(AuditLog)
-        return self._parts(base, [batch_id]).get(batch_id, [])
+        parts = self._parts(base, [batch_id]).get(batch_id, [])
+        done = self.already_done(batch_id)
+        if done:
+            _take_off(parts, done["count"])
+        return parts
+
+    def already_done(self, batch_id: uuid.UUID) -> dict[str, Any] | None:
+        """What of a batch's deletes the authority found already made by another
+        change (`{count, by}`), or None."""
+        return self._already_done(self._s.query(AuditLog), [batch_id]).get(batch_id)
+
+    def _already_done(
+        self, base, keys: list[uuid.UUID]
+    ) -> dict[uuid.UUID, dict[str, Any]]:
+        """Of the record deletes in these events (a batch's id, or an entry's),
+        the ones a device sent that the authority found already deleted: marked
+        superseded (`SyncRepository.mark_sent`) and, in the authority's order,
+        preceded by another delete of the same record. Per event: how many, and
+        who made the earlier deletes. The authority's history is the truth, so
+        these are not the device's own changes."""
+        if not keys:
+            return {}
+        group = func.coalesce(AuditLog.batch_id, AuditLog.id)
+        before = aliased(AuditLog)
+        q = base.filter(
+            AuditLog.entity_type == "record",
+            AuditLog.action == "delete",
+            AuditLog.apply_state == "superseded",
+            AuditLog.hub_seq.is_not(None),
+            group.in_(keys),
+        ).join(
+            before,
+            and_(
+                before.entity_id == AuditLog.entity_id,
+                before.entity_type == "record",
+                before.action == "delete",
+                before.id != AuditLog.id,
+                before.hub_seq.is_not(None),
+                before.hub_seq < AuditLog.hub_seq,
+            ),
+        )
+        out: dict[uuid.UUID, dict[str, Any]] = {}
+        for key, n in q.with_entities(
+            group, func.count(func.distinct(AuditLog.id))
+        ).group_by(group):
+            out[key] = {"count": n, "by": []}
+        for key, who in q.with_entities(group, before.actor).distinct():
+            if who and key in out and who not in out[key]["by"]:
+                out[key]["by"].append(who)
+        for found in out.values():
+            found["by"].sort()
+        return out
 
     def _parts(self, base, batch_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[dict]]:
         parts: dict[uuid.UUID, list[dict]] = {}
@@ -1084,6 +1144,15 @@ class LocalAuditRepository:
                 )
             )
         return q
+
+
+def _take_off(parts: list[dict], n: int) -> None:
+    """Leave out of a batch's parts `n` record deletes that were not its own."""
+    for p in parts:
+        if p["entity_type"] == "record" and p["action"] == "delete":
+            p["count"] -= n
+            break
+    parts[:] = [p for p in parts if p["count"] > 0]
 
 
 def _batch_dto(r: AuditBatch) -> AuditBatchDTO:

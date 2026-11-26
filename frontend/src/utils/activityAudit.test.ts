@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { AuditLogEntry } from '../api/audit'
-import { auditEntryTarget, describeAnyAuditEntry } from './activityAudit'
+import type { AuditEvent, AuditLogEntry } from '../api/audit'
+import {
+  auditEntryTarget,
+  describeAnyAuditEntry,
+  describeAuditEvent,
+} from './activityAudit'
 
 const entry = (over: Partial<AuditLogEntry>): AuditLogEntry =>
   ({
@@ -27,5 +31,29 @@ describe('Activity on saved filters and the Analytics page', () => {
       to: '/analytics',
       label: 'Analytics',
     })
+  })
+})
+
+describe('describeAuditEvent already done', () => {
+  const event = (done: { count: number; by: string[] } | null) =>
+    ({
+      id: 'b1',
+      kind: 'batch',
+      timestamp: '2026-01-01T00:00:00Z',
+      count: 12,
+      entry: null,
+      batch: { id: 'b1', kind: 'delete', label: null, ref: null },
+      parts: [{ entity_type: 'record', action: 'delete', count: 12 }],
+      already_done: done,
+    }) as unknown as AuditEvent
+
+  it('says how many were already deleted, and by whom', () => {
+    const s = describeAuditEvent(event({ count: 8, by: ['jamie'] }))
+    expect(s.title).toBe('Deleted 12 records')
+    expect(s.detail).toBe('8 already deleted by jamie on the server')
+  })
+
+  it('says nothing when none were', () => {
+    expect(describeAuditEvent(event(null)).detail).toBeNull()
   })
 })

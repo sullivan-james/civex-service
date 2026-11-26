@@ -117,6 +117,19 @@ export function describeParts(parts: AuditPart[]): string {
 /** The title and detail of a line of history: a single change describes itself,
  * and a batch says what kind of operation it was and what it did. */
 export function describeAuditEvent(event: AuditEvent): AuditSummary {
+  const summary = describeEvent(event)
+  const done = event.already_done
+  if (!done || done.count < 1) return summary
+  const said = `${done.count.toLocaleString()} already deleted${
+    done.by.length ? ` by ${done.by.join(', ')}` : ''
+  } on the server`
+  return {
+    ...summary,
+    detail: summary.detail ? `${summary.detail}. ${said}` : said,
+  }
+}
+
+function describeEvent(event: AuditEvent): AuditSummary {
   if (event.entry) return describeAnyAuditEntry(event.entry)
   const batch = event.batch!
   const total = event.parts.reduce((n, p) => n + p.count, 0)
