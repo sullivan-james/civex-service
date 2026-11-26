@@ -307,3 +307,17 @@ def test_a_release_plan_counts_the_files_the_store_lacks(client: TestClient):
     assert (plan["total"], plan["available"]) == (2, 1)
     assert plan["missing"] == {"files": 1, "bytes": 5}
     assert plan["complete"] is False
+
+
+def test_a_releases_files_can_be_listed_with_the_inventory(client: TestClient):
+    from civex.config import load_config
+    from civex.context import build_local_context
+
+    _study(client)
+    client.post("/api/releases", json={"name": "v1", "title": "Survey"})
+    ctx = build_local_context(load_config())
+    with ctx.release_svc.file_access("v1") as (access, selection):
+        listed = access.listing(selection)
+    ctx.close()
+    assert listed.total == 1 and [i.filename for i in listed.items] == ["p.jpg"]
+    assert sum(p.files for p in listed.summary) == 1

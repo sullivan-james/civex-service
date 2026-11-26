@@ -27,6 +27,9 @@ final version's entry or `## Unreleased` instead of one of its own. The version 
 - **Files: a release plan counts the files the store lacks.**
   `POST /releases/{name}/files/plan` carries `missing: {files, bytes}`, the
   files neither reachable here nor fetchable from a server.
+- **Files: a release's files can be listed.** The file inventory
+  (`FileAccessService.listing`) failed on a release's frozen records; it now
+  lists them, by where each file is.
 - **Files: a file past the arriving window is "Missing"** in the app on a host;
   "not uploaded yet" is said only while a file is still arriving.
 - **Sync: failed joins are counted per project.** The limit on failed joins and

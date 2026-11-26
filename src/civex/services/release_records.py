@@ -119,6 +119,56 @@ class FrozenRecords:
             trails[r.id] = chain[::-1]
         return trails
 
+    def held_files(self, picked: Any, search: str | None = None) -> list[Any]:
+        """Every file the release's records hold, as the inventory lists them
+        (`FileAccessService` over a live project asks the database; a release
+        has its records in hand). Where a file is comes from its `location`."""
+        from civex.domain.file_access import HeldFile
+
+        needle = (search or "").casefold()
+        kinds = set(picked.kinds) if getattr(picked, "kinds", None) else None
+        wanted = set(picked.ids) if getattr(picked, "ids", None) else None
+        records = [
+            self._by_id[i]
+            for i in self._order
+            if (kinds is None or self._by_id[i].schema_name in kinds)
+            and (wanted is None or str(i) in {str(w) for w in wanted})
+        ]
+        values, _ = self.file_values(records)
+        out = []
+        for r, name, ref in values:
+            filename = str(ref.get("filename") or "")
+            out.append(
+                HeldFile(
+                    str(r.id),
+                    str(r.dataset_id),
+                    str(r.created_at),
+                    name,
+                    ref["sha256"],
+                    filename,
+                    int(ref.get("size") or 0),
+                    (ref.get("location") or {}).get("volume") or None,
+                    (),
+                    False,
+                    False,
+                    not needle or needle in filename.casefold(),
+                )
+            )
+        return out
+
+    def files_from_server(self) -> bool:
+        return False  # a release is read from its bundle, never from a server
+
+    def shared_copies(self) -> dict[tuple[str, str | None], int]:
+        return {}
+
+    def recently_received(self, cited: Any) -> set[Any]:
+        return set()
+
+    def holding_files(self, picked: Any) -> list[str]:
+        held = {h.record_id for h in self.held_files(picked)}
+        return [i for i in self.ids if i in held]
+
     def beneath(self, records: list[RecordDTO], *_: Any, **__: Any) -> list[RecordDTO]:
         wanted = {r.id for r in records}
         out = []
