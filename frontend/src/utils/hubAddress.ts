@@ -24,6 +24,8 @@ export function parseHubAddress(raw: string): HubAddress | null {
     return null
   }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return null
+  // `https://hub.example@evil.example/...` reads as the first host, goes to the second.
+  if (url.username || url.password) return null
   const parts = url.pathname.split('/').filter(Boolean)
   if (parts[parts.length - 1] === 'data') parts.pop()
   const origin = url.origin
@@ -46,13 +48,28 @@ export function parseHubAddress(raw: string): HubAddress | null {
 }
 
 /** The page where a person approves the code, with the code filled in (a
- * server may have put it there already). */
-export function approvalUrl(verifyUrl: string, code: string): string {
+ * server may have put it there already). Only a page on the hub's own origin
+ * is used: anything else (another host, javascript:, a relative path) gives
+ * null, and the person is shown the code to approve by hand instead. */
+export function approvalUrl(
+  verifyUrl: string | null | undefined,
+  code: string,
+  hubAddress: string,
+): string | null {
+  if (!verifyUrl) return null
   try {
     const url = new URL(verifyUrl)
+    const hub = new URL(hubAddress)
+    if (
+      (url.protocol !== 'https:' && url.protocol !== 'http:') ||
+      url.username ||
+      url.password ||
+      url.origin !== hub.origin
+    )
+      return null
     if (!url.searchParams.has('code')) url.searchParams.set('code', code)
     return url.toString()
   } catch {
-    return verifyUrl
+    return null
   }
 }

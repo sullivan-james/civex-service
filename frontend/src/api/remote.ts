@@ -47,6 +47,8 @@ export interface RemoteStatus {
   /** Why the last connect started here failed, in a person's words, and the
    * technical text behind it. */
   connect_error: string | null
+  /** `no_access`: the hub refused this computer; a person there must let it in. */
+  connect_error_kind?: string | null
   connect_error_detail?: string | null
   /** The civex this computer runs. */
   version?: string
@@ -447,6 +449,11 @@ export const remoteApi = {
       expires_at: number | null
       verify_url?: string | null
     }>('/remote/connect', { url, invite }),
+  /** Whether this computer has joined that address before. */
+  known: (url: string) =>
+    api.get<{ joined: boolean }>(
+      `/remote/known?url=${encodeURIComponent(url)}`,
+    ),
   disconnect: () => api.post<RemoteStatus>('/remote/disconnect', {}),
   syncNow: () => api.post<{ requested: boolean }>('/remote/sync', {}),
   /** Stop warning about every missing file (the records keep citing them). */

@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { remoteApi } from '../api/remote'
 import { useNavigate, useSearchParams } from 'react-router'
 import { useCollections } from '../hooks/useCollections'
 import { useSchemas } from '../hooks/useSchemas'
@@ -20,10 +22,6 @@ import {
 } from '../components/ui'
 import { formatTime } from '../utils/dates'
 
-/** Errors that mean the hub said no, not that something broke: the fix is a
- * person there, not trying again. */
-const NO_ACCESS = /approved|refused|not allowed|denied|permission|access/i
-
 /** "Connect to a hub": a full page that joins this project to a repository on
  * a host. `?url=` fills the address in (the host's "open in the app" link).
  * It uses the same connect as Settings -> Sync; this page only says what will
@@ -41,13 +39,16 @@ export default function ConnectPage() {
   // When connecting began: the status read before that is an old one.
   const [startedAt, setStartedAt] = useState<number | null>(null)
   const [target, setTarget] = useState<ReturnType<typeof parseHubAddress>>(null)
+  const [sure, setSure] = useState(false)
   const opened = useRef<string | null>(null)
 
   const s = startedAt && status.dataUpdatedAt >= startedAt ? status.data : null
   const verify =
     s?.awaiting_approval?.verify_url ?? connect.data?.verify_url ?? null
   const code = s?.awaiting_approval?.code ?? connect.data?.code ?? null
-  const approveAt = verify && code ? approvalUrl(verify, code) : null
+  // Only a page on the hub's own address is ever opened or linked.
+  const approveAt =
+    verify && code && target ? approvalUrl(verify, code, target.address) : null
 
   // The approval page opens by itself once, as soon as there is a code.
   useEffect(() => {
@@ -70,6 +71,12 @@ export default function ConnectPage() {
     if (done) navigate('/')
   }, [done, navigate])
 
+  const parsed = parseHubAddress(raw)
+  const known = useQuery({
+    queryKey: ['remote-known', parsed?.address],
+    queryFn: () => remoteApi.known(parsed!.address),
+    enabled: !!parsed,
+  })
   if (!dials)
     return (
       <Page title="Connect to a hub">
@@ -77,8 +84,8 @@ export default function ConnectPage() {
       </Page>
     )
 
-  const parsed = parseHubAddress(raw)
-  const known = collections.isSuccess && schemas.isSuccess
+  const joinedBefore = known.data?.joined
+  const loaded = collections.isSuccess && schemas.isSuccess
   const empty =
     (collections.data?.length ?? 0) + (schemas.data?.length ?? 0) === 0
   const name = (target ?? parsed)?.name ?? 'the hub'
@@ -122,7 +129,8 @@ export default function ConnectPage() {
           </Field>
           {raw.trim() && !parsed && (
             <p role="alert" className="text-xs text-danger">
-              Use a web address, like https://hub.example.com/owner/repo.
+              Use a web address like https://hub.example.com/owner/repo, with no
+              user name or password in it.
             </p>
           )}
           <Disclosure summary="Have an invite code?">
@@ -135,26 +143,55 @@ export default function ConnectPage() {
               />
             </Field>
           </Disclosure>
-          {parsed && known && (
-            <p className="text-sm text-fg-muted" data-testid="plan">
-              {empty
-                ? `This project is empty. It will become a copy of ${parsed.name}.`
-                : `This project has data. It can only connect to a repo with nothing in it, and then fills it. If ${parsed.name} has data, nothing changes.`}
-            </p>
+          {parsed && loaded && (
+            <div className="space-y-2 text-sm" data-testid="plan">
+              <p>
+                Hub: <strong className="font-mono">{parsed.host}</strong>
+              </p>
+              {joinedBefore === false && (
+                <p className="text-attention">
+                  This computer has not connected to {parsed.host} before. Check
+                  that this is the hub you mean.
+                </p>
+              )}
+              <p className="text-fg-muted">
+                {empty
+                  ? `This project is empty. It will become a copy of ${parsed.name} on ${parsed.host}.`
+                  : `This project has data. It can only connect to a repo with nothing in it, and then fills ${parsed.name} on ${parsed.host} with it. If that repo has data, nothing changes.`}
+              </p>
+              {!empty && (
+                <label className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    checked={sure}
+                    onChange={(e) => setSure(e.target.checked)}
+                    className="mt-1"
+                  />
+                  <span>
+                    {joinedBefore === false
+                      ? `Send this project's data to ${parsed.host}, a hub I have not used before`
+                      : `Send this project's data to ${parsed.host}`}
+                  </span>
+                </label>
+              )}
+            </div>
           )}
           {connect.error && (
             <p role="alert" className="text-sm text-danger">
               {errorMessage(connect.error)}
             </p>
           )}
-          <Button disabled={!parsed || !known} onClick={start}>
-            Connect
+          <Button
+            disabled={!parsed || !loaded || (!empty && !sure)}
+            onClick={start}
+          >
+            {parsed ? `Connect to ${parsed.host}` : 'Connect'}
           </Button>
         </div>
       )
     }
   } else if (s?.connect_error) {
-    const help = NO_ACCESS.test(s.connect_error)
+    const help = s.connect_error_kind === 'no_access'
     body = (
       <Card title="Connecting did not finish">
         <p role="alert" className="text-sm text-attention">
@@ -222,7 +259,7 @@ export default function ConnectPage() {
         </div>
         {!approveAt && (
           <p className="mt-2 text-xs text-fg-muted">
-            Approve this code on {name}, in its devices page.
+            Approve this code on {name} yourself, in its devices page.
           </p>
         )}
       </Card>

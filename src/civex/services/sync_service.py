@@ -370,6 +370,28 @@ def _closes_transports(fn: _F) -> _F:
     return wrapper  # type: ignore[return-value]
 
 
+def _own_page(login: LoginStarted, url: str) -> LoginStarted:
+    """The authority names a page where a person approves the code, and the app
+    and CLI send people there: only an http(s) page on the authority's own
+    origin (no embedded credentials) is kept, anything else is dropped so a
+    hostile server cannot aim a person elsewhere."""
+    page = login.verify_url
+    if not page:
+        return login
+    try:
+        theirs, ours = urllib.parse.urlsplit(page), urllib.parse.urlsplit(url)
+        ok = (
+            theirs.scheme in ("http", "https")
+            and theirs.username is None
+            and theirs.password is None
+            and (theirs.scheme, theirs.hostname, theirs.port)
+            == (ours.scheme, ours.hostname, ours.port)
+        )
+    except ValueError:
+        ok = False
+    return login if ok else replace(login, verify_url=None)
+
+
 class SyncService:
     def __init__(
         self,
@@ -870,7 +892,7 @@ class SyncService:
         url = url.strip().rstrip("/")
         self._refuse_following_while_serving()
         _check_address(url)
-        return self._made(url).request_login()
+        return _own_page(self._made(url).request_login(), url)
 
     @_closes_transports
     def check_connect(self, url: str, invite: str | None) -> str:

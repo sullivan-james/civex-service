@@ -23,6 +23,7 @@ const idle = {
 
 let status: Record<string, unknown>
 let collections: unknown[]
+let joined: boolean
 let answer: Record<string, unknown>
 let calls: { path: string; body: unknown }[]
 const open = vi.fn()
@@ -31,6 +32,7 @@ beforeEach(() => {
   status = { ...idle }
   collections = []
   answer = { mode: 'joined' }
+  joined = true
   calls = []
   open.mockReset()
   vi.stubGlobal('open', open)
@@ -54,6 +56,7 @@ beforeEach(() => {
         else status = { ...idle, connecting: true }
         return json(answer, 202)
       }
+      if (url.pathname === '/api/remote/known') return json({ joined })
       if (url.pathname === '/api/remote') return json(status)
       if (url.pathname === '/api/collections') return json(collections)
       return json([])
@@ -81,10 +84,13 @@ describe('ConnectPage', () => {
   it('says an empty project becomes a copy, and sends the sync address', async () => {
     renderPage()
     expect(await screen.findByTestId('plan')).toHaveTextContent(
-      'This project is empty. It will become a copy of ada/notes.',
+      'This project is empty. It will become a copy of ada/notes on hub.example.',
     )
+    expect(
+      screen.getByRole('button', { name: 'Connect to hub.example' }),
+    ).toBeInTheDocument()
     expect(screen.queryByLabelText('Invite code')).not.toBeInTheDocument()
-    await userEvent.click(screen.getByRole('button', { name: 'Connect' }))
+    await userEvent.click(screen.getByRole('button', { name: /^Connect/ }))
     await waitFor(() =>
       expect(calls[0]).toEqual({
         path: '/api/remote/connect',
@@ -99,6 +105,60 @@ describe('ConnectPage', () => {
     expect(await screen.findByTestId('plan')).toHaveTextContent(
       /has data.*only connect to a repo with nothing in it/,
     )
+    // Sending data away needs a yes that names the host.
+    const button = screen.getByRole('button', { name: /^Connect/ })
+    expect(button).toBeDisabled()
+    await userEvent.click(
+      screen.getByRole('checkbox', {
+        name: "Send this project's data to hub.example",
+      }),
+    )
+    expect(button).toBeEnabled()
+    await userEvent.click(button)
+    await waitFor(() => expect(calls).toHaveLength(1))
+  })
+
+  it('warns, more strongly for data, about a hub never used before', async () => {
+    joined = false
+    collections = [{ id: 'c1', name: 'Humpbacks', record_count: 3 }]
+    renderPage('?url=https://hub.civex.uk.evil.com/ada/notes')
+    expect(await screen.findByText(/has not connected to/)).toHaveTextContent(
+      'hub.civex.uk.evil.com',
+    )
+    expect(
+      screen.getByRole('checkbox', {
+        name: /hub.civex.uk.evil.com, a hub I have not used before/,
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it('refuses an address with a user name in it', async () => {
+    renderPage('?url=https://hub.example@evil.example/ada/notes')
+    expect(await screen.findByRole('alert')).toHaveTextContent('no user name')
+    expect(screen.getByRole('button', { name: 'Connect' })).toBeDisabled()
+  })
+
+  it.each([
+    'javascript:alert(1)',
+    'data:text/html,hi',
+    'https://evil.example/ada/notes/device',
+    '/ada/notes/device',
+  ])('never opens or links a hostile approval page (%s)', async (bad) => {
+    answer = {
+      mode: 'approval',
+      code: 'ABCD-2345',
+      expires_at: 2_000_000_000,
+      verify_url: bad,
+    }
+    renderPage()
+    await userEvent.click(
+      await screen.findByRole('button', { name: /^Connect/ }),
+    )
+    expect(await screen.findByText('ABCD-2345')).toBeInTheDocument()
+    expect(open).not.toHaveBeenCalled()
+    expect(
+      screen.queryByRole('link', { name: 'Approve in your browser' }),
+    ).not.toBeInTheDocument()
   })
 
   it('opens the approval page with the code, then carries on to Home', async () => {
@@ -110,7 +170,7 @@ describe('ConnectPage', () => {
     }
     renderPage()
     await userEvent.click(
-      await screen.findByRole('button', { name: 'Connect' }),
+      await screen.findByRole('button', { name: /^Connect/ }),
     )
     expect(
       await screen.findByRole('link', { name: 'Approve in your browser' }),
@@ -134,7 +194,7 @@ describe('ConnectPage', () => {
   it('shows copying progress and waits for it', async () => {
     renderPage()
     await userEvent.click(
-      await screen.findByRole('button', { name: 'Connect' }),
+      await screen.findByRole('button', { name: /^Connect/ }),
     )
     status = {
       ...idle,
@@ -151,11 +211,12 @@ describe('ConnectPage', () => {
   it('names who to ask when the hub says no', async () => {
     renderPage()
     await userEvent.click(
-      await screen.findByRole('button', { name: 'Connect' }),
+      await screen.findByRole('button', { name: /^Connect/ }),
     )
     status = {
       ...idle,
       connect_error: 'The server refused this device: not allowed',
+      connect_error_kind: 'no_access',
     }
     expect(
       await screen.findByText(/refused this device/, {}, { timeout: 4000 }),
@@ -167,9 +228,24 @@ describe('ConnectPage', () => {
     expect(screen.getByText(/to let you in/)).toBeInTheDocument()
   })
 
+  it('does not blame access for a network error', async () => {
+    renderPage()
+    await userEvent.click(
+      await screen.findByRole('button', { name: /^Connect/ }),
+    )
+    status = {
+      ...idle,
+      connect_error: 'Could not reach the server, check access and try again',
+    }
+    expect(
+      await screen.findByText(/Could not reach/, {}, { timeout: 4000 }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/to let you in/)).not.toBeInTheDocument()
+  })
+
   it('refuses an address that is not a web address', async () => {
     renderPage('?url=ssh://me@box/p')
     expect(await screen.findByRole('alert')).toHaveTextContent('web address')
-    expect(screen.getByRole('button', { name: 'Connect' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^Connect/ })).toBeDisabled()
   })
 })

@@ -45,6 +45,9 @@ class SyncJobs:
         # person's words, and the technical text behind it.
         self.connect_error: str | None = None
         self.connect_error_detail: str | None = None
+        # What kind of failure, for the app to act on: `no_access` when the
+        # authority refused this computer (or hides what it has from it).
+        self.connect_error_kind: str | None = None
         # The request to join a person must approve, while the connect waits.
         self.awaiting: LoginStarted | None = None
         self.worker = SyncWorker(
@@ -119,6 +122,7 @@ class SyncJobs:
                 return
             self.connect_error = None
             self.connect_error_detail = None
+            self.connect_error_kind = None
             self.copy_progress = None
             self.awaiting = login
             self._connecting = threading.Thread(
@@ -139,6 +143,9 @@ class SyncJobs:
             log.warning("connecting to %s failed: %s", url, e, exc_info=e is not raw)
             self.connect_error = str(e) or type(raw).__name__
             self.connect_error_detail = e.detail or None
+            self.connect_error_kind = (
+                "no_access" if not e.retryable and e.status in (401, 403, 404) else None
+            )
             return
         finally:
             ctx.close()

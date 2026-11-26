@@ -15,7 +15,10 @@ final version's entry or `## Unreleased` instead of one of its own. The version 
   host's approval page with the code filled in, carries on by itself once it is
   approved, shows the copy, and lands on Home. Reached from Home on an empty
   project, the Ctrl+K palette and Settings -> Sync. `GET /api/remote` and
-  `POST /api/remote/connect` now return the approval page's `verify_url`.
+  `POST /api/remote/connect` now return the approval page's `verify_url`,
+  kept only when it is an http(s) page on the authority's own origin (also in
+  the CLI); `GET /api/remote` says when a refusal means no access, and
+  `GET /api/remote/known` whether this computer joined an address before.
 
 - **Two people deleting the same records no longer double-count.** When a
   push and another person's bulk delete (or two bulk deletes) hit the same

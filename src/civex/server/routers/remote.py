@@ -116,6 +116,11 @@ class RemoteStatusResponse(BaseModel):
     connect_error: str | None = Field(
         default=None, description="Why the last connect started here failed."
     )
+    connect_error_kind: str | None = Field(
+        default=None,
+        description="`no_access` when the authority refused this computer; a person "
+        "there has to let it in.",
+    )
     connect_error_detail: str | None = Field(
         default=None,
         description="The technical text behind `connect_error`, for whoever needs it.",
@@ -473,6 +478,7 @@ def _status(ctx: AppContext) -> RemoteStatusResponse:
         ),
         connecting=sync_jobs.connecting,
         connect_error=sync_jobs.connect_error,
+        connect_error_kind=sync_jobs.connect_error_kind,
         connect_error_detail=sync_jobs.connect_error_detail,
         version=__version__,
         awaiting_approval=(
@@ -498,6 +504,23 @@ def _refuse(e: SyncError) -> HTTPException:
 def status(ctx: AppContext = Depends(get_ctx)):
     """How this project stands with its authority."""
     return _status(ctx)
+
+
+class RemoteKnownResponse(BaseModel):
+    joined: bool = Field(
+        description="This computer has joined that address before, so connecting "
+        "needs no approval."
+    )
+
+
+@router.get(
+    "/known",
+    response_model=RemoteKnownResponse,
+    dependencies=[requires(REMOTE_DIAL)],
+)
+def known(url: str, ctx: AppContext = Depends(get_ctx)):
+    """Whether this computer has joined the authority at `url` before."""
+    return RemoteKnownResponse(joined=not ctx.sync_svc.needs_approval(url, None))
 
 
 @router.post(

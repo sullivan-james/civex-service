@@ -203,3 +203,59 @@ def test_a_project_with_no_missing_files_lists_none(client: TestClient) -> None:
     assert ignored.status_code == 200 and ignored.json() == {"count": 0}
     removed = client.post("/api/remote/files/missing/remove", json={"dry_run": True})
     assert removed.status_code == 200 and removed.json()["changed"] == 0
+
+
+def test_the_approval_page_must_be_on_the_authoritys_own_origin() -> None:
+    """A hostile authority cannot aim a person at another page."""
+    from civex.domain.sync import LoginStarted
+    from civex.services.sync_service import _own_page
+
+    def page(url: str | None) -> str | None:
+        login = LoginStarted(
+            "AB-12", "secret", expires_at=1, interval=1, verify_url=url
+        )
+        return _own_page(login, "https://hub.example/o/r/data").verify_url
+
+    good = "https://hub.example/o/r/device?code=AB-12"
+    assert page(good) == good
+    assert page(None) is None
+    for bad in (
+        "javascript:alert(1)",
+        "data:text/html,hi",
+        "https://evil.example/o/r/device",
+        "https://hub.example.evil.example/device",
+        "https://user@hub.example/device",
+        "http://hub.example/device",
+        "http://hub.example:99999/device",
+        "/o/r/device",
+        "device",
+    ):
+        assert page(bad) is None, bad
+
+
+def test_known_says_whether_this_computer_joined_before(client, monkeypatch) -> None:
+    from civex.services.sync_service import SyncService
+
+    monkeypatch.setattr(SyncService, "needs_approval", lambda self, url, invite: True)
+    assert client.get("/api/remote/known", params={"url": "https://h"}).json() == {
+        "joined": False
+    }
+
+
+def test_a_refusal_is_reported_as_no_access(client, monkeypatch) -> None:
+    from civex.domain.sync import SyncError
+    from civex.server.routers import remote
+    from civex.services.sync_service import SyncService
+
+    def refuse(self, url, invite, **kw):
+        raise SyncError("The server refused this device", retryable=False, status=403)
+
+    monkeypatch.setattr(SyncService, "connect", refuse)
+    remote.sync_jobs._connect("https://h/o/r/data")
+    assert remote.sync_jobs.connect_error_kind == "no_access"
+    try:
+        assert client.get("/api/remote").json()["connect_error_kind"] == "no_access"
+    finally:
+        remote.sync_jobs.connect_error = None
+        remote.sync_jobs.connect_error_kind = None
+        remote.sync_jobs.connect_error_detail = None
