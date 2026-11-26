@@ -189,6 +189,7 @@ class ImportService:
             )
             with zipfile.ZipFile(source) as book:
                 members = book.infolist()
+                sheets = _worksheet_parts(book)
         except Exception as e:  # not a zip, however it fails
             raise ValidationError(
                 f"'{filename}' could not be opened as a spreadsheet: {e}"
@@ -213,14 +214,21 @@ class ImportService:
                 and m.file_size / max(1, m.compress_size) > lim.max_ratio
             ):
                 raise too_tight
-            # The shared strings are held whole in memory while a sheet is read.
-            if m.filename.endswith("sharedStrings.xml") and (
+            # Only a worksheet is streamed; any other part (the shared strings
+            # above all, found by content type, not name) is held whole in
+            # memory while a sheet is read.
+            if m.filename not in (sheets or ()) and (
                 m.file_size > lim.max_unpacked_mb * _MB // 4
             ):
                 raise ValidationError(
                     f"The text in this spreadsheet is over {lim.max_unpacked_mb // 4} "
                     "MB; the most that can be brought in is that."
                 )
+        if sheets is None:
+            raise ValidationError(
+                f"'{filename}' could not be opened as a spreadsheet: it does not "
+                "say which parts are sheets."
+            )
 
     def _read(
         self,
@@ -407,7 +415,9 @@ class ImportService:
         reused by the rest. Kept in a folder in the user's cache; a host may
         share that folder between its processes (files appear whole or not at
         all, and a copy that has gone is simply made again). Old copies go
-        after a day, and the oldest go when the folder holds too much."""
+        after a day, and the oldest go when the folder holds too much (that
+        cap bounds disk: with more large imports at once than fit, copies are
+        made again, which is correct but slower)."""
         lim = self._ctx.config.import_
         folder = runs_folder().with_name(runs_folder().name + "-import")
         folder.mkdir(parents=True, exist_ok=True)
@@ -505,11 +515,18 @@ class ImportService:
         file = self._file(spec.sha256, spec.filename)
         mapping = self._prepare(spec)
         copy = self._copy(file, spec.sheet)
+        wants_earlier = bool(start and spec.match_on and spec.if_exists != "add_new")
         try:
             df = _batch(copy, start, limit)
+            earlier = (
+                _batch(copy, 0, start, only=list(mapping)) if wants_earlier else None
+            )
         except FileNotFoundError:  # cleared since it was found: made again
             copy = self._copy(file, spec.sheet, rebuild=True)
             df = _batch(copy, start, limit)
+            earlier = (
+                _batch(copy, 0, start, only=list(mapping)) if wants_earlier else None
+            )
         if len(df) == 0:
             return ImportBatch(start, 0, 0, 0, 0, 0, [], True)
         match_on = list(spec.match_on)
@@ -518,7 +535,7 @@ class ImportService:
         if start and keys and spec.if_exists != "add_new":
             # Every mapped column, not only the keys: a row that could not
             # be saved (a bad cell) does not hold its key either.
-            inputs["earlier"] = _batch(copy, 0, start, only=list(mapping))
+            inputs["earlier"] = earlier
         save = _step("civex.save_records@1")
         config = save.config_model(
             schema=spec.kind,
@@ -613,6 +630,25 @@ def _mb(size: int) -> str:
 _CELL_MAX = 32_767
 
 
+def _worksheet_parts(book: zipfile.ZipFile) -> set[str] | None:
+    """Names of the parts the workbook declares as worksheets (by content
+    type, as openpyxl finds them); None when it declares none at all."""
+    from xml.etree import ElementTree
+
+    try:
+        info = book.getinfo("[Content_Types].xml")
+        if info.file_size > _MB:
+            return None
+        root = ElementTree.fromstring(book.read(info))
+    except (KeyError, ElementTree.ParseError):
+        return None
+    return {
+        el.get("PartName", "").lstrip("/")
+        for el in root
+        if el.get("ContentType", "").endswith("worksheet+xml") and el.get("PartName")
+    }
+
+
 def _rows_message(most: int) -> str:
     return (
         f"This file has more than {most:,} rows; the most that can be brought "
@@ -630,12 +666,12 @@ def _tidy(folder: Path, most: int) -> None:
     now = time.time()
     entries = []
     for f in folder.iterdir():
-        if f.suffix == ".tmp" and now - f.stat().st_mtime < _COPY_SECONDS:
-            continue  # being written
         try:
             st = f.stat()
         except OSError:
-            continue
+            continue  # renamed or removed by another writer
+        if f.suffix == ".tmp" and now - st.st_mtime < _COPY_SECONDS:
+            continue  # being written
         if now - st.st_mtime > _COPY_SECONDS:
             f.unlink(missing_ok=True)
         else:

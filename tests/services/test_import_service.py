@@ -792,3 +792,23 @@ def test_the_folder_of_copies_keeps_within_its_size(tmp_path):
         sorted(p.name for p in tmp_path.iterdir()) == ["2.csv", "3.csv"]
         or len(list(tmp_path.iterdir())) == 2
     )
+
+
+def test_shared_strings_are_bounded_by_content_type_not_name(ctx):
+    import os
+
+    ctx.config.import_.max_unpacked_mb = 4
+    types = (
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Override PartName="/xl/s.xml" ContentType="application/vnd.openxmlformats-'
+        'officedocument.spreadsheetml.sharedStrings+xml"/></Types>'
+    ).encode()
+    ref = ctx.file_svc.store_bytes(
+        _zip(
+            {"[Content_Types].xml": types, "xl/s.xml": os.urandom(1_500_000)},
+            stored={"xl/s.xml"},
+        ),
+        "r.xlsx",
+    )
+    with pytest.raises(ValidationError, match="text in this spreadsheet"):
+        ctx.import_svc.inspect(ref.sha256, ref.filename)
