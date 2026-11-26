@@ -1306,9 +1306,7 @@ class SyncAuthorityService:
         if denied := self._policy.refuses(who, settled):
             raise _Denied(denied)
 
-    def _take(
-        self, who: Principal, entry: SyncEntry, alone: bool = True
-    ) -> OpResult:
+    def _take(self, who: Principal, entry: SyncEntry, alone: bool = True) -> OpResult:
         """Merge the change into what is held, write it, and record it."""
         kind, eid = entry.entity_type, entry.entity_id
         head = self._applier.head(kind, eid)
