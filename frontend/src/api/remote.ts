@@ -52,7 +52,12 @@ export interface RemoteStatus {
   version?: string
   /** This computer asked to join and waits for a person to approve the code
    * on the server. */
-  awaiting_approval?: { code: string; expires_at: number } | null
+  awaiting_approval?: {
+    code: string
+    expires_at: number
+    /** Where a person approves it, when the server has a page for that. */
+    verify_url?: string | null
+  } | null
 }
 
 export interface SyncDevice {
@@ -436,10 +441,12 @@ export const remoteApi = {
    * the background (see `progress`). Without an invite, this computer must
    * have joined that address before. */
   connect: (url: string, invite?: string) =>
-    api.post<{ mode: string; code: string | null; expires_at: number | null }>(
-      '/remote/connect',
-      { url, invite },
-    ),
+    api.post<{
+      mode: string
+      code: string | null
+      expires_at: number | null
+      verify_url?: string | null
+    }>('/remote/connect', { url, invite }),
   disconnect: () => api.post<RemoteStatus>('/remote/disconnect', {}),
   syncNow: () => api.post<{ requested: boolean }>('/remote/sync', {}),
   /** Stop warning about every missing file (the records keep citing them). */
