@@ -215,6 +215,7 @@ class ImportSpec:
     kind: str  # the kind of record: its key
     columns: list[ColumnChoice]
     kind_label: str | None = None  # makes the kind when it isn't there yet
+    new_collection: bool = False  # makes the collection (named `collection`)
     sheet: str | None = None
     match_on: list[str] = field(default_factory=list)
     if_exists: str = "update"

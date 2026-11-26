@@ -90,6 +90,7 @@ export default function App() {
             <Route path="/collections/:id" element={<CollectionDetailPage />} />
             <Route path="/collections/:id/new" element={<NewRecordPage />} />
             <Route path="/collections/:id/import" element={<ImportPage />} />
+            <Route path="/import" element={<ImportPage />} />
             <Route
               path="/views"
               element={<Navigate replace to="/collections" />}

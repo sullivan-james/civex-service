@@ -3905,6 +3905,10 @@ class ImportRunRequest(BaseModel):
     filename: str
     sheet: str | None = None
     collection: str = Field(description="The collection the records go in.")
+    new_collection: bool = Field(
+        default=False,
+        description="Make the collection, named `collection`, if it isn't there.",
+    )
     kind: str = Field(description="The kind of record, by key.")
     kind_label: str | None = Field(
         default=None, description="Makes the kind, named this, if it isn't there."
@@ -3929,6 +3933,7 @@ class ImportRunRequest(BaseModel):
             filename=self.filename,
             sheet=self.sheet,
             collection=self.collection,
+            new_collection=self.new_collection,
             kind=self.kind,
             kind_label=self.kind_label,
             columns=[ColumnChoice(**c.model_dump()) for c in self.columns],

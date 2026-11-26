@@ -40,16 +40,19 @@ type Phase = 'file' | 'columns' | 'check' | 'import' | 'done'
 export function ImportWizard({
   collection,
   collectionId,
+  collections,
   initialKind,
   recordsHref,
 }: {
-  /** The collection the records go in, by name and id. */
-  collection: string
-  collectionId: string
+  /** The collection the records go in, by name and id; none to choose one
+   * (or make one) in the wizard, from `collections`. */
+  collection?: string
+  collectionId?: string
+  collections?: string[]
   /** The kind of record the list was showing, if any. */
   initialKind?: string | null
   /** Where "See the records" goes. */
-  recordsHref: (kind: string) => string
+  recordsHref: (kind: string, collection: string) => string
 }) {
   const { data: schemas } = useSchemas()
   const queryClient = useQueryClient()
@@ -65,6 +68,10 @@ export function ImportWizard({
   const [target, setTarget] = useState<Target>({ kind: 'new', label: '' })
   const [settings, setSettings] = useState<ColumnSetting[]>([])
   const [match, setMatch] = useState('')
+  const [place, setPlace] = useState<{ name: string; isNew: boolean }>({
+    name: collection ?? '',
+    isNew: false,
+  })
   const [ifExists, setIfExists] = useState<Choices['ifExists']>('update')
   const [checked, setChecked] = useState<Totals | null>(null)
   const [checking, setChecking] = useState<{ next: number } | null>(null)
@@ -92,7 +99,8 @@ export function ImportWizard({
           sheet,
           target,
           schema,
-          collection,
+          collection: place.name,
+          newCollection: place.isNew,
           settings,
           match,
           ifExists,
@@ -102,6 +110,8 @@ export function ImportWizard({
 
   function startFrom(read: ImportSheet, name: string, sha256: string) {
     setFile({ sha256, filename: name })
+    // Chosen here: a new collection named from the file, unless one is picked.
+    if (!collection) setPlace({ name: nameFromFile(name), isNew: true })
     setSheet(read)
     const first = topLevel.find((s) => s.name === initialKind)
     const next: Target = first
@@ -234,6 +244,9 @@ export function ImportWizard({
           choices={choices}
           topLevel={topLevel}
           onTarget={pickTarget}
+          places={collection ? undefined : (collections ?? [])}
+          place={place}
+          onPlace={setPlace}
           onSheet={pickSheet}
           onSettings={setSettings}
           onMatch={setMatch}
@@ -311,7 +324,7 @@ export function ImportWizard({
           )}
           <div className="flex flex-wrap gap-2">
             <Link
-              to={recordsHref(kind)}
+              to={recordsHref(kind, place.name.trim())}
               className="inline-flex items-center rounded-md bg-accent px-3 py-2 text-sm font-medium text-fg-on-accent hover:opacity-90"
             >
               See the records
