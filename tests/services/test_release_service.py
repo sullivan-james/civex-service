@@ -783,3 +783,121 @@ def test_write_copy_reports_bytes_written(ctx: AppContext, study, tmp_path: Path
     )
     assert seen and seen[-1] == (out.stat().st_size, release.bundle_size)
     assert [d for d, _ in seen] == sorted(d for d, _ in seen)
+
+
+def test_a_held_back_release_can_be_discarded_and_its_name_reused(ctx, study):
+    held = _make(ctx, "v1", publish=False)
+    assert held.published_at is None
+    assert _owned(ctx, held)
+    with pytest.raises(ValidationError):
+        ctx.release_svc.cite("v1")
+    with pytest.raises(ValidationError):
+        ctx.release_svc.full_bundle("v1")
+    ctx.release_svc.discard("v1")
+    ctx.commit()
+    assert ctx.release_svc.list_all() == []
+    assert not _owned(ctx, held)
+    entry = ctx._session.scalars(
+        select(AuditLog).where(
+            AuditLog.entity_type == "release", AuditLog.action == "delete"
+        )
+    ).one()
+    assert str(entry.entity_id) == str(held.id)
+    again = _make(ctx, "v1")
+    assert again.published_at is not None and again.id != held.id
+
+
+def test_a_published_release_cannot_be_discarded(ctx, study):
+    from civex.domain.exceptions import ReleasePublishedError
+
+    _make(ctx, "v1")
+    _make(ctx, "v2", publish=False)
+    ctx.release_svc.publish("v2")
+    ctx.commit()
+    for name in ("v1", "v2"):
+        with pytest.raises(ReleasePublishedError):
+            ctx.release_svc.discard(name)
+    ctx.release_svc.yank("v1", "gone")
+    ctx.commit()
+    with pytest.raises(ReleasePublishedError):  # yanked after publishing
+        ctx.release_svc.discard("v1")
+    assert {r.name for r in ctx.release_svc.list_all()} == {"v1", "v2"}
+
+
+def test_a_withdrawn_held_back_release_is_not_discarded(ctx, study):
+    from civex.domain.exceptions import ReleasePublishedError
+
+    _make(ctx, "v1", publish=False)
+    ctx.release_svc.withdraw("v1", "oops")
+    ctx.commit()
+    with pytest.raises(ReleasePublishedError):
+        ctx.release_svc.discard("v1")
+
+
+def test_publishing_after_a_discard_or_twice_fails_cleanly(ctx, study):
+    _make(ctx, "v1", publish=False)
+    ctx.release_svc.publish("v1")
+    ctx.commit()
+    with pytest.raises(ValidationError):
+        ctx.release_svc.publish("v1")
+    from civex.domain.exceptions import NotFoundError
+
+    _make(ctx, "v2", publish=False)
+    ctx.release_svc.discard("v2")
+    ctx.commit()
+    with pytest.raises(NotFoundError):
+        ctx.release_svc.publish("v2")
+
+
+def test_discard_and_publish_take_the_release_row_lock(ctx, study):
+    """The loser of a publish/discard race finds the winner's result: the
+    row is read under FOR UPDATE after the lookup, so a stale lookup is
+    re-checked (not found after a discard, published after a publish)."""
+    from civex.domain.exceptions import NotFoundError, ReleasePublishedError
+
+    held = _make(ctx, "v1", publish=False)
+    svc = ctx.release_svc
+    real = svc._repo.lock
+    # Another request publishes between our lookup and our lock.
+    svc._repo.lock = lambda id: (
+        svc._repo.update(id, published_at=held.created_at),
+        real(id),
+    )[1]
+    try:
+        with pytest.raises(ReleasePublishedError):
+            svc.discard("v1")
+    finally:
+        svc._repo.lock = real
+    other = _make(ctx, "v2", publish=False)
+    svc._repo.lock = lambda id: (svc._repo.delete(id), real(id))[1]
+    try:
+        with pytest.raises(NotFoundError):
+            svc.publish("v2")
+    finally:
+        svc._repo.lock = real
+    assert other.name == "v2"
+
+
+def test_who_may_discard_a_release(tmp_path: Path):
+    root = tmp_path / "study"
+    scaffold_project(root)
+    owner = build_local_context(load_config_at(root))
+    owner.schema_svc.create("sample")
+    owner.release_svc.create("v1", "t", publish=False)
+    owner.commit()
+    writer = build_context(
+        Project(
+            config=load_config_at(root),
+            config_store=FileConfigStore(root),
+            actor="someone",
+            permissions=Permissions.of(p.READ, p.WRITE_RECORDS),
+        )
+    )
+    try:
+        with pytest.raises(NotAllowedError):
+            writer.release_svc.discard("v1")
+        with pytest.raises(NotAllowedError):
+            writer.release_svc.publish("v1")
+    finally:
+        writer.close()
+        owner.close()

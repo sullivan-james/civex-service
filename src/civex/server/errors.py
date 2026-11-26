@@ -26,6 +26,7 @@ from civex.domain.exceptions import (
     CivexError,
     ConfigError,
     ConflictMovedError,
+    ReleasePublishedError,
     DatabaseTooNewError,
     DatabaseUnavailableError,
     FeatureUnavailableError,
@@ -165,7 +166,15 @@ def _status_for(exc: CivexError) -> int:
         return 404
     if isinstance(exc, TooLargeError):
         return 413
-    if isinstance(exc, (AlreadyExistsError, GCAlreadyRunningError, ConflictMovedError)):
+    if isinstance(
+        exc,
+        (
+            AlreadyExistsError,
+            GCAlreadyRunningError,
+            ConflictMovedError,
+            ReleasePublishedError,
+        ),
+    ):
         return 409
     if isinstance(exc, ValidationError):
         return 422

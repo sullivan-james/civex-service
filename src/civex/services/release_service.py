@@ -22,8 +22,12 @@ A release's content never changes. Its citation metadata may be corrected and
 it may be withdrawn with a reason (both keep everything), or **yanked**: its
 data is given up (it owns nothing any more, and clean-up then removes what
 nothing else uses), leaving a tombstone that still answers a citation. Each is
-a history entry. Making, correcting, withdrawing and yanking need
-`release`.
+a history entry. A host may hold a release back as it is made
+(`publish=False`, e.g. while files it needs arrive): it is frozen all the
+same but can't be cited, downloaded or copied, and `discard` removes it
+altogether (its name is free again) until it is published; once published
+only a yank gives it up. Making, correcting, withdrawing, publishing,
+discarding and yanking need `release`.
 
 **Getting the data out** goes through `FileAccessService` reading the
 release's frozen records (`release_records.FrozenRecords`): the same path
@@ -66,6 +70,7 @@ from civex.domain.dtos import ReleaseDTO
 from civex.domain.exceptions import (
     AlreadyExistsError,
     NotFoundError,
+    ReleasePublishedError,
     ValidationError,
 )
 from civex.domain.file_access import FilePlan, FileSelection
@@ -320,7 +325,9 @@ class ReleaseService:
 
     def cite(self, name: str, form: str = "text") -> str:
         """How to cite a release: `text`, `bibtex` or `cff`."""
-        return rules.citation(self.facts(self.get(name)), form)
+        release = self.get(name)
+        self.require_published(release)
+        return rules.citation(self.facts(release), form)
 
     @staticmethod
     def facts(r: ReleaseDTO) -> rules.CitationFacts:
@@ -376,10 +383,13 @@ class ReleaseService:
         keywords: list[str] | None = None,
         include_workflows: bool = False,
         progress: Progress | None = None,
+        publish: bool = True,
     ) -> ReleaseDTO:
         """Freeze `scope` as a release named `name`: write the bundle of its
         records, hash it, keep it in the object store, record the manifest and
-        own the files the records cite. No drive is asked for a file."""
+        own the files the records cite. No drive is asked for a file. With
+        `publish=False` it is held back (not citable, downloadable or
+        copyable) until `publish`, and can be `discard`ed meanwhile."""
         self._permissions.require(permissions.RELEASE)
         name = rules.check_name(name)
         meta = rules.check_metadata(
@@ -450,6 +460,7 @@ class ReleaseService:
                 civex_version=__version__,
                 created_at=now,
                 created_by=self._actor,
+                published_at=now if publish else None,
             )
             with zipfile.ZipFile(path, "a") as zf:
                 zf.writestr(rules.RELEASE_JSON, json.dumps(_manifest(draft), indent=1))
@@ -524,6 +535,53 @@ class ReleaseService:
         )
         self._log("update", release, after)
         return after
+
+    def publish(self, name: str) -> ReleaseDTO:
+        """Make a held-back release available (to cite, download, copy). Takes
+        the release's row lock, so against a `discard` of it one wins and the
+        other fails cleanly (here: not found). Publishing twice is refused."""
+        self._permissions.require(permissions.RELEASE)
+        release = self._locked(name)
+        if release.published_at is not None:
+            raise ValidationError(f"Release '{release.name}' is already published")
+        self._not_yanked(release)
+        now = datetime.now(timezone.utc)
+        after = self._repo.update(release.id, published_at=now, updated_at=now)
+        self._log("update", release, after)
+        return after
+
+    def discard(self, name: str) -> None:
+        """Remove a release that was never published, as if it had not been
+        made: its name is free again, it stops owning its files and its bundle
+        (clean-up removes what nothing else uses) and a history entry says it
+        was discarded. Refused (`ReleasePublishedError`, 409) once it has been
+        published, or if it is withdrawn or yanked: a published release stays
+        as a record; yank it to give its data up. A release not published
+        can't have been cited, downloaded or copied."""
+        self._permissions.require(permissions.RELEASE)
+        release = self._locked(name)
+        if (
+            release.published_at is not None
+            or release.yanked_at is not None
+            or release.withdrawn_at is not None
+        ):
+            raise ReleasePublishedError(
+                f"Release '{release.name}' was published, so it stays as a "
+                "record: yank it to give its data up"
+            )
+        self._repo.disown(release.id)
+        self._repo.delete(release.id)
+        if self._audit is not None:
+            self._audit.log_change(
+                "delete", "release", release.id, release.to_dict(), None
+            )
+
+    def _locked(self, name: str) -> ReleaseDTO:
+        found = self.get(name)
+        release = self._repo.lock(found.id)
+        if release is None:  # discarded while this waited for the row
+            raise NotFoundError(f"Release '{name}' not found")
+        return release
 
     def plan_yank(self, name: str) -> YankPlan:
         """What yanking would give up, counted by the clean-up's own rule
@@ -690,6 +748,7 @@ class ReleaseService:
         first when this copy hasn't got them)."""
         release = self.get(name)
         self._not_yanked(release)
+        self.require_published(release)
         with self._bundle(release) as f:
             yield release, f
 
@@ -740,6 +799,7 @@ class ReleaseService:
         release = self.get(name)
         if release.yanked_at is not None:
             return release, False
+        self.require_published(release)
         if not self._store.exists(release.bundle_sha256) and self.fetch is not None:
             try:
                 self.fetch(release.bundle_sha256)
@@ -1076,6 +1136,11 @@ class ReleaseService:
                 f"{release.yanked_at.date().isoformat()}: its data has been given up"
             )
 
+    @staticmethod
+    def require_published(release: ReleaseDTO) -> None:
+        if release.published_at is None:
+            raise ValidationError(f"Release '{release.name}' is not published yet")
+
     @contextmanager
     def _bundle(self, release: ReleaseDTO) -> Iterator[Any]:
         sha = release.bundle_sha256
@@ -1103,6 +1168,7 @@ def _manifest(r: ReleaseDTO) -> dict[str, Any]:
         k: v
         for k, v in r.to_dict().items()
         if k not in ("bundle_sha256", "bundle_size", "local_seq")
+        and k != "published_at"
         and not k.startswith(("withdrawn_", "yanked_"))
     }
     out["hash_definition"] = f"civex-release-content/{rules.HASH_VERSION}"

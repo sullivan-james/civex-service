@@ -321,3 +321,18 @@ def test_a_releases_files_can_be_listed_with_the_inventory(client: TestClient):
     ctx.close()
     assert listed.total == 1 and [i.filename for i in listed.items] == ["p.jpg"]
     assert sum(p.files for p in listed.summary) == 1
+
+
+def test_discard_a_held_back_release_over_http(client: TestClient):
+    _study(client)
+    made = client.post(
+        "/api/releases", json={"name": "v1", "title": "Survey", "publish": False}
+    )
+    assert made.status_code == 201 and made.json()["published_at"] is None
+    assert client.get("/api/releases/v1/citation").status_code == 422
+    assert client.post("/api/releases/v1/discard").status_code == 204
+    assert client.get("/api/releases/v1").status_code == 404
+    client.post("/api/releases", json={"name": "v1", "title": "Survey"})
+    refused = client.post("/api/releases/v1/discard")
+    assert refused.status_code == 409
+    assert "was published" in refused.json()["detail"]
