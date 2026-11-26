@@ -2319,19 +2319,32 @@ class LocalSyncRepository:
         )
 
     def mark_sent(self, results: list[OpResult]) -> None:
+        """Record what the authority answered for each change sent: as
+        one-at-a-time updates of each row would, written together (a change
+        not held here is skipped)."""
+        rows: dict[tuple[str, bool, bool], list[dict[str, Any]]] = {}
         for result in results:
-            row = self._s.get(AuditLog, result.op_id)
-            if row is None:
-                continue
             if result.status == "rejected":
-                row.sync_state = "rejected"
+                values: dict[str, Any] = {"sync_state": "rejected"}
             elif result.status != "deferred":
-                row.sync_state = "synced"
+                values = {"sync_state": "synced"}
                 if result.hub_seq is not None:
-                    row.hub_seq = result.hub_seq
+                    values["hub_seq"] = result.hub_seq
                 if result.status in ("merged", "conflict"):
-                    row.apply_state = "superseded"
-        self._s.flush()
+                    values["apply_state"] = "superseded"
+            else:
+                continue
+            rows.setdefault(tuple(sorted(values)), []).append(  # type: ignore[arg-type]
+                {"id": result.op_id, **values}
+            )
+        for batch in rows.values():
+            self._s.execute(
+                update(AuditLog),
+                batch,
+                execution_options={"synchronize_session": False},
+            )
+        if rows:
+            self._s.expire_all()
 
     def forget_numbers(self) -> None:
         """Clear the numbers another authority gave this project's history (it
@@ -2478,6 +2491,34 @@ class LocalSyncRepository:
             if row.sync_state == "pending":
                 row.sync_state = "synced"
             self._s.flush()
+
+    def mark_seqs(self, items: list[tuple[uuid.UUID, int, str | None]]) -> None:
+        """`mark_seq` for each of these (id, number, device), written together."""
+        by_device: dict[bool, list[dict[str, Any]]] = {False: [], True: []}
+        for entry_id, seq, device in items:
+            row: dict[str, Any] = {"id": entry_id, "hub_seq": seq}
+            if device:
+                row["device"] = device
+            by_device[bool(device)].append(row)
+        for batch in by_device.values():
+            if batch:
+                self._s.execute(
+                    update(AuditLog),
+                    batch,
+                    execution_options={"synchronize_session": False},
+                )
+        ids = [i for i, _, _ in items]
+        for start in range(0, len(ids), _ID_CHUNK):
+            self._s.execute(
+                update(AuditLog)
+                .where(
+                    AuditLog.id.in_(ids[start : start + _ID_CHUNK]),
+                    AuditLog.sync_state == "pending",
+                )
+                .values(sync_state="synced")
+                .execution_options(synchronize_session=False)
+            )
+        self._s.expire_all()
 
     def latest_hlc(self) -> str | None:
         return self._s.query(func.max(AuditLog.hlc)).scalar()

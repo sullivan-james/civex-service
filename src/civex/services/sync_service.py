@@ -1520,9 +1520,19 @@ class SyncService:
             settled = False
             try:
                 with self._repo.savepoint():
+                    numbered: list[tuple[uuid.UUID, int, str | None]] = []
                     for i, entry in enumerate(entries):
                         if i < skip:
                             continue
+                        if numbered and (
+                            owned is None
+                            or entry.id not in owned
+                            or arriving is not None
+                        ):
+                            # (Ours, now numbered, are written together; before
+                            # anything else reads or writes, in their place.)
+                            self._repo.mark_seqs(numbered)
+                            numbered = []
                         if entry.hub_seq is None:
                             raise SyncError("The server sent a change without a number")
                         if arriving is not None and entry.op != arriving:
@@ -1551,10 +1561,19 @@ class SyncService:
                             # releases: they are never taken (published on a
                             # host), only read past.
                             pass
-                        elif self._repo.has_entry(entry.id):
+                        elif (
+                            entry.id in owned
+                            if owned is not None
+                            else self._repo.has_entry(entry.id)
+                        ):
                             # Ours, now numbered, and stamped with the device
                             # it came through.
-                            self._repo.mark_seq(entry.id, entry.hub_seq, entry.device)
+                            if owned is not None:
+                                numbered.append((entry.id, entry.hub_seq, entry.device))
+                            else:
+                                self._repo.mark_seq(
+                                    entry.id, entry.hub_seq, entry.device
+                                )
                         elif entry.op and (entry.op == arriving or i >= tail):
                             arriving = entry.op
                             to_hold = self._stage(entry, dirty, above, to_hold)
@@ -1570,6 +1589,8 @@ class SyncService:
                             if entry.entity_type == "record":
                                 touched.append(entry.entity_id)
                         cursor = entry.hub_seq
+                    if numbered:
+                        self._repo.mark_seqs(numbered)
                     if entries:
                         self._flags_stale = True  # (something came in)
                     if arriving is not None and not page.more:
