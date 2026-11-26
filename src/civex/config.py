@@ -332,6 +332,13 @@ class S3Config:
     region: str | None = None
     endpoint: str | None = None  # e.g. "http://127.0.0.1:9000" for MinIO
     profile: str | None = None  # an AWS profile name, else the default chain
+    # Names of environment variables holding the keys (never the keys). Take
+    # precedence over `profile`; a named variable that is unset or empty is an
+    # error, never a fallback to another source. They let one process hold
+    # several S3Configs with different credentials.
+    access_key_env: str | None = None
+    secret_key_env: str | None = None
+    session_token_env: str | None = None
     # Files go straight between a device or browser and the bucket by presigned
     # URL (`direct_files`), never through civex. Off: civex streams them.
     direct: bool = True
@@ -506,6 +513,9 @@ def parse_config(data: dict, root: Path) -> Config:
                 region=s3d.get("region") or None,
                 endpoint=s3d.get("endpoint") or None,
                 profile=s3d.get("profile") or None,
+                access_key_env=s3d.get("access_key_env") or None,
+                secret_key_env=s3d.get("secret_key_env") or None,
+                session_token_env=s3d.get("session_token_env") or None,
                 direct=bool(s3d.get("direct", True)),
             )
         store = StoreConfig(
@@ -747,6 +757,9 @@ def render_config(config: Config) -> str:
                     lines.append(f"endpoint = {_tv(sc.s3.endpoint)}\n")
                 if sc.s3.profile:
                     lines.append(f"profile = {_tv(sc.s3.profile)}\n")
+                for _k in ("access_key_env", "secret_key_env", "session_token_env"):
+                    if getattr(sc.s3, _k):
+                        lines.append(f"{_k} = {_tv(getattr(sc.s3, _k))}\n")
                 if not sc.s3.direct:
                     lines.append("direct = false\n")
 

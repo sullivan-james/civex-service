@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any, BinaryIO, cast
 
 from civex.config import S3_VOLUME, S3Config
+from civex.domain.exceptions import ConfigError
 from civex.domain.dtos import (
     VOLUME_OFFLINE,
     VOLUME_ONLINE,
@@ -109,17 +110,53 @@ def _b64(sha256_hex: str) -> str:
     return base64.b64encode(bytes.fromhex(sha256_hex)).decode("ascii")
 
 
+def _env_credentials(config: S3Config) -> dict[str, str]:
+    """Keys read from the environment variables `config` names, as Session
+    arguments; {} when it names none. A named variable that is unset or empty
+    is a ConfigError (no silent fallback). Values are never put in a message."""
+    names = {
+        "aws_access_key_id": config.access_key_env,
+        "aws_secret_access_key": config.secret_key_env,
+        "aws_session_token": config.session_token_env,
+    }
+    if not any(names.values()):
+        return {}
+    if not (config.access_key_env and config.secret_key_env):
+        raise ConfigError(
+            "[store.s3] access_key_env and secret_key_env must be named together"
+        )
+    out: dict[str, str] = {}
+    for arg, var in names.items():
+        if not var:
+            continue
+        value = os.environ.get(var)
+        if not value:
+            raise ConfigError(
+                f"[store.s3] names the environment variable {var} for "
+                f"credentials, but it is not set (or is empty)"
+            )
+        out[arg] = value
+    return out
+
+
 def boto_client(config: S3Config) -> Any:
-    """A boto3 S3 client for `config`: credentials from the environment, the
-    named profile or the machine's role, never from config.toml."""
+    """A boto3 S3 client for `config`: credentials from the environment
+    variables it names (`access_key_env` ...), else the named profile or the
+    default chain / machine's role; never from config.toml. Each call builds
+    its own session, so configs with different variables stay independent."""
     # Imported here, not at the top: boto3 is slow to import and only a
     # project that names a bucket needs it.
     import boto3
     from botocore.config import Config as BotoConfig
 
-    session = boto3.session.Session(
-        profile_name=config.profile, region_name=config.region
-    )
+    keys = _env_credentials(config)
+    if keys:
+        # Explicit keys beat the profile; the process environment is only read.
+        session = boto3.session.Session(region_name=config.region, **keys)
+    else:
+        session = boto3.session.Session(
+            profile_name=config.profile, region_name=config.region
+        )
     options: dict[str, Any] = {"signature_version": "s3v4"}
     if config.endpoint:
         # MinIO and friends serve one host: the bucket is in the path.
