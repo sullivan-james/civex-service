@@ -560,7 +560,7 @@ def test_too_many_rows_or_columns_is_refused_with_the_limit(ctx, study, monkeypa
     ctx.config.import_.max_rows = 1000
     ctx.config.import_.max_columns = 3
     wide, wname = _csv(ctx, "a,b,c,d\n1,2,3,4\n")
-    with pytest.raises(ValidationError, match=r"4 columns; the most .* is 3"):
+    with pytest.raises(ValidationError, match=r"more than 3 columns"):
         ctx.import_svc.inspect(wide, wname)
     ok = ctx.import_svc.inspect(sha, name)  # within the column limit
     assert ok.total == 150
@@ -624,3 +624,171 @@ def test_batches_resume_from_the_file_without_rereading_it(ctx, study, monkeypat
     assert done == [(s, min(11, 60 - s), min(11, 60 - s)) for s in range(0, 60, 11)]
     assert len(passes) == 1  # the file was passed over once, not once per batch
     assert len(_people(ctx)) == 60
+
+
+def _zip(members: dict[str, bytes], stored: set[str] = frozenset()) -> bytes:
+    import zipfile
+
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as z:
+        for n, data in members.items():
+            z.writestr(
+                n,
+                data,
+                zipfile.ZIP_STORED if n in stored else zipfile.ZIP_DEFLATED,
+            )
+    return out.getvalue()
+
+
+def test_what_a_file_is_comes_from_its_bytes_not_its_name(ctx):
+    # A bomb named .xls still gets the zip checks.
+    ref = ctx.file_svc.store_bytes(
+        _zip({"xl/worksheets/sheet1.xml": b"0" * 30_000_000}), "bomb.xls"
+    )
+    with pytest.raises(ValidationError, match="packed far tighter"):
+        ctx.import_svc.inspect(ref.sha256, ref.filename)
+    # A real workbook under an .xls name reads as the workbook it is.
+    sha, name = _xlsx(ctx, {"S": [["a"], [1], [2]]}, name="people.xls")
+    assert ctx.import_svc.inspect(sha, name).total == 2
+    # A workbook under a text name, or text under an Excel name, is refused.
+    sha, _ = _xlsx(ctx, {"S": [["a"], [1]]})
+    with pytest.raises(ValidationError, match="Excel name"):
+        ctx.import_svc.inspect(sha, "x.csv")
+    ref = ctx.file_svc.store_bytes(b"a,b\n1,2\n", "x.xlsx")
+    with pytest.raises(ValidationError, match="not the kind"):
+        ctx.import_svc.inspect(ref.sha256, ref.filename)
+    # An old-format file over its own, lower limit.
+    ctx.config.import_.max_xls_mb = 1
+    ref = ctx.file_svc.store_bytes(b"\xd0\xcf\x11\xe0" + b"\0" * 1_200_000, "o.xls")
+    with pytest.raises(ValidationError, match=r"from an \.xls file is 1 MB"):
+        ctx.import_svc.inspect(ref.sha256, ref.filename)
+
+
+def test_a_huge_heading_row_is_refused_before_it_is_parsed(ctx, monkeypatch):
+    import pandas as pd
+
+    def boom(*a, **k):
+        raise AssertionError("parsed")
+
+    monkeypatch.setattr(pd, "read_csv", boom)
+    ctx.config.import_.max_columns = 100
+    sha, name = _csv(ctx, "a" + "," * 3_000_000 + "\n1\n")
+    with pytest.raises(ValidationError, match="more than 100 columns"):
+        ctx.import_svc.inspect(sha, name)
+    # Separators inside quotes are not columns; and a first line that does not
+    # end in the sample is no heading row.
+    ctx.config.import_.max_columns = 1000
+    sha, name = _csv(ctx, "x" * 70_000 + "\n1\n")
+    with pytest.raises(ValidationError, match="heading row .* too long"):
+        ctx.import_svc.inspect(sha, name)
+
+
+def test_stored_filler_cannot_dilute_the_ratio_and_strings_are_bounded(ctx):
+    import os
+
+    ctx.config.import_.max_ratio = 20
+    ref = ctx.file_svc.store_bytes(
+        _zip(
+            {
+                "junk.bin": os.urandom(5_000_000),
+                "xl/worksheets/sheet1.xml": b"0" * 3_000_000,
+            },
+            stored={"junk.bin"},
+        ),
+        "d.xlsx",
+    )
+    with pytest.raises(ValidationError, match="packed far tighter"):
+        ctx.import_svc.inspect(ref.sha256, ref.filename)
+    ctx.config.import_.max_unpacked_mb = 4
+    ref = ctx.file_svc.store_bytes(
+        _zip(
+            {"xl/sharedStrings.xml": os.urandom(1_500_000)},
+            stored={"xl/sharedStrings.xml"},
+        ),
+        "s.xlsx",
+    )
+    with pytest.raises(ValidationError, match="text in this spreadsheet"):
+        ctx.import_svc.inspect(ref.sha256, ref.filename)
+
+
+def test_a_cell_or_a_copy_past_its_limit_is_refused(ctx, study):
+    sha, name = _csv(ctx, "ID,Note\n1," + "x" * 40_000 + "\n")
+    seen = ctx.import_svc.inspect(sha, name)
+    with pytest.raises(ValidationError, match="longer than 32,767"):
+        ctx.import_svc.run(_spec(sha, name, seen), 0, 10)
+    ctx.config.import_.max_unpacked_mb = 1
+    sha, name = _csv(
+        ctx, "ID,Note\n" + "\n".join(f"{i},{'y' * 900}" for i in range(2000)) + "\n"
+    )
+    seen = ctx.import_svc.inspect(sha, name)
+    with pytest.raises(ValidationError, match="more text than"):
+        ctx.import_svc.run(_spec(sha, name, seen, kind="k2"), 0, 10)
+
+
+def test_two_builders_of_one_copy_do_not_clobber_each_other(ctx, monkeypatch):
+    import threading
+
+    import civex.services.import_service as mod
+
+    monkeypatch.setattr(mod, "_BLOCK", 10)
+    sha, name = _csv(ctx, "ID,N\n" + "\n".join(f"{i},n{i}" for i in range(500)) + "\n")
+    file = ctx.import_svc._file(sha, name)
+    sheets: list = []
+    barrier = threading.Barrier(2)
+
+    def build():
+        svc = mod.ImportService()
+        svc._app_ctx = ctx
+        with svc._workspace():
+            barrier.wait()
+            sheets.append(svc._copy(file, None, rebuild=True))
+
+    ts = [threading.Thread(target=build) for _ in range(2)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert len(sheets) == 2
+    for c in sheets:
+        df = mod._batch(c, 0, 500)
+        assert df["ID"].tolist() == [str(i) for i in range(500)]
+        assert df["N"].tolist() == [f"n{i}" for i in range(500)]
+
+
+def test_a_batch_in_the_middle_of_a_block_and_a_lost_copy(ctx, study, monkeypatch):
+    import os
+
+    import civex.services.import_service as mod
+
+    monkeypatch.setattr(mod, "_BLOCK", 7)
+    sha, name = _csv(
+        ctx, "ID,Name\n" + "\n".join(f"{i},n{i}" for i in range(40)) + "\n"
+    )
+    file = ctx.import_svc._file(sha, name)
+    with ctx.import_svc._workspace():
+        copy = ctx.import_svc._copy(file, None)
+    part = mod._batch(copy, 10, 5, only=["Name"])
+    assert part.columns.tolist() == ["Name"]
+    assert part["Name"].tolist() == [f"n{i}" for i in range(10, 15)]
+    assert mod._batch(copy, 0, 12, only=["ID"])["ID"].tolist() == [
+        str(i) for i in range(12)
+    ]
+    # The copy is cleared while a run is going: it is made again.
+    seen = ctx.import_svc.inspect(sha, name)
+    os.unlink(copy["path"])
+    got = ctx.import_svc.run(_spec(sha, name, seen), 12, 5)
+    assert (got.start, got.read, got.created) == (12, 5, 5)
+
+
+def test_the_folder_of_copies_keeps_within_its_size(tmp_path):
+    import os
+
+    from civex.services.import_service import _tidy
+
+    for i in range(4):
+        f = tmp_path / f"{i}.csv"
+        f.write_bytes(b"x" * 100)
+        os.utime(f, (1_900_000_000 + i, 1_900_000_000 + i))
+    _tidy(tmp_path, 250)
+    assert (
+        sorted(p.name for p in tmp_path.iterdir()) == ["2.csv", "3.csv"]
+        or len(list(tmp_path.iterdir())) == 2
+    )

@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import shutil
+import tempfile
 import time
 import zipfile
 from collections.abc import Iterator
@@ -106,24 +107,79 @@ class ImportService:
             record=None, dataset=None, _app_ctx=self._ctx, run_dir=self._folder
         )
 
+    def _head(self, sha256: str, n: int) -> bytes:
+        where = self._ctx.file_svc.local_path(sha256)
+        if where is not None:
+            with open(where, "rb") as f:
+                return f.read(n)
+        return self._ctx.file_svc.retrieve(sha256)[:n]
+
     def _file(self, sha256: str, filename: str) -> dict[str, Any]:
         self._ctx.file_svc.check_readable(sha256)
         size = self._ctx.file_svc.size_of(sha256)
         if size is None:
             raise NotFoundError("File not found")
-        self._check_size(sha256, filename, size)
-        return {"sha256": sha256, "filename": filename, "size": size}
-
-    def _check_size(self, sha256: str, filename: str, size: int) -> None:
-        """Refuse a file past the limits before anything parses it."""
         lim = self._ctx.config.import_
         if size > lim.max_file_mb * _MB:
             raise ValidationError(
                 f"This file is {_mb(size)}; the most that can be brought in is "
                 f"{lim.max_file_mb} MB."
             )
-        if not filename.lower().endswith((".xlsx", ".xlsm")):
-            return
+        # What the file is is decided by its first bytes, never its name.
+        head = self._head(sha256, 65536)
+        if head.startswith(b"PK\x03\x04"):
+            kind = "xlsx"
+        elif head.startswith(b"\xd0\xcf\x11\xe0"):
+            kind = "xls"
+        else:
+            kind = "text"
+        if (kind == "text") == filename.lower().endswith(_EXCEL):
+            raise ValidationError(
+                f"'{filename}' is not the kind of file its name says."
+                if kind == "text"
+                else f"'{filename}' is a spreadsheet; give it an Excel name "
+                "(.xlsx) to bring it in."
+            )
+        if kind == "xlsx":
+            self._check_zip(sha256, filename)
+        elif kind == "xls":
+            if size > lim.max_xls_mb * _MB:
+                raise ValidationError(
+                    f"This file is {_mb(size)}; the most that can be brought in "
+                    f"from an .xls file is {lim.max_xls_mb} MB. Save it as .xlsx."
+                )
+        else:
+            self._check_header(head, len(head) < 65536)
+        return {"sha256": sha256, "filename": filename, "size": size, "format": kind}
+
+    def _check_header(self, head: bytes, whole: bool) -> None:
+        """Count the columns from the first line, before any parser can build
+        them: a header of millions of separators is refused here."""
+        text = head.decode("utf-8-sig", errors="replace")
+        most = self._ctx.config.import_.max_columns
+        counts = {",": 0, "\t": 0, ";": 0}
+        quoted = False
+        for c in text:
+            if c == '"':
+                quoted = not quoted
+            elif not quoted:
+                if c in counts:
+                    counts[c] += 1
+                    if max(counts.values()) + 1 > most:
+                        raise ValidationError(
+                            f"This file has more than {most} columns; the most "
+                            "that can be brought in is "
+                            f"{most}."
+                        )
+                elif c in "\r\n":
+                    return
+        if not whole:
+            raise ValidationError(
+                "The heading row of this file is too long to be one; it is not read."
+            )
+
+    def _check_zip(self, sha256: str, filename: str) -> None:
+        lim = self._ctx.config.import_
         try:
             where = self._ctx.file_svc.local_path(sha256)
             source = (
@@ -144,11 +200,27 @@ class ImportService:
                 f"This spreadsheet unpacks to {_mb(unpacked)}; the most that "
                 f"can be brought in is {lim.max_unpacked_mb} MB."
             )
+        too_tight = ValidationError(
+            "This spreadsheet is packed far tighter than a real one "
+            f"(over {lim.max_ratio} times), so it is not read."
+        )
         if unpacked / packed > lim.max_ratio:
-            raise ValidationError(
-                "This spreadsheet is packed far tighter than a real one "
-                f"(over {lim.max_ratio} times), so it is not read."
-            )
+            raise too_tight
+        for m in members:
+            # Each part on its own: stored filler must not hide a bomb.
+            if (
+                m.file_size > _MB
+                and m.file_size / max(1, m.compress_size) > lim.max_ratio
+            ):
+                raise too_tight
+            # The shared strings are held whole in memory while a sheet is read.
+            if m.filename.endswith("sharedStrings.xml") and (
+                m.file_size > lim.max_unpacked_mb * _MB // 4
+            ):
+                raise ValidationError(
+                    f"The text in this spreadsheet is over {lim.max_unpacked_mb // 4} "
+                    "MB; the most that can be brought in is that."
+                )
 
     def _read(
         self,
@@ -187,7 +259,7 @@ class ImportService:
     def _inspect(self, sha256: str, filename: str, sheet: str | None) -> ImportSheet:
         self._ctx.file_svc.check_readable(sha256)
         file = self._file(sha256, filename)
-        sheets = self._sheets(sha256, filename)
+        sheets = self._sheets(file)
         if sheets and sheet is None:
             sheet = sheets[0]
         if sheets and sheet not in sheets:
@@ -226,26 +298,24 @@ class ImportService:
             total=total,
         )
 
-    def _sheets(self, sha256: str, filename: str) -> list[str]:
-        if not filename.lower().endswith(_EXCEL):
+    def _sheets(self, file: dict[str, Any]) -> list[str]:
+        if file["format"] == "text":
             return []
-        import io
-
         import pandas as pd
 
         try:
             # From the stored file where it is, not a copy held in memory.
-            where = self._ctx.file_svc.local_path(sha256)
+            where = self._ctx.file_svc.local_path(file["sha256"])
             source = (
                 where
                 if where is not None
-                else io.BytesIO(self._ctx.file_svc.retrieve(sha256))
+                else io.BytesIO(self._ctx.file_svc.retrieve(file["sha256"]))
             )
             with pd.ExcelFile(source) as book:
                 return [str(n) for n in book.sheet_names]
         except Exception as e:  # a file that is no Excel file, however it fails
             raise ValidationError(
-                f"'{filename}' could not be opened as a spreadsheet: {e}"
+                f"'{file['filename']}' could not be opened as a spreadsheet: {e}"
             ) from e
 
     # -- reading through once ----------------------------------------------
@@ -270,20 +340,21 @@ class ImportService:
         path = self._ctx.file_svc.local_path(file["sha256"])
         name = file["filename"]
         stream: Iterator[list[list[str]]]
-        if name.lower().endswith(_EXCEL):
+        if file["format"] != "text":
             stream = _excel_rows(
-                path, self._ctx.file_svc.retrieve, file["sha256"], sheet, name
+                path,
+                self._ctx.file_svc.retrieve,
+                file["sha256"],
+                sheet,
+                name,
+                file["format"] == "xls",
             )
         else:
             stream = self._csv_rows(file, path, count)
         for rows in stream:
             seen += len(rows)
             if seen > most:
-                raise ValidationError(
-                    f"This file has more than {most:,} rows; the most that can "
-                    "be brought in is "
-                    f"{most:,}."
-                )
+                raise ValidationError(_rows_message(most))
             yield rows
 
     def _csv_rows(
@@ -327,51 +398,75 @@ class ImportService:
         out.write_bytes(self._ctx.file_svc.retrieve(sha256))
         return out
 
-    def _copy(self, file: dict[str, Any], sheet: str | None) -> dict[str, Any]:
+    def _copy(
+        self, file: dict[str, Any], sheet: str | None, *, rebuild: bool = False
+    ) -> dict[str, Any]:
         """The file's rows written once as plain text, with a mark every
         `_BLOCK` rows, so a part is read by going straight to it instead of
         reading the file again from its first row. Made on the first part and
-        reused by the rest, whichever process asks."""
+        reused by the rest. Kept in a folder in the user's cache; a host may
+        share that folder between its processes (files appear whole or not at
+        all, and a copy that has gone is simply made again). Old copies go
+        after a day, and the oldest go when the folder holds too much."""
+        lim = self._ctx.config.import_
         folder = runs_folder().with_name(runs_folder().name + "-import")
         folder.mkdir(parents=True, exist_ok=True)
-        tag = hashlib.sha256((sheet or "").encode()).hexdigest()[:12]
-        stem = f"{file['sha256']}-{tag}"
+        cfg = self._ctx.config
+        owner = hashlib.sha256(repr((cfg.project_root, cfg.db)).encode()).hexdigest()
+        # What the rows depend on: the project, the file, the sheet, the way
+        # it is read (all text, these separators, this encoding).
+        parse = f"{sheet or ''}|text|,\\t;|utf-8-sig|v1"
+        tag = hashlib.sha256(f"{owner}|{parse}".encode()).hexdigest()[:16]
+        stem = f"{tag}-{file['sha256']}"
         marks = folder / f"{stem}.json"
         body = folder / f"{stem}.csv"
-        if marks.exists() and body.exists():
-            os.utime(marks)
-            return {**json.loads(marks.read_text()), "path": str(body)}
-        now = time.time()
-        for old in folder.iterdir():
+        if not rebuild and marks.exists() and body.exists():
             try:
-                if now - old.stat().st_mtime > _COPY_SECONDS:
-                    old.unlink()
-            except OSError:
-                pass
+                info = json.loads(marks.read_text())
+                self._check_columns(len(info["headings"]))
+                if info["rows"] > lim.max_rows:
+                    raise ValidationError(_rows_message(lim.max_rows))
+                os.utime(marks)
+                os.utime(body)
+                return {**info, "path": str(body)}
+            except (OSError, ValueError, KeyError):
+                pass  # gone or damaged: made again below
+        _tidy(folder, _FOLDER_MAX_BYTES)
         headings = [str(c) for c in self._read(file, sheet, limit=0).columns]
         self._check_columns(len(headings))
         offsets: list[int] = []
         total = 0
-        tmp = folder / f"{stem}.{os.getpid()}.tmp"
+        written = 0
+        most = lim.max_unpacked_mb * _MB
+        fd, tmp_name = tempfile.mkstemp(dir=folder, suffix=".tmp")
+        tmp = Path(tmp_name)
         try:
-            with open(tmp, "wb") as out:
+            with os.fdopen(fd, "wb") as out:
                 for rows in self._passes(file, sheet):
                     for row in rows:
                         if total % _BLOCK == 0:
-                            offsets.append(out.tell())
+                            offsets.append(written)
                         buf = io.StringIO()
                         csv.writer(buf, lineterminator="\n").writerow(
                             _fit(row, len(headings))
                         )
-                        out.write(buf.getvalue().encode())
+                        data = buf.getvalue().encode()
+                        written += len(data)
+                        if written > most:
+                            raise ValidationError(
+                                "This file holds more text than the "
+                                f"{lim.max_unpacked_mb} MB that can be brought in."
+                            )
+                        out.write(data)
                         total += 1
             os.replace(tmp, body)
         finally:
             tmp.unlink(missing_ok=True)
         info = {"headings": headings, "offsets": offsets, "rows": total}
-        tmp_marks = folder / f"{stem}.{os.getpid()}.json.tmp"
-        tmp_marks.write_text(json.dumps(info))
-        os.replace(tmp_marks, marks)
+        fd, marks_tmp = tempfile.mkstemp(dir=folder, suffix=".tmp")
+        with os.fdopen(fd, "w") as m:
+            m.write(json.dumps(info))
+        os.replace(marks_tmp, marks)
         return {**info, "path": str(body)}
 
     # -- saving ------------------------------------------------------------
@@ -410,7 +505,11 @@ class ImportService:
         file = self._file(spec.sha256, spec.filename)
         mapping = self._prepare(spec)
         copy = self._copy(file, spec.sheet)
-        df = _batch(copy, start, limit)
+        try:
+            df = _batch(copy, start, limit)
+        except FileNotFoundError:  # cleared since it was found: made again
+            copy = self._copy(file, spec.sheet, rebuild=True)
+            df = _batch(copy, start, limit)
         if len(df) == 0:
             return ImportBatch(start, 0, 0, 0, 0, 0, [], True)
         match_on = list(spec.match_on)
@@ -510,8 +609,52 @@ def _mb(size: int) -> str:
     return f"{size / _MB:,.1f} MB"
 
 
+#: The longest a cell may be (Excel's own limit).
+_CELL_MAX = 32_767
+
+
+def _rows_message(most: int) -> str:
+    return (
+        f"This file has more than {most:,} rows; the most that can be brought "
+        f"in is {most:,}."
+    )
+
+
+#: What the folder of read-through copies may hold before the oldest go.
+_FOLDER_MAX_BYTES = 2 * 1024**3
+
+
+def _tidy(folder: Path, most: int) -> None:
+    """Remove copies not used for a day, then the least recently used until
+    the folder is within `most` bytes."""
+    now = time.time()
+    entries = []
+    for f in folder.iterdir():
+        if f.suffix == ".tmp" and now - f.stat().st_mtime < _COPY_SECONDS:
+            continue  # being written
+        try:
+            st = f.stat()
+        except OSError:
+            continue
+        if now - st.st_mtime > _COPY_SECONDS:
+            f.unlink(missing_ok=True)
+        else:
+            entries.append((st.st_mtime, st.st_size, f))
+    total = sum(size for _, size, _ in entries)
+    for _, size, f in sorted(entries):
+        if total <= most:
+            break
+        f.unlink(missing_ok=True)
+        total -= size
+
+
 def _fit(row: list[Any], width: int) -> list[str]:
     row = [("" if v is None else str(v)) for v in row[:width]]
+    if any(len(v) > _CELL_MAX for v in row):
+        raise ValidationError(
+            f"A cell in this file is longer than {_CELL_MAX:,} characters, "
+            "the most a cell may hold."
+        )
     return row + [""] * (width - len(row))
 
 
@@ -542,14 +685,19 @@ def _batch(
 
 
 def _excel_rows(
-    path: Any, retrieve: Any, sha256: str, sheet: str | None, name: str
+    path: Any,
+    retrieve: Any,
+    sha256: str,
+    sheet: str | None,
+    name: str,
+    legacy: bool = False,
 ) -> Iterator[list[list[str]]]:
     """Rows of one sheet, streamed (openpyxl read-only: the sheet is parsed as
     it is passed, never loaded whole), as the text pandas would give them. Rows
     left empty at the end are dropped, as pandas drops them."""
     import openpyxl
 
-    if name.lower().endswith(".xls"):
+    if legacy:
         # The old binary format cannot be streamed; its size is already limited.
         import pandas as pd
 

@@ -96,7 +96,9 @@ class ImportConfig:
     max_file_mb: int = 50
     # Largest an Excel file may be once unpacked (it is a zip), in megabytes,
     # and the most it may expand by, so a small file can't unpack into memory.
-    max_unpacked_mb: int = 500
+    max_unpacked_mb: int = 200
+    # Largest an old-format .xls file may be (it can't be streamed).
+    max_xls_mb: int = 10
     max_ratio: int = 100
     # Most rows (under the headings) and columns.
     max_rows: int = 1_000_000
