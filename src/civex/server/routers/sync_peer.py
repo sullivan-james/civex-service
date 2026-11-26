@@ -340,25 +340,34 @@ class SyncSessionResponse(BaseModel):
 
 
 class _Attempts:
-    """Failed joins and sign-ins, per caller: past `LIMIT` a minute, it waits.
-    An invite is far too long to guess; this keeps the log quiet. In memory:
-    one process serves an authority."""
+    """Failed joins and sign-ins, per project and caller: past `LIMIT` a
+    minute, it waits. An invite is far too long to guess; this keeps the log
+    quiet. In memory: one process serves an authority. A host serving many
+    projects counts each apart (the project is its database, which a host
+    gives its own schema), so failures on one never slow another, and callers
+    that share an address (behind a proxy) are slowed only on the project they
+    failed on."""
 
     LIMIT = 10
     WINDOW = 60.0
 
     def __init__(self) -> None:
-        self._failed: dict[str, deque[float]] = {}
+        self._failed: dict[tuple[str, str], deque[float]] = {}
         self._lock = threading.Lock()
 
-    def _recent(self, host: str) -> deque[float]:
+    @staticmethod
+    def _key(request: Request) -> tuple[str, str]:
+        host = request.client.host if request.client else ""
+        return current_project(request).config.db.url, host
+
+    def _recent(self, host: tuple[str, str]) -> deque[float]:
         times = self._failed.setdefault(host, deque())
         while times and times[0] < time.monotonic() - self.WINDOW:
             times.popleft()
         return times
 
     def check(self, request: Request) -> None:
-        host = request.client.host if request.client else ""
+        host = self._key(request)
         with self._lock:
             if len(self._recent(host)) >= self.LIMIT:
                 raise HTTPException(
@@ -368,7 +377,7 @@ class _Attempts:
                 del self._failed[host]
 
     def failed(self, request: Request) -> None:
-        host = request.client.host if request.client else ""
+        host = self._key(request)
         with self._lock:
             self._recent(host).append(time.monotonic())
 

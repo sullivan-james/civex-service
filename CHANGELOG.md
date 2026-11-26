@@ -6,6 +6,11 @@ One section per tagged release: `## vX.Y.Z — <label> (YYYY-MM-DD)`. Every
 PRODUCTION_READINESS.md §4a). A pre-release tag (`v1.3.0rc1`) may use the
 final version's entry or `## Unreleased` instead of one of its own. The version itself has one source of truth,
 
+- **Sync: failed joins are counted per project.** The limit on failed joins and
+  sign-ins was one per process, keyed by caller address alone, so on a host
+  serving many projects junk joins on one made joins on another answer 429
+  (and callers behind one proxy address locked out every project). It is now
+  counted per project and caller; the limit is unchanged.
 - **Sync: a device's push bookkeeping is written in bulk.** After a push the
   device recorded each answer (and, when its own changes came back in the feed,
   each number) with a read and a write per change; it now writes them together.

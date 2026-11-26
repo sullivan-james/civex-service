@@ -235,3 +235,47 @@ def test_serve_sync_only_refuses_a_project_that_is_not_an_authority(project_dir)
     result = CliRunner().invoke(app, ["serve", "--sync-only"])
     assert result.exit_code == 1
     assert "civex sync authority enable" in result.output
+
+
+def _asking(db_url: str, host: str = "10.0.0.1"):
+    """A request for a project on `db_url`, from `host`."""
+    from types import SimpleNamespace
+
+    project = SimpleNamespace(config=SimpleNamespace(db=SimpleNamespace(url=db_url)))
+    return SimpleNamespace(
+        client=SimpleNamespace(host=host), state=SimpleNamespace(project=project)
+    )
+
+
+def test_two_projects_do_not_share_a_lockout():
+    from fastapi import HTTPException
+
+    from civex.server.routers.sync_peer import _Attempts
+
+    attempts = _Attempts()
+    a, b = (
+        _asking("postgresql://h/db?search_path=repo_a"),
+        _asking("postgresql://h/db?search_path=repo_b"),
+    )
+    for _ in range(_Attempts.LIMIT):
+        attempts.failed(a)
+    with pytest.raises(HTTPException) as locked:
+        attempts.check(a)
+    assert locked.value.status_code == 429
+    attempts.check(b)  # same caller address, another project: not slowed
+    attempts.failed(b)
+    attempts.check(b)
+
+
+def test_one_project_still_locks_a_caller_out_and_others_callers_are_free():
+    from fastapi import HTTPException
+
+    from civex.server.routers.sync_peer import _Attempts
+
+    attempts = _Attempts()
+    url = "postgresql://h/db?search_path=repo_a"
+    for _ in range(_Attempts.LIMIT):
+        attempts.failed(_asking(url))
+    with pytest.raises(HTTPException):
+        attempts.check(_asking(url))
+    attempts.check(_asking(url, host="10.0.0.2"))
