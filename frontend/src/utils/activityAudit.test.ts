@@ -35,7 +35,7 @@ describe('Activity on saved filters and the Analytics page', () => {
 })
 
 describe('describeAuditEvent already done', () => {
-  const event = (done: { count: number; by: string[] } | null) =>
+  const event = (done: NonNullable<AuditEvent['already_done']> | null) =>
     ({
       id: 'b1',
       kind: 'batch',
