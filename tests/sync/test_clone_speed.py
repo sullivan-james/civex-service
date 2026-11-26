@@ -141,9 +141,12 @@ def test_a_copy_that_stopped_part_way_is_finished_by_copying_again(
     calls = {"n": 0}
 
     def cut(self, kind, after, limit, *rest):
-        calls["n"] += 1
-        if kind == "record" and calls["n"] > 8:
-            raise sync_service.SyncError("the connection dropped")
+        # (the third page of records is the one asked for while the second is
+        # written: its failure arrives after two pages were committed)
+        if kind == "record":
+            calls["n"] += 1
+            if calls["n"] == 3:
+                raise sync_service.SyncError("the connection dropped")
         return real(self, kind, after, limit, *rest)
 
     monkeypatch.setattr(Loopback, "snapshot", cut)
@@ -151,7 +154,8 @@ def test_a_copy_that_stopped_part_way_is_finished_by_copying_again(
         phone.sync_svc.connect("https://authority.test", phone._invite)
     phone.commit()
     held = phone.sync_repo.all_ids("record")
-    assert held and held != authority.sync_repo.all_ids("record")
+    assert len(held) == 18  # two pages of 9 were written and kept
+    assert held != authority.sync_repo.all_ids("record")
     monkeypatch.setattr(Loopback, "snapshot", real)
     assert connect(phone) == "joined"
     assert snapshots(phone) == snapshots(authority)
@@ -168,3 +172,73 @@ def test_the_index_is_made_by_a_migration(authority):
     authority.commit()
     found = inspect(authority._session.get_bind()).get_indexes("records")
     assert any(i["column_names"] == ["created_at", "id"] for i in found)
+
+
+def test_a_wide_page_is_cut_by_bytes_and_read_a_chunk_at_a_time(
+    project, authority, monkeypatch
+):
+    """Asked for 1000 records of ~1 KB each with a budget of 20 KB, the
+    authority reads no more than the budget and one chunk, and the pages that
+    follow still cover every record once."""
+    from civex.services import sync_authority
+
+    build_study(authority)
+    for i in range(150):
+        authority.record_svc.add(
+            "study", "encounter", {"site": f"{i:04d}" + "x" * 1000}
+        )
+    authority.commit()
+    monkeypatch.setattr(sync_authority, "SNAPSHOT_PAGE_BYTES", 20_000)
+    monkeypatch.setattr(sync_authority, "SNAPSHOT_CHUNK", 5)
+    read: list[int] = []
+    real = authority.sync_repo.snapshots_page
+
+    def spy(kind, after, limit, *rest):
+        out = real(kind, after, limit, *rest)
+        if kind == "record":
+            read.append(len(out))
+        return out
+
+    monkeypatch.setattr(authority.sync_repo, "snapshots_page", spy)
+    svc = authority.authority_svc
+    seen: list[str] = []
+    after = None
+    pages = 0
+    while True:
+        before = len(read)
+        page = svc.snapshot("record", after, 1000)
+        pages += 1
+        seen += [i["id"] for i in page.items]
+        assert max(read[before:]) <= 5  # never more than a chunk at once
+        assert sum(read[before:]) <= 20  # about the budget (1 KB rows) + a chunk
+        if not page.more:
+            break
+        assert 5 <= len(page.items) <= 20
+        after = page.next
+    assert pages > 5
+    assert len(seen) == len(set(seen)) == 151
+    assert set(seen) == authority.sync_repo.all_ids("record")
+
+
+def test_a_refused_big_page_falls_back_to_200_for_the_rest_of_the_copy(
+    project, authority, monkeypatch
+):
+    """An older authority (reached mid-copy) answers 422 to a limit over 500."""
+    _study(authority)
+    monkeypatch.setattr(sync_service, "SNAPSHOT_PAGE", 25)
+    limits: list[int] = []
+    real = Loopback.snapshot
+
+    def old(self, kind, after, limit, *rest):
+        limits.append(limit)
+        if limit > 500:
+            raise sync_service.SyncError("too big", retryable=False, status=422)
+        return real(self, kind, after, limit, *rest)
+
+    monkeypatch.setattr(Loopback, "snapshot", old)
+    phone = device(project, authority, "phone")
+    assert connect(phone) == "joined"
+    assert limits[0] > 500 and set(limits[1:]) == {25, SNAPSHOT_PAGE_MAX} - {
+        SNAPSHOT_PAGE_MAX
+    }
+    assert snapshots(phone) == snapshots(authority)

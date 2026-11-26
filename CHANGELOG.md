@@ -16,8 +16,13 @@ final version's entry or `## Unreleased` instead of one of its own. The version 
   next page is read while the current one is written, and a page of records is
   written in a few statements instead of one by one. A new migration adds an
   index on `records (created_at, id)`, the order a copy is read in, so reading
-  page after page no longer re-sorts what is left. A copy cut short is still
-  finished by copying again.
+  page after page no longer re-sorts what is left (a plain `CREATE INDEX`: it
+  blocks writes to `records` while it builds, so on a large project run the
+  migration at a quiet time). A copy cut short is still finished by copying
+  again. The authority reads a page in chunks and stops at the byte budget, so
+  a request never holds more than that, however wide the records; a device
+  whose big-page request is refused by an older authority asks for 200 from
+  then on.
 - **Sync: a blank copy only downloads.** A computer that copies a project owes
   the server only files it stored itself; files that came with the records it
   pulled were counted as owed, so the copy flipped between "Copying the
