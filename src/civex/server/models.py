@@ -1254,6 +1254,22 @@ class MoveRecordsRequest(RecordSelectionRequest):
     )
 
 
+class RecordDeletePreviewResponse(BaseModel):
+    """What deleting some records would take, and what to ask before doing it."""
+
+    chosen: int = Field(description="Live records chosen.")
+    records: int = Field(
+        description="Records that would go in all, with everything beneath them."
+    )
+    cascading: int = Field(
+        description="Records that go only because they sit beneath a chosen one."
+    )
+    confirm: Literal["plain", "type"] = Field(
+        description="`plain`: an ordinary confirmation (the delete can be "
+        "undone). `type`: a large delete, so the confirmation is typed."
+    )
+
+
 class RecordMovePlanResponse(BaseModel):
     """What a move would do. `problems` says, in plain words, why it can't be
     done; it is empty when `can_move`."""

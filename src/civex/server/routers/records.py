@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
 
 from civex.context import AppContext, context_factory
+from civex.domain.delete_policy import delete_tier
 from civex.domain.dtos import RecordBulkEditResultDTO
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.query import RecordQuery
@@ -34,6 +35,7 @@ from civex.server.models import (
     QualityRecordsResponse,
     QualityReportResponse,
     RecordQueryRequest,
+    RecordDeletePreviewResponse,
     RecordMovePlanResponse,
     RecordLabelResponse,
     RecordLabelsRequest,
@@ -627,6 +629,27 @@ def bulk_delete_records(
     deleted = ctx.record_svc.delete_many(ids, force=force)
     ctx.commit()
     return {"deleted": deleted}
+
+
+@router.post("/records/delete-preview", response_model=RecordDeletePreviewResponse)
+def preview_delete_records(
+    body: RecordSelectionRequest, ctx: AppContext = Depends(get_read_ctx)
+):
+    """What deleting these records would take (each with everything beneath
+    it) and the confirmation to ask for: `plain`, or `type` for a large delete.
+    Nothing is changed."""
+    try:
+        chosen, total = ctx.record_svc.delete_preview(**_selection(body, "delete"))
+    except NotFoundError as e:
+        raise HTTPException(404, detail=str(e))
+    except (ValueError, ValidationError) as e:
+        raise HTTPException(422, detail=str(e))
+    return RecordDeletePreviewResponse(
+        chosen=chosen,
+        records=total,
+        cascading=max(total - chosen, 0),
+        confirm=delete_tier(total),
+    )
 
 
 def _selection(body: RecordSelectionRequest, verb: str) -> dict:

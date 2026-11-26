@@ -46,6 +46,13 @@ export interface RecordSelectionBody {
   search_fields?: string[] | null
 }
 
+export interface RecordDeletePreview {
+  chosen: number
+  records: number
+  cascading: number
+  confirm: 'plain' | 'type'
+}
+
 /** The records a person chose in a list: the rows ticked, or everything the
  * list's query shows. */
 export type RecordSelection =
@@ -564,6 +571,12 @@ export const recordsApi = {
 
   deleteMany: (ids: string[]) =>
     api.post<{ deleted: number }>('/records/bulk-delete', { ids }),
+
+  /** What deleting the chosen records would take, with everything beneath
+   * them, and the confirmation to ask: `plain`, or `type` for a large delete.
+   * The server decides, so the threshold is one rule everywhere. */
+  deletePreview: (body: RecordSelectionBody) =>
+    api.post<RecordDeletePreview>('/records/delete-preview', body),
 
   /** Deletes every record the query matches (no filters: the whole
    * collection). The same query the list shows, so "all N matching" is
