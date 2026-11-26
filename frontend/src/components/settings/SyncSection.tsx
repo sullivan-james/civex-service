@@ -71,7 +71,7 @@ function ConnectForm() {
         />
       </Field>
       <p className="text-xs text-fg-muted">
-        Connecting to a hub repository?{' '}
+        Connecting to a hub project?{' '}
         <Link to="/connect" className="text-accent hover:underline">
           Use the guided page
         </Link>
