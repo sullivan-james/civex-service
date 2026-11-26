@@ -213,7 +213,12 @@ class ImportService:
 
     def _run(self, spec: ImportSpec, start: int, limit: int) -> ImportBatch:
         ctx = self._ctx
-        ctx.dataset_svc.get(spec.collection)  # NotFoundError for a missing one
+        try:
+            ctx.dataset_svc.get(spec.collection)
+        except NotFoundError:
+            if not spec.new_collection:
+                raise
+            ctx.dataset_svc.create(spec.collection.strip())
         file = self._file(spec.sha256, spec.filename)
         mapping = self._prepare(spec)
         df = self._read(file, spec.sheet, skip=start, limit=limit)

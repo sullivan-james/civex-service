@@ -10,7 +10,8 @@ export function FileStep({
   collectionId,
   onRead,
 }: {
-  collectionId: string
+  /** The collection the file is for; none when it is not chosen yet. */
+  collectionId?: string
   onRead: (sheet: ImportSheet, filename: string, sha256: string) => void
 }) {
   const [busy, setBusy] = useState<

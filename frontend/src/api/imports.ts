@@ -42,6 +42,8 @@ export interface ImportRequest {
   filename: string
   sheet: string | null
   collection: string
+  /** Make the collection if it isn't there. */
+  new_collection?: boolean
   kind: string
   kind_label: string | null
   columns: ColumnChoice[]

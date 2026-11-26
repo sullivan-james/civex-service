@@ -128,6 +128,16 @@ export default function HomePage() {
         </ol>
       )}
 
+      {isSuccess && !started && (
+        <p className="mt-4 text-sm text-fg-muted">
+          Have a spreadsheet?{' '}
+          <Link to="/import" className="text-accent hover:underline">
+            Import it
+          </Link>
+          .
+        </p>
+      )}
+
       {offered(features, { feature: 'local_workflows' }) && <RecentActivity />}
     </Page>
   )

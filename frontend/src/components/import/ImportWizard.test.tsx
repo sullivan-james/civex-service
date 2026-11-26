@@ -90,7 +90,7 @@ beforeEach(() => {
 })
 afterEach(() => vi.unstubAllGlobals())
 
-function renderWizard() {
+function renderWizard(project = false) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -99,9 +99,10 @@ function renderWizard() {
       <ToastProvider>
         <MemoryRouter>
           <ImportWizard
-            collection="study"
-            collectionId="c1"
-            recordsHref={(kind) => `/collections/c1?schema=${kind}`}
+            collection={project ? undefined : 'study'}
+            collectionId={project ? undefined : 'c1'}
+            collections={project ? [] : undefined}
+            recordsHref={(kind, name) => `/collections/${name}?schema=${kind}`}
           />
         </MemoryRouter>
       </ToastProvider>
@@ -157,7 +158,7 @@ describe('ImportWizard', () => {
     expect(screen.getByText('2 added.')).toBeInTheDocument()
     expect(
       screen.getByRole('link', { name: 'See the records' }),
-    ).toHaveAttribute('href', '/collections/c1?schema=people')
+    ).toHaveAttribute('href', '/collections/study?schema=people')
   })
 
   it('leaves a column out and cannot go on with none', async () => {
@@ -224,5 +225,25 @@ describe('ImportWizard', () => {
         screen.getByText('There is nothing in this file to bring in.'),
       ).toBeInTheDocument(),
     )
+  })
+
+  it('starts a project with nothing in it: a new collection from the file', async () => {
+    renderWizard(true)
+    const user = await chooseFile()
+    expect(filesApi.uploadBatch).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      undefined,
+    )
+    expect(screen.getByLabelText('Collection name')).toHaveValue('People')
+    await user.click(screen.getByRole('button', { name: 'Check' }))
+    await screen.findByText("Rows that won't be saved")
+    expect(runs[0].body.collection).toBe('People')
+    expect(runs[0].body.new_collection).toBe(true)
+    await user.click(screen.getByRole('button', { name: 'Import 2 rows' }))
+    await screen.findByText('Done')
+    expect(
+      screen.getByRole('link', { name: 'See the records' }),
+    ).toHaveAttribute('href', '/collections/People?schema=people')
   })
 })

@@ -29,6 +29,9 @@ export function ColumnsStep({
   choices,
   topLevel,
   onTarget,
+  places,
+  place,
+  onPlace,
   onSheet,
   onSettings,
   onMatch,
@@ -41,6 +44,10 @@ export function ColumnsStep({
   choices: Choices
   topLevel: Schema[]
   onTarget: (t: Target) => void
+  /** The collections to choose from, when the collection is chosen here. */
+  places?: string[]
+  place: { name: string; isNew: boolean }
+  onPlace: (p: { name: string; isNew: boolean }) => void
   onSheet: (name: string) => void
   onSettings: (s: ColumnSetting[]) => void
   onMatch: (heading: string) => void
@@ -73,6 +80,39 @@ export function ColumnsStep({
       </p>
 
       <div className="flex flex-wrap items-end gap-4">
+        {places && (
+          <>
+            <Field label="Collection">
+              <Select
+                value={place.isNew ? NEW_KIND : place.name}
+                onChange={(e) =>
+                  onPlace(
+                    e.target.value === NEW_KIND
+                      ? { name: '', isNew: true }
+                      : { name: e.target.value, isNew: false },
+                  )
+                }
+              >
+                {places.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+                <option value={NEW_KIND}>A new collection</option>
+              </Select>
+            </Field>
+            {place.isNew && (
+              <Field label="Collection name">
+                <Input
+                  value={place.name}
+                  onChange={(e) =>
+                    onPlace({ name: e.target.value, isNew: true })
+                  }
+                />
+              </Field>
+            )}
+          </>
+        )}
         <Field label="Put the rows in">
           <Select
             value={target.kind === 'existing' ? target.name : NEW_KIND}
