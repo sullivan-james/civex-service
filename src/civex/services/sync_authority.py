@@ -415,7 +415,7 @@ class SyncAuthorityService:
                     if any(r.status == DEFERRED for r in flushed):
                         break
                 if self._bulk and kind in ("delete", "restore"):
-                    if cache.read.get(action[0].entity_id) != kind:
+                    if any(cache.read.get(e.entity_id) != kind for e in action):
                         self._prefetch_changes(cache, taken, position, kind)
                 elif self._bulk and len(action) == 1 and cache.stale:
                     # What the changes to come ask of the records is read
@@ -622,6 +622,17 @@ class SyncAuthorityService:
             if _run_kind(e) != kind:
                 break
             stretch.append(e)
+        # (an action is read to its end, or it could not go in with the run)
+        at = position + len(stretch)
+        while (
+            stretch
+            and stretch[-1].op
+            and at < len(taken)
+            and taken[at].op == stretch[-1].op
+            and _run_kind(taken[at]) == kind
+        ):
+            stretch.append(taken[at])
+            at += 1
         self._stretch_left = len(stretch)
         heads = {
             e.entity_id: self._repo.snapshot("record", e.entity_id) for e in stretch
