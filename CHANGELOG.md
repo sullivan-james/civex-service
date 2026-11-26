@@ -48,11 +48,7 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
-## v2.3.2 — bundle import fix (2026-11-25)
-
-### Fixed
-
-- Importing a bundle no longer fails with "from_filename: there is no field '…'" when a field's `from_filename` rule reads a file field listed after it. The rule is now set once every field exists, as `filename_template` already was. This also fixes copying a hub release.
+## v2.3.3 — bulk delete and restore over sync, files on a host (2026-11-26)
 
 ### Changed
 
@@ -67,6 +63,11 @@ from the next tag forward.
   projects are unchanged.
 
 ### Fixed
+
+- **Sync: failed joins are counted per project and caller.** On a host with many
+  projects, failed joins on one project no longer lock the same caller out of
+  the others, and behind a proxy one address no longer locks out every project.
+  Limits are unchanged.
 
 - **Sync: deleting several records that have children in one call no longer
   half-applies.** A delete (or exact restore) of two or more trees logged its
@@ -149,6 +150,12 @@ from the next tag forward.
   longer reads every record of the schema into memory under the push lock, and
   a schema change that does not touch its keys (a label, a description) skips
   it. The answers are the same.
+
+## v2.3.2 — bundle import fix (2026-11-25)
+
+### Fixed
+
+- Importing a bundle no longer fails with "from_filename: there is no field '…'" when a field's `from_filename` rule reads a file field listed after it. The rule is now set once every field exists, as `filename_template` already was. This also fixes copying a hub release.
 
 ## v2.3.1 — release screens left to the host (2026-11-24)
 
