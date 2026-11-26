@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 from civex_plugin_sdk.io_convert import to_invoke_form
 
+from civex.domain import permissions
 from civex.domain.exceptions import (
     NotFoundError,
     PluginExecutionError,
@@ -181,7 +182,14 @@ class ImportService:
         import pandas as pd
 
         try:
-            with pd.ExcelFile(io.BytesIO(self._ctx.file_svc.retrieve(sha256))) as book:
+            # From the stored file where it is, not a copy held in memory.
+            where = self._ctx.file_svc.local_path(sha256)
+            source = (
+                where
+                if where is not None
+                else io.BytesIO(self._ctx.file_svc.retrieve(sha256))
+            )
+            with pd.ExcelFile(source) as book:
                 return [str(n) for n in book.sheet_names]
         except Exception as e:  # a file that is no Excel file, however it fails
             raise ValidationError(
@@ -214,7 +222,9 @@ class ImportService:
     def _run(self, spec: ImportSpec, start: int, limit: int) -> ImportBatch:
         ctx = self._ctx
         try:
-            ctx.dataset_svc.get(spec.collection)
+            dataset = ctx.dataset_svc.get(spec.collection)
+            # Said here, as the same refusal as any save, not as a failed step.
+            ctx.project.permissions.require(permissions.WRITE_RECORDS, dataset.id)
         except NotFoundError:
             if not spec.new_collection:
                 raise
@@ -228,12 +238,13 @@ class ImportService:
         keys = [mapping[h] for h in mapping if mapping[h] in match_on]
         inputs: dict[str, Any] = {"rows": df}
         if start and keys and spec.if_exists != "add_new":
-            by_field = {v: k for k, v in mapping.items()}
             earlier = self._read(
                 file,
                 spec.sheet,
                 limit=start,
-                only=[by_field[k] for k in keys],
+                # Every mapped column, not only the keys: a row that could not
+                # be saved (a bad cell) does not hold its key either.
+                only=list(mapping),
             )
             inputs["earlier"] = earlier
         save = _step("civex.save_records@1")

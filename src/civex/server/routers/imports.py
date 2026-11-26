@@ -2,13 +2,12 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from civex.context import AppContext
 from civex.server.deps import get_ctx
 from civex.server.models import (
     ImportBatchResponse,
-    ImportInspectRequest,
     ImportRunRequest,
     ImportSheetResponse,
 )
@@ -16,12 +15,19 @@ from civex.server.models import (
 router = APIRouter(prefix="/import", tags=["import"])
 
 
-@router.post("/inspect", response_model=ImportSheetResponse)
-def inspect_spreadsheet(body: ImportInspectRequest, ctx: AppContext = Depends(get_ctx)):
+@router.get("/inspect", response_model=ImportSheetResponse)
+def inspect_spreadsheet(
+    sha256: str = Query(description="The uploaded spreadsheet (a stored file)."),
+    filename: str = Query(description="Its name, which says if it is Excel or text."),
+    sheet: str | None = Query(
+        default=None, description="Which sheet of an Excel file."
+    ),
+    ctx: AppContext = Depends(get_ctx),
+):
     """Look inside an uploaded spreadsheet (CSV, TSV or Excel): its sheets, its
     columns with what each looks like, its first rows and how many rows it has.
-    Upload it first with `PUT /files/stream`; nothing is read from a path."""
-    return asdict(ctx.import_svc.inspect(body.sha256, body.filename, body.sheet))
+    Upload it first with `PUT /files/stream`. A read: it writes nothing. Nothing is read from a path."""
+    return asdict(ctx.import_svc.inspect(sha256, filename, sheet))
 
 
 @router.post("/run", response_model=ImportBatchResponse)

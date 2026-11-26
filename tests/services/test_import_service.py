@@ -366,7 +366,7 @@ def test_a_check_says_what_the_save_will_and_keeps_nothing(ctx, study):
 
 
 def test_parts_of_a_file_give_what_the_whole_does(ctx, study):
-    rows = ["ID,Age"] + [f"{i % 7},{i}" for i in range(40)] + ["x,abc"]
+    rows = ["ID,Age", "3,abc"] + [f"{i % 7},{i}" for i in range(40)] + ["x,abc"]
     sha, name = _csv(ctx, "\n".join(rows) + "\n")
     seen = ctx.import_svc.inspect(sha, name)
 
@@ -386,8 +386,8 @@ def test_parts_of_a_file_give_what_the_whole_does(ctx, study):
         )
         total = dict(created=0, updated=0, unchanged=0, skipped=0)
         problems: list[str] = []
-        size = -(-41 // parts)
-        for start in range(0, 41, size):
+        size = -(-42 // parts)
+        for start in range(0, 42, size):
             part = ctx.import_svc.run(spec, start, size, check=check)
             for k in total:
                 total[k] += getattr(part, k)
@@ -402,9 +402,12 @@ def test_parts_of_a_file_give_what_the_whole_does(ctx, study):
             assert got == whole, (parts, check)
             assert problems == whole_problems, (parts, check)
             ctx.commit()
-    assert whole["skipped"] == 34  # 33 repeats of 7 keys, and the bad row
-    assert any("Row 42: age: 'abc'" in p for p in whole_problems)
-    assert any("is also row 2" in p for p in whole_problems)
+    # 33 repeats of 7 keys, and the two bad rows: the early bad row does not
+    # hold its key, so the first good row with it is saved, not "also row 2".
+    assert whole["skipped"] == 35
+    assert any("Row 43: age: 'abc'" in p for p in whole_problems)
+    assert not any("is also row 2," in p for p in whole_problems)
+    assert any("is also row 3," in p for p in whole_problems)
 
 
 def test_kinds_inside_another_record_are_refused(ctx, study):

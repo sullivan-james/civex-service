@@ -64,12 +64,11 @@ export interface ImportBatch {
 }
 
 export const importsApi = {
-  inspect: (sha256: string, filename: string, sheet?: string | null) =>
-    api.post<ImportSheet>('/import/inspect', {
-      sha256,
-      filename,
-      sheet: sheet ?? null,
-    }),
+  inspect: (sha256: string, filename: string, sheet?: string | null) => {
+    const q = new URLSearchParams({ sha256, filename })
+    if (sheet) q.set('sheet', sheet)
+    return api.get<ImportSheet>(`/import/inspect?${q}`)
+  },
   /** A part of the file: `check` keeps nothing and says what saving would do.
    * `batch` puts the changes of every part in one event of history. */
   run: (

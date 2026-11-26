@@ -20,7 +20,7 @@ Open the collection, choose **New**, then **Import spreadsheet**.
    History, so the records it brought in can be undone from there.
 
 Values are read as written: `007` stays `007`, and a column is only taken for
-numbers or dates when every value in the first rows is one. Records that belong
+numbers or dates when every value in the first rows is one. If an import stops part way and a part is sent again, rows that were saved and have no matching column can be added twice: choose a matching column when the file may be imported more than once. Records that belong
 inside another record are not imported this way.
 
 The wizard runs the Table and Save as records steps, so the same import can be
