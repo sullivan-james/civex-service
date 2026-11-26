@@ -42,6 +42,7 @@ import {
   ChevronDown,
   Columns3,
   Plus,
+  Upload,
 } from '../ui/icons'
 import { toTableRows } from '../records/tableRows'
 import {
@@ -581,6 +582,24 @@ export function RecordsExplorer({
               `/collections/${dataset}/new?${new URLSearchParams({ schema: s.name })}`,
             ),
         })),
+        // Inside a record there is no spreadsheet to put in: an import is of
+        // records at the top of a collection.
+        ...(x.rootId
+          ? []
+          : [
+              {
+                label: 'Import spreadsheet',
+                icon: Upload,
+                onClick: () =>
+                  navigate(
+                    `/collections/${dataset}/import${
+                      listed
+                        ? `?${new URLSearchParams({ schema: listed.name })}`
+                        : ''
+                    }`,
+                  ),
+              },
+            ]),
       ]
     : []
   const newMenu =
@@ -670,6 +689,11 @@ export function RecordsExplorer({
             : null
         }
         newMenu={newMenu}
+        importHref={
+          dataset && mayWrite && !x.rootId
+            ? `/collections/${dataset}/import`
+            : undefined
+        }
         cannotAddSchema={
           can('change_structure') ? undefined : why('change_structure')
         }
