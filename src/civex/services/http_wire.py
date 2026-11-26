@@ -201,7 +201,7 @@ def retries(status: int) -> bool:
 def status_error(reply: Reply, not_found: str | None = None) -> SyncError:
     """The `SyncError` for a failed answer, in words for the person, saying
     whether trying again later can help. `not_found` is what a 404 means for
-    this call (default: not a civex sync server)."""
+    this call (default: nothing there, or private)."""
     status = reply.status
     detail = detail_of(reply)
     text = _words(detail) or f"The server answered {status}"
@@ -230,8 +230,9 @@ def status_error(reply: Reply, not_found: str | None = None) -> SyncError:
     if status == 404:
         return err(
             not_found
-            or "That address is not a civex sync server (or sync is not switched "
-            "on there)",
+            or "Nothing was found at that address. The project may not exist, or "
+            "it is private: sign in to the host or use an invite from its admin "
+            "(or sync is not switched on there)",
             False,
         )
     if status == 413:

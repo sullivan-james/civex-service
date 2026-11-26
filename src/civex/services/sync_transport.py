@@ -125,11 +125,16 @@ class HttpSyncTransport:
                 self._plain("POST", "/device-login", body).json()
             )
         except SyncError as e:
-            if e.status == 404:  # an authority from before this way in
+            if e.status in (401, 403, 404):
+                # A private project answers like a missing one; an older
+                # authority has no way in without an invite.
                 raise SyncError(
-                    "This computer hasn't joined that server, and the server is "
-                    "too old to approve it from there: ask its admin for an invite",
+                    "This project hasn't joined that server, and it can't ask to "
+                    "join from here. The project wasn't found or is private, or "
+                    "the server can't approve it: sign in to the host, or ask its "
+                    "admin for an invite",
                     retryable=False,
+                    status=e.status,
                 ) from e
             raise
 

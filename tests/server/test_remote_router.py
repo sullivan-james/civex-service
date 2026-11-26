@@ -259,3 +259,107 @@ def test_a_refusal_is_reported_as_no_access(client, monkeypatch) -> None:
         remote.sync_jobs.connect_error = None
         remote.sync_jobs.connect_error_kind = None
         remote.sync_jobs.connect_error_detail = None
+
+
+def _authority_that(monkeypatch, hello_error):
+    """A computer that has joined `https://hub.example` (for another project)
+    whose authority answers `hello` with `hello_error` (None: knows us)."""
+    from civex import user_state
+    from civex.domain.sync import LoginStarted
+    from civex.server.routers import remote
+    from civex.services.sync_service import SyncService
+
+    monkeypatch.setattr(user_state, "authority_for", lambda url: "some-key")
+    asked: list[str] = []
+
+    class Probe:
+        def hello(self):
+            asked.append("hello")
+            if hello_error:
+                raise hello_error
+            return None
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(SyncService, "_made", lambda self, url: Probe())
+    started = LoginStarted(
+        "ABCD-2345", "secret", expires_at=2_000_000_000, interval=1, verify_url=None
+    )
+    monkeypatch.setattr(SyncService, "request_login", lambda self, url: started)
+    begun: list = []
+    monkeypatch.setattr(
+        remote.sync_jobs, "start_connect", lambda url, login=None: begun.append(login)
+    )
+    return asked, started, begun
+
+
+def test_a_second_project_on_a_joined_computer_gets_a_code(client, monkeypatch):
+    """The computer joined that address for another project: this project's
+    device is not known there, so the app asks to join instead of refusing."""
+    from civex.domain.sync import SyncError
+
+    gone = SyncError("never joined", retryable=False, status=401, code="not_a_device")
+    asked, started, begun = _authority_that(monkeypatch, gone)
+    answer = client.post("/api/remote/connect", json={"url": "https://hub.example"})
+    assert answer.status_code == 202, answer.text
+    assert answer.json()["mode"] == "approval" and answer.json()["code"] == "ABCD-2345"
+    assert asked == ["hello"] and begun == [started]
+
+
+def test_a_revoked_device_gets_a_code_too(client, monkeypatch):
+    from civex.domain.sync import SyncError
+
+    revoked = SyncError("revoked", retryable=False, status=401, code="not_a_device")
+    _, _, begun = _authority_that(monkeypatch, revoked)
+    answer = client.post("/api/remote/connect", json={"url": "https://hub.example"})
+    assert answer.json()["mode"] == "approval" and len(begun) == 1
+
+
+def test_a_known_device_or_an_invite_skips_the_approval(client, monkeypatch):
+    from civex.services.sync_service import SyncService
+
+    _authority_that(monkeypatch, None)
+    monkeypatch.setattr(SyncService, "check_connect", lambda self, url, invite: "empty")
+    answer = client.post("/api/remote/connect", json={"url": "https://hub.example"})
+    assert answer.json()["mode"] == "empty"
+    # An invite never probes: the join itself is the check.
+    asked, _, _ = _authority_that(monkeypatch, None)
+    monkeypatch.setattr(
+        SyncService, "check_connect", lambda self, url, invite: "joined"
+    )
+    client.post("/api/remote/connect", json={"url": "https://h", "invite": "x"})
+    assert asked == []
+
+
+def test_a_private_project_is_not_called_a_non_civex_server():
+    from civex.domain.sync import SyncError
+    from civex.services.http_wire import Reply, status_error
+
+    text = str(status_error(Reply(404, {}, b"")))
+    assert "not a civex sync server" not in text
+    assert "private" in text and "invite" in text
+
+    from civex.services.sync_transport import HttpSyncTransport
+
+    for status in (401, 404):
+        t = HttpSyncTransport.__new__(HttpSyncTransport)
+
+        def refuse(*a, status=status, **k):
+            raise SyncError("x", retryable=False, status=status)
+
+        t._plain = refuse
+        t._credentials = types.SimpleNamespace(device_id="d", private_key="k")
+        from civex import keys
+
+        keys_public = keys.public_of
+        keys.public_of = lambda k: "p"
+        try:
+            try:
+                t.request_login()
+            except SyncError as e:
+                assert "private" in str(e) and "invite" in str(e)
+            else:
+                raise AssertionError("no refusal")
+        finally:
+            keys.public_of = keys_public
