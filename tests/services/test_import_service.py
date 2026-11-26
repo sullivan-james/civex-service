@@ -502,3 +502,19 @@ def test_a_run_that_saves_many_records_notes_each_once(ctx, study):
     wf.affected_records.clear()
     wf._note_affected(b, "updated")
     assert [e["action"] for e in wf.affected_records] == ["updated"]
+
+
+def test_a_collection_is_made_from_the_spreadsheet_when_asked(ctx):
+    sha, name = _csv(ctx, CSV)
+    seen = ctx.import_svc.inspect(sha, name)
+    spec = _spec(sha, name, seen)
+    spec = ImportSpec(**{**spec.__dict__, "collection": "People list"})
+    with pytest.raises(NotFoundError):
+        ctx.import_svc.run(spec, 0, 100)  # not made unless asked
+    spec = ImportSpec(**{**spec.__dict__, "new_collection": True})
+    assert ctx.import_svc.run(spec, 0, 100, check=True).created == 3
+    assert ctx.dataset_svc.list_all() == []  # a check keeps nothing
+    assert ctx.import_svc.run(spec, 0, 100).created == 3
+    ctx.commit()
+    assert [d.name for d in ctx.dataset_svc.list_all()] == ["People list"]
+    assert ctx.import_svc.run(spec, 0, 100).created == 3  # parts find it made

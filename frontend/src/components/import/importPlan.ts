@@ -162,6 +162,8 @@ export interface Choices {
   target: Target
   schema: Schema | undefined
   collection: string
+  /** The collection is to be made. */
+  newCollection: boolean
   settings: ColumnSetting[]
   /** The heading of the column rows are matched by; '' for none. */
   match: string
@@ -193,7 +195,8 @@ export function buildRequest(c: Choices): ImportRequest {
     sha256: c.sha256,
     filename: c.filename,
     sheet: c.sheet.sheet,
-    collection: c.collection,
+    collection: c.collection.trim(),
+    new_collection: c.newCollection,
     kind,
     kind_label: c.target.kind === 'new' ? c.target.label.trim() : null,
     columns,
@@ -204,6 +207,7 @@ export function buildRequest(c: Choices): ImportRequest {
 
 /** Why the choices can't be used yet, in a sentence; null when they can. */
 export function whyNot(c: Choices): string | null {
+  if (c.newCollection && !c.collection.trim()) return 'Name the new collection.'
   if (c.target.kind === 'new' && !c.target.label.trim())
     return 'Name the new kind of record.'
   const going = c.settings.filter((s) => s.goesIn !== LEAVE_OUT)

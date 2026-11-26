@@ -66,6 +66,7 @@ const choices = (over: Partial<Choices> = {}): Choices => ({
   target: { kind: 'new', label: 'People' },
   schema: undefined,
   collection: 'study',
+  newCollection: false,
   settings: suggestSettings(COLUMNS, undefined),
   match: '',
   ifExists: 'update',

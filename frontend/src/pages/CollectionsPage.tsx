@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router'
 import { useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCollections, useCreateCollection } from '../hooks/useCollections'
@@ -71,6 +72,7 @@ function CreateCollectionModal({ onClose }: { onClose: () => void }) {
 export default function CollectionsPage() {
   const { data, isLoading, error } = useCollections()
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const [showCreate, setShowCreate] = useState(false)
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
@@ -120,6 +122,10 @@ export default function CollectionsPage() {
         </Button>
       }
       secondaryActions={[
+        {
+          label: 'Import spreadsheet',
+          onClick: () => navigate('/import'),
+        },
         {
           label: 'Copy to another project…',
           onClick: () => setShowExport(true),
@@ -197,9 +203,12 @@ export default function CollectionsPage() {
           error={error ? errorMessage(error) : undefined}
           emptyTitle="No collections yet"
           emptyAction={
-            <Button variant="primary" onClick={() => setShowCreate(true)}>
-              New collection
-            </Button>
+            <span className="flex flex-wrap items-center justify-center gap-2">
+              <Button variant="primary" onClick={() => setShowCreate(true)}>
+                New collection
+              </Button>
+              <Button to="/import">Import spreadsheet</Button>
+            </span>
           }
         />
       </TabPanel>
