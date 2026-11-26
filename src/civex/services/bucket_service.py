@@ -52,6 +52,28 @@ def _where(settings: S3Config) -> str:
     return where
 
 
+def _keeping_keys(current: S3Config | None, settings: S3Config) -> S3Config:
+    """`settings` as a person gave them never name credential variables (they
+    are the host's to set); for the bucket already in use, at the same
+    endpoint, keep the ones it has, so a change such as `direct` doesn't switch
+    to another account."""
+    if (
+        current is None
+        or settings.access_key_env
+        or settings.secret_key_env
+        or settings.session_token_env
+        or (current.bucket, current.prefix, current.endpoint)
+        != (settings.bucket, settings.prefix, settings.endpoint)
+    ):
+        return settings
+    return replace(
+        settings,
+        access_key_env=current.access_key_env,
+        secret_key_env=current.secret_key_env,
+        session_token_env=current.session_token_env,
+    )
+
+
 def settings_of(
     bucket: str,
     prefix: str = "",
@@ -151,6 +173,7 @@ class BucketService:
         trying: list under the prefix, then write, read back and remove a small
         object. Nothing is left behind."""
         current = self._config_store.load().store_config.s3
+        settings = _keeping_keys(current, settings)
         same_place = (
             current is not None
             and current.bucket == settings.bucket
@@ -235,6 +258,7 @@ class BucketService:
         its check."""
         config = self._config_store.load()
         current = config.store_config.s3
+        settings = _keeping_keys(current, settings)
         moves = (
             current is None
             or current.bucket != settings.bucket
