@@ -8,6 +8,15 @@ final version's entry or `## Unreleased` instead of one of its own. The version 
 
 ## Unreleased
 
+- **Connect to a host from the app.** A new `/connect?url=` page joins a
+  project to a repository on a host: paste its address (the page's own address
+  or its `/data` sync address), and it says first what will happen (an empty
+  project becomes a copy; one with data can only fill an empty repo), opens the
+  host's approval page with the code filled in, carries on by itself once it is
+  approved, shows the copy, and lands on Home. Reached from Home on an empty
+  project, the Ctrl+K palette and Settings -> Sync. `GET /api/remote` and
+  `POST /api/remote/connect` now return the approval page's `verify_url`.
+
 - **Two people deleting the same records no longer double-count.** When a
   push and another person's bulk delete (or two bulk deletes) hit the same
   records at once, both wrote a delete in history, so undoing one batch also

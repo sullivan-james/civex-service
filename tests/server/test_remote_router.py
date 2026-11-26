@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import types
+
 from fastapi.testclient import TestClient
 
 
@@ -161,7 +163,13 @@ def test_connecting_without_an_invite_asks_to_join_and_waits(client, monkeypatch
     from civex.server.routers import remote
     from civex.services.sync_service import SyncService
 
-    started = LoginStarted("ABCD-2345", "secret", expires_at=2_000_000_000, interval=1)
+    started = LoginStarted(
+        "ABCD-2345",
+        "secret",
+        expires_at=2_000_000_000,
+        interval=1,
+        verify_url="https://hub.example/o/r/device",
+    )
     monkeypatch.setattr(SyncService, "request_login", lambda self, url: started)
     begun: list[tuple[str, object]] = []
     monkeypatch.setattr(
@@ -175,8 +183,17 @@ def test_connecting_without_an_invite_asks_to_join_and_waits(client, monkeypatch
         "mode": "approval",
         "code": "ABCD-2345",
         "expires_at": 2_000_000_000,
+        "verify_url": "https://hub.example/o/r/device",
     }
     assert begun == [("https://hub.example", started)]
+
+    # The waiting card reads the same page address from the status.
+    monkeypatch.setattr(remote.sync_jobs, "awaiting", started)
+    monkeypatch.setattr(
+        remote.sync_jobs, "_connecting", types.SimpleNamespace(is_alive=lambda: True)
+    )
+    waiting = client.get("/api/remote").json()["awaiting_approval"]
+    assert waiting["verify_url"] == "https://hub.example/o/r/device"
 
 
 def test_a_project_with_no_missing_files_lists_none(client: TestClient) -> None:

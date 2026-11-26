@@ -133,6 +133,11 @@ class AwaitingApprovalResponse(BaseModel):
     expires_at: int = Field(
         description="Unix seconds; the code stops working after it."
     )
+    verify_url: str | None = Field(
+        default=None,
+        description="Where a person approves the code, when the server has a page "
+        "for that.",
+    )
 
 
 class OfflineDriveFiles(BaseModel):
@@ -234,6 +239,11 @@ class RemoteConnectResponse(BaseModel):
     )
     expires_at: int | None = Field(
         default=None, description="Unix seconds; the code stops working after it."
+    )
+    verify_url: str | None = Field(
+        default=None,
+        description="Where a person approves the code, when the server has a page "
+        "for that (mode approval).",
     )
 
 
@@ -466,7 +476,11 @@ def _status(ctx: AppContext) -> RemoteStatusResponse:
         connect_error_detail=sync_jobs.connect_error_detail,
         version=__version__,
         awaiting_approval=(
-            AwaitingApprovalResponse(code=login.user_code, expires_at=login.expires_at)
+            AwaitingApprovalResponse(
+                code=login.user_code,
+                expires_at=login.expires_at,
+                verify_url=login.verify_url,
+            )
             if (login := sync_jobs.awaiting) and sync_jobs.connecting
             else None
         ),
@@ -508,7 +522,10 @@ def connect(body: RemoteConnectRequest, ctx: AppContext = Depends(get_ctx)):
             started = ctx.sync_svc.request_login(body.url)
             sync_jobs.start_connect(body.url, login=started)
             return RemoteConnectResponse(
-                mode="approval", code=started.user_code, expires_at=started.expires_at
+                mode="approval",
+                code=started.user_code,
+                expires_at=started.expires_at,
+                verify_url=started.verify_url,
             )
         mode = ctx.sync_svc.check_connect(body.url, body.invite)
     except SyncError as e:

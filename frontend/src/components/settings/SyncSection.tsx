@@ -1,5 +1,6 @@
 import { NotAvailable } from '../FeatureGate'
 import { useState } from 'react'
+import { Link } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { settingsApi } from '../../api/settings'
 import { errorMessage } from '../../lib/errors'
@@ -69,6 +70,13 @@ function ConnectForm() {
           autoComplete="off"
         />
       </Field>
+      <p className="text-xs text-fg-muted">
+        Connecting to a hub repository?{' '}
+        <Link to="/connect" className="text-accent hover:underline">
+          Use the guided page
+        </Link>
+        .
+      </p>
       {connect.error && (
         <p role="alert" className="text-xs text-danger">
           {errorMessage(connect.error)}

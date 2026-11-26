@@ -71,6 +71,7 @@ function RecentActivity() {
 
 export default function HomePage() {
   const features = useFeatures()
+  const dials = offered(features, { feature: 'remote_dial' })
   const { data: collections, isPending, isSuccess } = useCollections()
   // Steps are for an empty project: once there is a collection, the shortcuts
   // above are the way back in. Steps that need a feature the server lacks
@@ -135,6 +136,16 @@ export default function HomePage() {
             Import it
           </Link>
           .
+          {dials && (
+            <>
+              {' '}
+              Or{' '}
+              <Link to="/connect" className="text-accent hover:underline">
+                connect to a hub
+              </Link>
+              .
+            </>
+          )}
         </p>
       )}
 
