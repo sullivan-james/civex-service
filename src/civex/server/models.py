@@ -1013,6 +1013,11 @@ class FieldCheckRequest(BaseModel):
     required: bool | None = Field(
         default=None, description="Whether it would be required (omitted: as now)."
     )
+    deleting: bool = Field(
+        default=False,
+        description="Count the records that hold a value for the field "
+        "(what deleting it would take with it) instead.",
+    )
 
 
 class FieldCheckResponse(BaseModel):
@@ -1023,6 +1028,15 @@ class FieldCheckResponse(BaseModel):
     )
     blank: int = Field(
         description="How many leave the field empty, when it would be required."
+    )
+    holding: int = Field(
+        default=0,
+        description="How many records hold a value for the field (when asked about deleting it).",
+    )
+    partial: bool = Field(
+        default=False,
+        description="This copy holds only some of the records, so the counts "
+        "are for those and the server may find more.",
     )
     examples: list[QualityExampleResponse] = Field(
         description="A few of those records (at most 5)."
@@ -1035,6 +1049,8 @@ class FieldCheckResponse(BaseModel):
             field=c.field,
             breaks_rule=c.breaks_rule,
             blank=c.blank,
+            holding=c.holding,
+            partial=c.partial,
             examples=[
                 QualityExampleResponse(
                     record_id=e.record_id, record_name=e.record_name, message=e.message
@@ -1402,7 +1418,7 @@ class DeletedFieldValue(BaseModel):
 class RecordSyncResponse(BaseModel):
     state: str = Field(
         description="not_connected, held_here, synced, pending, first_upload, "
-        "refused or conflict."
+        "refused, unfit or conflict."
     )
     remote: str | None = Field(default=None, description="The authority's address.")
     pending: int = Field(default=0, description="Changes not yet sent.")

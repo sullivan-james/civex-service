@@ -17,6 +17,7 @@ export interface FileLocation {
     | 'unknown'
     | 'remote'
     | 'absent'
+    | 'arriving'
   /** Can be opened right now; null when unknown. */
   available: boolean | null
   /** Why it can't be opened, in plain words (blank when it can). */

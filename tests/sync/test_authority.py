@@ -434,7 +434,7 @@ def test_a_second_record_with_a_taken_unique_value_is_refused_not_stored(
     assert head(authority, first.id)["site"] == "x"
 
 
-def test_a_value_outside_its_restriction_is_refused(project):
+def test_a_value_outside_its_restriction_is_taken_in_and_flagged(project):
     authority, laptop = project("authority"), project("laptop")
     laptop.schema_svc.create("encounter")
     laptop.schema_svc.add_field(
@@ -454,8 +454,10 @@ def test_a_value_outside_its_restriction_is_refused(project):
 
     result = _send(authority, pending, "laptop")
 
-    assert result.results[-1].status == "rejected"
-    assert authority.sync_repo.snapshot("record", record.id) is None
+    last = result.results[-1]
+    assert last.status == "applied"
+    assert [c["kind"] for c in last.conflicts] == ["unfit"]
+    assert head(authority, record.id)["depth"] == 99.0
 
 
 def test_editing_a_record_that_already_clashes_is_not_refused_over_the_old_clash(

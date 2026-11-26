@@ -60,6 +60,14 @@ def _interval(value: object) -> int:
     return 0 if seconds <= 0 else max(5, seconds)
 
 
+def _hours(value: object) -> int:
+    """Hours a pushed file may take to arrive; 0 means no allowance."""
+    try:
+        return max(0, int(value))  # type: ignore[call-overload]
+    except (TypeError, ValueError):
+        return 24
+
+
 @dataclass
 class IdentityConfig:
     """Who changes made in this project are recorded as. None: the operating-system user. It is only a label
@@ -97,6 +105,10 @@ class SyncConfig:
     # How often the background sync looks for changes, in seconds. 0 = never:
     # it syncs only when asked (Sync now, `civex sync`).
     interval_seconds: int = 60
+    # Serving: how long a file cited by a pushed record counts as `arriving`
+    # (its device is still uploading) before it is reported missing, in hours.
+    # 0: never arriving, a file not here is missing at once.
+    arriving_hours: int = 24
     # Which files a device keeps a copy of (`DOWNLOAD_MODES`): "all" fetches
     # every file the project's records cite in the background, a few at a time;
     # "opened" fetches one only when it is opened or exported (for a computer
@@ -553,6 +565,7 @@ def parse_config(data: dict, root: Path) -> Config:
         serve=bool(sync_data.get("serve", False)),
         paused=bool(sync_data.get("paused", False)),
         interval_seconds=_interval(sync_data.get("interval_seconds", 60)),
+        arriving_hours=_hours(sync_data.get("arriving_hours", 24)),
         download_files=(
             str(sync_data.get("download_files"))
             if sync_data.get("download_files") in DOWNLOAD_MODES
@@ -738,6 +751,7 @@ def render_config(config: Config) -> str:
         or sync.serve
         or sync.paused
         or sync.interval_seconds != 60
+        or sync.arriving_hours != 24
         or sync.download_files != "all"
         or sync.library != "workflows"
     ):
@@ -750,6 +764,8 @@ def render_config(config: Config) -> str:
             lines.append("paused = true\n")
         if sync.interval_seconds != 60:
             lines.append(f"interval_seconds = {sync.interval_seconds}\n")
+        if sync.arriving_hours != 24:
+            lines.append(f"arriving_hours = {sync.arriving_hours}\n")
         if sync.download_files != "all":
             lines.append(f"download_files = {_tv(sync.download_files)}\n")
         if sync.library != "workflows":

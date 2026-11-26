@@ -17,6 +17,8 @@ export function recordSyncText(s: RecordSync, now = Date.now()): string | null {
       return `First upload to ${server} not finished${files}`
     case 'refused':
       return `Refused: ${s.message ?? 'the server would not take it'}${files}`
+    case 'unfit':
+      return `Breaks a rule: ${s.message ?? 'its values do not fit'}${files}`
     case 'conflict':
       return `Conflict with ${server}${files}`
     default:

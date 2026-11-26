@@ -183,7 +183,8 @@ def test_job_duration_stats(client: TestClient) -> None:
     assert {m["label"] for m in body["percentile_markers"]} == {"p50", "p90", "p99"}
 
     resp = client.get(
-        "/api/analytics/jobs/duration", params={"plugin_id": "civex.value_from_filename@1"}
+        "/api/analytics/jobs/duration",
+        params={"plugin_id": "civex.value_from_filename@1"},
     )
     assert resp.json()["count"] == 1
 

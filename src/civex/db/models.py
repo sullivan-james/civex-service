@@ -1300,6 +1300,9 @@ class SyncOp(Base):
     second time."""
 
     __tablename__ = "sync_ops"
+    # Which things arrived lately (`received_since`): files they cite are
+    # `arriving` while their device uploads them.
+    __table_args__ = (Index("ix_sync_ops_entity", "entity_id", "received_at"),)
 
     op_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
     device_id: Mapped[str | None] = mapped_column(String(36), nullable=True)

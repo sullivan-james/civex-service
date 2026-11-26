@@ -7,6 +7,7 @@ export function placeLabel(p: { place: string; kind: PlaceKind }): string {
   // Not here, and not checked with the server (a download says if it lacks it).
   if (p.kind === 'server') return 'Not on this computer'
   if (p.kind === 'missing') return 'Missing'
+  if (p.kind === 'arriving') return 'Uploading'
   if (p.kind === 'unreachable') return `${p.place} (not reachable)`
   return p.place
 }
@@ -21,6 +22,7 @@ export function placeCount(p: {
   const n = p.files.toLocaleString()
   if (p.kind === 'server') return `${n} not on this computer`
   if (p.kind === 'missing') return `${n} missing`
+  if (p.kind === 'arriving') return `${n} uploading`
   if (p.kind === 'unreachable')
     return `${n} on ${p.place}, which can't be reached`
   return `${n} on ${p.place}`
@@ -34,4 +36,5 @@ export const PLACE_TONE: Record<PlaceKind, Tone> = {
   unreachable: 'attention',
   server: 'neutral',
   missing: 'danger',
+  arriving: 'neutral',
 }

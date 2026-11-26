@@ -30,6 +30,7 @@ import json
 import logging
 import os
 import shutil
+import stat
 import re
 import time
 import uuid
@@ -941,6 +942,136 @@ class VolumeAwareFileObjectStore:
         return FileRef(
             sha256=sha256, filename=original_filename, size=size, volume=vol_name
         )
+
+    def import_object(self, sha256: str, source: Path) -> tuple[str, int]:
+        """Take the file at `source` (another store's copy of `sha256`) in as
+        this store's own: a hard link when `source` is on the same filesystem as
+        the drive it goes to (no bytes move, no room needed), else a copy, hashed
+        as it is written so a source whose bytes are not `sha256` is refused
+        (ValidationError) and never stored. Returns (how, size): how is "link",
+        "copy", "present" (already held) or "absent" (the source is gone, or is
+        not a regular file: a symlink is never followed, not even one swapped in
+        while this runs); size is that of the stored inode. Recorded in the
+        inventory like any put; no name is known, so no manifest line is
+        written."""
+        if self._existing_copy(sha256) is not None:
+            return "present", 0
+        try:
+            before = os.lstat(source)
+        except FileNotFoundError:
+            return "absent", 0
+        if not stat.S_ISREG(before.st_mode):
+            return "absent", 0
+        same = (before.st_dev, before.st_ino)
+        size = before.st_size
+        reasons: list[str] = []
+        for vol_name in self._write_candidates(None):
+            can, reason = self._can_write(vol_name, 0)
+            if not can:
+                reasons.append(f"{vol_name}: {reason}")
+                continue
+            try:
+                tmp_path = self._scratch_path(vol_name)
+            except VolumeUnavailableError as e:
+                reasons.append(f"{vol_name}: {e}")
+                continue
+            how = "link"
+            try:
+                try:
+                    os.link(source, tmp_path, follow_symlinks=False)
+                except OSError:  # another filesystem, or a drive without links
+                    if not os.path.lexists(source):
+                        return "absent", 0
+                    how = "copy"
+                    can, reason = self._can_write(vol_name, before.st_size)
+                    if not can:
+                        reasons.append(f"{vol_name}: {reason}")
+                        continue
+                    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                    hasher = hashlib.sha256()
+                    size = 0
+                    fd = os.open(source, flags)
+                    with os.fdopen(fd, "rb") as src, tmp_path.open("wb") as dst:
+                        opened = os.fstat(src.fileno())
+                        if (
+                            not stat.S_ISREG(opened.st_mode)
+                            or (opened.st_dev, opened.st_ino) != same
+                        ):
+                            return "absent", 0
+                        while chunk := src.read(_COPY_CHUNK):
+                            hasher.update(chunk)
+                            dst.write(chunk)
+                            size += len(chunk)
+                    if hasher.hexdigest() != sha256:
+                        raise ValidationError(
+                            f"The source's bytes for {sha256} hash to "
+                            f"{hasher.hexdigest()}; it was not stored under that name"
+                        )
+                else:
+                    linked = os.lstat(tmp_path)
+                    if (
+                        not stat.S_ISREG(linked.st_mode)
+                        or (linked.st_dev, linked.st_ino) != same
+                    ):
+                        return "absent", 0  # swapped for something else
+                    size = linked.st_size
+                dest = self._object_path(sha256, vol_name)
+                dest.parent.mkdir(exist_ok=True)
+                file_modes.replace(tmp_path, dest)
+            except FileNotFoundError:
+                if not os.path.lexists(source):  # taken away while it was read
+                    return "absent", 0
+                raise VolumeUnavailableError(
+                    f"Cannot write to volume '{vol_name}'"
+                ) from None
+            except OSError as e:
+                if e.errno == errno.ENOSPC:
+                    reasons.append(f"{vol_name}: no space left on device")
+                    continue
+                if e.errno == errno.ELOOP:  # a symlink swapped in
+                    return "absent", 0
+                raise VolumeUnavailableError(
+                    f"Cannot write to volume '{vol_name}': {e}"
+                ) from e
+            finally:
+                tmp_path.unlink(missing_ok=True)
+            self._register(vol_name, sha256, size)
+            return how, size
+        raise self._all_volumes_full(size, reasons, None)
+
+    def import_chunks(
+        self, sha256: str, chunks: Iterable[bytes], size_hint: int | None = None
+    ) -> str:
+        """Store `chunks` as `sha256`, hashed as they are written to a scratch
+        file on the drive they go to: kept only if they hash to `sha256`
+        (ValidationError otherwise; nothing is left, recorded or named).
+        Returns "stream", or "present" if already held. No manifest line."""
+        if self._existing_copy(sha256) is not None:
+            return "present"
+        vol_name, tmp_path = self._open_scratch(size_hint)
+        hasher = hashlib.sha256()
+        size = 0
+        try:
+            with tmp_path.open("wb") as f:
+                for chunk in chunks:
+                    if chunk:
+                        hasher.update(chunk)
+                        f.write(chunk)
+                        size += len(chunk)
+            if hasher.hexdigest() != sha256:
+                raise ValidationError(
+                    f"The source's bytes for {sha256} are not that content; it was "
+                    "not stored under that name"
+                )
+            dest = self._object_path(sha256, vol_name)
+            dest.parent.mkdir(exist_ok=True)
+            file_modes.replace(tmp_path, dest)
+        except OSError as e:
+            raise self._write_error(vol_name, e, size, streamed=True) from e
+        finally:
+            tmp_path.unlink(missing_ok=True)
+        self._register(vol_name, sha256, size)
+        return "stream"
 
     def get(self, sha256: str) -> bytes:
         path = self._find_object(sha256)

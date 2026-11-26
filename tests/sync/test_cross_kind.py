@@ -9,6 +9,10 @@ B reaches the authority first. The random version of all of these is
 from __future__ import annotations
 
 
+import pytest
+
+from civex.domain.exceptions import ValidationError
+from civex.services.sync_service import SyncService
 from civex.testing.peers import connect, device, snapshots
 
 
@@ -197,3 +201,259 @@ def test_a_record_is_not_deleted_from_under_a_child_added_elsewhere_meanwhile(
     assert record(authority, new.id)["deleted_at"] is None
     (kept,) = {c.message for c in a.sync_svc.conflicts() if c.entity_id == site.id}
     assert "added beneath it" in kept
+
+
+def test_a_refused_schema_change_is_kept_and_the_servers_later_change_waits(
+    project, authority
+):
+    a, b, _, _ = setup(project, authority)
+    b.record_svc.add("survey", "site", {"name": "x", "code": "2"})
+    b.commit()
+    a.schema_svc.set_unique_keys("site", [["name"]])
+    a.commit()
+    b.sync_svc.sync()
+    a.sync_svc.sync()
+    (refused,) = refusals(a)
+    assert refused.kind == "rejected" and refused.schema_name == "site"
+    assert set(refused.takes) == {"theirs", "retry"}
+    assert a.schema_svc.get("site").unique_keys  # kept, not rolled back
+
+    b.schema_svc.update("site", display_template="{code}")
+    b.commit()
+    b.sync_svc.sync()
+    a.sync_svc.sync()
+    kept = a.schema_svc.get("site")
+    assert kept.unique_keys and kept.display_template != "{code}"  # waits
+
+    a.sync_svc.resolve_conflict(refused.id, "theirs")
+    a.commit()
+    taken = a.schema_svc.get("site")
+    assert taken.unique_keys == [] and taken.display_template == "{code}"
+
+
+def test_a_refused_schema_change_goes_in_when_sent_again_after_the_cause_is_gone(
+    project, authority
+):
+    a, b, _, _ = setup(project, authority)
+    dup = b.record_svc.add("survey", "site", {"name": "x", "code": "2"})
+    b.commit()
+    a.schema_svc.set_unique_keys("site", [["name"]])
+    a.commit()
+    b.sync_svc.sync()
+    a.sync_svc.sync()
+    (refused,) = refusals(a)
+    b.record_svc.update(str(dup.id), {"name": "y", "code": "2"})
+    b.commit()
+    b.sync_svc.sync()
+    a.sync_svc.resolve_conflict(refused.id, "retry")
+    a.commit()
+    a.sync_svc.sync()
+    assert authority.schema_svc.get("site").unique_keys
+    assert a.sync_svc.conflicts() == []
+
+
+def test_an_open_item_exempts_the_thing_from_the_convergence_check(project, authority):
+    from civex.testing.convergence import differences, open_items, snapshots
+
+    a, b, _, _ = setup(project, authority)
+    b.record_svc.add("survey", "site", {"name": "x", "code": "2"})
+    b.commit()
+    a.schema_svc.set_unique_keys("site", [["name"]])
+    a.commit()
+    b.sync_svc.sync()
+    a.sync_svc.sync()
+    assert differences(snapshots(authority), snapshots(a))
+    assert not differences(snapshots(authority), snapshots(a), open_items(a))
+
+
+def _clash_on_keys(project, authority):
+    a, b, _, _ = setup(project, authority)
+    b.record_svc.add("survey", "site", {"name": "x", "code": "2"})
+    b.commit()
+    a.schema_svc.set_unique_keys("site", [["name"]])
+    a.commit()
+    b.sync_svc.sync()
+    a.sync_svc.sync()
+    return a, b
+
+
+def test_letting_go_after_two_refusals_takes_what_the_server_holds_now(
+    project, authority
+):
+    a, b = _clash_on_keys(project, authority)
+    a.schema_svc.set_unique_keys("site", [["name"], ["name", "code"]])
+    a.schema_svc.set_unique_keys("site", [["name"]])
+    a.commit()
+    a.sync_svc.sync()
+    (refused,) = refusals(a)  # the later try replaced the first item
+    a.sync_svc.resolve_conflict(refused.id, "theirs")
+    a.commit()
+    assert a.schema_svc.get("site").unique_keys == []
+    assert refusals(a) == []
+
+
+def test_letting_go_of_a_refused_create_trashes_it(project, authority):
+    a, b, _, _ = setup(project, authority)
+    b.schema_svc.create("dup")
+    b.commit()
+    a.schema_svc.create("dup")
+    a.commit()
+    b.sync_svc.sync()
+    a.sync_svc.sync()
+    (item,) = refusals(a)
+    assert a.schema_svc.get("dup") is not None  # kept while it is open
+    a.sync_svc.resolve_conflict(item.id, "theirs")
+    a.commit()
+    assert refusals(a) == []
+    # The authority never had this one: it is in the trash here, not gone.
+    assert [s.id for s in a.schema_svc.list_deleted()] == [item.entity_id]
+
+
+def test_letting_go_is_refused_while_another_change_to_it_is_unsent(project, authority):
+    a, b = _clash_on_keys(project, authority)
+    (refused,) = refusals(a)
+    a.schema_svc.update("site", description="more")
+    a.commit()
+    with pytest.raises(ValidationError, match="Send or undo your other change"):
+        a.sync_svc.resolve_conflict(refused.id, "theirs")
+    assert [c.id for c in refusals(a)] == [refused.id]
+    assert a.schema_svc.get("site").unique_keys  # still kept
+
+
+def test_a_field_delete_the_server_refuses_is_kept_and_letting_go_restores_it(
+    project, authority, monkeypatch
+):
+    a, b, _, _ = setup(project, authority)
+    real = authority.authority_svc._rules.check
+
+    def refuse_when_a_field_goes(touched):
+        if any(kind == "field" for kind, _ in touched):
+            raise ValidationError("A rule here says the field stays")
+        real(touched)
+
+    monkeypatch.setattr(
+        authority.authority_svc._rules, "check", refuse_when_a_field_goes
+    )
+    a.schema_svc.delete_field("site", "code")
+    a.commit()
+    a.sync_svc.sync()
+    items = refusals(a)
+    assert items and not [c for c in a.sync_svc.conflicts() if c.kind == "not_taken"]
+    assert "code" not in [f.name for f in a.schema_svc.get("site").fields]  # kept
+    a.sync_svc.resolve_conflict(items[0].id, "theirs")
+    a.commit()
+    assert "code" in [f.name for f in a.schema_svc.get("site").fields]
+
+
+def test_a_refused_schema_delete_is_kept_whole_with_the_records_it_took(
+    project, authority, monkeypatch
+):
+    a, b, site, visit = setup(project, authority)
+    real = authority.authority_svc._rules.check
+
+    def refuse_when_a_schema_goes(touched):
+        if any(kind == "schema" for kind, _ in touched):
+            raise ValidationError("A rule here says the schema stays")
+        real(touched)
+
+    monkeypatch.setattr(
+        authority.authority_svc._rules, "check", refuse_when_a_schema_goes
+    )
+    a.schema_svc.delete("site")  # takes its records with it
+    a.commit()
+    a.sync_svc.sync()
+    kinds = {(c.kind, c.entity_type) for c in a.sync_svc.conflicts()}
+    assert not {k for k in kinds if k[0] == "not_taken"}
+    assert ("rejected", "schema") in kinds
+    assert record(a, site.id)["deleted_at"] is not None  # kept as it was made
+    assert record(authority, site.id)["deleted_at"] is None
+    item = next(c for c in a.sync_svc.conflicts() if c.entity_type == "schema")
+    a.sync_svc.resolve_conflict(item.id, "theirs")
+    a.commit()
+    assert a.sync_svc.conflicts() == []
+    assert record(a, site.id)["deleted_at"] is None  # back, with its records
+
+
+def test_only_a_data_refusal_of_structure_holds_the_servers_changes(project, authority):
+    a, _, _, _ = setup(project, authority)
+    schema = a.schema_svc.get("site").id
+    for code, held in (("permission", False), ("data", True)):
+        a.sync_svc._repo.add_conflict(
+            kind="rejected",
+            entity_type="schema",
+            entity_id=schema,
+            field=None,
+            yours=None,
+            theirs=None,
+            base=None,
+            theirs_actor=None,
+            theirs_device=None,
+            theirs_at=None,
+            op_id=None,
+            device_name=None,
+            message="x",
+            code=code,
+        )
+        assert (("schema", schema) in a.sync_svc._repo.dirty_entities()) is held
+        for c in a.sync_svc._repo.find_open_conflicts(kind="rejected"):
+            a.sync_svc._repo.resolve_conflict(c.id, "theirs")
+
+
+def test_letting_go_reads_the_server_once_for_all_items(
+    project, authority, monkeypatch
+):
+    a, b = _clash_on_keys(project, authority)
+    asked = []
+    real = SyncService._transport
+
+    def counting(self):
+        t = real(self)
+        original = t.snapshot
+
+        def snap(kind, *args, **kw):
+            asked.append(kind)
+            return original(kind, *args, **kw)
+
+        t.snapshot = snap
+        return t
+
+    monkeypatch.setattr(SyncService, "_transport", counting)
+    report = a.sync_svc.resolve_many("theirs", kind="rejected")
+    assert report.done == 1 and not report.failed
+    assert asked.count("schema") == 1
+
+
+def test_a_letting_go_that_fails_leaves_nothing_half_done_and_the_item_open(
+    project, authority, monkeypatch
+):
+    a, b = _clash_on_keys(project, authority)
+    (refused,) = refusals(a)
+
+    def boom(*_):
+        raise ValidationError("could not apply")
+
+    monkeypatch.setattr(SyncService, "_replay_held", boom)
+    report = a.sync_svc.resolve_many("theirs", kind="rejected")
+    assert [f[0] for f in report.failed] == [refused.id]
+    assert [c.id for c in refusals(a)] == [refused.id]
+    assert a.schema_svc.get("site").unique_keys  # still as kept, not half taken
+
+
+def test_letting_go_of_a_refused_create_is_refused_while_records_under_it_are_unsent(
+    project, authority
+):
+    a, b, _, _ = setup(project, authority)
+    b.schema_svc.create("dup")
+    b.commit()
+    a.schema_svc.create("dup")
+    a.commit()
+    b.sync_svc.sync()
+    a.sync_svc.sync()
+    (item,) = refusals(a)
+    a.dataset_svc.create("extra")
+    a.record_svc.add("extra", "dup", {})
+    a.commit()
+    with pytest.raises(ValidationError, match="Send or undo your other change"):
+        a.sync_svc.resolve_conflict(item.id, "theirs")
+    assert [c.id for c in refusals(a)] == [item.id]
+    assert not a.schema_svc.list_deleted()

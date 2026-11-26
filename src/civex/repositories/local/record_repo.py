@@ -5,6 +5,7 @@ import math
 import sqlite3
 import uuid
 from datetime import datetime, timezone
+from collections.abc import Collection
 from typing import Any
 
 from sqlalchemy import (
@@ -31,7 +32,7 @@ from sqlalchemy.sql.base import Executable
 from sqlalchemy.sql.expression import ClauseElement
 from sqlalchemy.orm import Session, aliased
 
-from civex.db.field_values import field_value
+from civex.db.field_values import field_json, field_value
 from civex.db import read_scope
 from civex.db.models import (
     Dataset,
@@ -900,12 +901,15 @@ class LocalRecordRepository:
         if not field_ids:
             return 0, []
         rr = RecordReference
-        target, referrer = aliased(Record), aliased(Record)
+        # The tables, not aliased ORM entities: the read-scope criteria would
+        # rewrite an aliased entity's join condition into invalid SQL. The scope
+        # still holds, through `rr` (a reference of a hidden record is absent).
+        target, referrer = Record.__table__.alias(), Record.__table__.alias()
         where = (
-            target.dataset_id == dataset_id,
-            target.deleted_at.is_(None),
-            referrer.dataset_id != dataset_id,
-            referrer.deleted_at.is_(None),
+            target.c.dataset_id == dataset_id,
+            target.c.deleted_at.is_(None),
+            referrer.c.dataset_id != dataset_id,
+            referrer.c.deleted_at.is_(None),
             rr.field_id.in_(field_ids),
         )
 
@@ -913,8 +917,8 @@ class LocalRecordRepository:
             return (
                 select(*cols)
                 .select_from(rr)
-                .join(referrer, referrer.id == rr.record_id)
-                .join(target, target.id == rr.target_id)
+                .join(referrer, referrer.c.id == rr.record_id)
+                .join(target, target.c.id == rr.target_id)
                 .where(*where)
             )
 
@@ -930,6 +934,58 @@ class LocalRecordRepository:
             joined(rr.record_id, rr.field_id).where(rr.record_id.in_(page))
         )
         return total, [(r[0], r[1]) for r in pairs]
+
+    def referrer_collections_into_dataset(
+        self, dataset_id: uuid.UUID, field_ids: list[uuid.UUID]
+    ) -> set[uuid.UUID]:
+        """The collections of the live records, in other collections, that
+        point at a live record in `dataset_id`. Whatever the caller may see:
+        the rule that asks says which of them it may not."""
+        if not field_ids:
+            return set()
+        rr = RecordReference
+        target, referrer = Record.__table__.alias(), Record.__table__.alias()
+        with read_scope.unscoped(self._s):
+            return set(
+                self._s.scalars(
+                    select(referrer.c.dataset_id)
+                    .select_from(rr)
+                    .join(referrer, referrer.c.id == rr.record_id)
+                    .join(target, target.c.id == rr.target_id)
+                    .where(
+                        target.c.dataset_id == dataset_id,
+                        target.c.deleted_at.is_(None),
+                        referrer.c.dataset_id != dataset_id,
+                        referrer.c.deleted_at.is_(None),
+                        rr.field_id.in_(field_ids),
+                    )
+                    .distinct()
+                )
+            )
+
+    def referrer_places_of(
+        self, target_ids: list[uuid.UUID], field_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, uuid.UUID]:
+        """Each live record holding a reference to any of these, with its
+        collection, whatever the caller may see."""
+        with read_scope.unscoped(self._s):
+            ids = list({r for r, _, _ in self.referrers_of(target_ids, field_ids)})
+            return {rid: p.dataset_id for rid, p in self.placement_of(ids).items()}
+
+    def referrer_places_by_target(
+        self, target_ids: list[uuid.UUID], field_ids: list[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, uuid.UUID, uuid.UUID]]:
+        """(live referrer, target, referrer's collection) for every live record
+        holding a reference to any of these, whatever the caller may see: what
+        `referrer_places_of` finds, with the target each one points at."""
+        with read_scope.unscoped(self._s):
+            held = self.referrers_of(target_ids, field_ids)
+            where = self.placement_of(list({r for r, _, _ in held}))
+        return [
+            (referrer, target, where[referrer].dataset_id)
+            for referrer, _, target in held
+            if referrer in where
+        ]
 
     def dangling_references(
         self, field_ids: list[uuid.UUID]
@@ -1256,6 +1312,82 @@ class LocalRecordRepository:
             marker = (dataset_id, parent_id, tuple(_canonical(v) for v in values))
             groups.setdefault(marker, []).append(rid)
         return [ids for ids in groups.values() if len(ids) > 1]
+
+    def has_key_duplicate(
+        self,
+        schema_id: uuid.UUID,
+        field_ids: list[str],
+        number_fields: Collection[str] = (),
+    ) -> bool:
+        """Whether `key_duplicates` would find any group: the database narrows
+        the records to those that share what the key holds (a window count,
+        so nothing else is read), and the first group confirmed ends it. The
+        database's equality is never narrower than ours: a number field
+        (`number_fields`) is compared as the float `_canonical` makes of it
+        (so 2**53 and 2**53 + 1 share), anything else as the JSON it is, so
+        it can only name more candidates, which are then judged exactly as
+        `key_duplicates` does."""
+        from civex.domain.uniqueness import key_values
+
+        if not field_ids:
+            return False
+        values = [
+            self._as_number(Record, f) if f in number_fields else field_json(Record, f)
+            for f in field_ids
+        ]
+        sharing = func.count().over(
+            partition_by=[Record.dataset_id, Record.parent_record_id, *values]
+        )
+        inner = (
+            select(
+                Record.dataset_id.label("d"),
+                Record.parent_record_id.label("p"),
+                Record.data.label("v"),
+                sharing.label("n"),
+            )
+            .where(
+                Record.schema_id == schema_id,
+                Record.deleted_at.is_(None),
+                *[v.is_not(None) for v in values],
+            )
+            .subquery()
+        )
+        seen: set[tuple] = set()
+        rows = self._s.execute(
+            select(inner.c.d, inner.c.p, inner.c.v).where(inner.c.n > 1)
+        ).yield_per(1000)
+        try:
+            for dataset_id, parent_id, data in rows:
+                found = key_values(data or {}, field_ids)
+                if found is None:
+                    continue
+                marker = (dataset_id, parent_id, tuple(_canonical(v) for v in found))
+                if marker in seen:
+                    return True
+                seen.add(marker)
+        finally:
+            rows.close()
+        return False
+
+    def _as_number(self, entity: Any, field_id: str) -> Any:
+        """`field_id` as a float where it holds a number, else NULL (such
+        values only group with each other, more widely than `_canonical`)."""
+        raw = field_json(entity, field_id)
+        if self._pg:
+            return case(
+                (
+                    func.jsonb_typeof(raw) == "number",
+                    field_value(entity, field_id, "number"),
+                ),
+                else_=None,
+            )
+        return case(
+            (
+                func.typeof(raw).in_(("integer", "real")),
+                field_value(entity, field_id, "number"),
+            ),
+            else_=None,
+        )
 
     def subtree_levels(
         self, root_ids: list[uuid.UUID], deleted: bool | None = None

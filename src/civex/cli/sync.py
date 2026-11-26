@@ -734,7 +734,7 @@ def resolve(
     kind: str = typer.Option(
         None,
         "--kind",
-        help="With --all: only this kind (conflict, rejected or edit_vs_delete).",
+        help="With --all: only this kind (conflict, rejected, edit_vs_delete or unfit).",
     ),
 ) -> None:
     """Settle a conflict, or with --all every open one."""

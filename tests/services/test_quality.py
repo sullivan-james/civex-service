@@ -226,6 +226,21 @@ def test_checking_a_field_before_changing_it(ctx: AppContext, survey):
         ctx.quality_svc.check_field("sample", "name")  # the site's field
 
 
+def test_checking_a_delete_counts_what_the_field_holds_and_warns_of_a_partial_copy(
+    ctx: AppContext, survey
+):
+    held = ctx.quality_svc.check_field("sample", "depth", deleting=True)
+    assert held.holding == ctx.record_svc.count_records(RecordQuery(schema="sample"))
+    assert held.holding > 0
+    assert held.breaks_rule == held.blank == 0
+    assert held.partial is False
+    assert len(held.examples) == min(held.holding, quality.MAX_EXAMPLES)
+    ctx.quality_svc.partial = lambda: True
+    assert ctx.quality_svc.check_field("sample", "depth", deleting=True).partial
+    # Nothing is blocked: the field is still there to delete.
+    ctx.schema_svc.delete_field("sample", "depth")
+
+
 def test_reading_is_asked(ctx: AppContext, survey):
     ctx.quality_svc._permissions = Permissions.nothing()
     with pytest.raises(NotAllowedError):

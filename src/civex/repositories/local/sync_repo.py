@@ -64,8 +64,11 @@ from civex.domain.audit_diff import entry_snapshots
 from civex.domain.merge import value_at
 from civex.domain.sync_page import ACTION_ENTRIES_MAX, budget, take
 from civex.domain.sync import (
+    KEPT_STRUCTURE,
     NOT_SYNCED_KINDS,
     LoginRequestDTO,
+    APPLIED,
+    MERGED,
     OpResult,
     SyncBatchInfo,
     SyncConflictDTO,
@@ -511,6 +514,35 @@ class LocalSyncRepository:
         for dataset_id in ids.values():
             counts[dataset_id] = counts.get(dataset_id, 0) + 1
         return counts
+
+    def received_since(
+        self, cited: dict[uuid.UUID, set[str]], since: datetime
+    ) -> set[tuple[uuid.UUID, str]]:
+        """Of these (record -> files it cites), the (record, file) pairs a device
+        sent since `since`: a change taken (applied or merged, never refused or
+        held) whose entry added or changed that file on that record. One
+        lookup per 500 records, through the ops' own index and the entries'
+        feed position (`hub_seq`)."""
+        from civex.domain.permissions import file_changes
+
+        listed = sorted(cited)
+        out: set[tuple[uuid.UUID, str]] = set()
+        for at in range(0, len(listed), 500):
+            rows = self._s.execute(
+                select(AuditLog)
+                .join(SyncOp, AuditLog.hub_seq == SyncOp.hub_seq)
+                .where(
+                    SyncOp.entity_id.in_(listed[at : at + 500]),
+                    SyncOp.received_at >= since,
+                    SyncOp.status.in_((APPLIED, MERGED)),
+                    SyncOp.device_id.is_not(None),
+                    AuditLog.entity_id == SyncOp.entity_id,
+                )
+            ).scalars()
+            for entry in rows:
+                for sha in file_changes(entry)[0] & cited.get(entry.entity_id, set()):
+                    out.add((entry.entity_id, sha))
+        return out
 
     def server_lacks_of(self, shas: set[str]) -> set[str]:
         """Of these files, those the authority said it hasn't got, when asked."""
@@ -1229,13 +1261,94 @@ class LocalSyncRepository:
         if self._absent is not None:
             self._absent.difference_update(v["id"] for v in every)
 
+    def live_children(self, ids: list[uuid.UUID]) -> set[uuid.UUID]:
+        """Which of these records have a live record directly beneath them."""
+        found: set[uuid.UUID] = set()
+        for at in range(0, len(ids), _ID_CHUNK):
+            found.update(
+                p
+                for p in self._s.scalars(
+                    select(Record.parent_record_id)
+                    .where(
+                        Record.parent_record_id.in_(ids[at : at + _ID_CHUNK]),
+                        Record.deleted_at.is_(None),
+                    )
+                    .distinct()
+                )
+                if p is not None
+            )
+        return found
+
+    def soft_delete_records(self, items: list[tuple[uuid.UUID, datetime]]) -> None:
+        """`soft_delete` of each of these records, which are live and have no
+        record to take with them: one UPDATE per distinct stamp and chunk of
+        ids. Not an edit: each keeps the date it was last changed. The records
+        this push holds are told, so they are not read again."""
+        by_stamp: dict[datetime, list[uuid.UUID]] = {}
+        for rid, stamp in items:
+            by_stamp.setdefault(stamp, []).append(rid)
+        self._s.flush()
+        for stamp, ids in by_stamp.items():
+            for at in range(0, len(ids), _ID_CHUNK):
+                self._s.execute(
+                    update(Record)
+                    .where(Record.id.in_(ids[at : at + _ID_CHUNK]))
+                    .values(deleted_at=stamp, updated_at=Record.updated_at)
+                    .execution_options(synchronize_session=False)
+                )
+        self._told(dict(items))
+
+    def restore_records(self, ids: list[uuid.UUID]) -> None:
+        """`restore` of each of these records (deleted, nothing else to bring
+        back): one UPDATE per chunk of ids, each keeping the date it was last
+        changed."""
+        self._s.flush()
+        for at in range(0, len(ids), _ID_CHUNK):
+            self._s.execute(
+                update(Record)
+                .where(Record.id.in_(ids[at : at + _ID_CHUNK]))
+                .values(deleted_at=None, updated_at=Record.updated_at)
+                .execution_options(synchronize_session=False)
+            )
+        self._told({rid: None for rid in ids})
+
+    def _told(self, stamps: dict[uuid.UUID, datetime | None]) -> None:
+        """Records a bulk UPDATE just deleted or restored: the ones the session
+        has are set to say so (no read), so nothing else of what the push holds
+        is stale and `forget_held` is not needed."""
+        for record in list(self._s.identity_map.values()):
+            if isinstance(record, Record) and record.id in stamps:
+                set_committed_value(record, "deleted_at", stamps[record.id])
+
     def insert_entries(self, rows: list[tuple[SyncEntry, int]]) -> None:
         """Keep entries made elsewhere (each with its number), as
         `insert_entry` does, in one statement; none belongs to a batch."""
         if not rows:
             return
         self._s.flush()
-        self._s.connection().execute(
+        conn = self._s.connection()
+        # An entry of a batch (a bulk delete's) names it: made once, here.
+        batches = {e.batch.id: e.batch for e, _ in rows if e.batch is not None}
+        if batches:
+            known = set(
+                self._s.scalars(
+                    select(AuditBatch.id).where(AuditBatch.id.in_(list(batches)))
+                )
+            )
+            fresh = [
+                {
+                    "id": b.id,
+                    "kind": b.kind,
+                    "label": b.label,
+                    "ref": b.ref,
+                    "created_at": _parse(b.created_at),
+                }
+                for i, b in batches.items()
+                if i not in known
+            ]
+            if fresh:
+                conn.execute(insert(AuditBatch), fresh)
+        conn.execute(
             insert(AuditLog),
             [
                 {
@@ -1249,7 +1362,7 @@ class LocalSyncRepository:
                     "format": 2 if e.delta is not None else 1,
                     "op_id": uuid.UUID(e.op) if e.op else None,
                     "timestamp": _parse(e.timestamp),
-                    "batch_id": None,
+                    "batch_id": e.batch.id if e.batch is not None else None,
                     "actor": e.actor,
                     "device": e.device,
                     "device_id": uuid.UUID(e.device_id) if e.device_id else None,
@@ -1504,20 +1617,23 @@ class LocalSyncRepository:
 
     def resolve_conflicts(self, ids: list[uuid.UUID], resolution: str) -> int:
         """Mark open conflicts settled, in one statement. Returns how many were."""
-        if not ids:
-            return 0
-        n = (
-            self._s.query(SyncConflict)
-            .filter(SyncConflict.id.in_(ids), SyncConflict.status == "open")
-            .update(
-                {
-                    "status": "resolved",
-                    "resolution": resolution,
-                    "resolved_at": datetime.now(timezone.utc),
-                },
-                synchronize_session=False,
+        n = 0
+        for at in range(0, len(ids), 500):  # (under a database's variable limit)
+            n += (
+                self._s.query(SyncConflict)
+                .filter(
+                    SyncConflict.id.in_(ids[at : at + 500]),
+                    SyncConflict.status == "open",
+                )
+                .update(
+                    {
+                        "status": "resolved",
+                        "resolution": resolution,
+                        "resolved_at": datetime.now(timezone.utc),
+                    },
+                    synchronize_session=False,
+                )
             )
-        )
         self._s.flush()
         return n
 
@@ -1806,7 +1922,8 @@ class LocalSyncRepository:
                 synchronize_session=False,
             )
         self._s.flush()
-        self._s.expire_all()
+        if kind != "record":  # (a record takes no other record with it)
+            self._s.expire_all()
 
     def restore(self, kind: str, id: uuid.UUID) -> None:
         """Undo a delete as a person's restore does: a schema or collection
@@ -1827,7 +1944,8 @@ class LocalSyncRepository:
             if kind == "record":
                 flag_modified(row, "updated_at")
         self._s.flush()
-        self._s.expire_all()
+        if kind != "record":  # (a record brings no other record back)
+            self._s.expire_all()
 
     def delete_view(self, id: uuid.UUID, kind: str = "view") -> None:
         """Remove a thing that has no deleted state (a view, the page)."""
@@ -1874,21 +1992,24 @@ class LocalSyncRepository:
 
     def pending_entries(self, limit: int) -> list[SyncEntry]:
         """Changes made here that the authority has not been sent, oldest first:
-        `limit` of them, and the rest of the action the last one belongs to, so
-        an action is never split across two pushes (it is taken whole or not)."""
+        `limit` of them, and the rest of every action with an entry among them (a
+        call that logged several trees level by level has each tree's entries
+        apart), so an action is never split across two pushes."""
         pending = self._s.query(AuditLog).filter(
             AuditLog.sync_state == "pending", AuditLog.hub_seq.is_(None), _SYNCED
         )
         rows = pending.order_by(*_WRITE_ORDER).limit(limit).all()
-        if len(rows) == limit and rows[-1].op_id is not None:
+        if len(rows) == limit:
             seen = {r.id for r in rows}
-            rows += [
-                r
-                for r in pending.filter(AuditLog.op_id == rows[-1].op_id)
-                .order_by(*_WRITE_ORDER)
-                .all()
-                if r.id not in seen
-            ]
+            ops = {r.op_id for r in rows if r.op_id is not None}
+            if ops:
+                rows += [
+                    r
+                    for r in pending.filter(AuditLog.op_id.in_(ops))
+                    .order_by(*_WRITE_ORDER)
+                    .all()
+                    if r.id not in seen
+                ]
         return self._entries(rows)
 
     def count_pending(self) -> int:
@@ -1968,7 +2089,8 @@ class LocalSyncRepository:
 
     def dirty_entities(self) -> set[tuple[str, uuid.UUID]]:
         """Things with a change here still waiting to be sent (set aside by an
-        unfinished first upload too): what a pull must not overwrite."""
+        unfinished first upload too), or a refused one of structure kept for
+        review: what a pull must not overwrite."""
         rows = (
             self._s.query(AuditLog.entity_type, AuditLog.entity_id)
             .filter(
@@ -1977,7 +2099,50 @@ class LocalSyncRepository:
             )
             .distinct()
         )
-        return {(t, i) for t, i in rows}
+        found = {(t, i) for t, i in rows}
+        # Structure the authority refused is kept here, marked, until the
+        # person settles it: what the authority says of it meanwhile waits.
+        kept = self._s.query(SyncConflict.entity_type, SyncConflict.entity_id).filter(
+            SyncConflict.status == "open",
+            SyncConflict.kind == "rejected",
+            SyncConflict.code == "data",
+            SyncConflict.entity_type.in_(KEPT_STRUCTURE),
+        )
+        return found | {(t, i) for t, i in kept}
+
+    def has_unsent(self, kind: str, entity_id: uuid.UUID) -> bool:
+        """Whether a change to this thing is still waiting to be sent, or (for
+        a schema or a field) one to a record that sits under it: a record of
+        the schema, or one carrying a value for the field."""
+        unsent = (
+            AuditLog.sync_state.in_(("pending", "seeding")),
+            AuditLog.hub_seq.is_(None),
+        )
+        if (
+            self._s.query(AuditLog.id)
+            .filter(
+                AuditLog.entity_type == kind, AuditLog.entity_id == entity_id, *unsent
+            )
+            .first()
+            is not None
+        ):
+            return True
+        if kind not in ("schema", "field"):
+            return False
+        needle = str(entity_id)
+        return (
+            self._s.query(AuditLog.id)
+            .filter(
+                AuditLog.entity_type == "record",
+                or_(
+                    cast(AuditLog.old_data, String).contains(needle),
+                    cast(AuditLog.new_data, String).contains(needle),
+                ),
+                *unsent,
+            )
+            .first()
+            is not None
+        )
 
     def mark_sent(self, results: list[OpResult]) -> None:
         for result in results:

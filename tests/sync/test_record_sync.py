@@ -63,6 +63,7 @@ def test_an_unfinished_first_upload_is_said(project, authority, monkeypatch):
     assert laptop.sync_svc.record_sync(rec.id).state == "first_upload"
 
 
+@pytest.mark.usefixtures("rules_refuse")
 def test_a_refused_record_gives_the_authoritys_reason(project, authority):
     laptop = device(project, authority, "laptop")
     laptop.schema_svc.create("call")
@@ -125,3 +126,27 @@ def test_the_endpoint_answers_for_a_record(
     body = client.get(f"/api/records/{rec.id}/sync").json()
     assert body["state"] == "not_connected"
     assert client.get("/api/records/nope/sync").status_code == 404
+
+
+def test_an_unfit_item_is_its_own_state_and_only_offers_to_be_let_go(pair):
+    """The shape of a record that went in but breaks a data rule: not a clash,
+    not a refusal, and nothing to send again."""
+    laptop, _phone, rec = pair
+    laptop.sync_svc._repo.add_conflict(
+        kind="unfit",
+        entity_type="record",
+        entity_id=rec.id,
+        field=None,
+        yours=None,
+        theirs=None,
+        op_id=None,
+        device_name=None,
+        message="Required field 'site' is empty",
+        code="data",
+    )
+    laptop.commit()
+    s = laptop.sync_svc.record_sync(rec.id)
+    assert s.state == "unfit" and s.conflict_id
+    assert s.message == "Required field 'site' is empty"
+    [row] = [c for c in laptop.sync_svc.conflicts() if c.kind == "unfit"]
+    assert row.code == "data" and row.takes == ["theirs"]

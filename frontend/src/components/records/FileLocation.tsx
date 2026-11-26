@@ -171,6 +171,7 @@ function chipText(file: FileLike): string {
   const loc = file.location
   if (!loc) return ''
   if (loc.state === 'remote') return 'not on this computer'
+  if (loc.state === 'arriving') return 'uploading'
   if (loc.state === 'absent') return 'missing'
   if (loc.volume === null) return 'location unknown'
   if (loc.available === false)
@@ -189,6 +190,8 @@ function hint(file: FileLike): string {
   const loc = file.location
   if (loc?.state === 'remote')
     return 'Not downloaded to this computer yet: opening it downloads it.'
+  if (loc?.state === 'arriving')
+    return 'Uploading: the computer that added it is still sending it.'
   if (loc?.state === 'absent')
     return 'Not on this computer, and the server hasn’t got it. Click for details.'
   if (!loc || loc.volume === null)
@@ -277,6 +280,8 @@ function FileLocationPanel({
               kind="server"
               reason="Another device added it. Opening or exporting it downloads it."
             />
+          ) : loc.state === 'arriving' ? (
+            <PlaceStatus place="" kind="arriving" reason={loc.reason} />
           ) : loc.volume === null ? (
             <PlaceStatus
               place=""

@@ -20,6 +20,7 @@ export interface RecordSync {
     | 'pending'
     | 'first_upload'
     | 'refused'
+    | 'unfit'
     | 'conflict'
   remote: string | null
   pending: number

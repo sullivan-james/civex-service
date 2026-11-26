@@ -93,6 +93,17 @@ describe('a change that was not taken', () => {
   })
 })
 
+describe('a refused schema or field', () => {
+  it('is labelled by what it is, to retry or discard', () => {
+    expect(kindLabel('rejected', 'field')).toBe('Field refused')
+    expect(kindLabel('rejected', 'schema')).toBe('Schema refused')
+    expect(kindLabel('rejected', 'record')).toBe('Refused')
+    expect(takeLabel('rejected', 'retry', 'field')).toBe('Retry')
+    expect(takeLabel('rejected', 'theirs', 'schema')).toBe('Discard')
+    expect(takeLabel('rejected', 'theirs', 'record')).toBe('Let it go')
+  })
+})
+
 describe('a refused record', () => {
   it('says it is not on the server yet, why, and that saving a fix sends it', () => {
     const said = describeAttempt(
@@ -113,5 +124,18 @@ describe('a refused record', () => {
   it('names how it ended by itself', () => {
     expect(settledLabel('sent')).toBe('Went in')
     expect(settledLabel('replaced')).toBe('Replaced by a later attempt')
+  })
+})
+
+describe('a record that went in but breaks a rule', () => {
+  it('is labelled, can only be dismissed, and says fixing the value clears it', () => {
+    const said = describeAttempt(
+      c('1', { kind: 'unfit', message: "Required field 'site' is empty" }),
+      (iso) => iso,
+    )
+    expect(said).toContain('went in')
+    expect(said).toContain("'site' is empty")
+    expect(kindLabel('unfit')).toBe('Breaks a rule')
+    expect(takeLabel('unfit', 'theirs')).toBe('Dismiss')
   })
 })

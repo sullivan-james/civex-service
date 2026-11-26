@@ -358,6 +358,20 @@ NOT_SYNCED_MESSAGE = (
     "Releases are published on a civex hub and are not synced: make this one there."
 )
 
+# A change that went in (a record) although its values break a data rule of the
+# project (a required field left empty, a value outside its field's
+# restrictions): the answer's `conflicts` item has kind `UNFIT` and this code. The
+# record is kept and shown by everyone as it is; the flag is a fact about the
+# data, worked out again from it, and the pusher's item is only the nudge.
+UNFIT = "unfit"
+UNFIT_DATA = "data"
+
+# What a device keeps when the authority's rules refuse it, marked (`rejected`),
+# to send again or let go: never put back where the authority has it. Until it
+# is settled the thing counts as changed here, so the authority's later changes
+# to it wait (and do not quietly overwrite it).
+KEPT_STRUCTURE = frozenset({"schema", "field"})
+
 ACTIONS = frozenset({"create", "update", "delete", "restore", "purge"})
 # A delete's time becomes the `deleted_at` of what it deletes, so a device whose
 # clock is further ahead than this is refused rather than stamping the future.
@@ -1159,7 +1173,7 @@ class SyncPolicy(Protocol):
 @dataclass
 class SyncConflictDTO:
     id: uuid.UUID
-    kind: str  # conflict | rejected | edit_vs_delete
+    kind: str  # conflict | rejected | edit_vs_delete | unfit
     entity_type: str
     entity_id: uuid.UUID
     field: str | None
@@ -1307,6 +1321,16 @@ class SyncTransport(Protocol):
 PUSH_BUDGET_BYTES = 2 * 1024 * 1024
 
 
+def group_by_op(entries: list[SyncEntry]) -> list[SyncEntry]:
+    """`entries` with each action's entries (sharing an `op`) together: actions
+    in the order they first appear, entries in the order given. An entry with no
+    `op` is an action of its own."""
+    groups: dict[Any, list[SyncEntry]] = {}
+    for at, entry in enumerate(entries):
+        groups.setdefault(entry.op or at, []).append(entry)
+    return [e for g in groups.values() for e in g]
+
+
 def batch_by_budget(
     entries: list[SyncEntry],
     max_entries: int,
@@ -1319,6 +1343,7 @@ def batch_by_budget(
     alone, and the first action is always taken). Entries with no `op` are each
     an action of their own."""
     size = size_of or (lambda e: len(json.dumps(e.to_dict())))
+    entries = group_by_op(entries)  # an action's entries may have been apart
     taken: list[SyncEntry] = []
     used = 0
     i = 0

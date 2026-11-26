@@ -231,7 +231,24 @@ class Permissions:
         self._normalise_scopes()
         # (continued below: the split of `MANAGE_FILES`, then the actions that
         # follow `WRITE_RECORDS` for a host that has not heard of them)
+        self._structure_needs_full_read()
         self._follow_writing()
+
+    def _structure_needs_full_read(self) -> None:
+        """Changing the structure (kinds, fields, collections) reaches the
+        records of every collection: it changes what they mean and whether
+        they are valid. Someone who cannot see them all would do it blind, so
+        `CHANGE_STRUCTURE` is available only with unrestricted read: the one
+        rule, so every route, service and sync push meets it the same way."""
+        if self.read_scope().unrestricted:
+            return
+        allowed = dict(self.allowed)
+        # A release bundles the whole structure and every record: the same
+        # reach, so it is withheld too, granted or derived.
+        for action in (CHANGE_STRUCTURE, RELEASE):
+            if action in allowed:
+                allowed[action] = frozenset()
+        object.__setattr__(self, "allowed", allowed)
 
     def lacking(self, *actions: str) -> Permissions:
         """These permissions, but `actions` may be done nowhere (stated, so a
@@ -354,6 +371,10 @@ class Permissions:
         if kind == "dataset" and getattr(entry, "action", None) != "create":
             # Changing or deleting a collection one cannot read: it is not there.
             asks.append((READ, str(getattr(entry, "entity_id", ""))))
+        if kind == "field" and getattr(entry, "action", None) in ("delete", "purge"):
+            # Deleting a field takes the right to delete as well as to change
+            # the structure: it can destroy every value held in it.
+            asks.append((CHANGE_STRUCTURE, None))
         if kind == "record":
             added, removed = file_changes(entry)
             if added:
@@ -430,7 +451,7 @@ def action_for(entry: Any) -> tuple[str, Any]:
     `WRITE_RECORDS` in its collection; a record deleted or purged is `DELETE`
     there; a saved filter or the Analytics page is `VIEWS` `ANYWHERE`, and a note is
     `NOTES` there (its collection is asked about once its record is found); a collection or kind
-    of record deleted or purged is `DELETE`; every other change to a schema,
+    of record or a field deleted or purged is `DELETE`; every other change to a schema,
     field or collection is `CHANGE_STRUCTURE`."""
     kind = getattr(entry, "entity_type", None)
     action = getattr(entry, "action", None)
@@ -447,7 +468,7 @@ def action_for(entry: Any) -> tuple[str, Any]:
             getattr(entry, "new_data", None) or getattr(entry, "old_data", None) or {}
         )
         return NOTES, snapshot.get("dataset_id") or ANYWHERE
-    if kind in ("dataset", "schema") and removing:
+    if kind in ("dataset", "schema", "field") and removing:
         return DELETE, None
     return CHANGE_STRUCTURE, None
 

@@ -54,8 +54,11 @@ from civex.domain.file_refs import without_file_locations
 from civex.domain.hosts import is_loopback
 from civex.domain.dtos import MissingFileGroupDTO, MissingFilesRemovalDTO
 from civex.domain.sync import (
+    KEPT_STRUCTURE,
     PUSH_BUDGET_BYTES,
     REFUSAL_PERMISSION,
+    UNFIT,
+    UNFIT_DATA,
     batch_by_budget,
     is_lock_contention,
     Joined,
@@ -101,6 +104,8 @@ from civex.services import ssh_tunnel
 # PostgreSQL the authority's cost per change grows with the batch, so this
 # sits between 100 and that limit.
 PUSH_BATCH = 250
+# How many flagged records are read, and flags settled, per statement.
+FLAG_CHUNK = 500
 # How many referenced files are checked against the authority per request.
 FILE_CHECK_PAGE = 1000
 # A file above this many bytes is sent alone, one at a time, and confirmed and
@@ -235,8 +240,9 @@ class RecordSyncState:
     `state`: `not_connected` (no authority), `held_here` (this project is the
     authority), `synced`, `pending` (changes not yet sent), `first_upload`
     (set aside by a first upload that has not finished), `refused` (the
-    authority would not take a change) or `conflict` (a value both sides
-    changed, for a person to settle)."""
+    authority would not take a change), `unfit` (taken, but its values break a
+    data rule) or `conflict` (a value both sides changed, for a person to
+    settle)."""
 
     state: str
     remote: str | None = None
@@ -372,6 +378,11 @@ class SyncService:
         config_store: ConfigStore,
     ) -> None:
         self._config = config
+        # Whether this pass's last pull reached the authority's head, and
+        # whether anything came in, was answered or changed since the flags were
+        # last judged (a new service judges once): `_settle_flags`.
+        self._at_head = False
+        self._flags_stale = True
         # Where `[sync]` is saved (config.toml for a local project); never
         # written to directly, so a hosted project's settings live elsewhere.
         self._config_store = config_store
@@ -476,12 +487,16 @@ class SyncService:
         )
         open_ = self._repo.find_open_conflicts(entity_id=record_id)
         refused = next((c for c in open_ if c.kind == "rejected"), None)
-        clash = next((c for c in open_ if c.kind != "rejected"), None)
+        unfit = next((c for c in open_ if c.kind == UNFIT), None)
+        clash = next((c for c in open_ if c.kind not in ("rejected", UNFIT)), None)
         if clash:
             out.state, out.conflict_id = "conflict", str(clash.id)
         elif refused:
             out.state, out.conflict_id = "refused", str(refused.id)
             out.message = refused.message
+        elif unfit:
+            out.state, out.conflict_id = "unfit", str(unfit.id)
+            out.message = unfit.message
         elif pending:
             out.state = "pending"
         elif seeding:
@@ -724,7 +739,7 @@ class SyncService:
                 takes.insert(takes.index("retry"), "restore_above")
             v = values.get((str(c.entity_id), _field_id(c) or ""))
             if v is None:
-                out.append(replace(c, takes=takes, sits_under=under))
+                out.append(replace(c, takes=takes, sits_under=under, **self._named(c)))
                 continue
             current = without_file_locations(v.value) if c.field else None
             also = [
@@ -773,6 +788,24 @@ class SyncService:
                 )
             )
         return out
+
+    def _named(self, c: SyncConflictDTO) -> dict[str, Any]:
+        """What a refused schema or field is called, for a person: the schema's
+        name, and the field's (as `field_label`)."""
+        if c.entity_type not in KEPT_STRUCTURE:
+            return {}
+        snap = self._repo.snapshot(c.entity_type, c.entity_id) or {}
+        if c.entity_type == "schema":
+            return {"schema_name": snap.get("name")}
+        parent = (
+            self._repo.snapshot("schema", uuid.UUID(str(snap["schema_id"])))
+            if snap.get("schema_id")
+            else None
+        )
+        return {
+            "schema_name": (parent or {}).get("name"),
+            "field_label": snap.get("label") or snap.get("name"),
+        }
 
     def _attempt(
         self, conflict: SyncConflictDTO
@@ -1271,6 +1304,7 @@ class SyncService:
     @_closes_transports
     def _sync(self) -> SyncReport:
         progress = self._sync_progress
+        self._at_head = False
         if problem := self._one_role():
             raise SyncError(problem, retryable=False)
         transport = self._transport()
@@ -1367,6 +1401,7 @@ class SyncService:
         if report.pushed or report.conflicts:
             report.pulled += self._pull(transport)
         report.open_rejected = len(self._repo.find_open_conflicts(kind="rejected"))
+        self._settle_flags()
         return report
 
     def _resend_permission_refusals(self) -> int:
@@ -1414,6 +1449,7 @@ class SyncService:
     # -- pull -------------------------------------------------------------
 
     def _pull(self, transport: SyncTransport) -> int:
+        self._at_head = False
         dirty = self._catch_up()
         cursor = self._repo.meta().cursor
         applied = 0
@@ -1482,6 +1518,8 @@ class SyncService:
                             if entry.entity_type == "record":
                                 touched.append(entry.entity_id)
                         cursor = entry.hub_seq
+                    if entries:
+                        self._flags_stale = True  # (something came in)
                     if arriving is not None and not page.more:
                         self._settle_arriving(arriving, to_hold, dirty, start)
                         arriving, to_hold = None, False
@@ -1526,6 +1564,7 @@ class SyncService:
                 continue
             self._commit()
             if not page.more:
+                self._at_head = True
                 return applied
 
     def _stage(
@@ -2355,6 +2394,8 @@ class SyncService:
         goes in as a whole (`whole`), its refusal is settled by that. Returns
         how many changes it held back."""
         held = 0
+        if results:
+            self._flags_stale = True  # (answers may open, or settle, a flag)
         # Which things have a refusal waiting: asked once, not of each (almost
         # none do), and kept up as refusals are added below.
         refused = self._repo.with_open_refusals(
@@ -2424,7 +2465,20 @@ class SyncService:
                 kind = problem.get("kind", "conflict")
                 if self._repo.has_conflict(result.op_id, problem.get("field"), kind):
                     continue
-                if result.status != REJECTED:
+                if kind == UNFIT:
+                    # One flag per field of a record: a newer one replaces the
+                    # one before. (It is no clash: nothing to pull again.)
+                    self._repo.resolve_conflicts(
+                        [
+                            c.id
+                            for c in self._repo.find_open_conflicts(
+                                kind=UNFIT, entity_id=entry.entity_id
+                            )
+                            if c.field == problem.get("field")
+                        ],
+                        "replaced",
+                    )
+                elif result.status != REJECTED:
                     report.conflicts += 1
                 self._repo.add_conflict(
                     kind=kind,
@@ -2440,11 +2494,95 @@ class SyncService:
                     op_id=result.op_id,
                     device_name=None,
                     message=problem.get("message"),
-                    code=problem.get("code") if kind == "rejected" else None,
+                    code=problem.get("code") if kind in ("rejected", UNFIT) else None,
                 )
                 if kind == "rejected":
                     refused.add(entry.entity_id)
         return held
+
+    def _settle_flags(self) -> None:
+        """Settle the flags (`unfit` items) the data no longer earns. See
+        `_judge_flags`; whatever goes wrong there leaves the flags as they are
+        and never fails the sync."""
+        try:
+            self._judge_flags()
+        except Exception:  # noqa: BLE001 - a flag is a reminder, never a reason to fail
+            log.warning("sync: could not judge the flags again", exc_info=True)
+            try:
+                self._repo.rollback()
+            except Exception:  # noqa: BLE001 - nothing more to do about it
+                log.warning("sync: could not undo the flag pass", exc_info=True)
+
+    def _judge_flags(self) -> None:
+        """A flag is the authority's judgement of a record's values by its
+        rules, so a copy shows what the authority says: it goes only when this
+        copy is level with the authority (nothing unsent, no change of its own
+        structure refused, none of the server's structure it could not apply,
+        the feed read to its head), where the schemas and values it holds are
+        the authority's. Then every open flag (there are few) is judged again,
+        with one resolver and the records read in chunks, and those whose field
+        no longer breaks a rule, or whose record is deleted or gone, are
+        settled. Nothing is done when nothing came in, was answered or was
+        copied since the last time they were judged. Kept as they are: a record
+        with a refused change of its own, one in a collection this copy may no
+        longer read, and one that cannot be judged here."""
+        if not (self._at_head and self._repo.count_pending() == 0):
+            return
+        if not self._flags_stale:
+            return
+        flags: dict[uuid.UUID, list[SyncConflictDTO]] = {}
+        for c in self._repo.find_open_conflicts(kind=UNFIT):
+            if c.entity_type == "record":
+                flags.setdefault(c.entity_id, []).append(c)
+        if not flags:
+            self._flags_stale = False
+            return
+        # (a change of this copy's structure the authority refused, or one of
+        # the authority's it could not apply: the rules here are not its)
+        refused = self._repo.find_open_conflicts(kind="rejected")
+        if any(c.entity_type in ("schema", "field") for c in refused) or any(
+            c.entity_type in ("schema", "field")
+            for c in self._repo.find_open_conflicts(kind="not_applied")
+        ):
+            return
+        refused_records = {c.entity_id for c in refused}
+        readable = self._repo.readable()
+        cache = self._records.incoming_cache()
+        done: list[uuid.UUID] = []
+        ids = [r for r in flags if r not in refused_records]
+        for at in range(0, len(ids), FLAG_CHUNK):
+            chunk = ids[at : at + FLAG_CHUNK]
+            held = {
+                uuid.UUID(str(st["id"])): st
+                for st in self._repo.record_snapshots([str(i) for i in chunk])
+            }
+            for record_id in chunk:
+                state = held.get(record_id)
+                if state is None:
+                    done += [c.id for c in flags[record_id]]  # (purged here or there)
+                    continue
+                if (
+                    readable is not None
+                    and str(state.get("dataset_id")) not in readable
+                ):
+                    continue
+                try:
+                    broken = {
+                        f["field"] for f in self._records.rule_findings(state, cache)
+                    }
+                except (
+                    ValidationError,
+                    ValueError,
+                    TypeError,
+                    KeyError,
+                    AttributeError,
+                ):
+                    continue
+                done += [c.id for c in flags[record_id] if c.field not in broken]
+        if done:
+            self._repo.resolve_conflicts(done, "fixed")
+            self._commit()
+        self._flags_stale = False
 
     # ------------------------------------------------------------------
     # Joining and seeding
@@ -2581,6 +2719,7 @@ class SyncService:
         since `cursor` for another collection this device may read: the feed
         past the cursor will say they moved, and the device must hold them by
         then or that, and every change after it, would be to a record it lacks."""
+        self._flags_stale = True  # (records come in as the authority has them)
         dirty = {(kind, str(i)) for kind, i in self._repo.dirty_entities()}
         held: set[str] = set()
         passes: list[tuple[str, int | None]] = [
@@ -2644,8 +2783,12 @@ class SyncService:
         )
         report.pushed += self._push(transport, report)
         head, held = self._copy_state(transport, hello)
+        # (A flag alone keeps nothing: a record the authority no longer holds
+        # goes, and its flag with it, `_settle_flags`.)
         keep = {(kind, str(i)) for kind, i in self._repo.dirty_entities()} | {
-            (c.entity_type, str(c.entity_id)) for c in self._repo.find_open_conflicts()
+            (c.entity_type, str(c.entity_id))
+            for c in self._repo.find_open_conflicts()
+            if c.kind != UNFIT
         }
         for kind in reversed(ENTITY_ORDER):
             gone = self._repo.all_ids(kind) - held.get(kind, set())
@@ -2657,6 +2800,7 @@ class SyncService:
         if hello.readable is not None:
             self._repo.set_readable({c["id"] for c in hello.readable})
         self._commit()
+        self._flags_stale = True  # (everything was rewritten as the authority has it)
 
     @_closes_transports
     def fetch_history(
@@ -3219,8 +3363,92 @@ class SyncService:
             self._repo.mark_retrying(conflict_id)
             self._commit()
             return
-        self._repo.resolve_conflict(conflict_id, take)
+        if take == "theirs" and self._keeps_structure(conflict):
+            self._let_structure_go(conflict)  # (settles it, or says why not)
+        else:
+            self._repo.resolve_conflict(conflict_id, take)
+        self._flags_stale = True  # (a refusal let go may make this copy level)
         self._commit()
+
+    @staticmethod
+    def _keeps_structure(conflict: SyncConflictDTO) -> bool:
+        return (
+            conflict.kind == "rejected"
+            and conflict.entity_type in KEPT_STRUCTURE
+            and conflict.code == UNFIT_DATA
+        )
+
+    def _let_structure_go(
+        self,
+        conflict: SyncConflictDTO,
+        read: dict[str, dict[str, dict[str, Any]]] | None = None,
+    ) -> None:
+        """A refused change to a schema or a field is let go: this copy becomes
+        what the authority holds now (what it holds of the thing, read from it;
+        a thing it never had is put in the trash here, with what went with it),
+        and takes what it said meanwhile (held while the change was kept). The
+        other parts of the action go with it: it can't be kept by halves.
+        Refused, the item left open, when the thing has another change still
+        to send (letting go would drop it) or the authority can't be reached."""
+        original = self._repo.get_entry(conflict.op_id) if conflict.op_id else None
+        ids = (
+            {e.id for e in self._repo.entries_of_action(original.op)}
+            if original and original.op
+            else set()
+        )
+        mine = (conflict.entity_type, conflict.entity_id)
+        open_ = [
+            c
+            for c in self._repo.find_open_conflicts(kind="rejected")
+            if c.id == conflict.id
+            or (c.op_id in ids)
+            or (c.entity_type, c.entity_id) == mine
+        ]
+        things = {(c.entity_type, c.entity_id) for c in open_}
+        structure = {t for t in things if t[0] in KEPT_STRUCTURE}
+        for kind, thing_id in sorted(things, key=str):
+            if self._repo.has_unsent(kind, thing_id):
+                named = self._named(conflict)
+                name = named.get("field_label") or named.get("schema_name") or kind
+                raise ValidationError(f"Send or undo your other change to {name} first")
+        held = self._authority_holds(structure, read)
+        for (kind, thing_id), state in held.items():
+            if state is not None:
+                self._applier.apply_state(kind, thing_id, state)
+            elif not (self._repo.snapshot(kind, thing_id) or {}).get("deleted_at"):
+                self._applier.apply_delete(kind, thing_id, datetime.now(timezone.utc))
+        self._repo.resolve_conflicts([c.id for c in open_], "theirs")
+        self._replay_held(self._repo.dirty_entities())
+
+    def _authority_holds(
+        self,
+        things: set[tuple[str, uuid.UUID]],
+        read: dict[str, dict[str, dict[str, Any]]] | None = None,
+    ) -> dict[tuple[str, uuid.UUID], dict[str, Any] | None]:
+        """What the authority holds of each of these schemas and fields now
+        (None: nothing). A kind is read from it once, page by page, as a copy
+        of it is: into `read` when the caller keeps one across several."""
+        read = {} if read is None else read
+        try:
+            transport = self._transport()
+            for kind in {k for k, _ in things} - set(read):
+                held: dict[str, dict[str, Any]] = {}
+                after: str | None = None
+                while True:
+                    page = transport.snapshot(kind, after, SNAPSHOT_PAGE)
+                    held.update({snap["id"]: snap for snap in page.items})
+                    if not page.more:
+                        break
+                    after = page.next
+                read[kind] = held
+            out: dict[tuple[str, uuid.UUID], dict[str, Any] | None] = {
+                (k, i): read[k].get(str(i)) for k, i in things
+            }
+            return out
+        except SyncError as e:
+            raise ValidationError(
+                f"The server can't be reached to take its version: {e}"
+            ) from None
 
     def resolve_many(
         self,
@@ -3254,8 +3482,22 @@ class SyncService:
             report.done = len(offered)
             return report
         if take == "theirs":
-            report.settled = [c.id for c in offered]
+            kept = [c for c in offered if self._keeps_structure(c)]
+            plain = [c for c in offered if c not in kept]
+            report.settled = [c.id for c in plain]
             report.done = self._repo.resolve_conflicts(report.settled, take)
+            read: dict[str, dict[str, dict[str, Any]]] = {}
+            for c in kept:
+                if self._repo.get_conflict(c.id).status != "open":  # type: ignore[union-attr]
+                    continue  # (settled with an earlier part of its action)
+                try:
+                    with self._repo.savepoint():
+                        self._let_structure_go(c, read)
+                    report.done += 1
+                    report.settled.append(c.id)
+                except CivexError as e:
+                    report.failed.append((c.id, str(e)))
+            self._flags_stale = True
             self._commit()
             return report
         for c in offered:
@@ -3384,6 +3626,9 @@ _TAKES: dict[str, tuple[str, ...]] = {
     "conflict": ("theirs", "mine", "value"),
     "edit_vs_delete": ("theirs", "delete"),
     "rejected": ("theirs", "retry"),
+    # Taken as it is: nothing to send again. Fixing the values clears it (see
+    # `_note`); `theirs` only lets the reminder go.
+    "unfit": ("theirs",),
 }
 _RECORD_ONLY = frozenset({"mine", "value", "delete"})
 

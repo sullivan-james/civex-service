@@ -18,7 +18,8 @@ from civex.domain.file_refs import collect_sha256_refs
 from civex.domain import notes as note_rules
 from civex.domain.permissions import EVERYTHING, Permissions
 from civex.domain.file_refs import without_file_locations
-from civex.domain.sync import not_on_server_yet
+from civex.domain.file_access import arriving_location
+from civex.domain.sync import UNFIT, UNFIT_DATA, not_on_server_yet
 from civex.domain.dtos import (
     OrphanDTO,
     DERIVED_FILE_KEYS,
@@ -62,6 +63,7 @@ from civex.domain.exceptions import (
     CoercionError,
     DuplicateRecordError,
     NotFoundError,
+    RuleBroken,
     ValidationError,
 )
 from civex.domain.filters import (
@@ -187,6 +189,12 @@ def _check_restrictions(
     if value is None:
         return
 
+    # A value that is not of its field's kind is no broken rule: refused with
+    # any other type error (only where there are restrictions; none, as ever,
+    # takes what a person writes). Sync judges the same way (`_rule_findings`).
+    if restrictions and (problem := _kind_problem(value, dtype, field_name)):
+        raise ValidationError(problem)
+
     # URL format is always validated regardless of restrictions.
     if dtype == "url":
         s = str(value)
@@ -215,7 +223,7 @@ def _check_restrictions(
                     value, (restrictions or {}).get("precision", "day")
                 )
             except ValidationError as e:
-                raise ValidationError(f"Field '{field_name}': {e}") from None
+                raise RuleBroken(f"Field '{field_name}': {e}") from None
 
     if dtype in ("file", "file_list"):
         # The shape is checked whatever the restrictions, like a geometry's.
@@ -239,37 +247,33 @@ def _check_restrictions(
         mn = restrictions.get("min")
         mx = restrictions.get("max")
         if mn is not None and value < mn:
-            raise ValidationError(
-                f"Field '{field_name}': {value} is below minimum ({mn})"
-            )
+            raise RuleBroken(f"Field '{field_name}': {value} is below minimum ({mn})")
         if mx is not None and value > mx:
-            raise ValidationError(
-                f"Field '{field_name}': {value} exceeds maximum ({mx})"
-            )
+            raise RuleBroken(f"Field '{field_name}': {value} exceeds maximum ({mx})")
 
     elif dtype == "string":
         choices = restrictions.get("choices")
         max_length = restrictions.get("max_length")
         if choices is not None and value not in choices:
-            raise ValidationError(
+            raise RuleBroken(
                 f"Field '{field_name}': '{value}' must be one of: {', '.join(str(c) for c in choices)}"
             )
         if max_length is not None and len(value) > int(max_length):
-            raise ValidationError(
+            raise RuleBroken(
                 f"Field '{field_name}': value length {len(value)} exceeds max_length {max_length}"
             )
 
     elif dtype == "longtext":
         max_length = restrictions.get("max_length")
         if max_length is not None and len(value) > int(max_length):
-            raise ValidationError(
+            raise RuleBroken(
                 f"Field '{field_name}': value length {len(value)} exceeds max_length {max_length}"
             )
 
     elif dtype == "enum":
         choices = restrictions.get("choices")
         if choices is not None and value not in choices:
-            raise ValidationError(
+            raise RuleBroken(
                 f"Field '{field_name}': '{value}' must be one of: {', '.join(str(c) for c in choices)}"
             )
 
@@ -281,7 +285,7 @@ def _check_restrictions(
         except ValueError:
             problem = None  # malformed value or bound; see the datetime branch
         if problem:
-            raise ValidationError(f"Field '{field_name}': {problem}")
+            raise RuleBroken(f"Field '{field_name}': {problem}")
 
     elif dtype in ("date", "datetime"):
         mn = restrictions.get("min")
@@ -297,11 +301,11 @@ def _check_restrictions(
                 mn_cmp = _dt.fromisoformat(str(mn)) if mn is not None else None
                 mx_cmp = _dt.fromisoformat(str(mx)) if mx is not None else None
             if mn_cmp is not None and v_cmp < mn_cmp:
-                raise ValidationError(
+                raise RuleBroken(
                     f"Field '{field_name}': {value} is before minimum ({mn})"
                 )
             if mx_cmp is not None and v_cmp > mx_cmp:
-                raise ValidationError(
+                raise RuleBroken(
                     f"Field '{field_name}': {value} is after maximum ({mx})"
                 )
         except (ValueError, TypeError):
@@ -494,6 +498,38 @@ def _file_dicts(value: Any) -> list[dict[str, Any]]:
     if isinstance(value, list):
         return [item for item in value if isinstance(item, dict)]
     return []
+
+
+def _kind_problem(value: Any, dtype: str, name: str) -> str | None:
+    """Why `value` is not a value of a restricted `dtype` field at all: what
+    must hold before a restriction can be said to be broken. Only called for
+    fields that carry restrictions, so what a person's own write accepts of an
+    unrestricted field (text of any kind, say) is accepted here too."""
+    if dtype in ("string", "longtext", "enum") and not isinstance(value, str):
+        return f"Field '{name}': '{value}' is not text"
+    if dtype in ("date", "datetime"):
+        if not isinstance(value, str):
+            return f"Field '{name}': '{value}' is not a {dtype}"
+        try:
+            if dtype == "date":
+                partial_dates.period(value)
+            else:
+                _dt.fromisoformat(value)
+        except ValueError:
+            return f"Field '{name}': '{value}' is not a valid {dtype}"
+    return None
+
+
+def _unfit(field_id: Any, message: str, value: Any = None) -> dict[str, Any]:
+    """One finding of the data rules, as an answer's `conflicts` item carries it
+    (nothing here is a query: no one else's value is named)."""
+    return {
+        "kind": UNFIT,
+        "field": f"data.{field_id}",
+        "code": UNFIT_DATA,
+        "yours": value,
+        "message": message,
+    }
 
 
 def _changed_values(
@@ -752,22 +788,49 @@ class IncomingCache:
         self._resolver = resolver
         self.shapes = resolver()
         self.datasets: dict[uuid.UUID, Any] = {}
-        # Whether records may be answered from here: not for a caller who sees
-        # only some collections (what it finds is its own view of them).
-        self.use_records = False
+        # Which collections the caller sees (None: all). `places` is the whole
+        # project, as the sync authority settles it; a caller who sees only
+        # some collections is answered from it only where the question is the
+        # caller's own (the record a reference or a parent names: one in a
+        # collection it does not see is not there), never through a second
+        # lookup that would differ for hidden and missing.
+        self.sees: Callable[[Any], bool] | None = None
         # Record id -> where it is (None: not there), for every record the
         # run names: read at once, and kept up with what the run writes.
         self.places: dict[uuid.UUID, RecordPlace | None] = {}
+        # For a caller who sees only some collections: file digest -> (used by
+        # a record it sees, used by anything), read at once for the files a run
+        # cites (`SyncAuthorityService._prefetch_uses`) and kept up with what
+        # the run writes; `dirty` are digests whose answer a run member made
+        # uncertain. `uses_upto` is how far into the push they were read.
+        self.uses: dict[str, tuple[bool, bool]] = {}
+        self.dirty: set[str] = set()
+        self.uses_upto = 0
         # Uniqueness keys (see `RecordService.unique_marks`) that no stored
         # record held when they were read, and those the run has since made.
         self.free: set[tuple[Any, ...]] = set()
+        # Schema id -> its required fields (name, id, label), read from the shape.
+        self.required: dict[uuid.UUID, list[tuple[str, str, str]]] = {}
         self.made: set[tuple[Any, ...]] = set()
+        # What the sync authority's bulk deletes and restores ask of the records
+        # they are about to settle, read together (`SyncAuthorityService.
+        # _prefetch_changes`) and dropped with `places` when anything else
+        # writes: each record's state as held (None: not there), those with a
+        # live record beneath them, and those a record the caller cannot see
+        # points at.
+        self.heads: dict[uuid.UUID, dict[str, Any] | None] = {}
+        # Which kind of change (delete or restore) each record's state was read
+        # for: what is read for one is not what the other asks.
+        self.read: dict[uuid.UUID, str] = {}
+        self.children: set[uuid.UUID] = set()
+        self.hidden: set[uuid.UUID] = set()
         # Records were changed since `places` was read: to be read again.
         self.stale = True
 
     def clear(self) -> None:
         """Forget what was read (a schema or a collection may have changed)."""
         self.shapes = self._resolver()
+        self.required.clear()
         self.datasets.clear()
         self.clear_records()
 
@@ -776,6 +839,13 @@ class IncomingCache:
         self.places.clear()
         self.free.clear()
         self.made.clear()
+        self.uses.clear()
+        self.dirty.clear()
+        self.uses_upto = 0
+        self.heads.clear()
+        self.read.clear()
+        self.children.clear()
+        self.hidden.clear()
         self.stale = True
 
 
@@ -803,6 +873,12 @@ class RecordService:
         # Of these files, those the authority hasn't said it holds (set by
         # `context.py`; nothing when the project follows no authority).
         self.not_on_server: Callable[[set[str]], set[str]] = lambda _: set()
+        # Of these (record -> files it cites), the pairs a device sent lately
+        # (an authority only): such a file on no drive is `arriving`, its
+        # device still uploading.
+        self.recently_received: Callable[
+            [dict[uuid.UUID, set[str]]], set[tuple[uuid.UUID, str]]
+        ] = lambda _: set()
         # Of these files, those the authority said it hasn't got, and (reason,
         # fix) for one neither here nor there (set by `context.py`).
         self.server_lacks: Callable[[set[str]], set[str]] = lambda _: set()
@@ -1204,7 +1280,13 @@ class RecordService:
             for ref in _file_dicts(r.data.get(name))
             if ref.get("sha256") and (r.id, ref["sha256"]) not in used
         }
-        location = self._locator(wanted, used, unpointed)
+        cited_by: dict[str, set[uuid.UUID]] = {}
+        for r, names in zip(records, file_fields):
+            for name in names:
+                for ref in _file_dicts(r.data.get(name)):
+                    if ref.get("sha256") in unpointed:
+                        cited_by.setdefault(ref["sha256"], set()).add(r.id)
+        location = self._locator(wanted, used, unpointed, cited_by)
 
         def decorate(record_id: uuid.UUID, value: Any) -> Any:
             if isinstance(value, dict):
@@ -1247,9 +1329,21 @@ class RecordService:
         wanted: set[str],
         used: dict[tuple[uuid.UUID, str], str],
         unpointed: set[str],
+        cited_by: dict[str, set[uuid.UUID]] | None = None,
     ) -> Callable[[uuid.UUID, str | None], dict[str, Any]]:
         volume_of = self._files.locate_volumes(unpointed) if unpointed else {}
         following = self.files_from_server()
+        # Records a device sent lately that cite a file not here: one lookup
+        # for the batch, and only when there is such a file.
+        arriving: set[tuple[uuid.UUID, str]] = set()
+        if cited_by and not following:
+            owners: dict[uuid.UUID, set[str]] = {}
+            for sha, volume in volume_of.items():
+                if volume is None:
+                    for record_id in cited_by.get(sha, set()):
+                        owners.setdefault(record_id, set()).add(sha)
+            if owners:
+                arriving = self.recently_received(owners)
         from_server = None in volume_of.values() and following
         unsent = self.not_on_server(wanted) if following else set()
         # Not here, and the server said it hasn't got it: nobody can fetch it,
@@ -1292,6 +1386,8 @@ class RecordService:
                     "fix": "Opening or exporting it downloads it from the server.",
                     "sent": sha not in unsent,
                 }
+            if volume is None and (record_id, sha or "") in arriving:
+                return arriving_location()
             if volume is None:
                 # Not on any volume we know of (yet): don't claim it is gone --
                 # it may only be on a remote that hasn't been fetched.
@@ -1872,7 +1968,13 @@ class RecordService:
         if found:
             # (what a run has read already is not asked for again)
             held = cache.places if cache is not None else {}
-            targets = {i: held[i] for i in found if held.get(i) is not None}
+            sees = cache.sees if cache is not None else None
+            targets = {}
+            for i in found:
+                place = held.get(i)
+                # (one in a collection the caller does not see is not there)
+                if place is not None and (sees is None or sees(place.dataset_id)):
+                    targets[i] = place
             asked = [i for i in found if i not in held]
             targets.update({t.id: t for t in self._records.list_by_ids(asked)})
         owners = {} if owners is None else owners
@@ -1957,6 +2059,58 @@ class RecordService:
             ]
         records = {r.id: r for r in self._records.list_by_ids(list(fields))}
         return total, [(records[rid], f) for rid, f in fields.items() if rid in records]
+
+    def collection_referrer_block(
+        self, dataset_id: uuid.UUID, sees: Callable[[Any], bool]
+    ) -> str | None:
+        """The one rule for deleting a global collection or making it local:
+        "hidden" when a record the caller cannot see (`sees` says which
+        collections they can) in another collection points into it, "visible"
+        when only records they can see do, else None. The service and the sync
+        authority both ask it."""
+        field_map = self._reference_field_map()
+        where = self._records.referrer_collections_into_dataset(
+            dataset_id, [uuid.UUID(f) for f in field_map]
+        )
+        if any(not sees(w) for w in where):
+            return "hidden"
+        return "visible" if where else None
+
+    def hidden_referrers_of_records(
+        self,
+        target_ids: set[uuid.UUID],
+        sees: Callable[[Any], bool],
+        exclude: set[uuid.UUID],
+    ) -> bool:
+        """Whether a record the caller cannot see, and that is not in
+        `exclude` (what is deleted with them), points at any of these."""
+        field_map = self._reference_field_map()
+        if not field_map or not target_ids:
+            return False
+        holders = self._records.referrer_places_of(
+            list(target_ids), [uuid.UUID(f) for f in field_map]
+        )
+        return any(
+            not sees(where) for rid, where in holders.items() if rid not in exclude
+        )
+
+    def hidden_referrer_targets(
+        self, target_ids: list[uuid.UUID], sees: Callable[[Any], bool]
+    ) -> set[uuid.UUID]:
+        """Which of these records a record the caller cannot see points at (a
+        record pointing at itself does not count): `hidden_referrers_of_records`
+        for each of many one-record deletes, in the same few queries."""
+        field_map = self._reference_field_map()
+        if not field_map or not target_ids:
+            return set()
+        held = self._records.referrer_places_by_target(
+            list(target_ids), [uuid.UUID(f) for f in field_map]
+        )
+        return {
+            target
+            for referrer, target, where in held
+            if referrer != target and not sees(where)
+        }
 
     def patched_data(
         self, record_id: str, fields: dict[str, Any]
@@ -2104,8 +2258,6 @@ class RecordService:
         holds (one per collection and schema). Records the run writes are
         added with `note_made`; a write by anything else is `clear_records`."""
         cache.stale = False
-        if not cache.use_records:
-            return
         want: set[uuid.UUID] = set()
         keys: dict[tuple[uuid.UUID, uuid.UUID], list[tuple[Any, ...]]] = {}
         places: dict[tuple[Any, ...], tuple[uuid.UUID | None, dict[str, Any]]] = {}
@@ -2163,40 +2315,52 @@ class RecordService:
     ) -> None:
         """A record state the run is about to write: it is there for what comes
         after it (a record under it, one pointing at it, one sharing its key)."""
-        if not cache.use_records:
-            return
         record_id = uuid.UUID(str(state["id"]))
+        gone = state.get("deleted_at")
         cache.places[record_id] = RecordPlace(
             record_id,
             uuid.UUID(str(state["dataset_id"])),
             shape.schema.id,
             shape.schema.name,
-            None,
+            _stamp_of(gone) if gone else None,
         )
-        cache.made.update(self.unique_marks(state, shape))
+        if not gone:  # a deleted record holds no unique key
+            cache.made.update(self.unique_marks(state, shape))
 
     def check_incoming(
         self,
         state: dict[str, Any],
         head: dict[str, Any] | None,
         cache: IncomingCache | None = None,
-    ) -> None:
+    ) -> list[dict[str, Any]]:
         """Refuse a record state sent by another device that a person's own write
-        would have refused: values outside their field's restrictions,
+        would have refused: values that are not values of their field's kind,
         references to records that aren't there or can't be referenced, a
         uniqueness key already taken, a collection that doesn't hold its schema,
-        a parent that isn't right. The same checks as `add`/`update`, so sync
-        can't bring in what an edit here couldn't.
+        a parent that isn't right. The same checks as `add`/`update`, except
+        that the data rules below are judged by the authority's rules, not the
+        sender's: what a person saved here under the rules they had can
+        arrive flagged, though it was valid when it was made.
+
+        The project's data rules are the exception: a required field left
+        empty or a value outside its field's restrictions (`RuleBroken`) does
+        not refuse. They are returned, one `unfit` item per field (`data.<field
+        id>`, the shape of an answer's `conflicts` item), for the record to be
+        taken in and flagged. A new record, or one brought back, is judged in
+        full; an edit by what it changed and the required fields it emptied, so
+        it is never flagged for an old problem. Only a well-typed value can
+        break a rule: a value of the wrong kind, a file's or a geometry's
+        restrictions (their shape is checked with them) and everything else
+        refuse as before. Nothing is returned when anything else refuses.
 
         `state` is the record as it would become (values keyed by field id, as
         stored) and `head` what is held now, or None for a record not held. What
         `head` already holds is not checked again, so an unrelated edit is never
-        refused over an old problem. Required fields are not checked: they were
-        when the change was made, and the schema may have moved on since.
+        refused over an old problem.
         Writing is not done here (that is `SyncRepository.apply_snapshot`), and
         neither are history or triggers: the change is already in the feed."""
         if state.get("deleted_at"):
-            return  # a record going away has nothing to satisfy
+            return []  # a record going away has nothing to satisfy
         try:
             record_id = uuid.UUID(str(state["id"]))
             dataset_id = uuid.UUID(str(state["dataset_id"]))
@@ -2268,7 +2432,7 @@ class RecordService:
         before = head.get("data") or {} if head and not head.get("deleted_at") else None
         named = self._ids_to_names(data, shape)
         before_named = self._ids_to_names(before, shape) if before is not None else None
-        self._validate_data(_changed_values(named, before_named), shape)
+        unfit = self._rule_findings(named, before_named, shape, schema_id, cache)
         with self.as_caller():
             self._check_references(
                 named, shape, dataset, unchanged=before_named, cache=cache
@@ -2282,6 +2446,67 @@ class RecordService:
             unchanged=before,
             cache=cache,
         )
+        return unfit
+
+    def rule_findings(
+        self, state: dict[str, Any], cache: IncomingCache | None = None
+    ) -> list[dict[str, Any]]:
+        """What a record state, as it is held, breaks of the data rules, in
+        full: what `check_incoming` returns for a new record. For a copy
+        working out whether a flag it was told of is still true."""
+        if state.get("deleted_at") or not isinstance(state.get("data") or {}, dict):
+            return []
+        schema_id = uuid.UUID(str(state["schema_id"]))
+        shape = (cache.shapes if cache else self._schema_svc.resolver())(schema_id)
+        if shape is None or shape.schema.deleted_at is not None:
+            return []
+        named = self._ids_to_names(state.get("data") or {}, shape)
+        return self._rule_findings(named, None, shape, schema_id, cache)
+
+    def _rule_findings(
+        self,
+        named: dict[str, Any],
+        before: dict[str, Any] | None,
+        shape: ResolvedSchema,
+        schema_id: uuid.UUID,
+        cache: IncomingCache | None,
+    ) -> list[dict[str, Any]]:
+        """The data rules `named` (values by field name) breaks, against
+        `before` (what is held, or None: judge everything). Only the shape is
+        read, so a run of them asks the database nothing. A value that is not
+        one of its field's kind raises, as `_validate_data` does."""
+        found: list[dict[str, Any]] = []
+        for name, value in _changed_values(named, before).items():
+            field = shape.by_name.get(name)
+            if field is None or value is None:
+                continue
+            # Only a value of its field's kind can break a rule: anything else
+            # (and a file's or a geometry's restrictions, which `_check_restrictions`
+            # mixes with their shape) refuses as it always did.
+            try:
+                _check_restrictions(value, field.dtype, field.restrictions, name)
+            except RuleBroken as e:
+                found.append(_unfit(field.id, str(e), value))
+            except FieldValueError:
+                raise
+            except ValidationError as e:
+                raise FieldValueError(str(e), f"data.{field.id}") from e
+        required = cache.required.get(schema_id) if cache else None
+        if required is None:
+            # (a child record holds its own fields: the rest live on its parent)
+            required = [
+                (rf.field.name, str(rf.field.id), rf.field.display_name)
+                for rf in shape.fields
+                if rf.field.required and rf.source_schema_name == shape.schema.name
+            ]
+            if cache is not None:
+                cache.required[schema_id] = required
+        for name, fid, label in required:
+            if _is_blank_value(named.get(name)) and (
+                before is None or not _is_blank_value(before.get(name))
+            ):
+                found.append(_unfit(fid, f"'{label}' is required and has no value"))
+        return found
 
     def _validate_data(
         self, data: dict[str, Any], shape: ResolvedSchema | None
@@ -4183,6 +4408,8 @@ class RecordService:
         # together or not at all (a child left live under a deleted parent
         # is not a project), but separate trees deleted at once don't.
         ops = _tree_ops(links) if self._audit else None
+        if ops:
+            every = _by_tree(every, ops)  # a tree's entries together
         with _audit_batch(self._audit, "delete", len(every) > 1):
             for start in range(0, len(every), _APPLY_CHUNK):
                 chunk = every[start : start + _APPLY_CHUNK]
@@ -5767,6 +5994,7 @@ class RecordService:
         if not self._audit:
             return
         ops = _tree_ops({i: rows[i].parent_record_id for i in ids})
+        ids = _by_tree(ids, ops)  # a tree's entries together, parents first
         with _audit_batch(self._audit, "restore", len(ids) > 1):
             self._audit.log_changes(
                 "restore",
@@ -6142,6 +6370,17 @@ def _tree_ops(
     return out
 
 
+def _by_tree(ids: list[uuid.UUID], ops: dict[uuid.UUID, uuid.UUID]) -> list[uuid.UUID]:
+    """`ids` with each tree together (trees in the order first met, each tree's
+    own order kept): the authority settles consecutive entries of one action as
+    one, so trees logged level by level would each be settled alone."""
+    group = {rid: ops.get(rid, rid) for rid in ids}
+    first: dict[uuid.UUID, int] = {}
+    for rid in ids:
+        first.setdefault(group[rid], len(first))
+    return sorted(ids, key=lambda rid: first[group[rid]])
+
+
 def _place(row: RestoreRow, deleted_at: _dt | None) -> dict[str, Any]:
     """A record as a restore's history entry holds it: where it sits and whether
     it is deleted, which is all a restore changes (no values are read)."""
@@ -6175,3 +6414,13 @@ def _parents_first_ids(
         return depth[rid]
 
     return sorted(ids, key=of)
+
+
+def _stamp_of(text: Any) -> _dt:
+    """When a record was deleted, as its state says (any moment, if it does
+    not parse: only that it is deleted is asked of it)."""
+    try:
+        at = _dt.fromisoformat(str(text))
+    except ValueError:
+        return _dt.min.replace(tzinfo=timezone.utc)
+    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)

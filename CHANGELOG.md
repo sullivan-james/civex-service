@@ -5,6 +5,17 @@ One section per tagged release: `## vX.Y.Z — <label> (YYYY-MM-DD)`. Every
 `.github/workflows/release.yml` fails the release job if it's missing (see
 PRODUCTION_READINESS.md §4a). A pre-release tag (`v1.3.0rc1`) may use the
 final version's entry or `## Unreleased` instead of one of its own. The version itself has one source of truth,
+
+- **Sync: a record that breaks a data rule is taken in and flagged.** A required
+  field left empty, or a value outside its field's restrictions (min/max,
+  choices, length, date range or precision), no longer refuses a pushed record:
+  it goes in as sent and the answer carries an `unfit` item per field (a new
+  conflict kind, code `data`). The authority's rules decide, so data saved
+  under older rules can arrive flagged. Still refused: a value of the wrong kind
+  (a list in a text field, a malformed date), a taken unique key, a missing
+  reference, and, for now, file (`accept`, `max_size`) and geo restrictions. The
+  pusher's item clears when the copy is level with the authority and the record
+  no longer breaks the rule (fixed, deleted or the rule relaxed elsewhere).
 the git tag (resolved via setuptools-scm into `civex.__version__`); this
 file is release notes, not a second place to track the number.
 
@@ -26,6 +37,83 @@ from the next tag forward.
 ### Fixed
 
 - Importing a bundle no longer fails with "from_filename: there is no field '…'" when a field's `from_filename` rule reads a file field listed after it. The rule is now set once every field exists, as `filename_template` already was. This also fixes copying a hub release.
+
+### Fixed
+
+- **Sync: deleting several records that have children in one call no longer
+  half-applies.** A delete (or exact restore) of two or more trees logged its
+  entries level by level, so the authority settled each parent alone, refused
+  it for the child sent with it (`conflict`: something added beneath it), and
+  left the parents live. Each tree's entries are now logged together, and a
+  device sending a log made level by level (its own, from before) keeps every
+  tree whole within one request, and the authority gathers a push's entries
+  of one action that arrive apart. A 2.3.x device that already splits a tree
+  across separate requests is not fixed on the server: update it.
+
+- **Sync: a pushed bulk delete or restore of records is written in bulk.** A run
+  of single-record deletes (or restores), as a bulk action on a device sends
+  them (each with its `op` and `batch`), is checked together (what is held,
+  children, hidden referrers, data rules and keys on a restore, permissions) and
+  written with one UPDATE per stamp, one numbering, and one insert each for
+  history (with its batch) and answers. Anything not certain (not here, already
+  deleted, edited on the server, a record beneath it, a clash) is settled one at
+  a time as before, with the same answers and rows. Settling a record's delete
+  or restore no longer discards everything the push holds. Measured on
+  PostgreSQL, authority only, about 0.3-0.4 ms per record instead of 17-19 ms.
+- **Sync: a refused schema or field change is kept and marked, not put back.**
+  When the authority's data or structure refuses a schema or field change (code
+  `data`), it answers `rejected`, writes nothing to the feed, and refuses the
+  whole action it was part of. The device keeps its version until the person
+  sends it again or discards it (which takes the server's version). No protocol
+  bump: an older device given `rejected` for a structure change keeps its
+  version but does not hold the server's later changes to it, by design.
+- **Store-to-store file copy for hosts.** `civex.context.copy_objects(source,
+  destination, shas, on_progress=, commit=)` copies content-addressed files
+  between two stores from `make_store` and returns a `CopyResult` (`copied`,
+  `skipped`, `absent`, `bytes_copied`, `methods`). Drive to drive hard-links
+  on one filesystem, else copies; bucket to bucket on the same endpoint,
+  profile and region is a server-side `copy_object` (`upload_part_copy` past
+  5 GiB); anything else streams with no temp file (multipart from the ranged
+  reader into a bucket). Shas are validated, files the destination holds are
+  skipped, a source whose bytes don't match its name is refused, and the
+  destination's inventory is written as a put writes it.
+  `ReleaseService.write_copy` takes an optional `on_progress(done, total)` in
+  bytes.
+
+- **Structure changes need unrestricted read; collection delete checks hidden
+  referrers.** `Permissions` now drops `change_structure` whenever read is
+  limited to some collections (kind create/rename/templates, field add/update/
+  restore/delete, collection create/rename/restore), so the services, the data
+  API and a sync push (`refuses`) all meet one rule. Deleting a field also needs
+  `delete` (`action_for`, the service and a push). Deleting a global collection
+  (or making it local) is refused while records the caller cannot see point
+  into it. A push follows the same rules: a record delete or purge with hidden referrers, and a collection delete or global-to-local change with any live referrers (one shared rule, `RecordService.collection_referrer_block`), is refused. An explicit `release` grant is withheld from restricted readers too. Documented that revoking a
+  device or narrowing access never wipes what it already synced.
+
+- **Files still being uploaded show as "Uploading", not "missing".** On an
+  authority, a file not here is `arriving` (record location state, `arriving`
+  in the Files tab's places, and not a `missing_file` in the data check) for
+  `[sync] arriving_hours` (default 24, 0 = no allowance) after a device sent a
+  change that was taken (applied or merged, never refused) and that added or
+  changed that very file on that record. An unrelated edit, or a refused
+  change, does not start the wait; after it, or once the file is uploaded, it
+  is as before. One batched lookup per page of records, only when one cites a
+  file not here. The push path does no extra work beyond one more index on
+  `sync_ops` (migration `a4e9c2b7d6f1`). Building it blocks writes to
+  `sync_ops` while it runs, which on an authority with a very large change
+  history can take a while: run the upgrade when pushes are quiet.
+- **Records created and then deleted before their first upload no longer slow a
+  push 15-fold.** The authority took a record that arrives already deleted one
+  at a time (about 9 ms each); it now writes it in bulk with the rest of its
+  run, as it does a live one, to the same rows (a deleted record holds no
+  unique key and its references are not asked about, as before). The client
+  still sends such records as they are: they are in the trash, and the server's
+  copy is what lets another device restore them and see their history.
+- **Checking that records still differ on a uniqueness key is a query that
+  stops at the first duplicate, and runs only when it can have changed.** It no
+  longer reads every record of the schema into memory under the push lock, and
+  a schema change that does not touch its keys (a label, a description) skips
+  it. The answers are the same.
 
 ## v2.3.1 — release screens left to the host (2026-11-24)
 

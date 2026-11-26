@@ -252,7 +252,7 @@ describe('SyncReviewPage', () => {
     ]
     page()
     expect(
-      await screen.findByRole('button', { name: 'Send again' }),
+      await screen.findByRole('button', { name: 'Retry' }),
     ).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'Resolve' })).toBeNull()
   })

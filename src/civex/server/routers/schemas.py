@@ -325,7 +325,11 @@ def check_field(
     editor asks this before saving. Every collection; nothing is changed."""
     try:
         check = ctx.quality_svc.check_field(
-            name, field_name, restrictions=body.restrictions, required=body.required
+            name,
+            field_name,
+            restrictions=body.restrictions,
+            required=body.required,
+            deleting=body.deleting,
         )
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))

@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import time
 import uuid
+from datetime import datetime, timedelta, timezone
 import weakref
 
 from contextlib import contextmanager
@@ -31,6 +32,8 @@ from civex.domain.exceptions import FeatureUnavailableError
 from civex.domain.permissions import Permissions
 from civex.domain.query import RecordQuery
 from civex.project import Project
+from civex.store_copy import CopyResult as CopyResult
+from civex.store_copy import copy_objects as copy_objects
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Engine
@@ -739,6 +742,10 @@ def build_context(
 
     release_repo = LocalReleaseRepository(session)
     sync_repo = LocalSyncRepository(session)
+    quality_svc = QualityService(record_svc, schema_svc, permissions=may)
+    # A copy that was told it may read only some collections holds only some
+    # of the records: what it finds says nothing of the rest.
+    quality_svc.partial = lambda: sync_repo.readable() is not None
     applier = SyncApplier(sync_repo, audit_repo)
     device_keys = DeviceKeys(sync_repo)
     authority_svc = SyncAuthorityService(
@@ -752,6 +759,11 @@ def build_context(
         # policy about each thing: a hidden collection must not look empty to it.
         unscoped=lambda: read_scope.unscoped(session),
         readable=(None if may.read_scope().unrestricted else file_svc.readable),
+        uses=(
+            None
+            if may.read_scope().unrestricted
+            else LocalFileReferenceRepository(session).uses
+        ),
         sees=(None if may.read_scope().unrestricted else may.read_scope().sees),
         scope=may.read_scope,
         # The same answer a person at a browser gets, asked of each change a
@@ -783,6 +795,17 @@ def build_context(
     record_svc.files_from_server = lambda: _sync().fetches_files
     record_svc.not_on_server = lambda shas: _sync().not_on_server(shas)
     record_svc.server_lacks = lambda shas: _sync().server_lacks(shas)
+
+    def _recently_received(
+        cited: dict[uuid.UUID, set[str]],
+    ) -> set[tuple[uuid.UUID, str]]:
+        hours = config.sync.arriving_hours
+        if hours <= 0:
+            return set()
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
+        return sync_repo.received_since(cited, since)
+
+    record_svc.recently_received = _recently_received
     record_svc.why_not_here = lambda shas: _sync().not_here_reasons(shas)
     file_info_svc.files_from_server = lambda: _sync().fetches_files
     file_access_svc.fetch_missing = (
@@ -871,7 +894,7 @@ def build_context(
             audit_repo,
             LocalDbSpace(engine, may_vacuum_full=features.DB_ADMIN in project.features),
         ),
-        quality_svc=QualityService(record_svc, schema_svc, permissions=may),
+        quality_svc=quality_svc,
         index_svc=index_svc,
         retention_svc=retention_svc,
         ai_svc=ai_svc,

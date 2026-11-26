@@ -123,5 +123,7 @@ def test_a_pushed_uniqueness_rule_is_for_someone_who_sees_everything():
     rule = update(unique_keys=[["a"]])
     assert restricted.refuses(None, rule)
     assert whole.refuses(None, rule) is None
-    # a schema edit that leaves the rules alone is the caller's to make
-    assert restricted.refuses(None, update(label="x")) is None
+    # (the rule above is judged on its own: see also the structure tests)
+    # nor is any other structure change: it needs unrestricted read
+    assert restricted.refuses(None, update(label="x"))
+    assert whole.refuses(None, update(label="x")) is None

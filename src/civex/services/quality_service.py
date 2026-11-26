@@ -17,7 +17,7 @@ each uniqueness key is one pass over its kind, whatever the page count.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 
 from civex.domain import permissions, quality
@@ -73,6 +73,8 @@ class QualityService:
         self._records = records
         self._schemas = schemas
         self._permissions = permissions
+        # Whether this copy holds only some of the project's records.
+        self.partial: Callable[[], bool] = lambda: False
 
     # -- the report --------------------------------------------------------
 
@@ -138,12 +140,15 @@ class QualityService:
         field_name: str,
         restrictions: dict[str, Any] | None = None,
         required: bool | None = None,
+        deleting: bool = False,
     ) -> quality.FieldCheck:
         """What the values stored for a field make of its rules as they would
         be (`restrictions`, `required`; as they are when left out): how many
         records' values they refuse, how many leave a required field empty,
         and a few of them named. Every collection; nothing is changed. What
-        the field editor warns with before a rule is tightened."""
+        the field editor warns with before a rule is tightened. `deleting`:
+        counts the records that hold a value for the field instead (what
+        deleting it would take with it). It only warns: nothing here blocks."""
         self._permissions.require_somewhere(permissions.READ)
         schema = self._schemas.get(schema_name)
         field = next((f for f in schema.fields if f.name == field_name), None)
@@ -154,9 +159,28 @@ class QualityService:
             )
         if restrictions is not None:
             self._schemas.check_restrictions(field.dtype, restrictions)
+        result = quality.FieldCheck(
+            schema=schema.name, field=field.name, partial=self.partial()
+        )
+        if deleting:
+            for page in self._records.stream_records(
+                RecordQuery(schema=schema.name), page_size=BULK_EDIT_PAGE
+            ):
+                for record in page:
+                    if quality.is_blank(record.data.get(field.name)):
+                        continue
+                    result.holding += 1
+                    if len(result.examples) < quality.MAX_EXAMPLES:
+                        result.examples.append(
+                            quality.Example(
+                                str(record.id),
+                                record.natural_name,
+                                "Holds a value that goes with the field",
+                            )
+                        )
+            return result
         wants_blank = field.required if required is None else required
         issues = {quality.BREAKS_RULE} | ({quality.BLANK} if wants_blank else set())
-        result = quality.FieldCheck(schema=schema.name, field=field.name)
         for _, _, findings in self._walk(
             RecordQuery(schema=schema.name),
             issues=issues,

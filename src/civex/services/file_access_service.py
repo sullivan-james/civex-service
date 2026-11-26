@@ -46,6 +46,7 @@ from civex.domain.transfers import KIND_FILES, TransferSpec
 from civex.services.transfer_engine import Step, plan_steps
 from civex.domain.file_refs import collect_sha256_refs
 from civex.domain.file_access import (
+    arriving_location,
     PLACE_SENT,
     PLACE_UNSENT,
     SERVER_STATES,
@@ -1799,6 +1800,20 @@ class FileAccessService:
             "Opening or exporting it downloads it from the server.",
         )
         lost, lost_fix = not_on_server_yet(None)
+        # Records a device sent lately whose file is on no drive here: that
+        # file is arriving (its device is still uploading), not missing.
+        arriving: set[tuple[str, str]] = set()
+        if not following:
+            owners: dict[uuid.UUID, set[str]] = {}
+            for h in held:
+                if h.volume is None and not h.stored_on:
+                    owners.setdefault(uuid.UUID(record_key(h.record_id)), set()).add(
+                        h.sha256
+                    )
+            if owners:
+                arriving = {
+                    (str(r), sha) for r, sha in self._records.recently_received(owners)
+                }
         out: list[tuple[FileItem, bool, tuple[Any, Any, Any]]] = []
         for h in held:
             record_id = ids.get(h.record_id)
@@ -1864,6 +1879,22 @@ class FileAccessService:
                     waiting_fix,
                     None,
                     h.on_server,
+                )
+            elif (record_id, h.sha256) in arriving:
+                here = arriving_location()
+                item = FileItem(
+                    "",
+                    h.sha256,
+                    h.filename,
+                    h.size,
+                    record_id,
+                    "",
+                    h.field,
+                    None,
+                    here["state"],
+                    False,
+                    here["reason"],
+                    here["fix"],
                 )
             else:
                 item = FileItem(
@@ -2571,7 +2602,7 @@ def _remove(dest: Path, path: str) -> None:
 
 def _places(items: list[FileItem]) -> list[PlaceSummary]:
     """Every file of a selection by place, readable drives first, then
-    unreachable drives, the server, and missing (biggest first within each)."""
+    unreachable drives, the server, arriving, and missing (biggest first within each)."""
     out: dict[tuple[str, str], PlaceSummary] = {}
     for item in items:
         place, kind = place_of(item)
@@ -2588,7 +2619,7 @@ def _places(items: list[FileItem]) -> list[PlaceSummary]:
         )
         row.files += 1
         row.bytes += item.size
-    rank = {"drive": 0, "unreachable": 1, "server": 2, "missing": 3}
+    rank = {"drive": 0, "unreachable": 1, "server": 2, "arriving": 3, "missing": 4}
     return sorted(out.values(), key=lambda r: (rank[r.kind], -r.bytes, r.place))
 
 

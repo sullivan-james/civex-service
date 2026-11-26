@@ -41,27 +41,41 @@ class ProjectRules:
 
     def check(self, touched: Iterable[tuple[str, uuid.UUID]]) -> None:
         """Raise ValidationError, saying what would be wrong, if what these
-        things are now breaks a rule. `touched` is (kind, id) of what changed."""
+        things are now breaks a rule. `touched` is (kind, id) of what changed.
+
+        Whether records still differ on a uniqueness key is asked only of a
+        schema whose rules may have changed (kind "keys", or a field of it, or
+        a schema change that does not say what it left alone): a record's own
+        key is judged as it is written (`RecordService.check_incoming`), so
+        there is nothing to ask again of the schema's records for a rename."""
         schema_ids: set[uuid.UUID] = set()
+        keyed: set[uuid.UUID] = set()
         record_ids: set[uuid.UUID] = set()
         for kind, thing in touched:
             if kind == "record":
                 record_ids.add(thing)
             if kind == "schema":
                 schema_ids.add(thing)
+            elif kind == "keys":
+                schema_ids.add(thing)
+                keyed.add(thing)
             elif kind == "field":
                 found = self._schemas.find_fields({thing}).get(thing)
                 if found is not None:
                     schema_ids.add(found[0].schema_id)
+                    keyed.add(found[0].schema_id)
         for schema_id in list(schema_ids):
             schema = self._schemas.get_by_id(schema_id, include_deleted=True)
             if schema is not None:
                 # Templates below it can use its fields.
-                schema_ids |= {d.id for d, _ in self._schemas.descendants(schema)}
+                below = {d.id for d, _ in self._schemas.descendants(schema)}
+                schema_ids |= below
+                if schema_id in keyed:
+                    keyed |= below
         for schema_id in schema_ids:
             schema = self._schemas.get_by_id(schema_id, include_deleted=True)
             if schema is not None and schema.deleted_at is None:
-                self._check_schema(schema)
+                self._check_schema(schema, duplicates=schema_id in keyed)
         # A record is in its parent's collection. A move brings a tree whole,
         # but a record added beneath one of them here meanwhile is not in it.
         if record_ids and self._records.dataset_mismatches(list(record_ids)):
@@ -71,7 +85,7 @@ class ProjectRules:
                 "meanwhile)"
             )
 
-    def _check_schema(self, schema: SchemaDTO) -> None:
+    def _check_schema(self, schema: SchemaDTO, duplicates: bool = True) -> None:
         names = {rf.field.name for rf in self._schemas.collect_fields(schema)}
         if schema.display_template:
             missing = _missing(schema.display_template, names, _RECORD_BUILTINS)
@@ -96,7 +110,12 @@ class ProjectRules:
                     f"A uniqueness rule of '{schema.name}' would name a field it "
                     "no longer has"
                 )
-            if self._records.key_duplicates(schema.id, list(key)):
+            numbers = {
+                str(f.id) for f in schema.fields if f.dtype in ("integer", "float")
+            }
+            if duplicates and self._records.has_key_duplicate(
+                schema.id, list(key), numbers
+            ):
                 raise ValidationError(
                     f"Records of '{schema.name}' already share the values a "
                     "uniqueness rule would make unique"
