@@ -41,7 +41,7 @@ from civex.domain.merge import LIFECYCLE_KEYS, DERIVED_KEYS, merge
 from civex.domain.permissions import ReadScope
 from civex.domain.scopes import GLOBAL, LOCAL
 from civex.services.sync_scope import FeedShaper
-from civex.domain.sync_page import json_size, take
+from civex.domain.sync_page import budget as page_budget, json_size, take
 from civex.domain.sync import (
     APPLIED,
     CAPABILITIES,
@@ -87,6 +87,8 @@ FEED_MAX = 500
 # may see of them (`feed`).
 FEED_SCAN_MAX = 2000
 PUSH_MAX = 500
+# Rows of a snapshot page read at once (see `snapshot`).
+SNAPSHOT_CHUNK = 500
 # The wall-clock time one push may spend settling: past it the push finishes
 # the action it is in and answers for what it has settled (a short answer, as
 # when it takes `PUSH_MAX`); the device sends the rest on its next request.
@@ -270,14 +272,30 @@ class SyncAuthorityService:
             # A collection the caller may not read is asked about like one that
             # is not there: an empty page, never what once lived in it.
             return SnapshotPage(kind, [], False, head, None)
+        # Read in chunks and stop once the byte budget is passed, so what one
+        # request holds is the budget and one chunk, however wide the records.
+        cap = budget if budget is not None else page_budget()
+        items: list[dict[str, Any]] = []
+        sizes: list[int] = []
+        used = 0
+        cursor = after
         try:
-            items = self._repo.snapshots_page(
-                kind, after, limit + 1, dataset, left_after
-            )
+            while len(items) < limit + 1 and used <= cap:
+                ask = min(SNAPSHOT_CHUNK, limit + 1 - len(items))
+                chunk = self._repo.snapshots_page(
+                    kind, cursor, ask, dataset, left_after
+                )
+                for item in chunk:
+                    sizes.append(json_size(item))
+                    used += sizes[-1]
+                items.extend(chunk)
+                if len(chunk) < ask:
+                    break
+                cursor = snapshot_cursor(chunk[-1])
         except ValueError as e:
             raise ValidationError(f"Not a page cursor: {after!r}") from e
         # By count and by bytes, `more` decided with the feed's (sync_page).
-        page, more = take(items, [json_size(i) for i in items], limit, budget)
+        page, more = take(items, sizes, limit, budget)
         return SnapshotPage(
             kind, page, more, head, snapshot_cursor(page[-1]) if more else None
         )

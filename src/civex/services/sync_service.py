@@ -13,6 +13,7 @@ point leaves the project as it was or one step further, never between.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import functools
 import threading
@@ -2924,27 +2925,30 @@ class SyncService:
         done = 0
         head: int | None = None
         held: dict[str, set[str]] = {}
-        size = (
+        size = [
             SNAPSHOT_PAGE_BIG if SNAPSHOT_PAGES in hello.capabilities else SNAPSHOT_PAGE
-        )
+        ]
         for kind in kinds_for(hello.protocol_version):
             # Things that sit under another of their kind that has not arrived
             # yet (it was made later, on a clock that was ahead): the database
             # refuses them until it has, so they wait for it, by its id.
             waiting: dict[str, list[dict[str, Any]]] = {}
             seen = held.setdefault(kind, set())
-            for page in _pages(transport, kind, size):
-                head = page.head_seq if head is None else head
-                for snap in page.items:
-                    seen.add(snap["id"])
-                self._join_page(kind, page.items, waiting)
-                self._commit()
-                done += len(page.items)
-                if progress:
-                    # Things made while copying can take it past the count.
-                    progress(
-                        SyncProgress(COPYING, done, total and max(total, done), kind)
-                    )
+            with contextlib.closing(_pages(transport, kind, size)) as pages:
+                for page in pages:
+                    head = page.head_seq if head is None else head
+                    for snap in page.items:
+                        seen.add(snap["id"])
+                    self._join_page(kind, page.items, waiting)
+                    self._commit()
+                    done += len(page.items)
+                    if progress:
+                        # Things made while copying can take it past the count.
+                        progress(
+                            SyncProgress(
+                                COPYING, done, total and max(total, done), kind
+                            )
+                        )
             if waiting:
                 # What they sit under was removed for good while the copy was
                 # read, and they went with it there.
@@ -4073,25 +4077,38 @@ def _waits_on(
     )
 
 
-def _pages(transport: SyncTransport, kind: str, size: int) -> Iterator[SnapshotPage]:
+def _pages(
+    transport: SyncTransport, kind: str, size: list[int]
+) -> Iterator[SnapshotPage]:
     """The pages of one kind, in order. The next is asked for while the caller
     writes the one in hand, so the wire and the database work at once (one
-    request in flight, and the transport is used by no one else meanwhile)."""
+    request in flight, and the transport is used by no one else meanwhile).
+    `size` is the page size asked for, in a list so that it holds for the rest
+    of the copy: an authority that refuses a big page (an older one reached
+    mid-copy, say) is asked for `SNAPSHOT_PAGE` from then on."""
+
+    def fetch(after: str | None) -> SnapshotPage:
+        try:
+            return transport.snapshot(kind, after, size[0])
+        except SyncError as e:
+            if e.status != 422 or size[0] <= SNAPSHOT_PAGE:
+                raise
+            size[0] = SNAPSHOT_PAGE
+            return transport.snapshot(kind, after, size[0])
+
     pool = ThreadPoolExecutor(1)
     try:
-        page = transport.snapshot(kind, None, size)
+        page = fetch(None)
         while True:
-            ahead = (
-                pool.submit(transport.snapshot, kind, page.next, size)
-                if page.more
-                else None
-            )
+            ahead = pool.submit(fetch, page.next) if page.more else None
             yield page
             if ahead is None:
                 return
             page = ahead.result()
     finally:
-        pool.shutdown(wait=True, cancel_futures=True)
+        # Not waiting for a request in flight: an error or Ctrl-C ends the
+        # copy now (the request's answer is dropped).
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
 def _sits_under(kind: str, snap: dict[str, Any]) -> str | None:
