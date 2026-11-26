@@ -1,4 +1,4 @@
-"""sync ops: whether a delete found the record already deleted
+"""sync ops and audit log: whether a delete found the record already deleted
 
 Revision ID: b7d3e9a1c5f2
 Revises: a4e9c2b7d6f1
@@ -18,20 +18,26 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+_TABLES = ("sync_ops", "audit_log")
+
+
 def upgrade() -> None:
-    have = {c["name"] for c in sa.inspect(op.get_bind()).get_columns("sync_ops")}
-    if "already_done" not in have:
-        with op.batch_alter_table("sync_ops") as batch:
-            batch.add_column(
+    for table in _TABLES:
+        have = {c["name"] for c in sa.inspect(op.get_bind()).get_columns(table)}
+        if "already_done" not in have:
+            # (not a batch alter: on SQLite that rebuilds the table and drops
+            # audit_log's numbering trigger)
+            op.add_column(
+                table,
                 sa.Column(
                     "already_done",
                     sa.Boolean(),
                     nullable=False,
                     server_default=sa.false(),
-                )
+                ),
             )
 
 
 def downgrade() -> None:
-    with op.batch_alter_table("sync_ops") as batch:
-        batch.drop_column("already_done")
+    for table in _TABLES:
+        op.drop_column(table, "already_done")

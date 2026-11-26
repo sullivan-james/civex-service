@@ -50,10 +50,39 @@ describe('describeAuditEvent already done', () => {
   it('says how many were already deleted, and by whom', () => {
     const s = describeAuditEvent(event({ count: 8, by: ['jamie'] }))
     expect(s.title).toBe('Deleted 12 records')
-    expect(s.detail).toBe('8 already deleted by jamie on the server')
+    expect(s.detail).toBe('8 already deleted on the server by jamie')
   })
 
   it('says nothing when none were', () => {
     expect(describeAuditEvent(event(null)).detail).toBeNull()
+  })
+
+  it('says another of your devices when it was the same person', () => {
+    const s = describeAuditEvent(
+      event({ count: 3, by: [], own: 3, own_devices: ['laptop'] }),
+    )
+    expect(s.detail).toBe(
+      '3 already deleted on the server from another of your devices (laptop)',
+    )
+  })
+
+  it('reads a single change as a plain statement', () => {
+    const single = {
+      ...event({ count: 1, by: ['jamie'] }),
+      kind: 'entry',
+      batch: null,
+      entry: {
+        id: 'e',
+        entity_type: 'record',
+        action: 'delete',
+        entity_id: 'r',
+        changes: [],
+        old_data: null,
+        new_data: null,
+      },
+    } as unknown as AuditEvent
+    expect(describeAuditEvent(single).detail).toContain(
+      'Already deleted on the server by jamie',
+    )
   })
 })

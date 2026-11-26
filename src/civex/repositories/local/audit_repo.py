@@ -28,6 +28,7 @@ from collections.abc import Iterable, Mapping
 from typing import Iterator
 
 from civex.db.models import (
+    SyncOp,
     _STILL_WHOLE,
     AuditBatch,
     AuditLog,
@@ -1047,42 +1048,82 @@ class LocalAuditRepository:
         self, base, keys: list[uuid.UUID]
     ) -> dict[uuid.UUID, dict[str, Any]]:
         """Of the record deletes in these events (a batch's id, or an entry's),
-        the ones a device sent that the authority found already deleted: marked
-        superseded (`SyncRepository.mark_sent`) and, in the authority's order,
-        preceded by another delete of the same record. Per event: how many, and
-        who made the earlier deletes. The authority's history is the truth, so
-        these are not the device's own changes."""
+        the ones the authority answered as already made by another change (the
+        flag it sent, kept on the device's row; on the authority, the op it
+        stored). Per event: how many, who made the deletes that were already
+        there (`by`; `own` of them by this person's other devices, named in
+        `own_devices`). The one who did it is the latest delete of the record
+        since its last restore before this one in the authority's order (the
+        undo rule, `deletes_since_restore`), not just any earlier delete."""
         if not keys:
             return {}
         group = func.coalesce(AuditLog.batch_id, AuditLog.id)
-        before = aliased(AuditLog)
-        q = base.filter(
-            AuditLog.entity_type == "record",
-            AuditLog.action == "delete",
-            AuditLog.apply_state == "superseded",
-            AuditLog.hub_seq.is_not(None),
-            group.in_(keys),
-        ).join(
-            before,
-            and_(
-                before.entity_id == AuditLog.entity_id,
-                before.entity_type == "record",
-                before.action == "delete",
-                before.id != AuditLog.id,
-                before.hub_seq.is_not(None),
-                before.hub_seq < AuditLog.hub_seq,
-            ),
+        flagged = or_(
+            AuditLog.already_done.is_(True),
+            exists().where(SyncOp.op_id == AuditLog.id, SyncOp.already_done.is_(True)),
         )
+        rows = (
+            base.filter(
+                AuditLog.entity_type == "record",
+                AuditLog.action == "delete",
+                flagged,
+                group.in_(keys),
+            )
+            .with_entities(
+                group,
+                AuditLog.id,
+                AuditLog.entity_id,
+                AuditLog.hub_seq,
+                AuditLog.actor,
+            )
+            .all()
+        )
+        history: dict[uuid.UUID, list[tuple[int, str, str | None, str | None]]] = {}
+        ids = list({r[2] for r in rows})
+        for at in range(0, len(ids), 5000):
+            for entity_id, action, seq, who, via in self._s.query(
+                AuditLog.entity_id,
+                AuditLog.action,
+                AuditLog.hub_seq,
+                AuditLog.actor,
+                AuditLog.device,
+            ).filter(
+                AuditLog.entity_type == "record",
+                AuditLog.action.in_(("delete", "restore")),
+                AuditLog.hub_seq.is_not(None),
+                AuditLog.entity_id.in_(ids[at : at + 5000]),
+            ):
+                if seq is not None:
+                    history.setdefault(entity_id, []).append((seq, action, who, via))
         out: dict[uuid.UUID, dict[str, Any]] = {}
-        for key, n in q.with_entities(
-            group, func.count(func.distinct(AuditLog.id))
-        ).group_by(group):
-            out[key] = {"count": n, "by": []}
-        for key, who in q.with_entities(group, before.actor).distinct():
-            if who and key in out and who not in out[key]["by"]:
-                out[key]["by"].append(who)
+        for key, entry_id, entity_id, seq, mine in rows:
+            found = out.setdefault(
+                key, {"count": 0, "by": [], "own": 0, "own_devices": []}
+            )
+            found["count"] += 1
+            if seq is None:
+                continue
+            earlier = sorted(
+                (h for h in history.get(entity_id, []) if h[0] < seq),
+                key=lambda h: h[0],
+            )
+            since: tuple[int, str, str | None, str | None] | None = None
+            for h in earlier:
+                if h[1] == "restore":
+                    since = None
+                else:
+                    since = h
+            if since is None or since[2] is None:
+                continue
+            if since[2] == mine:
+                found["own"] += 1
+                if since[3] and since[3] not in found["own_devices"]:
+                    found["own_devices"].append(since[3])
+            elif since[2] not in found["by"]:
+                found["by"].append(since[2])
         for found in out.values():
             found["by"].sort()
+            found["own_devices"].sort()
         return out
 
     def _parts(self, base, batch_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[dict]]:

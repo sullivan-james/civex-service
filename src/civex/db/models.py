@@ -670,6 +670,13 @@ class AuditLog(Base):
     # it rewrote; a record deleted and everything beneath it), so an authority
     # takes them, or refuses them, together. None for an entry on its own.
     op_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    # A delete this device sent that the authority answered as one of a record
+    # already deleted there (`OpResult.already_done`): the device's history
+    # counts it as the earlier change's, not its own. Only what the authority
+    # said, never worked out here.
+    already_done: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
 
 
 class WorkflowJob(Base):

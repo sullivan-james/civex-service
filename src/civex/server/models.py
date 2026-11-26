@@ -2539,6 +2539,10 @@ class AuditPart(BaseModel):
 class AuditAlreadyDone(BaseModel):
     count: int
     by: list[str] = Field(default_factory=list)
+    own: int = Field(
+        default=0, description="How many were made by this person's other devices."
+    )
+    own_devices: list[str] = Field(default_factory=list)
 
 
 class AuditEventResponse(BaseModel):

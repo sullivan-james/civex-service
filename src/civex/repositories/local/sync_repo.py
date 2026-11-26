@@ -2381,13 +2381,14 @@ class LocalSyncRepository:
                 values = {"sync_state": "synced"}
                 if result.hub_seq is not None:
                     values["hub_seq"] = result.hub_seq
-                if result.status in ("merged", "conflict") or (
-                    result.status == "applied" and result.already_done
-                ):
-                    # (an already-done delete: the record is deleted by the
-                    # earlier change the feed carries; this one is shown as
-                    # done by it, never replayed)
+                if result.status in ("merged", "conflict"):
                     values["apply_state"] = "superseded"
+                elif result.status == "applied" and result.already_done:
+                    # (the authority found the record already deleted: the
+                    # earlier change the feed carries did it; this one is
+                    # shown as done by it, and is never replayed)
+                    values["apply_state"] = "superseded"
+                    values["already_done"] = True
             else:
                 continue
             merged.setdefault(result.op_id, {}).update(values)

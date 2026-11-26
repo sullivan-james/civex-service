@@ -1668,7 +1668,7 @@ class AuditEventDTO:
     # The device it came through, when synced (see AuditLogDTO.device).
     device: str | None = None
     # Deletes this change sent that the authority found already made by another
-    # change: `{count, by}` (who made those). They are left out of `count` and
+    # change: `{count, by, own, own_devices}` (who made those). They are left out of `count` and
     # `parts`: the authority's history says whose they were.
     already_done: dict[str, Any] | None = None
 
