@@ -15,6 +15,7 @@ documented in `docs/guides/sync.md`.
 from __future__ import annotations
 
 import logging
+import hashlib
 import threading
 import time
 import uuid
@@ -355,16 +356,32 @@ class _Attempts:
         self._failed: dict[tuple[str, str], deque[float]] = {}
         self._lock = threading.Lock()
 
+    # Kept bounded: past this many callers, the expired are swept, and if
+    # that is not enough the least recently failed go (down to 90%).
+    MAX_KEYS = 10_000
+
     @staticmethod
     def _key(request: Request) -> tuple[str, str]:
+        """The project (a hash of its database URL: a host puts each project's
+        schema in it, and the URL may hold a password) and the caller."""
         host = request.client.host if request.client else ""
-        return current_project(request).config.db.url, host
+        url = current_project(request).config.db.url
+        return hashlib.sha256(url.encode()).hexdigest(), host
 
     def _recent(self, host: tuple[str, str]) -> deque[float]:
         times = self._failed.setdefault(host, deque())
         while times and times[0] < time.monotonic() - self.WINDOW:
             times.popleft()
         return times
+
+    def _sweep(self) -> None:
+        cutoff = time.monotonic() - self.WINDOW
+        for key in [k for k, t in self._failed.items() if not t or t[-1] < cutoff]:
+            del self._failed[key]
+        excess = len(self._failed) - self.MAX_KEYS * 9 // 10
+        if excess > 0:
+            for key in sorted(self._failed, key=lambda k: self._failed[k][-1])[:excess]:
+                del self._failed[key]
 
     def check(self, request: Request) -> None:
         host = self._key(request)
@@ -380,6 +397,8 @@ class _Attempts:
         host = self._key(request)
         with self._lock:
             self._recent(host).append(time.monotonic())
+            if len(self._failed) > self.MAX_KEYS:
+                self._sweep()
 
 
 _attempts = _Attempts()
