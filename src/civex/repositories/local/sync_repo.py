@@ -27,6 +27,7 @@ from sqlalchemy import (
     exists,
     func,
     insert,
+    literal_column,
     or_,
     select,
     text,
@@ -655,6 +656,26 @@ class LocalSyncRepository:
         q = self._not_here(collections, lacks)
         return int(self._s.execute(select(func.count()).select_from(q)).scalar_one())
 
+    def unprobed_files(self, after: str, limit: int) -> list[str]:
+        """Files live records cite that no drive here holds and that the
+        authority has neither said it holds nor said it lacks (nor a person
+        ignored), in hash order after `after`: what a look at the server has
+        yet to settle."""
+        q = self._not_here(None, "hide")
+        return list(
+            self._s.scalars(
+                select(q.c.sha)
+                .where(
+                    q.c.sha > after,
+                    ~select(ServerFile.sha256)
+                    .where(ServerFile.sha256 == q.c.sha)
+                    .exists(),
+                )
+                .order_by(q.c.sha)
+                .limit(limit)
+            )
+        )
+
     def count_files_lacked(self, since: datetime | None) -> tuple[int, int]:
         """(arriving, missing): the files live records here cite that no drive
         here holds and the authority said it hasn't got (less those a person
@@ -662,15 +683,13 @@ class LocalSyncRepository:
         (the device that added it may still be uploading: arriving) or not
         (missing). `since` None: all are missing."""
         q = self._not_here(None, "only")
-        total = int(self._s.execute(select(func.count()).select_from(q)).scalar_one())
-        if since is None:
-            return 0, total
-        new = int(
-            self._s.execute(
-                select(func.count()).select_from(q).where(q.c.latest >= since)
-            ).scalar_one()
+        new = (
+            func.coalesce(func.sum(case((q.c.latest >= since, 1), else_=0)), 0)
+            if since is not None
+            else literal_column("0")
         )
-        return new, total - new
+        total, fresh = self._s.execute(select(func.count(), new).select_from(q)).one()
+        return int(fresh), int(total) - int(fresh)
 
     def added_by(self, shas: list[str]) -> dict[str, str | None]:
         """Which device added each of these files (its name, as the authority

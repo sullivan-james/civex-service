@@ -4,12 +4,7 @@ import type { BackgroundTask } from '../../utils/backgroundTasks'
 import { describeSyncProgress } from '../../utils/syncProgress'
 import { formatSize } from '../../utils/storage'
 import { useFileListing } from '../useFileListing'
-import {
-  useIgnoreMissingFiles,
-  useRemoteStatus,
-  useSendFilesNow,
-  useUpdateRemote,
-} from '../useRemote'
+import { useRemoteStatus, useSendFilesNow, useUpdateRemote } from '../useRemote'
 
 /** Every collection's files, as the explorer lists them, narrowed. */
 export const ALL_FILES = '/collections?tab=records&show=files'
@@ -27,7 +22,6 @@ const MISSING = `${ALL_FILES}&files.place=missing`
 export function useServerFilesTasks(): BackgroundTask[] {
   const { data } = useRemoteStatus()
   const sendNow = useSendFilesNow()
-  const ignore = useIgnoreMissingFiles()
   const update = useUpdateRemote()
   const offered = Boolean(
     data &&
@@ -45,7 +39,6 @@ export function useServerFilesTasks(): BackgroundTask[] {
     ? serverFilesTasks(
         data,
         { disabled: sendNow.isPending, onClick: () => sendNow.mutate() },
-        { disabled: ignore.isPending, onClick: () => ignore.mutate() },
         {
           disabled: update.isPending,
           bytes,
@@ -58,7 +51,6 @@ export function useServerFilesTasks(): BackgroundTask[] {
 export function serverFilesTasks(
   data: RemoteStatus,
   send: { disabled: boolean; onClick: () => void },
-  ignore?: { disabled: boolean; onClick: () => void },
   keepAll?: { disabled: boolean; onClick: () => void; bytes?: number },
 ): BackgroundTask[] {
   if (!data.configured) return []
@@ -119,24 +111,6 @@ export function serverFilesTasks(
       title: `${plural(lacked, 'file')} missing`,
       detail: `The device that added ${lacked === 1 ? 'it' : 'them'} never uploaded ${lacked === 1 ? 'it' : 'them'}.`,
       actions: [{ label: 'See which', to: MISSING }],
-    })
-
-  const missing = waiting?.missing ?? 0
-  if (missing > 0)
-    tasks.push({
-      id: 'server-files-missing',
-      tone: 'attention',
-      icon: Upload,
-      title: `${plural(missing, 'file')} missing`,
-      detail: `${missing === 1 ? 'It is' : 'They are'} no longer on this computer, and the server hasn’t got ${missing === 1 ? 'it' : 'them'}.`,
-      actions: [
-        { label: 'See which', to: MISSING },
-        // Only files this project never stored can be ignored; ones stored
-        // once and since gone stay in the warning.
-        ...(ignore && (waiting?.never_stored ?? 0) > 0
-          ? [{ label: 'Ignore', ...ignore }]
-          : []),
-      ],
     })
 
   const notHere = data.files_not_here ?? 0

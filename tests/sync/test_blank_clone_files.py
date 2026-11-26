@@ -42,6 +42,21 @@ def _cite(laptop, record, contents: list[bytes], send: bool = True) -> list:
     return refs
 
 
+def _cite_ghost(laptop, name: str = "ghost") -> None:
+    """A record citing a file no computer has uploaded (or even stored)."""
+    laptop.record_svc.add(
+        "study",
+        "encounter",
+        {
+            "site": name,
+            "depth": 1.0,
+            "scan": {"sha256": "ab" * 32, "filename": f"{name}.bin", "size": 3},
+        },
+    )
+    laptop.commit()
+    laptop.sync_svc.sync()
+
+
 def _clone(project, authority, name="tablet"):
     clone = device(project, authority, name, download_files="opened")
     assert connect(clone) == "joined"
@@ -86,7 +101,7 @@ def test_files_the_authority_lacks_are_the_authoritys_not_ours(
     laptop, _, record = pair
     _cite(laptop, record, [b"never uploaded"], send=False)
     tablet = _clone(project, authority)
-    tablet.sync_svc.missing_files(with_groups=False)  # asks the server
+    tablet.sync_svc.probe_files()  # the worker's look, once the copy is done
 
     status = tablet.sync_svc.status()
     assert (status.files_arriving, status.files_missing) == (1, 0)
@@ -155,3 +170,47 @@ def test_download_progress_counts_every_pass_in_bytes_and_rate(
     assert (last.done, last.total) == (3, 3)
     assert last.bytes_done == sum(len(c) for c in contents)
     assert tablet.sync_svc.files_to_fetch() == 0
+
+
+def test_the_look_at_the_server_waits_for_the_copy_and_asks_once(
+    pair, project, authority
+):
+    laptop, _, record = pair
+    here = _cite(laptop, record, [b"on the server"])
+    _cite_ghost(laptop)
+    assert here
+    tablet = _clone(project, authority)
+    assert tablet.sync_svc.status().files_not_here == 2
+
+    tablet.sync_repo.set_cursor(-1)  # a copy still under way
+    assert tablet.sync_svc.probe_files() == 0
+    tablet.sync_repo.set_cursor(authority.sync_repo.head_seq())
+
+    assert tablet.sync_svc.probe_files() == 2
+    status = tablet.sync_svc.status()
+    # What the server lacks is not offered for download.
+    assert status.files_not_here == 1
+    assert status.files_arriving + status.files_missing == 1
+    assert tablet.sync_svc.probe_files() == 0  # nothing new to ask about
+
+
+def test_an_export_from_a_clone_fetches_the_files_it_lacks(
+    pair, project, authority, tmp_path
+):
+    import json
+    import zipfile
+
+    laptop, _, record = pair
+    kept = _cite(laptop, record, [b"fetched for the export"])[0]
+    _cite_ghost(laptop)
+    tablet = _clone(project, authority)
+    assert not tablet.file_svc.exists(kept.sha256)
+
+    out = tmp_path / "out.zip"
+    plan = tablet.bundle_svc.export(out)
+    assert tablet.file_svc.exists(kept.sha256)
+    with zipfile.ZipFile(out) as zf:
+        assert f"files/{kept.sha256}" in zf.namelist()
+        manifest = json.loads(zf.read("bundle.json"))
+    assert len(manifest["files"]["missing"]) == 1
+    assert (plan.files_unreachable, plan.files_not_on_server) == (1, 1)

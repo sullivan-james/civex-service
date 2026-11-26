@@ -196,16 +196,6 @@ class FilesWaitingResponse(BaseModel):
     offline: list[OfflineDriveFiles] = Field(
         description="Files only on drives that can't be read right now."
     )
-    missing: int = Field(
-        description="Files on no drive here that the server said it hasn't got "
-        "either: nothing here can send them (not in `files_to_send`)."
-    )
-    never_stored: int = Field(
-        default=0, description="Of `missing`, those this project never stored."
-    )
-    ignored: int = Field(
-        default=0, description="Missing files a person chose to stop hearing about."
-    )
 
 
 class SyncResultResponse(BaseModel):
@@ -458,9 +448,6 @@ def _status(ctx: AppContext) -> RemoteStatusResponse:
                     OfflineDriveFiles(volume=v, files=n, reason=r)
                     for v, n, r in w.offline
                 ],
-                missing=w.missing,
-                never_stored=w.never_stored,
-                ignored=w.ignored,
             )
             if (w := s.files_waiting)
             else None

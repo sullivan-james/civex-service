@@ -224,8 +224,23 @@ class SyncWorker:
             # Only collections kept on this computer (see collection_mode):
             # the service limits it, so nothing is fetched when none are.
             self._fetch_files(ctx, asked=asked)
+            self._probe_files(ctx)
         finally:
             ctx.close()
+
+    def _probe_files(self, ctx: AppContext) -> None:
+        """Ask the authority which files the records here cite it holds (the
+        ones nothing here has), so the missing ones are counted apart. Only
+        once the copy is done, and later only for newly cited files."""
+        if ctx.sync_repo.meta().history_from:
+            return
+        try:
+            ctx.sync_svc.probe_files(
+                seconds=FILES_SECONDS, should_stop=self._should_stop_sending
+            )
+        except SyncError as e:
+            log.info("asking about files failed (%s); it carries on later", e)
+            self._files_backoff_until = self._clock() + MAX_BACKOFF / 5
 
     def _send_files(self, ctx: AppContext, everything: bool) -> None:
         """Upload, for a while, the files the authority hasn't said it holds

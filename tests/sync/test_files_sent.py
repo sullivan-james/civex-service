@@ -122,7 +122,7 @@ def test_files_waiting_say_why_they_havent_gone(pair):
     laptop.sync_svc.sync()
     waiting = laptop.sync_svc.status().files_waiting
     assert waiting is not None
-    assert (waiting.ready, waiting.offline, waiting.missing) == (1, [], 0)
+    assert (waiting.ready, waiting.offline) == (1, [])
 
     # Not on this computer at all (lost here, say): nothing is stored for it,
     # so it is not this computer's to send, and nothing says it is missing

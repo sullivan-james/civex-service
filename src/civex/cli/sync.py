@@ -198,42 +198,12 @@ def now() -> None:
 def _files_owed(c) -> None:  # noqa: ANN001 — AppContext
     status = c.sync_svc.status()
     owed = status.files_to_send
-    missing = status.files_waiting.missing if status.files_waiting else 0
-    if missing:
-        console.print(
-            f"[yellow]{missing} file(s) records cite are neither on this computer "
-            "nor on the server, so nothing can send them: `civex files list --on "
-            "missing` lists them.[/yellow]"
-        )
-        _never_stored(status.files_waiting)
     if owed:
         console.print(
             f"[dim]{owed} file(s) aren't on the server yet: `civex sync send` "
             "sends them now (the app and `civex sync watch` send them in the "
             "background).[/dim]"
         )
-
-
-def _files_owed_missing(waiting) -> None:  # noqa: ANN001 — FilesWaiting
-    console.print(
-        f"[warning]Missing     {waiting.missing} file(s) records cite are "
-        "neither on this computer nor on the server[/warning]"
-    )
-    _never_stored(waiting)
-
-
-def _never_stored(waiting) -> None:  # noqa: ANN001 — FilesWaiting
-    if not waiting or not waiting.never_stored:
-        return
-    where = ", ".join(
-        f"{n} in {escape(name)}" for name, n in waiting.never_stored_in[:8]
-    )
-    console.print(
-        f"[dim]{waiting.never_stored} of them were never stored in this project "
-        f"(records cite them without their contents). Records affected: {where}. "
-        "Attach the file to those records again, or sync from the computer "
-        "that has it. `civex files missing` lists, ignores or removes them.[/dim]"
-    )
 
 
 @app.command("send")
@@ -562,8 +532,6 @@ def status() -> None:
     console.print(f"Last synced {s.last_synced_at or 'never'}")
     if s.last_error:
         console.print(f"[warning]Last problem  {escape(s.last_error)}[/warning]")
-    if s.files_waiting and s.files_waiting.missing:
-        _files_owed_missing(s.files_waiting)
     if s.files_arriving:
         console.print(
             f"Arriving    {s.files_arriving} file(s) aren't on the server yet: "

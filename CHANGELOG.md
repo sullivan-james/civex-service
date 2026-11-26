@@ -19,7 +19,8 @@ final version's entry or `## Unreleased` instead of one of its own. The version 
   (after that), neither this computer's to send. The status also carries
   `files_not_here`, what keeping every file would download.
 - **Sync: files are fetched when opened by default.** `sync.download_files` now
-  defaults to `opened` (it was `all`); choosing `all` still downloads every
+  defaults to `opened` (it was `all`), including for existing projects whose
+  settings never named it; choosing `all` still downloads every
   file in the background.
 - **Sync: file download progress counts the whole run.** The bytes and speed
   shown while downloading restarted with each pass of the run, so a finished
@@ -27,6 +28,12 @@ final version's entry or `## Unreleased` instead of one of its own. The version 
 - **Files: a release plan counts the files the store lacks.**
   `POST /releases/{name}/files/plan` carries `missing: {files, bytes}`, the
   files neither reachable here nor fetchable from a server.
+- **Sync: a computer that downloads files when opened looks at the server once
+  the copy is done.** It asks which cited files the server holds (a page at a
+  time, later only for newly cited ones), so files the server lacks are counted
+  as arriving or missing and not offered for download. An export of a project
+  bundle fetches the files it lacks from the server first, and reports those the
+  server hasn't got either (`files_not_on_server`).
 - **Files: a release's files can be listed.** The file inventory
   (`FileAccessService.listing`) failed on a release's frozen records; it now
   lists them, by where each file is.

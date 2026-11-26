@@ -840,6 +840,7 @@ def build_context(
         batch=history_svc.batch,
         after_bulk_write=index_svc.after_bulk_write,
     )
+    bundle_svc.fetch_missing = lambda shas: _sync().fetch_files(shas=shas)
     release_svc = ReleaseService(
         release_repo,
         bundle_svc,

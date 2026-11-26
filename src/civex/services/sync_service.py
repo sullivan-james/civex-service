@@ -341,21 +341,13 @@ class DeviceIdentity:
 
 @dataclass
 class FilesWaiting:
-    """Why files records here cite aren't on the server: what sending can
-    move now, what is on a drive that can't be read (by drive, with its own
-    reason), and what is missing: on no drive here, and the server said it
-    hasn't got it either, so nothing here can send it (`files_to_send`
-    doesn't count those)."""
+    """Why files this computer holds aren't on the server yet: what sending
+    can move now, and what is on a drive that can't be read (by drive, with its
+    own reason). Files that only came with pulled records are never this
+    computer's to send: they are `files_arriving` / `files_missing`."""
 
     ready: int = 0
     offline: list[tuple[str, int, str]] = field(default_factory=list)
-    missing: int = 0
-    # Of `missing`, those this project never stored (no drive has ever held
-    # them), and the collections whose records cite them, as (name, records).
-    never_stored: int = 0
-    never_stored_in: list[tuple[str, int]] = field(default_factory=list)
-    # Missing files a person chose to stop being told about.
-    ignored: int = 0
 
 
 _F = TypeVar("_F", bound=Callable[..., Any])
@@ -544,13 +536,8 @@ class SyncService:
         status: dict[str, Any] = {}
         offline: dict[str, int] = {}
         copies = self._repo.unconfirmed_copies(limit)
-        lacking = self._repo.server_lacks_of({s for s, v in copies.items() if not v})
-        for sha, volumes in copies.items():
+        for volumes in copies.values():
             if not volumes:
-                # Not here: missing once the server said it hasn't got it
-                # either, else not asked about yet (nothing to send from here
-                # whichever it is).
-                waiting.missing += sha in lacking
                 continue
             for v in volumes:
                 if v not in status:
@@ -560,14 +547,6 @@ class SyncService:
             else:
                 offline[volumes[0]] = offline.get(volumes[0], 0) + 1
         waiting.offline = [(v, n, status[v].reason) for v, n in sorted(offline.items())]
-        ignored = self._repo.ignored_missing()
-        absent = {s for s, v in copies.items() if not v and s in lacking}
-        waiting.ignored = len(absent & ignored)
-        waiting.missing -= waiting.ignored
-        if waiting.missing:
-            never = self._repo.never_stored(absent - ignored)
-            waiting.never_stored = len(never)
-            waiting.never_stored_in = self._citing_collections(never)
         return waiting
 
     # -- files nothing can supply -----------------------------------------
@@ -3158,6 +3137,36 @@ class SyncService:
         if not self.fetches_files:
             return 0
         return self._repo.count_files_not_here(self._kept_collections(), "wait")
+
+    def probe_files(
+        self,
+        seconds: float | None = None,
+        should_stop: Callable[[], bool] | None = None,
+    ) -> int:
+        """Ask the authority about the files records here cite that no drive
+        here holds and that it hasn't been asked about yet, a page at a time:
+        those it holds are noted as on the server, those it lacks as missing
+        (so they are counted apart and not offered for download). Only
+        newly cited files are asked about later. Not while the project is
+        still being copied. Returns how many were settled; `SyncError` when
+        the authority can't be reached."""
+        if not self.fetches_files or self._repo.meta().cursor == JOINING:
+            return 0
+        transport = self._transport()
+        started = time.monotonic()
+        settled, after = 0, ""
+        while page := self._repo.unprobed_files(after, FILE_CHECK_PAGE):
+            if (seconds is not None and time.monotonic() - started >= seconds) or (
+                should_stop is not None and should_stop()
+            ):
+                break
+            after = page[-1]
+            lacking = set(transport.missing_files(page))
+            self._repo.confirm_on_server(set(page) - lacking)
+            self._repo.note_server_lacks(lacking, backoff=False)
+            self._commit()
+            settled += len(page)
+        return settled
 
     def files_lacked(self) -> tuple[int, int]:
         """(arriving, missing): the files records here cite that no drive here

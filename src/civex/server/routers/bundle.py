@@ -44,6 +44,10 @@ class BundlePlanResponse(BaseModel):
     files_unreachable: int = Field(
         description="Of those, files on no drive that can be reached now (left out)."
     )
+    files_not_on_server: int = Field(
+        default=0,
+        description="Of those, files the server this project follows hasn't got either.",
+    )
     workflows: int
     plugins: int
     include_files: bool = Field(description="Whether the files would be carried.")

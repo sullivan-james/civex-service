@@ -477,3 +477,23 @@ def test_a_limited_reader_lists_the_files_of_their_collections_only(
     assert sum(p["files"] for p in body["summary"]) == 2
     for r in world.hidden:
         assert str(r.id) not in str(body)
+
+
+def test_two_scopes_through_one_engine_never_share_a_statement(
+    outsider: TestClient, owner: TestClient, world: World
+):
+    """The read-scope rule is a lambda criterion: alternating callers with
+    different scopes, on the same engine, each get their own rule."""
+    for _ in range(3):
+        full = owner.post("/api/file-access/files", json={}).json()
+        limited = outsider.post("/api/file-access/files", json={}).json()
+        assert world.sha in str(full) and world.sha not in str(limited)
+        assert sum(p["files"] for p in full["summary"]) == 1
+        assert sum(p["files"] for p in limited["summary"]) == 0
+        counts = {
+            who: c.get("/api/records/count", params={"schema": "sample"}).json()[
+                "count"
+            ]
+            for who, c in (("owner", owner), ("outsider", outsider))
+        }
+        assert counts == {"owner": 6, "outsider": 2}

@@ -18,14 +18,13 @@ describe('files and the server, as their own task', () => {
     expect(serverFilesTasks(status(), send)).toEqual([])
   })
 
-  it('counts only what this computer can send, and says missing files apart', () => {
-    const [task, missing] = serverFilesTasks(
+  it('counts only what this computer can send', () => {
+    const [task] = serverFilesTasks(
       status({
         files_to_send: 1,
         files_waiting: {
           ready: 0,
           offline: [{ volume: 'test1', files: 1, reason: 'path missing' }],
-          missing: 1,
         },
       }),
       send,
@@ -36,33 +35,13 @@ describe('files and the server, as their own task', () => {
     expect(task.detail).toBe(
       '1 file is on the drive “test1”, which can’t be read (path missing); it goes once it is plugged in.',
     )
-    expect(missing.title).toBe('1 file missing')
-    expect(missing.tone).toBe('attention')
-    expect(missing.detail).toBe(
-      'It is no longer on this computer, and the server hasn’t got it.',
-    )
-    expect(missing.actions?.[0]).toMatchObject({
-      label: 'See which',
-      to: '/collections?tab=records&show=files&files.place=missing',
-    })
-  })
-
-  it('says missing files even when nothing is left to send', () => {
-    const tasks = serverFilesTasks(
-      status({
-        files_to_send: 0,
-        files_waiting: { ready: 0, offline: [], missing: 2 },
-      }),
-      send,
-    )
-    expect(tasks.map((t) => t.title)).toEqual(['2 files missing'])
   })
 
   it('offers Send now when files can go', () => {
     const [task] = serverFilesTasks(
       status({
         files_to_send: 3,
-        files_waiting: { ready: 3, offline: [], missing: 0 },
+        files_waiting: { ready: 3, offline: [] },
       }),
       send,
     )
@@ -94,7 +73,6 @@ describe('files and the server, as their own task', () => {
       whyWaiting({
         ready: 2,
         offline: [{ volume: 'a', files: 1, reason: '' }],
-        missing: 0,
       }),
     ).toBe(
       '2 files will go up in the background. 1 file is on the drive “a”, which can’t be read; it goes once it is plugged in.',
@@ -140,7 +118,6 @@ describe('a blank copy only downloads', () => {
         serving: false,
       }),
       send,
-      undefined,
       keepAll,
     )
     expect(offer.actions?.[0].label).toMatch(
@@ -152,7 +129,6 @@ describe('a blank copy only downloads', () => {
       serverFilesTasks(
         status({ download_files: 'all', files_not_here: 3854 }),
         send,
-        undefined,
         keepAll,
       ),
     ).toEqual([])

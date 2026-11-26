@@ -66,6 +66,7 @@ class Rig:
                 files_to_try=lambda: self.to_fetch,
                 fetch_files=fetch_files,
                 send_files=send_files,
+                probe_files=lambda **kw: 0,
             ),
             close=lambda: None,
         )
