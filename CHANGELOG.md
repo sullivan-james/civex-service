@@ -52,11 +52,11 @@ from the next tag forward.
 
 ### Changed
 
-- **Files on a host have no drives.** Where a host offers accounts and no drives
-  (a hub), the Files tab, a record's files and exports show no drive, volume or
-  storage location, and no way to change a drive, free up space or manage
-  folders. A file that isn't there says "Not on the hub yet. It will appear
-  when the device that added it next syncs." (naming the device when known); one
+- **Files on a host have no drives.** Where a host offers accounts and no drives,
+  the Files tab, a record's files and exports show no drive, volume or storage
+  location, and no way to change a drive, free up space or manage folders. A
+  file that isn't there yet says it will appear when the device that added it
+  next syncs (naming the device when known); one
   that can't be reached right now says "Temporarily unavailable. Try again
   shortly." Moving files between drives (`/file-access/gather`, a release's
   `files/gather`) answers 501 where there are no drives. Desktop and self-hosted
