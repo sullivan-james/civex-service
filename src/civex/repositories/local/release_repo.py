@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
@@ -310,21 +311,31 @@ class LocalReleaseRepository:
         self._s.flush()
         return n
 
-    def lock(self, id: uuid.UUID) -> ReleaseDTO | None:
-        """The release as it is now, its row locked until the transaction ends
-        (so a publish and a discard of it take turns); None if it is gone."""
-        row = self._s.scalars(
-            select(Release)
-            .where(Release.id == id)
-            .with_for_update()
-            .execution_options(populate_existing=True)
-        ).one_or_none()
-        return _to_dto(row) if row is not None else None
+    def mark_published(self, id: uuid.UUID, when: datetime) -> bool:
+        """Publish a held-back release: one conditional UPDATE, so of a
+        publish and a discard of it exactly one succeeds (any database)."""
+        done = self._s.execute(
+            update(Release)
+            .where(Release.id == id, Release.published_at.is_(None))
+            .values(published_at=when)
+        )
+        self._s.expire_all()
+        return bool(done.rowcount)  # type: ignore[attr-defined]
 
-    def delete(self, id: uuid.UUID) -> None:
-        """Remove the release's row (its owned files go with `disown`)."""
-        self._s.execute(delete(Release).where(Release.id == id))
-        self._s.flush()
+    def delete_held_back(self, id: uuid.UUID) -> bool:
+        """Remove a release that was never published (and is neither
+        withdrawn nor yanked): one conditional DELETE; False if it is not
+        that (or not there)."""
+        done = self._s.execute(
+            delete(Release).where(
+                Release.id == id,
+                Release.published_at.is_(None),
+                Release.withdrawn_at.is_(None),
+                Release.yanked_at.is_(None),
+            )
+        )
+        self._s.expire_all()
+        return bool(done.rowcount)  # type: ignore[attr-defined]
 
     def create(self, **values: Any) -> ReleaseDTO:
         row = Release(id=values.pop("id", None) or uuid.uuid4(), **values)

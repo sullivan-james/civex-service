@@ -26,6 +26,7 @@ from civex.domain.exceptions import (
     CivexError,
     ConfigError,
     ConflictMovedError,
+    ReleaseHeldBackError,
     ReleasePublishedError,
     DatabaseTooNewError,
     DatabaseUnavailableError,
@@ -173,6 +174,7 @@ def _status_for(exc: CivexError) -> int:
             GCAlreadyRunningError,
             ConflictMovedError,
             ReleasePublishedError,
+            ReleaseHeldBackError,
         ),
     ):
         return 409

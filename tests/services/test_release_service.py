@@ -824,16 +824,6 @@ def test_a_published_release_cannot_be_discarded(ctx, study):
     assert {r.name for r in ctx.release_svc.list_all()} == {"v1", "v2"}
 
 
-def test_a_withdrawn_held_back_release_is_not_discarded(ctx, study):
-    from civex.domain.exceptions import ReleasePublishedError
-
-    _make(ctx, "v1", publish=False)
-    ctx.release_svc.withdraw("v1", "oops")
-    ctx.commit()
-    with pytest.raises(ReleasePublishedError):
-        ctx.release_svc.discard("v1")
-
-
 def test_publishing_after_a_discard_or_twice_fails_cleanly(ctx, study):
     _make(ctx, "v1", publish=False)
     ctx.release_svc.publish("v1")
@@ -849,33 +839,77 @@ def test_publishing_after_a_discard_or_twice_fails_cleanly(ctx, study):
         ctx.release_svc.publish("v2")
 
 
-def test_discard_and_publish_take_the_release_row_lock(ctx, study):
-    """The loser of a publish/discard race finds the winner's result: the
-    row is read under FOR UPDATE after the lookup, so a stale lookup is
-    re-checked (not found after a discard, published after a publish)."""
-    from civex.domain.exceptions import NotFoundError, ReleasePublishedError
+def test_publish_and_discard_race_is_decided_by_one_conditional_write(ctx, study):
+    """Each is a single conditional statement, so whichever runs second finds
+    nothing to do (no row lock needed, real SQLite)."""
+    from datetime import datetime, timezone
 
-    held = _make(ctx, "v1", publish=False)
-    svc = ctx.release_svc
-    real = svc._repo.lock
-    # Another request publishes between our lookup and our lock.
-    svc._repo.lock = lambda id: (
-        svc._repo.update(id, published_at=held.created_at),
-        real(id),
-    )[1]
+    repo = ctx.release_svc._repo
+    now = datetime.now(timezone.utc)
+    a = _make(ctx, "v1", publish=False)
+    assert repo.mark_published(a.id, now) is True
+    assert repo.delete_held_back(a.id) is False  # discard lost
+    assert repo.get(a.id) is not None
+    assert repo.mark_published(a.id, now) is False
+    b = _make(ctx, "v2", publish=False)
+    assert repo.delete_held_back(b.id) is True
+    assert repo.mark_published(b.id, now) is False  # publish lost
+    assert repo.delete_held_back(b.id) is False
+    assert repo.get(b.id) is None
+
+
+def test_a_held_back_release_cannot_be_withdrawn_or_yanked(ctx, study):
+    from civex.domain.exceptions import ReleaseHeldBackError
+
+    _make(ctx, "v1", publish=False)
+    with pytest.raises(ReleaseHeldBackError):
+        ctx.release_svc.yank("v1", "x")
+    with pytest.raises(ReleaseHeldBackError):
+        ctx.release_svc.withdraw("v1", "x")
+    ctx.release_svc.discard("v1")
+
+
+def test_a_held_back_release_gives_out_no_files_or_manifest(ctx, study, tmp_path):
+    _make(ctx, "v1", publish=False)
+    for attempt in (
+        lambda: ctx.release_svc.file_plan("v1"),
+        lambda: ctx.release_svc.gather_spec("v1", "x"),
+        lambda: ctx.release_svc.write_bag("v1", tmp_path, None),  # type: ignore[arg-type]
+    ):
+        with pytest.raises(ValidationError):
+            attempt()
+    with pytest.raises(ValidationError):
+        with ctx.release_svc.frozen("v1"):
+            pass
+
+
+def test_a_held_back_release_is_seen_only_by_who_may_make_releases(tmp_path: Path):
+    root = tmp_path / "study"
+    scaffold_project(root)
+    owner = build_local_context(load_config_at(root))
+    owner.schema_svc.create("sample")
+    owner.release_svc.create("held", "t", publish=False)
+    owner.release_svc.create("live", "t")
+    owner.commit()
+    reader = build_context(
+        Project(
+            config=load_config_at(root),
+            config_store=FileConfigStore(root),
+            actor="someone",
+            permissions=Permissions.of(p.READ),
+        )
+    )
     try:
-        with pytest.raises(ReleasePublishedError):
-            svc.discard("v1")
-    finally:
-        svc._repo.lock = real
-    other = _make(ctx, "v2", publish=False)
-    svc._repo.lock = lambda id: (svc._repo.delete(id), real(id))[1]
-    try:
+        assert {r.name for r in owner.release_svc.list_all()} == {"held", "live"}
+        assert [r.name for r in reader.release_svc.list_all()] == ["live"]
+        assert reader.release_svc.get("live")
+        from civex.domain.exceptions import NotFoundError
+
         with pytest.raises(NotFoundError):
-            svc.publish("v2")
+            reader.release_svc.get("held")
     finally:
-        svc._repo.lock = real
-    assert other.name == "v2"
+        reader.close()
+        owner.close()
 
 
 def test_who_may_discard_a_release(tmp_path: Path):

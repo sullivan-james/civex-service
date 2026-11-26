@@ -330,9 +330,22 @@ def test_discard_a_held_back_release_over_http(client: TestClient):
     )
     assert made.status_code == 201 and made.json()["published_at"] is None
     assert client.get("/api/releases/v1/citation").status_code == 422
+    assert client.post("/api/releases/v1/files/zip").status_code == 422
+    assert client.post("/api/releases/v1/files/plan").status_code == 422
+    assert (
+        client.post(
+            "/api/releases/v1/files/export", json={"mode": "copy", "folder": "/x"}
+        ).status_code
+        == 422
+    )
+    assert client.post("/api/releases/v1/yank", json={"reason": "r"}).status_code == 409
+    assert (
+        client.post("/api/releases/v1/withdraw", json={"reason": "r"}).status_code
+        == 409
+    )
     assert client.post("/api/releases/v1/discard").status_code == 204
     assert client.get("/api/releases/v1").status_code == 404
     client.post("/api/releases", json={"name": "v1", "title": "Survey"})
     refused = client.post("/api/releases/v1/discard")
     assert refused.status_code == 409
-    assert "was published" in refused.json()["detail"]
+    assert "is published" in refused.json()["detail"]

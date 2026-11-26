@@ -70,6 +70,7 @@ from civex.domain.dtos import ReleaseDTO
 from civex.domain.exceptions import (
     AlreadyExistsError,
     NotFoundError,
+    ReleaseHeldBackError,
     ReleasePublishedError,
     ValidationError,
 )
@@ -282,13 +283,19 @@ class ReleaseService:
 
     def list_all(self) -> list[ReleaseDTO]:
         self._permissions.require_somewhere(permissions.READ)
-        return self._repo.list_all()
+        found = self._repo.list_all()
+        if self._permissions.can_somewhere(permissions.RELEASE):
+            return found
+        return [r for r in found if r.published_at is not None]
 
     def get(self, name: str) -> ReleaseDTO:
         """A release by its name, its id, or the start of its id."""
         self._permissions.require_somewhere(permissions.READ)
         found = self._repo.get_by_name(name) or self._repo.get_by_prefix(name)
-        if found is None:
+        if found is None or (
+            found.published_at is None
+            and not self._permissions.can_somewhere(permissions.RELEASE)
+        ):  # a held-back release is the host's business: others never see it
             raise NotFoundError(f"Release '{name}' not found")
         return found
 
@@ -522,6 +529,7 @@ class ReleaseService:
         wherever it is shown. To give the data up, yank it."""
         self._permissions.require(permissions.RELEASE)
         release = self.get(name)
+        self._not_held_back(release)
         text = _reason(reason, "withdrawn")
         if release.withdrawn_at is not None:
             raise ValidationError(f"Release '{release.name}' is already withdrawn")
@@ -537,16 +545,20 @@ class ReleaseService:
         return after
 
     def publish(self, name: str) -> ReleaseDTO:
-        """Make a held-back release available (to cite, download, copy). Takes
-        the release's row lock, so against a `discard` of it one wins and the
-        other fails cleanly (here: not found). Publishing twice is refused."""
+        """Make a held-back release available (to cite, download, copy). Against
+        a `discard` of it one wins and the other fails cleanly (each is one
+        conditional statement, so it holds on any database). Publishing
+        twice is refused."""
         self._permissions.require(permissions.RELEASE)
-        release = self._locked(name)
-        if release.published_at is not None:
-            raise ValidationError(f"Release '{release.name}' is already published")
-        self._not_yanked(release)
+        release = self.get(name)
         now = datetime.now(timezone.utc)
-        after = self._repo.update(release.id, published_at=now, updated_at=now)
+        if not self._repo.mark_published(release.id, now):
+            # Not held back any more (published, or discarded meanwhile).
+            current = self._repo.get(release.id)
+            if current is None:
+                raise NotFoundError(f"Release '{name}' not found")
+            raise ValidationError(f"Release '{release.name}' is already published")
+        after = self._repo.update(release.id, updated_at=now)
         self._log("update", release, after)
         return after
 
@@ -559,29 +571,28 @@ class ReleaseService:
         as a record; yank it to give its data up. A release not published
         can't have been cited, downloaded or copied."""
         self._permissions.require(permissions.RELEASE)
-        release = self._locked(name)
-        if (
-            release.published_at is not None
-            or release.yanked_at is not None
-            or release.withdrawn_at is not None
-        ):
+        release = self.get(name)
+        if not self._repo.delete_held_back(release.id):
+            # Published, withdrawn or yanked since we looked (or discarded).
+            now = self._repo.get(release.id)
+            if now is None:
+                raise NotFoundError(f"Release '{name}' not found")
             raise ReleasePublishedError(
-                f"Release '{release.name}' was published, so it stays as a "
-                "record: yank it to give its data up"
+                f"Release '{release.name}' is "
+                + (
+                    "yanked"
+                    if now.yanked_at
+                    else "withdrawn"
+                    if now.withdrawn_at
+                    else "published"
+                )
+                + ", so it stays as a record: yank it to give its data up"
             )
         self._repo.disown(release.id)
-        self._repo.delete(release.id)
         if self._audit is not None:
             self._audit.log_change(
                 "delete", "release", release.id, release.to_dict(), None
             )
-
-    def _locked(self, name: str) -> ReleaseDTO:
-        found = self.get(name)
-        release = self._repo.lock(found.id)
-        if release is None:  # discarded while this waited for the row
-            raise NotFoundError(f"Release '{name}' not found")
-        return release
 
     def plan_yank(self, name: str) -> YankPlan:
         """What yanking would give up, counted by the clean-up's own rule
@@ -642,6 +653,7 @@ class ReleaseService:
         self._permissions.require(permissions.RELEASE)
         release = self.get(name)
         self._not_yanked(release)
+        self._not_held_back(release)
         text = _reason(reason, "yanked")
         now = datetime.now(timezone.utc)
         self._repo.disown(release.id)
@@ -820,6 +832,7 @@ class ReleaseService:
             raise ValidationError("Files can't be laid out here")
         release = self.get(name)
         self._not_yanked(release)
+        self.require_published(release)
         pointers = self._repo.owned_pointers(release.id)
         locate = self.locate
 
@@ -840,6 +853,7 @@ class ReleaseService:
 
         release = self.get(name)
         self._not_yanked(release)
+        self.require_published(release)
         with self._bundle(release) as f:
             yield FrozenRecords(f, lambda cited: lambda sha: {})
 
@@ -857,6 +871,7 @@ class ReleaseService:
         release's `release.json` and `CITATION.cff`. Returns (name, file) for
         each, to put beside the files in a zip."""
         release = self.get(name)
+        self.require_published(release)
         lines = sorted(f"{i.sha256}  {i.path}" for i in plan.items if i.available)
         written = {
             BAG_MANIFEST: "\n".join(lines) + "\n",
@@ -875,6 +890,7 @@ class ReleaseService:
         elsewhere is copied there, not moved."""
         release = self.get(name)
         self._not_yanked(release)
+        self.require_published(release)
         shas = [
             s
             for s in self._repo.owned_pointers(release.id)
@@ -1134,6 +1150,13 @@ class ReleaseService:
             raise ValidationError(
                 f"Release '{release.name}' was yanked on "
                 f"{release.yanked_at.date().isoformat()}: its data has been given up"
+            )
+
+    @staticmethod
+    def _not_held_back(release: ReleaseDTO) -> None:
+        if release.published_at is None:
+            raise ReleaseHeldBackError(
+                f"Release '{release.name}' is not published; discard it instead"
             )
 
     @staticmethod

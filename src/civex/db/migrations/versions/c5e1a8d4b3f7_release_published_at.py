@@ -2,7 +2,8 @@
 
 A host can hold a release back (frozen, but not citable, downloadable or
 copyable) and discard it if it was never published. Every release made so far
-counts as published when it was created.
+counts as published when it was created. (A downgrade then upgrade again
+publishes any held-back release: no back-compat is kept.)
 
 Revision ID: c5e1a8d4b3f7
 Revises: b7d3e9a1c5f2
