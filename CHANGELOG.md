@@ -6,6 +6,11 @@ One section per tagged release: `## vX.Y.Z — <label> (YYYY-MM-DD)`. Every
 PRODUCTION_READINESS.md §4a). A pre-release tag (`v1.3.0rc1`) may use the
 final version's entry or `## Unreleased` instead of one of its own. The version itself has one source of truth,
 
+- **Sync: a device's push bookkeeping is written in bulk.** After a push the
+  device recorded each answer (and, when its own changes came back in the feed,
+  each number) with a read and a write per change; it now writes them together.
+  Same values recorded, same order of effects; a 70k-record bulk delete pushes
+  about 35% faster end to end.
 - **Sync: a change already true is dropped, not written again.** A pushed delete
   of a record already deleted on the authority, a restore of one already live,
   or an edit or move that leaves a live record as it is, is acknowledged and
