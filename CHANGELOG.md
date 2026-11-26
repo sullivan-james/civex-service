@@ -6,6 +6,10 @@ One section per tagged release: `## vX.Y.Z — <label> (YYYY-MM-DD)`. Every
 PRODUCTION_READINESS.md §4a). A pre-release tag (`v1.3.0rc1`) may use the
 final version's entry or `## Unreleased` instead of one of its own. The version itself has one source of truth,
 
+- **Sync: a pushed bulk delete or restore checks collections faster.** The check
+  that a record and its parent stay in one collection looked up both columns in
+  a single `OR`, which PostgreSQL answered by scanning the records table once
+  per push; it now looks each up by its index. Same answers, same checks.
 - **Sync: a change already true is dropped, not written again.** A pushed delete
   of a record already deleted on the authority, a restore of one already live,
   or an edit or move that leaves a live record as it is, is acknowledged and
