@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from civex.domain.dtos import DatasetDTO, FieldDTO, FileRef, RecordDTO, SchemaDTO
-from civex.domain.exceptions import DuplicateRecordError
+from civex.domain.exceptions import DuplicateRecordError, ValidationError
 from civex.domain.file_refs import without_file_locations
 from civex.workflows.progress import RUNS
 
@@ -76,8 +76,10 @@ class WorkflowContext:
     unwanted relationship, only supply the one you'd almost always want when
     it's actually needed."""
 
-    record: RecordDTO
-    dataset: DatasetDTO
+    # None for work that is not for one record (a table brought in at the top of
+    # a collection): `get_context_record`/`get_context_dataset` then say so.
+    record: RecordDTO | None
+    dataset: DatasetDTO | None
     _app_ctx: "AppContext"
     job_depth: int = 0
     # Which run this is, so a record it saves can say, on any run that save
@@ -99,48 +101,60 @@ class WorkflowContext:
     # ends): files a plugin asks for, and values too large to send inline, are
     # kept here for every step of the run.
     run_dir: Path | None = None
+    _affected_at: dict[str, int] = field(default_factory=dict, init=False, repr=False)
 
     def __post_init__(self) -> None:
         # However the record was built, a workflow sees a file's identity, not
         # where it happens to be stored this moment (see without_file_locations).
-        self.record = dataclasses.replace(
-            self.record, data=without_file_locations(self.record.data)
-        )
+        if self.record is not None:
+            self.record = dataclasses.replace(
+                self.record, data=without_file_locations(self.record.data)
+            )
 
     def _note_affected(self, dto: RecordDTO, action: str) -> None:
         # Only the record's id and schema, never its name: a name is worked out
         # from the record when someone looks (`RecordService.labels`), so a
         # rename or a change of name template shows in old runs too, instead of
         # a copy taken now going stale in the run's history.
-        for entry in self.affected_records:
-            if entry["record_id"] == str(dto.id):
-                entry["action"] = action
-                return
-        self.affected_records.append(
-            {
-                "record_id": str(dto.id),
-                "schema_name": dto.schema_name,
-                "action": action,
-            }
-        )
+        # Found by record, not by walking the list: a run that saves tens of
+        # thousands of records would otherwise spend its time here.
+        at = self._affected_at.get(str(dto.id), -1)
+        if 0 <= at < len(self.affected_records) and (
+            self.affected_records[at]["record_id"] == str(dto.id)
+        ):
+            self.affected_records[at]["action"] = action
+            return
+        entry = {
+            "record_id": str(dto.id),
+            "schema_name": dto.schema_name,
+            "action": action,
+        }
+        self._affected_at[str(dto.id)] = len(self.affected_records)
+        self.affected_records.append(entry)
 
     def get_context_record(self) -> RecordDTO:
+        if self.record is None:
+            raise ValidationError("This work is not for one record.")
         return self.record
 
     def get_context_dataset(self) -> DatasetDTO:
+        if self.dataset is None:
+            raise ValidationError("This work is not for one collection.")
         return self.dataset
 
     def get_file(self, sha256: str) -> bytes:
         return self._app_ctx.file_svc.retrieve(sha256)
 
     def store_file(self, data: bytes, filename: str) -> FileRef:
-        return self._app_ctx.file_svc.store_bytes(data, filename, str(self.dataset.id))
+        return self._app_ctx.file_svc.store_bytes(
+            data, filename, str(self.get_context_dataset().id)
+        )
 
     def store_path(self, path: Path, filename: str) -> FileRef:
         """Store the file at `path` (read in chunks, never whole) in the run's
         collection, named `filename`."""
         return self._app_ctx.file_svc.store(
-            path, str(self.dataset.id), filename=filename
+            path, str(self.get_context_dataset().id), filename=filename
         )
 
     def store_folder(
@@ -177,7 +191,7 @@ class WorkflowContext:
         for number, path in enumerate(paths, start=1):
             self.progress(number - 1, len(paths), f"Reading {path.name}")
             ref, stored = self._app_ctx.file_svc.store_unless_stored(
-                path, str(self.dataset.id)
+                path, str(self.get_context_dataset().id)
             )
             refs.append(ref.to_dict())
             new += stored
@@ -262,7 +276,8 @@ class WorkflowContext:
                 dataset_name,
                 schema_name,
                 data,
-                parent_record_id=context_record_id or str(self.record.id),
+                parent_record_id=context_record_id
+                or (str(self.record.id) if self.record else None),
                 _job_depth=self.job_depth + 1,
                 _cause=self._cause,
             )

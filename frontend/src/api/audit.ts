@@ -201,6 +201,9 @@ export const auditApi = {
     api.get<BatchRevert>(`/audit/batches/${batchId}/revert?force=${force}`),
 
   /** Undo a whole bulk edit, as one new event in history. */
+  /** Start a batch, for work done over many requests (an import). */
+  openBatch: (kind: AuditBatch['kind'], label: string) =>
+    api.post<AuditBatch>('/audit/batches', { kind, label }),
   revertBatch: (batchId: string, force = false) =>
     api.post<BatchRevert>(`/audit/batches/${batchId}/revert`, { force }),
 }

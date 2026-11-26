@@ -48,6 +48,29 @@ that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
 
+## Unreleased
+
+- **Import a spreadsheet in the app.** The records list's New menu has "Import
+  spreadsheet": choose a CSV, TSV or Excel file (it is sent from the browser, so
+  it works embedded in a host), say which column goes in which field (a new kind
+  of record gets a field for each heading, with a type guessed from the first rows
+  that can be changed), and see what will happen before anything is saved: how
+  many records are added, changed or not saved, and why each row that won't work
+  won't. Importing again can update the records already there by a column, leave
+  them, or add new ones. A large file is read and saved in parts with progress,
+  and the whole import is one event in History. New endpoints `POST
+  /api/import/inspect` and `POST /api/import/run` (`check` saves nothing and gives
+  the counts the save will give). There is no second import engine: it runs the
+  Table and Save-as-records steps, which gained what it needed: Table reads a part
+  of a file (`skip_rows`, `max_rows`, `only_columns`) and every cell as written
+  (`as_text`, so `007` stays `007`), and Save-as-records matches a table's rows
+  with one question per few hundred rows instead of one per row, saves rows at the
+  top of a collection (no record to run on), converts each cell to its field's
+  type naming the rows it can't (`as_written`), and counts the keys of earlier rows
+  so a file saved in parts repeats nothing (`earlier`, `first_row`). Saving many
+  records in one run no longer slows with every record (the run's list of touched
+  records was searched from the start each time).
+
 ## v2.3.3 — bulk delete and restore over sync, files on a host (2026-11-26)
 
 ### Changed
