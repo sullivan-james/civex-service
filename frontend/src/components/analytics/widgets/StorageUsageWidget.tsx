@@ -1,3 +1,4 @@
+import { useHostedFiles } from '../../../hooks/useFeatures'
 import { useVolumes } from '../../../hooks/useStore'
 import { errorMessage } from '../../../lib/errors'
 import { ErrorState, EmptyState } from '../../ui'
@@ -11,6 +12,12 @@ import { WidgetCard } from '../WidgetCard'
  * (add/edit/remove, write-queue order) lives in Settings > Storage; this widget only
  * summarizes. */
 export function StorageUsageWidget() {
+  // A host keeps the files: there are no drives to summarise.
+  const hosted = useHostedFiles()
+  return hosted ? null : <DriveUsage />
+}
+
+function DriveUsage() {
   const { data: volumes, isLoading, error } = useVolumes()
 
   return (

@@ -23,6 +23,12 @@ import { errorMessage } from '../../lib/errors'
 import { displayLabel } from '../../utils/naming'
 import { PLACE_TONE, placeLabel } from '../../utils/places'
 import { PlaceStatus, PlacesBar } from './Where'
+import { useHostedFiles } from '../../hooks/useFeatures'
+import {
+  hostedMessage,
+  notOnHub,
+  TEMPORARILY_UNAVAILABLE,
+} from '../../utils/hostedFiles'
 import { formatSize } from '../../utils/storage'
 import { FileLink } from '../records/FileLocation'
 import { DeletedKeepers } from '../records/FileInfoPanel'
@@ -32,6 +38,7 @@ import { FreeUpDialog } from '../settings/storage/ComputerFiles'
 import {
   Button,
   Chip,
+  Status,
   StatusDot,
   DataTable,
   MultiPick,
@@ -64,7 +71,9 @@ export function FilesView({
 }) {
   const list = useListParams(NS, ['place', 'kind', 'used', 'server'], 50)
   const { data: schemas = [] } = useSchemas()
-  const followsServer = useFollowsServer()
+  const hosted = useHostedFiles()
+  // A host keeps the files: nothing to move, free up or send from here.
+  const followsServer = useFollowsServer() && !hosted
   const [acting, setActing] = useState<'free' | null>(null)
   const toast = useToast()
   const qc = useQueryClient()
@@ -155,18 +164,26 @@ export function FilesView({
               }))}
             />
           )}
-          <Places
-            summary={data?.summary ?? []}
-            value={list.picks.place}
-            onChange={(place) => list.set({ place: place || undefined })}
-          />
+          {hosted ? (
+            <HostedStatus
+              summary={data?.summary ?? []}
+              value={list.picks.place}
+              onChange={(place) => list.set({ place: place || undefined })}
+            />
+          ) : (
+            <Places
+              summary={data?.summary ?? []}
+              value={list.picks.place}
+              onChange={(place) => list.set({ place: place || undefined })}
+            />
+          )}
           <OnServer
-            counts={data?.server ?? []}
+            counts={hosted ? [] : (data?.server ?? [])}
             value={list.picks.server}
             onChange={(server) => list.set({ server: server || undefined })}
           />
         </div>
-        <PlacesBar places={data?.summary ?? []} />
+        {!hosted && <PlacesBar places={data?.summary ?? []} />}
         {followsServer && <Sending unsent={unsentOf(data)} />}
       </div>
 
@@ -178,11 +195,13 @@ export function FilesView({
         onSelectAllMatching={picked.selectAllMatching}
         actions={
           <>
-            <MoveToDriveButton
-              what={what}
-              pick={target}
-              onStarted={picked.clear}
-            />
+            {!hosted && (
+              <MoveToDriveButton
+                what={what}
+                pick={target}
+                onStarted={picked.clear}
+              />
+            )}
             {followsServer && (
               <>
                 <Button
@@ -215,7 +234,9 @@ export function FilesView({
             search
               ? 'No file or record matches the search.'
               : list.picks.place
-                ? 'None here: pick another place to see more.'
+                ? hosted
+                  ? 'None with that status: pick another to see more.'
+                  : 'None here: pick another place to see more.'
                 : 'None of these records holds a file.'
           }
           sort={
@@ -254,26 +275,29 @@ export function FilesView({
             },
             {
               key: 'place',
-              header: 'Where',
+              header: hosted ? 'Status' : 'Where',
               sortable: true,
-              render: (f) => (
-                <div className="flex flex-wrap items-center gap-x-2">
-                  <PlaceStatus
-                    place={f.place}
-                    kind={f.place_kind}
-                    reason={f.reason}
-                    fix={f.fix}
-                  />
-                  {f.sent === false && f.volume && (
-                    <span
-                      className="text-xs text-fg-muted"
-                      title="Other computers can’t open it until it is sent. It goes up in the background."
-                    >
-                      Not on the server yet
-                    </span>
-                  )}
-                </div>
-              ),
+              render: (f) =>
+                hosted ? (
+                  <HostedFileStatus file={f} />
+                ) : (
+                  <div className="flex flex-wrap items-center gap-x-2">
+                    <PlaceStatus
+                      place={f.place}
+                      kind={f.place_kind}
+                      reason={f.reason}
+                      fix={f.fix}
+                    />
+                    {f.sent === false && f.volume && (
+                      <span
+                        className="text-xs text-fg-muted"
+                        title="Other computers can’t open it until it is sent. It goes up in the background."
+                      >
+                        Not on the server yet
+                      </span>
+                    )}
+                  </div>
+                ),
             },
           ]}
         />
@@ -301,6 +325,64 @@ export function FilesView({
           onClose={() => setActing(null)}
         />
       )}
+    </div>
+  )
+}
+
+/** A file's state on a host: nothing when it is there, else what is wrong in
+ * plain words (never a drive, bucket or server). */
+function HostedFileStatus({ file }: { file: ListedFile }) {
+  const text =
+    file.place_kind === 'missing'
+      ? notOnHub(file.reason)
+      : file.place_kind === 'unreachable'
+        ? TEMPORARILY_UNAVAILABLE
+        : file.place_kind === 'arriving'
+          ? hostedMessage('arriving')
+          : null
+  if (!text) return null
+  return (
+    <Status tone={file.place_kind === 'arriving' ? 'neutral' : 'attention'}>
+      {text}
+    </Status>
+  )
+}
+
+/** The files that aren't simply there, each a filter: not on the hub yet,
+ * temporarily unavailable. Nothing when all is well. */
+function HostedStatus({
+  summary,
+  value,
+  onChange,
+}: {
+  summary: PlaceSummary[]
+  value: string
+  onChange: (place: string) => void
+}) {
+  // One chip per kind, filtering by the kind (never a store's name).
+  const count = (kind: string) =>
+    summary.filter((p) => p.kind === kind).reduce((n, p) => n + p.files, 0)
+  const parts = [
+    { place: 'missing', label: 'Not on the hub yet', files: count('missing') },
+    {
+      place: 'unreachable',
+      label: 'Temporarily unavailable',
+      files: count('unreachable'),
+    },
+  ].filter((p) => p.files > 0)
+  if (parts.length === 0) return null
+  return (
+    <div className="flex flex-wrap gap-2" role="group" aria-label="Status">
+      {parts.map((p) => (
+        <Chip
+          key={p.place}
+          selected={value === p.place}
+          onClick={() => onChange(value === p.place ? '' : p.place)}
+        >
+          <StatusDot tone="attention" />
+          {p.label} · {p.files.toLocaleString()}
+        </Chip>
+      ))}
     </div>
   )
 }

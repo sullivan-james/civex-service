@@ -1,4 +1,5 @@
 import { Link } from 'react-router'
+import { useHostedFiles } from '../../hooks/useFeatures'
 import { useFileListing } from '../../hooks/useFileListing'
 import { placeCount } from '../../utils/places'
 import { MoveToDriveButton } from '../files/MoveDialog'
@@ -19,6 +20,7 @@ export function RecordStorageSummary({
   name: string
   filesHref?: string
 }) {
+  const hosted = useHostedFiles()
   const pick = { within: recordId }
   const { data } = useFileListing({ ...pick, limit: 1 })
   const places = data?.summary ?? []
@@ -29,6 +31,38 @@ export function RecordStorageSummary({
   // Said only when it matters: a file that can't be reached or is missing.
   // Where files are, when all is well, is under Files in the page's menu.
   if (files === 0 || !attention) return null
+  if (hosted) {
+    // No drives here: only how many aren't on the hub yet or can't be had now.
+    const n = (kind: string) =>
+      places.filter((p) => p.kind === kind).reduce((a, p) => a + p.files, 0)
+    const missing = n('missing')
+    const unreachable = n('unreachable')
+    return (
+      <div
+        role="status"
+        className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border bg-canvas-subtle px-3 py-2 text-xs text-attention"
+      >
+        {missing > 0 && (
+          <span>
+            {missing.toLocaleString()} {missing === 1 ? 'file is' : 'files are'}{' '}
+            not on the hub yet.
+          </span>
+        )}
+        {unreachable > 0 && (
+          <span>
+            {unreachable.toLocaleString()}{' '}
+            {unreachable === 1 ? 'file is' : 'files are'} temporarily
+            unavailable. Try again shortly.
+          </span>
+        )}
+        {filesHref && (
+          <Link to={filesHref} className="ml-auto text-accent hover:underline">
+            Show all files
+          </Link>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div

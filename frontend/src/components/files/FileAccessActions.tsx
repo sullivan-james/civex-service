@@ -1,4 +1,5 @@
 import type { FileSelection } from '../../api/fileAccess'
+import { useHostedFiles } from '../../hooks/useFeatures'
 import { useExportHost } from '../../hooks/useExportHost'
 import { Button, Menu, type MenuEntry } from '../ui'
 import {
@@ -51,6 +52,8 @@ export function FileAccessActions({
    * ("Export these records…" from an analysis). */
   exportItem?: { label: string; hint: string }
 }) {
+  // Folders already made are on a drive: a host has none to manage.
+  const hosted = useHostedFiles()
   const { navigate, openExport, dialogs } = useExportHost({
     selection,
     folderName,
@@ -86,7 +89,7 @@ export function FileAccessActions({
             icon: Upload,
             onClick: () => openExport(),
           },
-          { separator: true as const },
+          ...(hosted && !builderTo ? [] : [{ separator: true as const }]),
           ...(builderTo
             ? [
                 {
@@ -97,12 +100,16 @@ export function FileAccessActions({
                 },
               ]
             : []),
-          {
-            label: 'Manage exports…',
-            hint: 'Folders already made.',
-            icon: FolderTree,
-            onClick: () => navigate('/exports?tab=made'),
-          },
+          ...(hosted
+            ? []
+            : [
+                {
+                  label: 'Manage exports…',
+                  hint: 'Folders already made.',
+                  icon: FolderTree,
+                  onClick: () => navigate('/exports?tab=made'),
+                },
+              ]),
         ]}
         trigger={({ toggle, open }) => (
           <Button
