@@ -340,6 +340,38 @@ class LocalAuditRepository:
             )
         ]
 
+    def deletes_since_restore(
+        self, entity_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, set[uuid.UUID]]:
+        """For each record, the ids of its delete entries newer than its latest
+        restore entry (all of them when it was never restored): two queries
+        per chunk of ids, columns only."""
+        out: dict[uuid.UUID, set[uuid.UUID]] = {}
+        ids = list(dict.fromkeys(entity_ids))
+        for at in range(0, len(ids), 5000):
+            chunk = ids[at : at + 5000]
+            restored = dict(
+                self._s.query(AuditLog.entity_id, func.max(AuditLog.timestamp))
+                .filter(
+                    AuditLog.entity_type == "record",
+                    AuditLog.action == "restore",
+                    AuditLog.entity_id.in_(chunk),
+                )
+                .group_by(AuditLog.entity_id)
+                .all()
+            )
+            for entry_id, entity_id, stamp in self._s.query(
+                AuditLog.id, AuditLog.entity_id, AuditLog.timestamp
+            ).filter(
+                AuditLog.entity_type == "record",
+                AuditLog.action == "delete",
+                AuditLog.entity_id.in_(chunk),
+            ):
+                back = restored.get(entity_id)
+                if back is None or utc(stamp) > utc(back):
+                    out.setdefault(entity_id, set()).add(entry_id)
+        return out
+
     def batch_entry_ids(self, batch_id: uuid.UUID) -> list[uuid.UUID]:
         return [
             r[0]

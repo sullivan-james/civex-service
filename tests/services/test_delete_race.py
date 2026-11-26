@@ -112,9 +112,33 @@ def test_a_record_restored_by_two_writers_has_one_restore_entry(two):
     ids = _make(first, 3)
     first.record_svc.delete_many(ids)
     first.commit()
-    rows = {r.id: r for r in first.record_svc._records.restore_rows([uuid.UUID(i) for i in ids])}
+    rows = {
+        r.id: r
+        for r in first.record_svc._records.restore_rows([uuid.UUID(i) for i in ids])
+    }
     wanted = list(rows)
     assert first.record_svc._records.restore_many(wanted) == set(wanted)
     first.commit()
     assert second.record_svc._records.restore_many(wanted) == set()
     assert _live(first) == 3
+
+
+def test_restore_set_under_the_race_counts_and_audits_what_it_changed(two, monkeypatch):
+    first, second = two
+    ids = _make(first, 4)
+    first.record_svc.delete_many(ids)
+    first.commit()
+    # The second writer plans (it saw them deleted), then the first restores.
+    plan = second.record_svc.plan_restore_set(ids)
+    assert len(plan.coming) == 4
+    done = first.record_svc.restore_set(ids)
+    first.commit()
+    assert (done.restored, done.came_back) == (4, 4)
+    monkeypatch.setattr(
+        second.record_svc, "plan_restore_set", lambda *a, **k: plan, raising=True
+    )
+    late = second.record_svc.restore_set(ids)
+    second.commit()
+    assert (late.restored, late.came_back) == (0, 0)
+    for rid in ids:
+        assert _entries(first, "restore", rid) == 1

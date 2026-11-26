@@ -10,25 +10,31 @@ from .test_delete_race import two  # noqa: F401
 import threading  # noqa: E402
 import uuid  # noqa: E402
 
+from civex.domain.dtos import RecordChangesDTO  # noqa: E402
 
-def test_a_delete_that_waits_on_the_others_lock_deletes_nothing(two):  # noqa: F811
+
+def test_two_deletes_of_the_same_records_write_one_entry_each(two):  # noqa: F811
+    """Two real transactions through the service: the second plans on the
+    records as live, waits on the first's row locks, and finds them deleted."""
     from .test_delete_race import _entries, _make
 
     first, second = two
     ids = _make(first, 5)
     wanted = [uuid.UUID(i) for i in ids]
     got: dict = {}
-    first_won = first.record_svc._records.delete_many(wanted)  # rows locked, uncommitted
+    first_done = first.record_svc.apply_changes(RecordChangesDTO(delete=wanted))
 
     def other():
-        got["won"] = second.record_svc._records.delete_many(wanted)  # waits for the lock
+        got["done"] = second.record_svc.apply_changes(RecordChangesDTO(delete=wanted))
         second.commit()
 
     t = threading.Thread(target=other)
     t.start()
-    t.join(timeout=0.5)
+    t.join(timeout=1.0)
     assert t.is_alive()  # blocked on the first writer's row locks
     first.commit()
     t.join(timeout=10)
-    assert first_won == set(wanted) and got["won"] == set()
-    assert all(_entries(first, "delete", i) == 0 for i in ids)
+    assert not t.is_alive()
+    assert first_done.deleted == 5
+    assert got["done"].deleted == 0
+    assert all(_entries(first, "delete", i) == 1 for i in ids)

@@ -14,7 +14,9 @@ final version's entry or `## Unreleased` instead of one of its own. The version 
   brought back records the other had deleted. A delete or restore now puts in
   history only the records its own write changed (the second is a no-op for
   records already deleted or restored), so undoing a batch restores exactly
-  what that batch deleted. PostgreSQL and SQLite.
+  what that batch deleted. Undoing a delete (a batch or one entry) also leaves a
+  record another change deleted too, as "Deleted again by another change".
+  PostgreSQL and SQLite.
 - **Sync: a blank copy only downloads.** A computer that copies a project owes
   the server only files it stored itself; files that came with the records it
   pulled were counted as owed, so the copy flipped between "Copying the

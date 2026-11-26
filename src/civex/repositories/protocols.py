@@ -784,6 +784,14 @@ class AuditRepository(Protocol):
         newest first, columns only."""
         ...
 
+    def deletes_since_restore(
+        self, entity_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, set[uuid.UUID]]:
+        """For each record, the ids of its delete entries newer than its latest
+        restore entry (all of them when it was never restored): who deleted it
+        in the stretch it is still deleted in."""
+        ...
+
     def batch_entry_ids(self, batch_id: uuid.UUID) -> list[uuid.UUID]:
         """The ids of every entry in a batch, newest first (ties by id), in one
         query however many there are."""

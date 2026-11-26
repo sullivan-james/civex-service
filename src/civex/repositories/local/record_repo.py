@@ -1426,6 +1426,27 @@ class LocalRecordRepository:
             ]
         return levels
 
+    def _changed(
+        self, chunk: list[uuid.UUID], when: Any, values: dict[str, Any]
+    ) -> set[uuid.UUID]:
+        """UPDATE the records of `chunk` that meet `when` (not an edit: each
+        keeps the date it was last changed) and return the ids this statement
+        changed. A database that answers an UPDATE with its rows (PostgreSQL,
+        SQLite from 3.35) says so itself; on an older SQLite the matching ids
+        are read first, which the one writer it allows makes exact."""
+        statement = (
+            update(Record)
+            .where(Record.id.in_(chunk), when)
+            .values(**values, updated_at=Record.updated_at)
+            .execution_options(synchronize_session=False)
+        )
+        if self._s.get_bind().dialect.update_returning:
+            return set(self._s.scalars(statement.returning(Record.id)))
+        hit = set(self._s.scalars(select(Record.id).where(Record.id.in_(chunk), when)))
+        if hit:
+            self._s.execute(statement.where(Record.id.in_(list(hit))))
+        return hit
+
     def delete_many(
         self, ids: list[uuid.UUID], stamp: datetime | None = None
     ) -> set[uuid.UUID]:
@@ -1437,14 +1458,8 @@ class LocalRecordRepository:
         now = stamp or datetime.now(timezone.utc)
         won: set[uuid.UUID] = set()
         for chunk in _chunks(ids):
-            won.update(
-                self._s.scalars(
-                    update(Record)
-                    .where(Record.id.in_(chunk), Record.deleted_at.is_(None))
-                    .values(deleted_at=now, updated_at=Record.updated_at)
-                    .returning(Record.id)
-                    .execution_options(synchronize_session=False)
-                )
+            won |= self._changed(
+                chunk, Record.deleted_at.is_(None), {"deleted_at": now}
             )
         self._s.expire_all()
         return won
@@ -1613,14 +1628,8 @@ class LocalRecordRepository:
         restored first is not returned, so it is not put in history twice)."""
         won: set[uuid.UUID] = set()
         for chunk in _bulk_chunks(self._s, ids):
-            won.update(
-                self._s.scalars(
-                    update(Record)
-                    .where(Record.id.in_(chunk), Record.deleted_at.is_not(None))
-                    .values(deleted_at=None, updated_at=Record.updated_at)
-                    .returning(Record.id)
-                    .execution_options(synchronize_session=False)
-                )
+            won |= self._changed(
+                chunk, Record.deleted_at.is_not(None), {"deleted_at": None}
             )
         self._s.expire_all()
         return won

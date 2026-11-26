@@ -4410,6 +4410,7 @@ class RecordService:
         ops = _tree_ops(links) if self._audit else None
         if ops:
             every = _by_tree(every, ops)  # a tree's entries together
+        deleted: set[uuid.UUID] = set()
         with _audit_batch(self._audit, "delete", len(every) > 1):
             for start in range(0, len(every), _APPLY_CHUNK):
                 chunk = every[start : start + _APPLY_CHUNK]
@@ -4423,6 +4424,7 @@ class RecordService:
                 # another person's bulk delete) is theirs, so undoing this
                 # batch never brings it back.
                 won = self._records.delete_many(chunk, stamp)
+                deleted |= won
                 if self._audit:
                     self._audit.log_changes(
                         "delete",
@@ -4435,7 +4437,12 @@ class RecordService:
                         timestamp=stamp,
                         ops=ops,
                     )
-        return sum(1 for rid in set(ids) if rid in links and links[rid] not in doomed)
+        # Counted from what this write deleted, not from what was asked.
+        return sum(
+            1
+            for rid in set(ids)
+            if rid in deleted and rid in links and links[rid] not in doomed
+        )
 
     def list_deleted(
         self,
@@ -5975,11 +5982,19 @@ class RecordService:
         plan = self.plan_restore_set([str(i) for i in ids])
         if plan.coming and dry_run:
             self._require_restore(plan.coming, plan.rows)
-        elif plan.coming:
-            self._restore_write(plan.coming, plan.rows)
+            return RestoreSetResultDTO(
+                restored=plan.restored,
+                came_back=len(plan.coming),
+                left=[str(i) for i in plan.blocked],
+                absent=[str(i) for i in plan.absent],
+            )
+        won = self._restore_write(plan.coming, plan.rows) if plan.coming else set()
+        # Counted from what this write brought back: a record someone else
+        # restored first is theirs, and is not counted twice.
+        lost = len([i for i in plan.coming if i not in won])
         return RestoreSetResultDTO(
-            restored=plan.restored,
-            came_back=len(plan.coming),
+            restored=max(0, plan.restored - lost),
+            came_back=len(won),
             left=[str(i) for i in plan.blocked],
             absent=[str(i) for i in plan.absent],
         )
@@ -5988,7 +6003,7 @@ class RecordService:
         self,
         ids: list[uuid.UUID],
         rows: dict[uuid.UUID, RestoreRow],
-    ) -> None:
+    ) -> set[uuid.UUID]:
         """Bring back these deleted records, `ids` parents before what sits
         under them (a child can't come back under a parent still deleted, here
         or wherever the entries are applied next), `rows` saying what each was:
@@ -6001,7 +6016,7 @@ class RecordService:
         won = self._records.restore_many(ids)
         ids = [i for i in ids if i in won]  # only what this write brought back
         if not self._audit or not ids:
-            return
+            return won
         ops = _tree_ops({i: rows[i].parent_record_id for i in ids})
         ids = _by_tree(ids, ops)  # a tree's entries together, parents first
         with _audit_batch(self._audit, "restore", len(ids) > 1):
@@ -6014,6 +6029,7 @@ class RecordService:
                 ),
                 ops=ops,
             )
+        return won
 
     def _require_restore(
         self, ids: list[uuid.UUID], rows: dict[uuid.UUID, RestoreRow]
@@ -6075,11 +6091,10 @@ class RecordService:
                 }
                 everything |= frontier
         plan = self.plan_restore_set([str(i) for i in everything], exact=True)
-        if plan.coming:
-            self._restore_write(plan.coming, plan.rows)
+        won = self._restore_write(plan.coming, plan.rows) if plan.coming else set()
         return RestoreSetResultDTO(
-            restored=len([i for i in plan.coming if i in chosen]),
-            came_back=len(plan.coming),
+            restored=len([i for i in plan.coming if i in chosen and i in won]),
+            came_back=len(won),
             left=[str(i) for i in plan.blocked if i in chosen],
         )
 
