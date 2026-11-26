@@ -132,7 +132,7 @@ def resolve_from_fields(config: Any, ctx: WorkflowContext) -> Any:
     says so, rather than a step silently given nothing."""
     if _is_from_field(config):
         name = config["from_field"]
-        record = ctx.get_record(str(ctx.record.id))
+        record = ctx.get_record(str(ctx.record.id))  # type: ignore[union-attr]  # a run is of a record
         value = record.data.get(name)
         if value is None or value == "":
             if config.get("if_empty") == "clear":
@@ -296,7 +296,7 @@ def _run(
     log.info(
         "▶ workflow '%s' | record %s | %d step(s)",
         wf.name,
-        str(ctx.record.id)[:8],
+        str(ctx.record.id)[:8],  # type: ignore[union-attr]  # a run is of a record
         len(order),
     )
     wf_start = time.perf_counter()

@@ -22,6 +22,7 @@ from typing import Any
 
 from civex_plugin_sdk import Ctx, RpcError
 
+from civex.domain.table_import import coerce_cell
 from civex.domain.uniqueness import UNIQUE_DTYPES, is_blank
 from civex.plugins.builtins._refusals import GONE, refused
 
@@ -107,7 +108,9 @@ def _plain(value: Any) -> Any:
     return value.item() if hasattr(value, "item") else value
 
 
-def _row_data(row: Any, columns: list[str], mapping: dict[str, str]) -> dict:
+def _row_data(
+    row: Any, columns: list[str], mapping: dict[str, str], as_written: bool = False
+) -> dict:
     import pandas as pd
 
     if mapping:
@@ -118,7 +121,11 @@ def _row_data(row: Any, columns: list[str], mapping: dict[str, str]) -> dict:
         }
     else:
         raw = {column: row[column] for column in columns}
-    return {k: _plain(v) for k, v in raw.items() if not pd.isna(v)}
+    return {
+        k: _plain(v)
+        for k, v in raw.items()
+        if not pd.isna(v) and not (as_written and is_blank(v))
+    }
 
 
 #: Types whose values are text: a number a table gives for one is written,
@@ -149,35 +156,67 @@ def _said(key: dict[str, str], values: list[Any]) -> str:
     return ", ".join(f"{k} {v!r}" for k, v in zip(key, values))
 
 
-def _existing(
+#: Existing records asked for in one question; a longer batch is asked in parts.
+_LOOKUP = 200
+#: Records one answer holds at most; a longer answer is read in pages.
+_PAGE = 1000
+
+
+def _found(
     ctx: Ctx,
     dataset: str,
     schema_name: str,
     parent_id: str,
     key: dict[str, str],
-    values: list[Any],
-) -> list[dict[str, Any]]:
-    """Up to two records in the row's place holding its key's values. Asks
-    with the explorer's typed filter (`filter_tree`), which compares as a
-    unique key does; `Ctx.find_records` doesn't send one yet in the released
-    SDK, so it is asked for directly."""
-    tree = {
-        "and": [
-            {"field": name, "op": "eq", "value": value}
-            for name, value in zip(key, values)
-        ]
-    }
-    found = ctx._call_tool(
-        "find_records",
-        {
-            "dataset_name": dataset,
-            "schema_name": schema_name,
-            "parent_record_id": parent_id,
-            "filter_tree": tree,
-            "limit": 2,
-        },
-    )
-    return found["records"]
+    batch: list[list[Any]],
+) -> dict[tuple, list[dict[str, Any]]]:
+    """The records already in the rows' place holding any of the key values in
+    `batch`, grouped by the key they hold, as a unique key compares them.
+    Asked a batch at a time with the explorer's typed filter (`filter_tree`),
+    never a row at a time: one question for a few hundred rows."""
+    names = list(key)
+    found: dict[tuple, list[dict[str, Any]]] = {}
+    for at in range(0, len(batch), _LOOKUP):
+        part = batch[at : at + _LOOKUP]
+        if len(names) == 1:
+            tree: dict[str, Any] = {
+                "and": [{"field": names[0], "op": "in", "value": [v[0] for v in part]}]
+            }
+        else:
+            tree = {
+                "or": [
+                    {
+                        "and": [
+                            {"field": n, "op": "eq", "value": v}
+                            for n, v in zip(names, values)
+                        ]
+                    }
+                    for values in part
+                ]
+            }
+        offset = 0
+        while True:
+            # `Ctx.find_records` doesn't send a filter tree yet in the released
+            # SDK, so the host function is asked for directly.
+            page = ctx._call_tool(
+                "find_records",
+                {
+                    "dataset_name": dataset,
+                    "schema_name": schema_name,
+                    "parent_record_id": parent_id,
+                    "filter_tree": tree,
+                    "limit": _PAGE,
+                    "offset": offset,
+                },
+            )["records"]
+            for record in page:
+                data = record.get("data", {})
+                marker = tuple(_same(data.get(n)) for n in names)
+                found.setdefault(marker, []).append(record)
+            if len(page) < _PAGE:
+                break
+            offset += _PAGE
+    return found
 
 
 def save_rows(
@@ -190,10 +229,27 @@ def save_rows(
     mapping: dict[str, str],
     parent_record_id: str,
     if_exists: str = "update",
+    as_written: bool = False,
+    first_row: int = 1,
+    earlier: Any = None,
 ) -> dict[str, Any]:
+    """Save the rows. `as_written`: the cells are text as a spreadsheet shows
+    them, so blanks are left out and each cell becomes the value its field
+    holds (`coerce_cell`), a row with a cell that can't be one is skipped and
+    named. `first_row` numbers the rows in what is said about them (a part of
+    a table read later starts higher), and `earlier` is the rows before them
+    (same columns), whose keys count when a repeated one is looked for: a table
+    saved in parts skips a repeated key the way one saved whole does."""
     dataset_name = dataset or ctx.get_context_dataset()["name"]
+    schema = ctx.get_schema(schema_name)
     key = {} if if_exists == "add_new" else match_key(ctx, schema_name, match_on)
-    parent_id = parent_record_id or ctx.get_context_record()["id"]
+    # A kind with no parent is at the top of its collection: there is no
+    # record to match within or save inside.
+    if parent_record_id or schema.get("parent_id"):
+        parent_id = parent_record_id or ctx.get_context_record()["id"]
+    else:
+        parent_id = ""
+    types = {f["name"]: f["dtype"] for f in schema.get("fields", []) if "dtype" in f}
     columns = list(df.columns)
     log.info(
         "Saving %d rows → collection '%s', kind '%s'%s",
@@ -202,18 +258,63 @@ def save_rows(
         schema_name,
         f", matched by {', '.join(key)}" if key else " (each a new record)",
     )
-    out = Outcome()
+
+    def _clean(row: Any) -> tuple[dict[str, Any], list[str]]:
+        """The row's values for its fields, and what is wrong with any."""
+        data = _row_data(row, columns, mapping, as_written)
+        wrong: list[str] = []
+        if as_written:
+            for name in list(data):
+                try:
+                    data[name] = coerce_cell(data[name], types.get(name, "string"))
+                except ValueError as e:
+                    wrong.append(f"{name}: {e}")
+        for name, dtype in key.items():
+            if dtype in _TEXT and name in data:
+                data[name] = _as_text(data[name])
+        return data, wrong
+
     seen: dict[tuple, int] = {}
-    for number, (_, row) in enumerate(df.iterrows(), start=1):
-        data = _row_data(row, columns, mapping)
+    if earlier is not None and key:
+        for at, (_, row) in enumerate(earlier.iterrows()):
+            data, wrong = _clean(row)
+            values = [data.get(name) for name in key]
+            if wrong or any(is_blank(v) for v in values):
+                continue
+            seen.setdefault(
+                tuple(_same(v) for v in values), first_row - len(earlier) + at
+            )
+
+    prepared: list[tuple[int, dict[str, Any], list[str]]] = []
+    for at, (_, row) in enumerate(df.iterrows()):
+        data, wrong = _clean(row)
+        prepared.append((first_row + at, data, wrong))
+    existing: dict[tuple, list[dict[str, Any]]] = {}
+    if key:
+        ask: dict[tuple, list[Any]] = {}
+        for _, data, wrong in prepared:
+            values = [data.get(name) for name in key]
+            if not wrong and not any(is_blank(v) for v in values):
+                marker = tuple(_same(v) for v in values)
+                if marker not in seen:
+                    ask.setdefault(marker, values)
+        if ask:
+            existing = _found(
+                ctx, dataset_name, schema_name, parent_id, key, list(ask.values())
+            )
+
+    out = Outcome()
+    for number, data, wrong in prepared:
         try:
+            if wrong:
+                out.skip(f"Row {number}: {'; '.join(wrong)}")
+                continue
+            if as_written and not data:
+                continue  # a row with nothing in it is not a record
             if not key:
                 ctx.create_record(dataset_name, schema_name, data, parent_id)
                 out.created += 1
                 continue
-            for name, dtype in key.items():
-                if dtype in _TEXT and name in data:
-                    data[name] = _as_text(data[name])
             values = [data.get(name) for name in key]
             blank = [name for name, v in zip(key, values) if is_blank(v)]
             if blank:
@@ -227,7 +328,7 @@ def save_rows(
                 )
                 continue
             seen[marker] = number
-            found = _existing(ctx, dataset_name, schema_name, parent_id, key, values)
+            found = existing.get(marker, [])
             if len(found) > 1:
                 out.skip(
                     f"Row {number}: several records already have {_said(key, values)}"

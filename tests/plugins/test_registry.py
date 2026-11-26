@@ -26,7 +26,7 @@ _BUILTIN_CONTRACTS = {
     "civex.table@1": (("files",), ("table",)),
     "civex.value_from_filename@1": ((), ("value", "filename", "extracted")),
     "civex.save_records@1": (
-        ("rows", "files"),
+        ("rows", "files", "earlier"),
         (
             "created",
             "updated",

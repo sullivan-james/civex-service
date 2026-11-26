@@ -20,6 +20,7 @@ export function EmptyCollectionGuide({
   schemas,
   within,
   newMenu,
+  importHref,
   cannotAddSchema,
 }: {
   /** None when the list is every collection at once. */
@@ -29,6 +30,8 @@ export function EmptyCollectionGuide({
   within?: { id: string; schema: Schema } | null
   /** The New menu for records, when there is a schema to add one of. */
   newMenu: ReactNode
+  /** The import page, when records can be brought in from a spreadsheet here. */
+  importHref?: string
   /** Why this person may not make a schema, when they may not. */
   cannotAddSchema?: string
 }) {
@@ -109,6 +112,14 @@ export function EmptyCollectionGuide({
           </div>
         </li>
       </ol>
+      {importHref && (
+        <p className="mt-5 flex flex-wrap items-center gap-3 text-sm text-fg-muted">
+          Have a spreadsheet?
+          <Button size="sm" to={importHref}>
+            Import spreadsheet
+          </Button>
+        </p>
+      )}
     </div>
   )
 }
