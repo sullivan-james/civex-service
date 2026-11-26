@@ -1036,6 +1036,10 @@ class SyncService:
             )
             self._commit()
         self._config.sync.remote = url
+        if mode == "joined":
+            # A new copy fetches files when they are opened (it was `all`:
+            # existing projects keep what they have).
+            self._config.sync.download_files = "opened"
         self._config_store.save(self._config)
 
         with sync_lock(self._config.civex_dir):

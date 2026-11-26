@@ -308,9 +308,14 @@ class AsDevice:
     """A device's sync service, acting from its own machine: every call sees that
     device's own user state (its token and device id), not another's."""
 
-    def __init__(self, service, state_file: Path) -> None:
+    def __init__(
+        self, service, state_file: Path, download_files: str | None = None
+    ) -> None:
         object.__setattr__(self, "_svc", service)
         object.__setattr__(self, "_state", state_file)
+        # What joining leaves `sync.download_files` as (None: as the product
+        # sets it, `opened` for a new copy).
+        object.__setattr__(self, "_download_files", download_files)
 
     def __getattr__(self, name):
         target = getattr(self._svc, name)
@@ -321,7 +326,10 @@ class AsDevice:
             previous = os.environ.get("CIVEX_USER_STATE")
             os.environ["CIVEX_USER_STATE"] = str(self._state)
             try:
-                return target(*args, **kwargs)
+                done = target(*args, **kwargs)
+                if name == "connect" and self._download_files is not None:
+                    self._svc._config.sync.download_files = self._download_files
+                return done
             finally:
                 if previous is None:
                     os.environ.pop("CIVEX_USER_STATE", None)
@@ -332,20 +340,23 @@ class AsDevice:
 
 
 def device(
-    project, authority, name, *, flaky: bool = False, download_files: str = "all"
+    project, authority, name, *, flaky: bool = False, download_files: str | None = "all"
 ):
     """A new, empty project that syncs to `authority` over a loopback, invited
     as `name`. The transport is the Flaky wrapper if asked. It keeps every file
     (`download_files`) unless told otherwise, so a test of what a device does
-    with files need not choose; the product default is `opened`."""
+    with files need not choose; joining sets `opened` in the product."""
     ctx = project(name)
-    ctx.config.sync.download_files = download_files
+    if download_files is not None:
+        ctx.config.sync.download_files = download_files
     _, invite = authority.device_keys.invite(name)
     authority.commit()
     ctx._holder = {}  # type: ignore[attr-defined]
     _use(ctx, authority, flaky)
     root = ctx.config.project_root
-    ctx.sync_svc = AsDevice(ctx.sync_svc, root.parent / f"{name}-user-state.toml")
+    ctx.sync_svc = AsDevice(
+        ctx.sync_svc, root.parent / f"{name}-user-state.toml", download_files
+    )
     ctx._invite = invite  # type: ignore[attr-defined]
     return ctx
 

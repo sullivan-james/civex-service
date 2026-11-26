@@ -120,7 +120,7 @@ def test_files_the_authority_lacks_are_the_authoritys_not_ours(
 def test_files_are_fetched_only_when_opened_until_chosen(pair, project, authority):
     laptop, _, record = pair
     _cite(laptop, record, [b"alpha", b"beta", b"gamma"])
-    assert SyncConfig().download_files == "opened"
+    assert SyncConfig().download_files == "all"  # existing projects keep it
     tablet = _clone(project, authority)
 
     status = tablet.sync_svc.status()
@@ -214,3 +214,14 @@ def test_an_export_from_a_clone_fetches_the_files_it_lacks(
         manifest = json.loads(zf.read("bundle.json"))
     assert len(manifest["files"]["missing"]) == 1
     assert (plan.files_unreachable, plan.files_not_on_server) == (1, 1)
+
+
+def test_joining_sets_a_new_copy_to_open_and_leaves_old_settings(
+    pair, project, authority
+):
+    laptop, _, record = pair
+    _cite(laptop, record, [b"one"])
+    fresh = device(project, authority, "fresh", download_files=None)
+    assert fresh.config.sync.download_files == "all"  # as before joining
+    assert connect(fresh) == "joined"
+    assert fresh.sync_svc.status().download_files == "opened"

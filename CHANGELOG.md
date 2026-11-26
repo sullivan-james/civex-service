@@ -18,9 +18,9 @@ final version's entry or `## Unreleased` instead of one of its own. The version 
   the device that added them may still be uploading) and `files_missing`
   (after that), neither this computer's to send. The status also carries
   `files_not_here`, what keeping every file would download.
-- **Sync: files are fetched when opened by default.** `sync.download_files` now
-  defaults to `opened` (it was `all`), including for existing projects whose
-  settings never named it; choosing `all` still downloads every
+- **Sync: a new copy fetches files when they are opened.** A project made by
+  joining an authority sets `sync.download_files` to `opened`; existing
+  projects, and settings that don't name it, keep `all`; choosing `all` still downloads every
   file in the background.
 - **Sync: file download progress counts the whole run.** The bytes and speed
   shown while downloading restarted with each pass of the run, so a finished
