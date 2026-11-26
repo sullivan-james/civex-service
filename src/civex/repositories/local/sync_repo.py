@@ -20,6 +20,8 @@ from sqlalchemy import (
     Text,
     Uuid,
     and_,
+    bindparam,
+    case,
     cast,
     delete,
     exists,
@@ -2319,10 +2321,11 @@ class LocalSyncRepository:
         )
 
     def mark_sent(self, results: list[OpResult]) -> None:
-        """Record what the authority answered for each change sent: as
-        one-at-a-time updates of each row would, written together (a change
-        not held here is skipped)."""
-        rows: dict[tuple[str, bool, bool], list[dict[str, Any]]] = {}
+        """Record what the authority answered for each change sent, as
+        answering them one at a time would (a change answered twice keeps what
+        each said, the later winning; one not held here is skipped), written
+        together."""
+        merged: dict[uuid.UUID, dict[str, Any]] = {}
         for result in results:
             if result.status == "rejected":
                 values: dict[str, Any] = {"sync_state": "rejected"}
@@ -2334,17 +2337,29 @@ class LocalSyncRepository:
                     values["apply_state"] = "superseded"
             else:
                 continue
-            rows.setdefault(tuple(sorted(values)), []).append(  # type: ignore[arg-type]
-                {"id": result.op_id, **values}
+            merged.setdefault(result.op_id, {}).update(values)
+        shapes: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+        for op_id, values in merged.items():
+            shapes.setdefault(tuple(sorted(values)), []).append(
+                {"b_id": op_id, **{f"b_{k}": v for k, v in values.items()}}
             )
-        for batch in rows.values():
+        table: Any = AuditLog.__table__
+        for keys, batch in shapes.items():
             self._s.execute(
-                update(AuditLog),
+                update(table)
+                .where(table.c.id == bindparam("b_id"))
+                .values({k: bindparam(f"b_{k}") for k in keys})
+                .execution_options(synchronize_session=False),
                 batch,
-                execution_options={"synchronize_session": False},
             )
-        if rows:
-            self._s.expire_all()
+        if shapes:
+            self._expire_entries()
+
+    def _expire_entries(self) -> None:
+        """History rows this session holds are stale after a bulk write."""
+        for obj in list(self._s.identity_map.values()):
+            if isinstance(obj, AuditLog):
+                self._s.expire(obj)
 
     def forget_numbers(self) -> None:
         """Clear the numbers another authority gave this project's history (it
@@ -2493,32 +2508,32 @@ class LocalSyncRepository:
             self._s.flush()
 
     def mark_seqs(self, items: list[tuple[uuid.UUID, int, str | None]]) -> None:
-        """`mark_seq` for each of these (id, number, device), written together."""
-        by_device: dict[bool, list[dict[str, Any]]] = {False: [], True: []}
+        """`mark_seq` for each of these (id, number, device), in one statement
+        (a change given twice keeps the later number, and a device once named)."""
+        merged: dict[uuid.UUID, dict[str, Any]] = {}
         for entry_id, seq, device in items:
-            row: dict[str, Any] = {"id": entry_id, "hub_seq": seq}
+            row = merged.setdefault(entry_id, {"b_seq": seq, "b_dev": None})
+            row["b_seq"] = seq
             if device:
-                row["device"] = device
-            by_device[bool(device)].append(row)
-        for batch in by_device.values():
-            if batch:
-                self._s.execute(
-                    update(AuditLog),
-                    batch,
-                    execution_options={"synchronize_session": False},
-                )
-        ids = [i for i, _, _ in items]
-        for start in range(0, len(ids), _ID_CHUNK):
-            self._s.execute(
-                update(AuditLog)
-                .where(
-                    AuditLog.id.in_(ids[start : start + _ID_CHUNK]),
-                    AuditLog.sync_state == "pending",
-                )
-                .values(sync_state="synced")
-                .execution_options(synchronize_session=False)
+                row["b_dev"] = device
+        if not merged:
+            return
+        table: Any = AuditLog.__table__
+        self._s.execute(
+            update(table)
+            .where(table.c.id == bindparam("b_id"))
+            .values(
+                hub_seq=bindparam("b_seq"),
+                device=func.coalesce(bindparam("b_dev"), table.c.device),
+                sync_state=case(
+                    (table.c.sync_state == "pending", "synced"),
+                    else_=table.c.sync_state,
+                ),
             )
-        self._s.expire_all()
+            .execution_options(synchronize_session=False),
+            [{"b_id": i, **v} for i, v in merged.items()],
+        )
+        self._expire_entries()
 
     def latest_hlc(self) -> str | None:
         return self._s.query(func.max(AuditLog.hlc)).scalar()
