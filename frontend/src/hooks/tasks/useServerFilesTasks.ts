@@ -29,16 +29,17 @@ export function useServerFilesTasks(): BackgroundTask[] {
   const sendNow = useSendFilesNow()
   const ignore = useIgnoreMissingFiles()
   const update = useUpdateRemote()
-  const offered =
-    !!data &&
+  const offered = Boolean(
+    data &&
     data.configured &&
     !data.serving &&
     data.download_files === 'opened' &&
-    (data.files_not_here ?? 0) > 0
+    (data.files_not_here ?? 0) > 0,
+  )
   // How big they are, once the listing has said (it can take a moment).
   const sizes = useFileListing({ limit: 1 }, offered)
   const bytes = sizes.data?.summary
-    .filter((p) => p.kind === 'server')
+    ?.filter((p) => p.kind === 'server')
     .reduce((n, p) => n + p.bytes, 0)
   return data
     ? serverFilesTasks(
