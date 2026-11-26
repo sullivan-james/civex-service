@@ -59,7 +59,7 @@ def spy(project):
     return ctx, calls
 
 
-def test_a_delete_already_made_is_acknowledged_and_written_once(project, spy):
+def test_a_delete_already_made_by_another_change_is_written_down_too(project, spy):
     ctx, calls = spy
     f = Flow(project)
     ids = f.many(5)
@@ -72,19 +72,18 @@ def test_a_delete_already_made_is_acknowledged_and_written_once(project, spy):
     calls["settled"] = 0
     answers, new_head = send(ctx, dup)
     assert [a[1] for a in answers] == ["applied"] * 5
-    assert new_head == head  # nothing numbered
+    # Another change's delete is history too: it is what lets an undo of one
+    # leave what the other also deleted. The record itself does not change.
     for rid in ids:
-        assert len(history(ctx, rid, "delete")) == 1
-        assert not [
-            e
-            for e in ctx.sync_repo.numbered_entries("record", rid, 0)
-            if e.actor == "sync"
-        ]
-    assert calls["delete"] == [] and calls["settled"] == 0  # bulk path, no writes
-    # Sent again, the same answers, none of it done again.
-    again_answers, _ = send(ctx, dup)
+        assert len(history(ctx, rid, "delete")) == 2
+    after = ctx.sync_repo.head_seq()
+    # Sent again (the same change), the same answers, none of it done again.
+    again_answers, again_head = send(ctx, dup)
     assert [a[:2] for a in again_answers] == [a[:2] for a in answers]
     assert all(a[5] for a in again_answers)
+    assert again_head == after
+    for rid in ids:
+        assert len(history(ctx, rid, "delete")) == 2
 
 
 def test_a_push_of_100_deletes_half_done_writes_the_other_half_in_one_action(
@@ -101,10 +100,13 @@ def test_a_push_of_100_deletes_half_done_writes_the_other_half_in_one_action(
     both = gone  # this device's delete of all 100
     answers, _ = send(ctx, both)
     assert [a[1] for a in answers] == ["applied"] * len(both)
-    # The 50 not yet deleted went in as one bulk write, the rest were skipped.
-    assert calls["delete"] == [50] and calls["settled"] == 0
+    # The 50 not yet deleted went in as one bulk write; the rest are written
+    # down as a second delete without changing the records.
+    assert calls["delete"] == [50]
     for rid in ids[50:]:
         assert len(history(ctx, rid, "delete")) == 1
+    for rid in ids[:50]:
+        assert len(history(ctx, rid, "delete")) == 2
     assert (
         len({str(e.batch) for rid in ids[50:] for e in history(ctx, rid, "delete")})
         == 1
@@ -130,7 +132,9 @@ def test_a_restore_of_a_record_already_live_is_acknowledged_and_not_written(
         assert len(history(ctx, rid, "restore")) == 1
 
 
-def test_a_delete_made_on_two_devices_is_settled_once_and_both_end_synced(project):
+def test_a_delete_made_on_two_devices_is_written_down_twice_and_both_end_synced(
+    project,
+):
     from civex.testing.peers import build_study, connect, device
 
     hub = project("hub")
@@ -146,12 +150,7 @@ def test_a_delete_made_on_two_devices_is_settled_once_and_both_end_synced(projec
     b.record_svc.delete(str(record.id), force=True)  # not yet seen the other's
     b.commit()
     b.sync_svc.sync()
-    assert len(history(hub, record.id, "delete")) == 1
-    assert not [
-        e
-        for e in hub.sync_repo.numbered_entries("record", record.id, 0)
-        if e.actor == "sync"
-    ]
+    assert len(history(hub, record.id, "delete")) == 2
     assert b.sync_repo.count_pending() == 0
 
 

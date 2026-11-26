@@ -55,16 +55,31 @@ def trees(f, ctx, n: int) -> list[uuid.UUID]:
     return out
 
 
-def test_a_single_record_push_after_a_web_delete_writes_no_second_entry(project):
+def test_a_single_record_push_after_a_web_delete_is_written_down_and_not_undone(
+    project,
+):
     ctx, f, ids = start(project, 1)
     pushed = f.deleted(ids)
     web_delete(ctx, ids)
     send(ctx, pushed)
-    assert len(deletes(ctx, ids[0])) == 1
+    assert len(deletes(ctx, ids[0])) == 2
+    # Sent again (a retry of the same change): nothing more is written.
+    head = ctx.sync_repo.head_seq()
+    send(ctx, pushed)
+    assert len(deletes(ctx, ids[0])) == 2 and ctx.sync_repo.head_seq() == head
+    for entry in deletes(ctx, ids[0]):
+        with pytest.raises(ValidationError):
+            ctx.history_svc.revert(str(entry))
+    assert live_ids(ctx) == set()
+
+
+def test_a_single_record_web_delete_undoes_when_it_is_the_only_one(project):
+    ctx, f, ids = start(project, 1)
+    web_delete(ctx, ids)
     [entry] = deletes(ctx, ids[0])
     ctx.history_svc.revert(str(entry))
     ctx.commit()
-    assert live_ids(ctx) == set(ids)  # the one delete there is undoes as ever
+    assert live_ids(ctx) == set(ids)
 
 
 @pytest.mark.parametrize("web_first", [True, False])
