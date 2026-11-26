@@ -310,6 +310,22 @@ class LocalReleaseRepository:
         self._s.flush()
         return n
 
+    def lock(self, id: uuid.UUID) -> ReleaseDTO | None:
+        """The release as it is now, its row locked until the transaction ends
+        (so a publish and a discard of it take turns); None if it is gone."""
+        row = self._s.scalars(
+            select(Release)
+            .where(Release.id == id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).one_or_none()
+        return _to_dto(row) if row is not None else None
+
+    def delete(self, id: uuid.UUID) -> None:
+        """Remove the release's row (its owned files go with `disown`)."""
+        self._s.execute(delete(Release).where(Release.id == id))
+        self._s.flush()
+
     def create(self, **values: Any) -> ReleaseDTO:
         row = Release(id=values.pop("id", None) or uuid.uuid4(), **values)
         self._s.add(row)
@@ -407,4 +423,5 @@ def _to_dto(row: Release) -> ReleaseDTO:
         yanked_at=row.yanked_at,
         yanked_by=row.yanked_by,
         yanked_reason=row.yanked_reason,
+        published_at=row.published_at,
     )

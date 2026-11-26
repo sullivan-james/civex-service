@@ -945,6 +945,8 @@ class ReleaseDTO:
     yanked_at: datetime | None = None
     yanked_by: str | None = None
     yanked_reason: str | None = None
+    # None while held back unpublished (it can still be discarded).
+    published_at: datetime | None = None
 
     def to_dict(self) -> dict[str, Any]:
         def iso(v: datetime | None) -> str | None:
@@ -972,6 +974,7 @@ class ReleaseDTO:
             "withdrawn_at": iso(self.withdrawn_at),
             "withdrawn_by": self.withdrawn_by,
             "withdrawn_reason": self.withdrawn_reason,
+            "published_at": iso(self.published_at),
             "yanked_at": iso(self.yanked_at),
             "yanked_by": self.yanked_by,
             "yanked_reason": self.yanked_reason,

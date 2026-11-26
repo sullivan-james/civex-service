@@ -516,6 +516,10 @@ class Release(Base):
     yanked_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
     yanked_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
     yanked_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # When it was published (made available to cite, download or copy). NULL
+    # while a host holds it back (`ReleaseService.create(publish=False)`): only
+    # then can it be discarded. Local, never sent.
+    published_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
     # Whether this copy has written the release's file_references rows (from
     # its records, or from its bundle once that is here). Local, never sent.
     indexed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

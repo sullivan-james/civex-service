@@ -76,6 +76,10 @@ class ReleaseMetadata(BaseModel):
 class ReleaseCreateRequest(ReleaseScopeRequest, ReleaseMetadata):
     name: str = Field(description="The version people cite, e.g. v1 or 2026-thesis.")
     title: str = Field(description="What the data is.")
+    publish: bool = Field(
+        default=True,
+        description="False holds it back, frozen but not citable, downloadable or copyable, until published; it can be discarded meanwhile.",
+    )
 
 
 class CitationPreviewRequest(ReleaseMetadata):
@@ -123,6 +127,9 @@ class ReleaseResponse(BaseModel):
     withdrawn_at: str | None
     withdrawn_by: str | None
     withdrawn_reason: str | None
+    published_at: str | None = Field(
+        description="When it was published; None while a host holds it back (it can then be discarded)."
+    )
     yanked_at: str | None = Field(
         description="When its data was given up; what is left is this record of it."
     )
@@ -336,6 +343,7 @@ def create_release(
         keywords=values.get("keywords"),
         include_workflows=body.include_workflows,
         progress=progress,
+        publish=body.publish,
     )
     ctx.commit()
     return ReleaseResponse.from_dto(made)
@@ -369,6 +377,23 @@ def withdraw_release(
     return ReleaseResponse.from_dto(release)
 
 
+@router.post("/releases/{name}/publish", response_model=ReleaseResponse)
+def publish_release(name: str, ctx: AppContext = Depends(get_ctx)):
+    """Make a release a host held back available to cite, download and copy."""
+    release = ctx.release_svc.publish(name)
+    ctx.commit()
+    return ReleaseResponse.from_dto(release)
+
+
+@router.post("/releases/{name}/discard", status_code=204)
+def discard_release(name: str, ctx: AppContext = Depends(get_ctx)):
+    """Remove a release that was never published, so its name can be used
+    again; its files and bundle are let go. Answered 409 for one that was
+    published (withdrawn or yanked too): yank it instead."""
+    ctx.release_svc.discard(name)
+    ctx.commit()
+
+
 @router.get("/releases/{name}/yank", response_model=YankPlanResponse)
 def plan_yank(name: str, ctx: AppContext = Depends(get_ctx)):
     """What yanking the release would give up: how many of its files (and
@@ -392,7 +417,9 @@ def yank_release(name: str, body: ReasonRequest, ctx: AppContext = Depends(get_c
 @router.get("/releases/{name}/citation", response_model=CitationResponse)
 def cite_release(name: str, ctx: AppContext = Depends(get_ctx)):
     """How to cite a release: a paragraph, BibTeX and CITATION.cff."""
-    facts = ctx.release_svc.facts(ctx.release_svc.get(name))
+    release = ctx.release_svc.get(name)
+    ctx.release_svc.require_published(release)
+    facts = ctx.release_svc.facts(release)
     return CitationResponse(
         text=rules.citation_text(facts),
         bibtex=rules.bibtex(facts),
