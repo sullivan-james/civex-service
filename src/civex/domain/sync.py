@@ -43,7 +43,16 @@ CAPABILITIES: tuple[str, ...] = (
     "device_login",
     "file_packs",
     "gzip_requests",
+    "snapshot_pages",
 )
+# Snapshot pages measured in bytes: `GET /snapshot/<kind>?limit=` may ask for
+# up to `SNAPSHOT_PAGE_MAX` things and the page is cut at
+# `SNAPSHOT_PAGE_BYTES` of payload instead of at 200 things. Only a device
+# that sees this in `Hello` asks for more than 500 (an older authority
+# refuses it); an older device keeps asking for 200 and is served as before.
+SNAPSHOT_PAGES = "snapshot_pages"
+SNAPSHOT_PAGE_MAX = 10000
+SNAPSHOT_PAGE_BYTES = 8 * 1024 * 1024
 # JSON request bodies (a push) may be sent `Content-Encoding: gzip`; the
 # authority decompresses them up to a cap (`server.sync_policy`).
 GZIP_REQUESTS = "gzip_requests"

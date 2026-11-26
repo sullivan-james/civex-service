@@ -366,6 +366,8 @@ class Record(Base):
             deferrable=True,
             initially="DEFERRED",
         ),
+        # The order a joining device reads the project in (`snapshots_page`).
+        Index("ix_records_created_id", "created_at", "id"),
         Index("ix_records_dataset_schema", "dataset_id", "schema_id"),
         Index("ix_records_dataset_created", "dataset_id", "created_at"),
         Index("ix_records_dataset_parent", "dataset_id", "parent_record_id"),
