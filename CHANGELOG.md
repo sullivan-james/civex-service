@@ -8,6 +8,7 @@ final version's entry or `## Unreleased` instead of one of its own. The version 
 
 ## Unreleased
 
+- **Faster restores into a host.** Records restored together with what was deleted with them (a record and its children, one action) are now written in bulk like single restores, instead of one record at a time: about 25 times faster on a 3,000-record test (4,000 against 160 records a second). Answers, history and conflicts are unchanged; an action with any record that cannot go in bulk is settled whole as before.
 - **App wording: "project", not "repository".** The web app's Connect page and sync settings now say "project" where they said "repo" or "repository". Text only; addresses, API paths and keys are unchanged.
 - **Connect to a host from the app.** A new `/connect?url=` page joins a
   project to a repository on a host: paste its address (the page's own address

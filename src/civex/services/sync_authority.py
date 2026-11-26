@@ -404,7 +404,9 @@ class SyncAuthorityService:
                     # left for the device's next push (never cut an action).
                     results += self._flush_run(who, run)
                     break
-                kind = _run_kind(action[0]) if len(action) == 1 else None
+                kind = (
+                    _run_kind(action[0]) if len(action) == 1 else _action_kind(action)
+                )
                 if run and run[0].kind != kind:
                     # A run is one kind of change: the next is judged with it
                     # written (a record made under one just deleted, ...).
@@ -432,12 +434,23 @@ class SyncAuthorityService:
                     self._prefetch_uses(cache, taken, position)
                 position += len(action)
                 fast = None
+                group: list[_Fast] | None = None
                 if self._bulk and len(action) == 1:
                     fast = (
                         self._fast_change(who, action[0], kind, run, cache)
                         if kind in ("delete", "restore")
                         else self._fast(who, action[0], run, cache)
                     )
+                elif self._bulk and kind == "restore":
+                    group = self._fast_restores(who, action, run, cache)
+                if group is not None:
+                    run.extend(group)
+                    if len(run) >= RUN_MAX:
+                        flushed = self._flush_run(who, run)
+                        results += flushed
+                        if any(r.status == DEFERRED for r in flushed):
+                            break
+                    continue
                 if fast is not None:
                     run.append(fast)
                     if len(run) >= RUN_MAX:
@@ -639,6 +652,7 @@ class SyncAuthorityService:
         kind: str,
         run: list[_Fast],
         cache: IncomingCache,
+        whole: bool = False,
     ) -> _Fast | None:
         """A record deleted or brought back, which goes in with the rest of its
         run in bulk (`_flush_run`): None unless it is certain to be taken as it
@@ -673,6 +687,8 @@ class SyncAuthorityService:
         # (without the cache, as `_settle` asks: a file cited is asked of the
         # database, which says what a run not yet written cannot)
         if problem := self._problem(who, entry, None, held=held):
+            if whole:
+                return None  # (the action is refused as a whole by `_settle_action`)
             self._in_run.update((entry.id, entry.entity_id))
             return _Fast(
                 entry,
@@ -681,6 +697,8 @@ class SyncAuthorityService:
                 kind=kind,
             )
         if _already_done(entry, head):
+            if whole:
+                return None  # (an action's entries are never answered as done)
             self._in_run.update((entry.id, entry.entity_id))
             return _Fast(entry, None, head=head, kind=kind, done=True)
         if kind == "delete":
@@ -726,6 +744,30 @@ class SyncAuthorityService:
         self._records.note_made(cache, final, shape)
         self._in_run.update((entry.id, entry.entity_id))
         return _Fast(entry, final, unfit=unfit, head=head, kind=kind)
+
+    def _fast_restores(
+        self,
+        who: Principal,
+        action: list[SyncEntry],
+        run: list[_Fast],
+        cache: IncomingCache,
+    ) -> list[_Fast] | None:
+        """The records one action brought back (a record and what was deleted
+        with it, one `op`): all of them go in with the run, or none does and
+        `_settle_action` settles it whole. Each is judged as `_fast_change`
+        judges one, a parent first, so a record beneath it finds it back."""
+        group: list[_Fast] = []
+        for entry in action:
+            fast = self._fast_change(who, entry, "restore", run, cache, whole=True)
+            if fast is None:
+                for taken in group:
+                    self._in_run.discard(taken.entry.id)
+                    self._in_run.discard(taken.entry.entity_id)
+                cache.clear_records()  # (what it noted as made is not)
+                return None
+            fast.group = action[0].op
+            group.append(fast)
+        return group
 
     def _written(
         self, kind: str, taken: list[_Fast], cache: IncomingCache | None
@@ -821,8 +863,21 @@ class SyncAuthorityService:
             for f in taken:
                 self._repo.drop_op(f.entry.id)  # (answers kept before it failed)
             settled: list[OpResult] = []
-            for f in items:
-                settled.append(f.refused or self._settle(who, f.entry))
+            at = 0
+            while at < len(items):
+                f = items[at]
+                span = [f]
+                while (
+                    f.group is not None
+                    and at + len(span) < len(items)
+                    and items[at + len(span)].group == f.group
+                ):
+                    span.append(items[at + len(span)])
+                at += len(span)
+                if f.group is not None and len(span) > 1:
+                    settled += self._settle_action(who, [g.entry for g in span])
+                else:
+                    settled.append(f.refused or self._settle(who, f.entry))
                 if settled[-1].status == DEFERRED:
                     break
             return settled
@@ -1726,6 +1781,8 @@ class _Fast:
     kind: str = "create"
     # Already so on the authority: answered, nothing written.
     done: bool = False
+    # The `op` of the action it is one of, when it was taken with the rest of it.
+    group: str | None = None
 
 
 @dataclasses.dataclass
@@ -1891,6 +1948,12 @@ def _actions(entries: list[SyncEntry]) -> list[list[SyncEntry]]:
         else:
             runs.append([entry])
     return runs
+
+
+def _action_kind(action: list[SyncEntry]) -> str | None:
+    """ "restore" for an action of nothing but records brought back (they go in
+    with a run of restores), else None."""
+    return "restore" if all(_run_kind(e) == "restore" for e in action) else None
 
 
 def _now_ms() -> int:
