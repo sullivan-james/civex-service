@@ -413,6 +413,15 @@ export function useMovePlan(body: MoveRecordsRequest | null) {
   })
 }
 
+/** What deleting a selection would take and how to confirm it (null waits). */
+export function useDeletePreview(body: RecordSelectionBody | null) {
+  return useQuery({
+    queryKey: ['record-delete-preview', body],
+    queryFn: () => recordsApi.deletePreview(body!),
+    enabled: body !== null,
+  })
+}
+
 /** What a bulk edit would do, asked again as the choices change (null waits). */
 export function useBulkEditPlan(body: BulkEditRequest | null) {
   return useQuery({

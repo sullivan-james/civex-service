@@ -3,12 +3,13 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router'
 import { hostRelease } from '../../utils/host'
 import {
   useDeleteManyRecords,
+  useDeletePreview,
   useDeleteMatchingRecords,
   useRecordPage,
   useRecordQuality,
   useRecordSummary,
 } from '../../hooks/useRecords'
-import { queryBody } from '../../api/records'
+import { queryBody, selectionBody } from '../../api/records'
 import {
   useCreateView,
   useDeleteView,
@@ -95,7 +96,6 @@ import { placeTarget, viewTarget } from '../../utils/navTargets'
 import type { NavTarget } from '../../utils/pins'
 import { applyExplorerPatch, viewPatch } from '../../utils/explorerState'
 import { ancestorSchemas } from '../../utils/hierarchy'
-import { HIGH_IMPACT_RECORD_THRESHOLD } from '../../lib/deleteImpact'
 import { errorMessage } from '../../lib/errors'
 import { pluralise } from '../../lib/utils'
 import { displayLabel } from '../../utils/naming'
@@ -513,6 +513,16 @@ export function RecordsExplorer({
     recordRecent(pinTarget)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recentKey, recentLabel])
+
+  const deletePreview = useDeletePreview(
+    confirmDelete && dataset
+      ? selectionBody(
+          allMatching
+            ? { query: x.query, collection: dataset }
+            : { ids: [...selected] },
+        )
+      : null,
+  )
 
   function confirmBulkDelete() {
     const done = {
@@ -1326,14 +1336,26 @@ export function RecordsExplorer({
         <ConfirmDialog
           title={`Delete ${pluralise(bulkCount, listedLabel.toLowerCase())}`}
           body={
-            allMatching
-              ? `Delete all ${total.toLocaleString()} ${listedLabel.toLowerCase()} matching the current filters and search? They move to Recently Deleted — restore any time before they're permanently purged.`
-              : `Delete the ${pluralise(selected.size, 'selected record')}? They move to Recently Deleted — restore any time before they're permanently purged.`
+            <>
+              They move to Recently Deleted and can be restored.
+              {deletePreview.data && deletePreview.data.cascading > 0 && (
+                <>
+                  {' '}
+                  {pluralise(
+                    deletePreview.data.cascading,
+                    'record',
+                  )} beneath{' '}
+                  {deletePreview.data.cascading === 1 ? 'it goes' : 'them go'}{' '}
+                  too.
+                </>
+              )}
+            </>
           }
           confirmLabel={`Delete ${bulkCount.toLocaleString()}`}
           variant="danger"
+          confirmDisabled={!deletePreview.data}
           typedConfirmationValue={
-            bulkCount > HIGH_IMPACT_RECORD_THRESHOLD
+            deletePreview.data?.confirm === 'type'
               ? (listed?.name ?? 'delete')
               : undefined
           }
