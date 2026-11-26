@@ -22,6 +22,7 @@ from sqlalchemy import (
     select,
     String,
     type_coerce,
+    union,
     text,
     tuple_,
     update,
@@ -1457,14 +1458,17 @@ class LocalRecordRepository:
         parent = aliased(Record)
         total = 0
         for chunk in _chunks(list(record_ids)):
+            # Two indexed lookups joined by UNION (the same records, counted
+            # once): one `OR` over both columns is read as a scan of the table.
+            found = [
+                select(Record.id)
+                .join(parent, parent.id == Record.parent_record_id)
+                .where(column.in_(chunk), Record.dataset_id != parent.dataset_id)
+                for column in (Record.id, Record.parent_record_id)
+            ]
             total += (
                 self._s.scalar(
-                    select(func.count(Record.id))
-                    .join(parent, parent.id == Record.parent_record_id)
-                    .where(
-                        or_(Record.id.in_(chunk), Record.parent_record_id.in_(chunk)),
-                        Record.dataset_id != parent.dataset_id,
-                    )
+                    select(func.count()).select_from(union(*found).subquery())
                 )
                 or 0
             )
