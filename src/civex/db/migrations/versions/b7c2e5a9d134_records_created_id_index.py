@@ -1,7 +1,7 @@
 """records: an index on (created_at, id), the order a snapshot is read in
 
 Revision ID: b7c2e5a9d134
-Revises: a4e9c2b7d6f1
+Revises: c5e1a8d4b3f7
 Create Date: 2026-11-26 18:00:00.000000
 
 A device joining reads the project in pages ordered by `(created_at, id)` with a
@@ -18,7 +18,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "b7c2e5a9d134"
-down_revision: Union[str, None] = "a4e9c2b7d6f1"
+down_revision: Union[str, None] = "c5e1a8d4b3f7"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
