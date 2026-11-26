@@ -169,3 +169,103 @@ def test_an_edit_that_changes_nothing_is_acknowledged_and_not_written(project, s
     answers, new_head = send(ctx, [dataclasses.replace(edit, id=uuid.uuid4())])
     assert answers[0][1] == "applied" and new_head == head
     assert len(history(ctx, ids[0], "update")) == 1
+
+
+# -- a device whose change was already true on the authority ------------------
+
+
+def _pair(project, n, extra=()):
+    """Devices a and b both holding n records, and the hub's pushes counted."""
+    from civex.testing.peers import build_study, connect, device
+
+    hub = project("hub")
+    a, b = device(project, hub, "a"), device(project, hub, "b")
+    first = build_study(a)
+    for name in extra:
+        a.dataset_svc.create(name)
+    ids = [str(first.id)] + [
+        str(a.record_svc.add("study", "encounter", {"site": f"s{i}", "depth": 1.0}).id)
+        for i in range(n - 1)
+    ]
+    a.commit()
+    connect(a)
+    a.sync_svc.sync()
+    connect(b)
+    b.sync_svc.sync()
+    pushes: list[int] = []
+    real = hub.authority_svc.push
+
+    def counted(who, entries):
+        pushes.append(len(entries))
+        return real(who, entries)
+
+    hub.authority_svc.push = counted
+    return hub, a, b, ids, pushes
+
+
+def _level(hub, b, ids, pushes):
+    """b has nothing unsent, a further sync sends nothing, and b's records are
+    as the hub's."""
+    b.sync_svc.sync()
+    assert b.sync_repo.count_pending() == 0
+    assert not b.sync_repo.pending_entries(10_000)
+    pushes.clear()
+    b.sync_svc.sync()
+    assert pushes == []
+    for rid in ids:
+        h = hub.sync_repo.snapshot("record", uuid.UUID(rid))
+        d = b.sync_repo.snapshot("record", uuid.UUID(rid))
+        assert bool(h["deleted_at"]) == bool(d["deleted_at"])
+        assert h["dataset_id"] == d["dataset_id"] and h["data"] == d["data"]
+
+
+def test_a_device_whose_delete_was_already_done_ends_synced_and_sends_nothing(project):
+    hub, a, b, ids, pushes = _pair(project, 3)
+    a.record_svc.delete_many(ids, force=True)
+    a.commit()
+    a.sync_svc.sync()
+    b.record_svc.delete_many(ids, force=True)
+    b.commit()
+    pushes.clear()
+    b.sync_svc.sync()
+    assert sum(pushes) == 3  # it was sent, and answered as done
+    _level(hub, b, ids, pushes)
+
+
+def test_a_device_whose_edit_was_already_made_ends_synced_and_sends_nothing(project):
+    hub, a, b, ids, pushes = _pair(project, 2)
+    for ctx in (a, b):
+        ctx.record_svc.update(ids[0], {"site": "same"})
+        ctx.commit()
+        if ctx is a:
+            a.sync_svc.sync()
+    pushes.clear()
+    b.sync_svc.sync()
+    assert sum(pushes) >= 1
+    _level(hub, b, ids, pushes)
+
+
+def test_a_device_whose_move_was_already_made_ends_synced_and_sends_nothing(project):
+    hub, a, b, ids, pushes = _pair(project, 2, extra=("other",))
+    for ctx in (a, b):
+        ctx.record_svc.move("other", ids=[ids[0]])
+        ctx.commit()
+        if ctx is a:
+            a.sync_svc.sync()
+    pushes.clear()
+    b.sync_svc.sync()
+    assert sum(pushes) >= 1
+    _level(hub, b, ids, pushes)
+
+
+def test_pending_deletes_over_two_push_pages_half_already_done(project):
+    hub, a, b, ids, pushes = _pair(project, 300)
+    a.record_svc.delete_many(ids[:150], force=True)
+    a.commit()
+    a.sync_svc.sync()
+    b.record_svc.delete_many(ids, force=True)
+    b.commit()
+    pushes.clear()
+    b.sync_svc.sync()
+    assert sum(pushes) == 300 and len(pushes) >= 2
+    _level(hub, b, ids, pushes)

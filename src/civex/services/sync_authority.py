@@ -1062,7 +1062,7 @@ class SyncAuthorityService:
         cache, self._cache = self._cache, None
         try:
             with self._repo.savepoint():
-                results = [self._take(who, e) for e in action]
+                results = [self._take(who, e, alone=False) for e in action]
                 failed = [r for r in results if r.status not in (APPLIED, MERGED)]
                 if failed:
                     raise _NotWhole(results)
@@ -1306,7 +1306,9 @@ class SyncAuthorityService:
         if denied := self._policy.refuses(who, settled):
             raise _Denied(denied)
 
-    def _take(self, who: Principal, entry: SyncEntry) -> OpResult:
+    def _take(
+        self, who: Principal, entry: SyncEntry, alone: bool = True
+    ) -> OpResult:
         """Merge the change into what is held, write it, and record it."""
         kind, eid = entry.entity_type, entry.entity_id
         head = self._applier.head(kind, eid)
@@ -1320,7 +1322,12 @@ class SyncAuthorityService:
             # here is refused as one that is held out of its sight is: the two
             # are told apart by nothing in the answer.
             raise ValidationError(NOT_HERE)
-        if kind == "record" and head is not None and _already_done(entry, head):
+        if (
+            alone  # (an action's own entries stand for what its cascade skips)
+            and kind == "record"
+            and head is not None
+            and _already_done(entry, head)
+        ):
             # Another device (or a person) got there first: acknowledged, and
             # nothing is written (no second entry, no settling one).
             return OpResult(entry.id, APPLIED, replayed=True)

@@ -2329,7 +2329,11 @@ class LocalSyncRepository:
                 row.sync_state = "synced"
                 if result.hub_seq is not None:
                     row.hub_seq = result.hub_seq
-                if result.status in ("merged", "conflict"):
+                if result.status in ("merged", "conflict") or (
+                    result.status == "applied" and result.hub_seq is None
+                ):
+                    # (an applied change with no number was already so there:
+                    # the authority holds no entry of it to replay it by)
                     row.apply_state = "superseded"
         self._s.flush()
 
