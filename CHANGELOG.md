@@ -8,6 +8,18 @@ final version's entry or `## Unreleased` instead of one of its own. The version 
 
 ## Unreleased
 
+- **Files download several at a time.** The background download of a copy's
+  files fetched one file per request, one after another, and committed after
+  each. It now takes up to six at once (each still checked against its hash,
+  written to the drive by the one thread that owns the store), and confirms
+  and commits in groups. On a local host with 2,000 small files and three
+  large ones, 31 to 149 files a second. A failure part way keeps every file
+  already stored.
+- **The file download's total follows the records as they arrive.** It was
+  counted once, when downloading began, so a copy whose first records cited 1,000
+  files kept showing "of 1,000" after the rest arrived citing 60,000. It is now
+  counted again on each pass, and shrinks when files turn out to be here already.
+
 - **Earlier history is read from the server when you look, not downloaded.** A
   copy of a project no longer fetches the history from before it was made: on a
   large project that took a long time, a lot of database space, and held back

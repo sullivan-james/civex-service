@@ -14,6 +14,7 @@ point leaves the project as it was or one step further, never between.
 from __future__ import annotations
 
 import contextlib
+import tempfile
 import logging
 import functools
 import threading
@@ -21,6 +22,7 @@ import threading
 import time
 import urllib.parse
 import uuid
+from collections import deque
 from collections.abc import Callable, Generator, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field, replace
@@ -131,6 +133,10 @@ PACKS_IN_FLIGHT = 4
 # before the next is read, so a bigger one means fewer pauses for the packs
 # still on their way (the authority answers up to 5000 per request).
 PACKED_CHECK_PAGE = 4000
+# Files downloaded together: one is held in memory up to this many bytes, then
+# in a temp file, until this side has written it to the drive.
+DOWNLOAD_SPOOL_BYTES = 4 * 1024 * 1024
+FILE_READ_BYTES = 256 * 1024
 FEED_PAGE = 200
 # How many feed windows one request for earlier history reads at most.
 EARLIER_WINDOWS = 25
@@ -3435,49 +3441,144 @@ class SyncService:
         # collection's setting.
         collections = self._kept_collections() if shas is None else None
         started = time.monotonic()
-        after = ""
-        while True:
-            page = self._repo.files_not_here(after, FILE_CHECK_PAGE, shas, collections)
-            if not page:
-                break
-            after = page[-1][0]
-            for sha, collection in page:
-                if skip and sha in skip:
-                    continue
-                if (limit is not None and report.attempted >= limit) or (
-                    seconds is not None and time.monotonic() - started >= seconds
-                ):
-                    report.stopped = True
-                    return report
-                report.attempted += 1
-                if self._files.exists(sha):  # on a drive, just not inventoried
-                    report.fetched += 1
-                    continue
-                try:
-                    chunks = transport.file_chunks(sha)
-                except FileNotFoundError:
-                    report.absent.append(sha)
-                    # A file asked for by name (opened) doesn't lengthen the
-                    # background wait.
-                    self._repo.note_server_lacks([sha], backoff=shas is None)
-                    continue
+        # Several files come at once where the transport allows it: each is
+        # read off the line by a pool thread into a spool (memory, spilling to
+        # a temp file past DOWNLOAD_SPOOL_BYTES), and this thread, which owns
+        # the store's session, writes it to the drive, checks its hash, and
+        # confirms and commits in groups. At most `threads * 2` files are in
+        # hand at once.
+        threads = max(1, int(getattr(transport, "download_threads", 1)))
+        pool = ThreadPoolExecutor(threads) if threads > 1 else None
+        window = threads * 2
+        flying: deque[
+            tuple[str, str | None, Future[tempfile.SpooledTemporaryFile[bytes] | None]]
+        ] = deque()
+        arrived: list[str] = []
+        group_began: list[float] = []
+        stop = threading.Event()
+
+        def pull(sha: str) -> tempfile.SpooledTemporaryFile[bytes] | None:
+            """The file's bytes in a spool, or None when the authority hasn't
+            got it. Runs on a pool thread: touches the transport only."""
+            if stop.is_set():
+                return None
+            try:
+                chunks = transport.file_chunks(sha)
+            except FileNotFoundError:
+                return None
+            spool: tempfile.SpooledTemporaryFile[bytes] = tempfile.SpooledTemporaryFile(
+                max_size=DOWNLOAD_SPOOL_BYTES
+            )
+            try:
+                for chunk in chunks:
+                    if stop.is_set():
+                        break
+                    spool.write(chunk)
+                spool.seek(0)
+                return spool
+            except BaseException:
+                spool.close()
+                raise
+
+        def record() -> None:
+            """What arrived is confirmed and committed together."""
+            if not arrived:
+                return
+            self._repo.confirm_on_server(arrived)  # it came from there
+            self._commit()
+            arrived.clear()
+            group_began.clear()
+
+        def settle_one() -> None:
+            sha, collection, future = flying.popleft()
+            spool = future.result()
+            if spool is None:
+                report.absent.append(sha)
+                # A file asked for by name (opened) doesn't lengthen the
+                # background wait.
+                self._repo.note_server_lacks([sha], backoff=shas is None)
+                return
+            try:
                 # Straight onto the drive (the one asked for, when it is
-                # fetched to go there, else its collection's): each byte
-                # written once, counted as it comes.
+                # fetched to go there, else its collection's).
                 stored = self._files.put_chunks(
-                    _counted(chunks, on_bytes),
+                    _counted(iter(lambda: spool.read(FILE_READ_BYTES), b""), on_bytes),
                     sha,
-                    collection_id=str(collection) if collection else None,
+                    collection_id=collection,
                     volume=volume,
                 )
-                if stored.sha256 != sha:
-                    self._files.delete(stored.sha256)
-                    raise SyncError("The server sent the wrong content for a file")
-                self._repo.confirm_on_server([sha])  # it came from there
-                self._commit()
-                report.fetched += 1
-                if progress:
-                    progress(report.fetched)
+            finally:
+                spool.close()
+            if stored.sha256 != sha:
+                self._files.delete(stored.sha256)
+                raise SyncError("The server sent the wrong content for a file")
+            if not arrived:
+                group_began.append(time.monotonic())
+            arrived.append(sha)
+            report.fetched += 1
+            if progress:
+                progress(report.fetched)
+            if len(arrived) >= SMALL_FILE_GROUP or (
+                group_began
+                and time.monotonic() - group_began[0] >= SMALL_FILE_GROUP_SECONDS
+            ):
+                record()
+
+        def submit(sha: str, collection: str | None) -> None:
+            if pool is None:
+                done: Future[tempfile.SpooledTemporaryFile[bytes] | None] = Future()
+                try:
+                    done.set_result(pull(sha))
+                except BaseException as e:  # noqa: BLE001 - raised when settled
+                    done.set_exception(e)
+                flying.append((sha, collection, done))
+            else:
+                flying.append((sha, collection, pool.submit(pull, sha)))
+            while len(flying) >= window:
+                settle_one()
+
+        try:
+            after = ""
+            stopped = False
+            while not stopped:
+                page = self._repo.files_not_here(
+                    after, FILE_CHECK_PAGE, shas, collections
+                )
+                if not page:
+                    break
+                after = page[-1][0]
+                for sha, collection in page:
+                    if skip and sha in skip:
+                        continue
+                    if (limit is not None and report.attempted >= limit) or (
+                        seconds is not None and time.monotonic() - started >= seconds
+                    ):
+                        report.stopped = True
+                        stopped = True
+                        break
+                    report.attempted += 1
+                    if self._files.exists(sha):  # on a drive, just not inventoried
+                        report.fetched += 1
+                        continue
+                    submit(sha, str(collection) if collection else None)
+            while flying:  # what is on its way is kept, not thrown away
+                settle_one()
+        finally:
+            # A failure (or an early exit) stops what has not begun, and what
+            # already reached the drive is confirmed and committed: nothing
+            # stored is lost.
+            stop.set()
+            for _, _, future in flying:
+                future.cancel()
+            if pool is not None:
+                pool.shutdown(wait=True)
+            for _, _, future in flying:
+                if not future.cancelled() and future.exception() is None:
+                    spool = future.result()
+                    if spool is not None:
+                        spool.close()
+            flying.clear()
+            record()
         return report
 
     def _join_page(

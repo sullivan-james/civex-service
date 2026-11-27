@@ -314,8 +314,11 @@ class SyncWorker:
                 self._on_files(None)
             return
         if not self._files_total:
-            self._files_total, self._files_done = left, 0
+            self._files_done = 0
             self._files_bytes, self._files_rate = 0, RateWindow()
+        # Counted again each pass: records still arriving (a copy, a sync) cite
+        # more files, and the bar's total follows them rather than the first count.
+        self._files_total = self._files_done + left
         base = self._files_done
         # Said before the first file starts (one can take minutes), so a person
         # sees at once that it is under way and how many there are.

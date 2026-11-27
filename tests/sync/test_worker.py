@@ -24,6 +24,7 @@ class Rig:
         self.to_fetch = 0
         self.fetches: list[dict] = []
         self.fail_fetch: Exception | None = None
+        self.per_pass: int | None = None  # files one pass fetches (None: all)
         self.sends: list[dict] = []
         self.fail_send: Exception | None = None
         self.sync_config = SyncConfig(remote="http://a", interval_seconds=60)
@@ -44,11 +45,15 @@ class Rig:
             self.fetches.append(kw)
             if self.fail_fetch:
                 raise self.fail_fetch
-            done = self.to_fetch
+            done = (
+                self.to_fetch
+                if self.per_pass is None
+                else min(self.per_pass, self.to_fetch)
+            )
             if kw.get("progress") and done:
                 kw["progress"](done)
-            self.to_fetch = 0
-            return SimpleNamespace(absent=[], stopped=False, fetched=done)
+            self.to_fetch -= done
+            return SimpleNamespace(absent=[], stopped=self.to_fetch > 0, fetched=done)
 
         def send_files(**kw):
             self.sends.append(kw)
@@ -203,6 +208,23 @@ def test_asking_for_downloads_shows_progress_at_once_and_runs_before_any_sync():
     assert len(r.fetches) == 1  # asked for: not held by the back-off or a pause
     assert r.calls == 0  # and no sync was needed first
     assert r.sends == []  # asked to download, not to upload
+    assert seen[-1] is None  # all here: the bar goes
+
+
+def test_the_file_total_grows_as_records_citing_more_files_arrive():
+    seen: list = []
+    r = Rig()
+    r.worker._on_files = seen.append
+    r.per_pass = 10
+    r.to_fetch = 1000  # what the records copied so far cite
+    r.files_tick()
+    assert (seen[-1].done, seen[-1].total) == (10, 1000)
+    r.to_fetch += 59_000  # the rest of the records arrive, citing many more
+    r.files_tick()
+    assert (seen[-1].done, seen[-1].total) == (20, 60_000)
+    r.to_fetch = 5  # some were found here, or the server hasn't got them
+    r.files_tick()
+    assert (seen[-2].done, seen[-2].total) == (25, 25)
     assert seen[-1] is None  # all here: the bar goes
 
 
