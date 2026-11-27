@@ -700,6 +700,15 @@ class RestoreSelectedResponse(BaseModel):
         description="Records live again in all, counting the parents brought back."
     )
     left: int = Field(description="Chosen records still deleted, and why not.")
+    stopped: bool = Field(
+        default=False,
+        description="Stopped by the person (`X-Civex-Progress` cancel) before "
+        "it was done: what came back stays.",
+    )
+    problem: str | None = Field(
+        default=None,
+        description="Why it stopped when a later chunk could not go ahead.",
+    )
 
 
 class RecordQueryRequest(BaseModel):
@@ -1300,6 +1309,15 @@ class MoveRecordsResponse(BaseModel):
         description="Records moved in all, with everything beneath them."
     )
     collection: str = Field(description="Where they are now.")
+    stopped: bool = Field(
+        default=False,
+        description="Stopped by the person (`X-Civex-Progress` cancel) before "
+        "it was done: `records` is what moved, and stays moved.",
+    )
+    problem: str | None = Field(
+        default=None,
+        description="Why it stopped when a later chunk could not go ahead.",
+    )
 
 
 class BulkEditRequest(RecordSelectionRequest):

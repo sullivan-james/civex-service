@@ -1,4 +1,5 @@
 import { api } from './client'
+import { progressHeaders } from './fileAccess'
 import { auditUrl, type AuditView, type PaginatedAuditLog } from './audit'
 
 export interface Field {
@@ -233,10 +234,12 @@ export const schemasApi = {
     api.put<Schema>(`/schemas/${name}/unique-keys`, { keys }),
   setCharts: (name: string, charts: Chart[]) =>
     api.put<Schema>(`/schemas/${name}/charts`, { charts }),
-  delete: (name: string) => api.delete<void>(`/schemas/${name}`),
+  delete: (name: string, progressId?: string) =>
+    api.delete<void>(`/schemas/${name}`, progressHeaders(progressId)),
   listDeleted: () => api.get<Schema[]>('/schemas/deleted'),
   restore: (name: string) => api.post<Schema>(`/schemas/${name}/restore`, {}),
-  purge: (name: string) => api.delete<void>(`/schemas/${name}/purge`),
+  purge: (name: string, progressId?: string) =>
+    api.delete<void>(`/schemas/${name}/purge`, progressHeaders(progressId)),
   addField: (
     name: string,
     body: {

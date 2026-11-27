@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { collectionsApi } from '../api/collections'
 import { useToast } from '../components/ui/ToastProvider'
 import { errorMessage } from '../lib/errors'
+import { withProgress } from '../components/files/fileFlows'
 
 export function useCollections() {
   return useQuery({ queryKey: ['collections'], queryFn: collectionsApi.list })
@@ -49,7 +50,10 @@ export function useDeleteCollection() {
   const qc = useQueryClient()
   const toast = useToast()
   return useMutation({
-    mutationFn: collectionsApi.delete,
+    mutationFn: (name: string) =>
+      withProgress('Deleting records…', (pid) =>
+        collectionsApi.delete(name, pid),
+      ),
     onSuccess: (_data, collectionName) => {
       qc.invalidateQueries({ queryKey: ['collections'] })
       qc.invalidateQueries({ queryKey: ['collections-deleted'] })
@@ -71,7 +75,10 @@ export function usePurgeCollection() {
   const qc = useQueryClient()
   const toast = useToast()
   return useMutation({
-    mutationFn: collectionsApi.purge,
+    mutationFn: (name: string) =>
+      withProgress('Deleting for good…', (pid) =>
+        collectionsApi.purge(name, pid),
+      ),
     onSuccess: (_data, collectionName) => {
       qc.invalidateQueries({ queryKey: ['collections'] })
       qc.invalidateQueries({ queryKey: ['collections-deleted'] })

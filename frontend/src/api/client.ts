@@ -73,7 +73,8 @@ export const api = {
     request<T>(path, { method: 'PUT', body: JSON.stringify(body) }),
   patch: <T>(path: string, body: unknown, headers?: Record<string, string>) =>
     request<T>(path, { method: 'PATCH', body: JSON.stringify(body), headers }),
-  delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  delete: <T>(path: string, headers?: Record<string, string>) =>
+    request<T>(path, { method: 'DELETE', headers }),
   /** Multipart file upload — does NOT set Content-Type (browser sets it with boundary). */
   upload: <T>(path: string, form: FormData) =>
     request<T>(path, { method: 'POST', body: form, headers: {} }),

@@ -1,4 +1,5 @@
 import { api } from './client'
+import { progressHeaders } from './fileAccess'
 import { auditUrl, type AuditView, type PaginatedAuditLog } from './audit'
 
 export interface Collection {
@@ -39,9 +40,11 @@ export const collectionsApi = {
       scope?: CollectionScope
     },
   ) => api.patch<Collection>(`/collections/${name}`, body),
-  delete: (name: string) => api.delete<void>(`/collections/${name}`),
+  delete: (name: string, progressId?: string) =>
+    api.delete<void>(`/collections/${name}`, progressHeaders(progressId)),
   listDeleted: () => api.get<Collection[]>('/collections/deleted'),
   restore: (name: string) =>
     api.post<Collection>(`/collections/${name}/restore`, {}),
-  purge: (name: string) => api.delete<void>(`/collections/${name}/purge`),
+  purge: (name: string, progressId?: string) =>
+    api.delete<void>(`/collections/${name}/purge`, progressHeaders(progressId)),
 }

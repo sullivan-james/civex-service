@@ -15,6 +15,7 @@ import { recordsApi } from '../api/records'
 import { useToast } from '../components/ui/ToastProvider'
 import { errorMessage } from '../lib/errors'
 import { invalidateRecordNames } from './useRecordName'
+import { withProgress } from '../components/files/fileFlows'
 
 /** What restoring `target` would do, asked fresh each time: it describes the
  * trash as it is now. */
@@ -70,14 +71,21 @@ export function useRestore(onDone?: () => void) {
   const navigate = useNavigate()
   return useMutation({
     mutationFn: (plan: RestoreVars) =>
-      restoreApi.restore({
-        kind: plan.kind,
-        ref:
-          plan.kind === 'record' || plan.kind === 'field' ? plan.id : plan.name,
-        schema: plan.schema_name ?? undefined,
-        onlyThis: plan.onlyThis,
-        withParents: plan.withParents,
-      }),
+      withProgress('Restoring records…', (pid) =>
+        restoreApi.restore(
+          {
+            kind: plan.kind,
+            ref:
+              plan.kind === 'record' || plan.kind === 'field'
+                ? plan.id
+                : plan.name,
+            schema: plan.schema_name ?? undefined,
+            onlyThis: plan.onlyThis,
+            withParents: plan.withParents,
+          },
+          pid,
+        ),
+      ),
     onSuccess: (_data, plan) => {
       toast.success(restoreReceipt(plan), {
         action: { label: 'View', onClick: () => navigate(whereTo(plan)) },
@@ -128,7 +136,10 @@ export function useRestoreAbove() {
   const qc = useQueryClient()
   const toast = useToast()
   return useMutation({
-    mutationFn: (id: string) => recordsApi.restoreAbove(id),
+    mutationFn: (id: string) =>
+      withProgress('Restoring records…', (pid) =>
+        recordsApi.restoreAbove(id, pid),
+      ),
     onSuccess: (restored) =>
       toast.success(
         `Restored ${restored
@@ -194,11 +205,23 @@ export function useRestoreSelected(onDone?: () => void) {
   const qc = useQueryClient()
   const toast = useToast()
   return useMutation({
-    mutationFn: (ids: string[]) => recordsApi.restoreSelected(ids),
+    mutationFn: (ids: string[]) =>
+      withProgress(
+        'Restoring records…',
+        (pid) => recordsApi.restoreSelected(ids, true, pid),
+        true,
+      ),
     onSuccess: (result) => {
       const n = (c: number, w: string) =>
         `${c.toLocaleString()} ${w}${c === 1 ? '' : 's'}`
       const extra = result.came_back - result.restored
+      if (result.stopped || result.problem) {
+        toast.success(
+          `Stopped. ${n(result.came_back, 'record')} restored.${result.problem ? ` ${result.problem}` : ''}`,
+        )
+        onDone?.()
+        return
+      }
       toast.success(
         `Restored ${n(result.restored, 'record')}` +
           (extra > 0 ? `, and ${n(extra, 'record')} above to hold them` : '') +

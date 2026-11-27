@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from civex.context import AppContext
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
 from civex.domain.query import RecordQuery
+from civex.server.routers.file_access import report_progress
+from civex.services.progress import Progress
 from civex.server.deps import get_ctx, get_read_ctx
 from civex.server.query_params import record_query
 from civex.server.routers.audit import AuditView, audit_page
@@ -123,9 +125,13 @@ def update_dataset(
 
 
 @router.delete("/{name}", status_code=204)
-def delete_dataset(name: str, ctx: AppContext = Depends(get_ctx)):
+def delete_dataset(
+    name: str,
+    ctx: AppContext = Depends(get_ctx),
+    progress: Progress | None = Depends(report_progress),
+):
     try:
-        ctx.dataset_svc.delete(name)
+        ctx.dataset_svc.delete(name, progress=progress)
         ctx.commit()
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
@@ -144,9 +150,13 @@ def restore_dataset_plan(name: str, ctx: AppContext = Depends(get_ctx)):
 
 
 @router.post("/{name}/restore", response_model=DatasetResponse)
-def restore_dataset(name: str, ctx: AppContext = Depends(get_ctx)):
+def restore_dataset(
+    name: str,
+    ctx: AppContext = Depends(get_ctx),
+    progress: Progress | None = Depends(report_progress),
+):
     try:
-        dto = ctx.dataset_svc.restore(name)
+        dto = ctx.dataset_svc.restore(name, progress=progress)
         ctx.commit()
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
@@ -156,8 +166,14 @@ def restore_dataset(name: str, ctx: AppContext = Depends(get_ctx)):
 
 
 @router.delete("/{name}/purge", status_code=204)
-def purge_dataset(name: str, ctx: AppContext = Depends(get_ctx)):
+def purge_dataset(
+    name: str,
+    ctx: AppContext = Depends(get_ctx),
+    progress: Progress | None = Depends(report_progress),
+):
     try:
+        if progress:
+            progress.phase("Deleting for good")
         ctx.dataset_svc.purge(name)
         ctx.commit()
     except NotFoundError as e:

@@ -317,7 +317,13 @@ def test_restore_all_takes_a_batch_and_refuses_one_that_is_not_an_id(
 def test_restore_selected_takes_ids_and_says_what_came_back(client: TestClient) -> None:
     r = client.post("/api/records/restore-selected", json={"ids": []})
     assert r.status_code == 200
-    assert r.json() == {"restored": 0, "came_back": 0, "left": 0}
+    assert r.json() == {
+        "restored": 0,
+        "came_back": 0,
+        "left": 0,
+        "stopped": False,
+        "problem": None,
+    }
     # An id that is not a record is skipped, not an error.
     r = client.post(
         "/api/records/restore-selected",

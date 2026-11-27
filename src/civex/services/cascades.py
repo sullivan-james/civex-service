@@ -16,6 +16,7 @@ import uuid
 from datetime import datetime
 
 from civex.repositories.protocols import AuditRepository, RecordRepository
+from civex.services.progress import Progress
 
 States = dict[uuid.UUID, datetime | None]
 
@@ -54,8 +55,12 @@ def log_cascade(
     *,
     schema_id: uuid.UUID | None = None,
     dataset_id: uuid.UUID | None = None,
+    progress: Progress | None = None,
+    label: str = "Recording changes",
 ) -> None:
-    """History for each record the delete or restore just made changed."""
+    """History for each record the delete or restore just made changed. All of
+    it is the one action of the delete or restore (it is never committed in
+    part), so `progress` only says how far the entries have got."""
     if audit is None:
         return
     changed = changed_records(
@@ -63,6 +68,24 @@ def log_cascade(
     )
     if not changed:
         return
+    if progress:
+        progress.phase(label, len(changed))
+    for at in range(0, len(changed), _SLICE):
+        part = changed[at : at + _SLICE]
+        _log_part(records, audit, part)
+        if progress:
+            progress.advance(min(at + _SLICE, len(changed)))
+
+
+# Records read and logged at a time.
+_SLICE = 5000
+
+
+def _log_part(
+    records: RecordRepository,
+    audit: AuditRepository,
+    changed: list[tuple[uuid.UUID, datetime | None, datetime | None]],
+) -> None:
     now = {r.id: r.to_dict() for r in records.list_by_ids([c[0] for c in changed])}
     for rid, was, became in changed:
         snapshot = now.get(rid)

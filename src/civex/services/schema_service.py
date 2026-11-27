@@ -40,6 +40,7 @@ from civex.domain.permissions import EVERYTHING, Permissions
 from civex.domain.timezones import validate_timezone
 from civex.domain.uniqueness import UNIQUE_DTYPES, normalise_keys
 from civex.services.cascades import States, log_cascade, record_states
+from civex.services.progress import Progress
 from civex.repositories.protocols import (
     AuditRepository,
     RecordRepository,
@@ -1397,7 +1398,7 @@ class SchemaService:
             record_count=record_count,
         )
 
-    def delete(self, name: str) -> None:
+    def delete(self, name: str, progress: Progress | None = None) -> None:
         """Soft-delete: the schema (and every record typed by it, across
         every collection — see SchemaRepository.delete) moves to Recently
         Deleted, reversible via restore() within the retention window.
@@ -1421,18 +1422,31 @@ class SchemaService:
                     timestamp=stamp,
                 )
             self._repo.delete(schema.id, stamp)
-            self._log_cascade(schema.id, before)
+            self._log_cascade(schema.id, before, progress, "Deleting records")
 
     def _cascade_before(self, schema_id: uuid.UUID) -> States:
         return (
             record_states(self._records, schema_id=schema_id) if self._records else {}
         )
 
-    def _log_cascade(self, schema_id: uuid.UUID, before: States) -> None:
+    def _log_cascade(
+        self,
+        schema_id: uuid.UUID,
+        before: States,
+        progress: Progress | None = None,
+        label: str = "Recording changes",
+    ) -> None:
         """An entry for each of the schema's records its delete or restore
         changed (`services/cascades`)."""
         if self._records:
-            log_cascade(self._records, self._audit, before, schema_id=schema_id)
+            log_cascade(
+                self._records,
+                self._audit,
+                before,
+                schema_id=schema_id,
+                progress=progress,
+                label=label,
+            )
 
     def _one_event(self, kind: str, before: States, stamp: datetime | None):
         """One action, shown as one event: a schema's delete or restore and
@@ -1495,7 +1509,7 @@ class SchemaService:
             deleted_at=schema.deleted_at,
         )
 
-    def restore(self, name: str) -> SchemaDTO:
+    def restore(self, name: str, progress: Progress | None = None) -> SchemaDTO:
         """Undo delete(): the schema and the records cascade-deleted with it
         become live again (see SchemaRepository.restore)."""
         self._permissions.require(permissions.CHANGE_STRUCTURE)
@@ -1516,7 +1530,7 @@ class SchemaService:
                     schema.to_dict(),
                     restored.to_dict(),
                 )
-            self._log_cascade(schema.id, before)
+            self._log_cascade(schema.id, before, progress, "Restoring records")
         return restored
 
     def purge(self, name: str) -> None:
