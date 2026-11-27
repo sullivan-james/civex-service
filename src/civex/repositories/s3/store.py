@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import dataclasses
 import hashlib
 import logging
 import math
@@ -139,11 +140,50 @@ def _env_credentials(config: S3Config) -> dict[str, str]:
     return out
 
 
+_CLIENTS: dict[tuple[Any, ...], Any] = {}
+_CLIENTS_LOCK = threading.Lock()
+_CLIENTS_MAX = 64
+# What else decides which credentials a client finds (boto3 reads these when
+# the client is made): a change to any of them is another client.
+_AMBIENT = (
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AWS_PROFILE",
+    "AWS_DEFAULT_PROFILE",
+    "AWS_REGION",
+    "AWS_DEFAULT_REGION",
+    "AWS_CONFIG_FILE",
+    "AWS_SHARED_CREDENTIALS_FILE",
+    "AWS_ENDPOINT_URL",
+)
+
+
 def boto_client(config: S3Config) -> Any:
     """A boto3 S3 client for `config`: credentials from the environment
     variables it names (`access_key_env` ...), else the named profile or the
-    default chain / machine's role; never from config.toml. Each call builds
-    its own session, so configs with different variables stay independent."""
+    default chain / machine's role; never from config.toml. One client is kept
+    for each config and set of credentials (a store is built for every request,
+    and making a client costs about 0.3 s of CPU; boto3 clients are safe to
+    share between threads), so configs with different variables stay
+    independent and a changed variable is a new client."""
+    key = (
+        dataclasses.astuple(config),
+        tuple(sorted(_env_credentials(config).items())),
+        tuple(os.environ.get(name) for name in _AMBIENT),
+    )
+    with _CLIENTS_LOCK:
+        client = _CLIENTS.get(key)
+        if client is None:
+            client = _build_client(config)
+            if len(_CLIENTS) >= _CLIENTS_MAX:
+                _CLIENTS.pop(next(iter(_CLIENTS)))
+            _CLIENTS[key] = client
+        return client
+
+
+def _build_client(config: S3Config) -> Any:
+    """A new client (see `boto_client`)."""
     # Imported here, not at the top: boto3 is slow to import and only a
     # project that names a bucket needs it.
     import boto3
