@@ -24,6 +24,7 @@ from civex.server.routers import (
     bucket,
     datasets,
     db,
+    health,
     indexes,
     bundle,
     export_definitions,
@@ -221,6 +222,14 @@ _OPENAPI_TAGS = [
         "description": (
             "Manage the object volumes that back file storage — add, update, "
             "or remove a volume, and inspect per-volume usage stats."
+        ),
+    },
+    {
+        "name": "health",
+        "description": (
+            "What `civex doctor` checks (the install, the database's shape, "
+            "references, records under a deleted one, files left on drives) "
+            "and its repair. Reachable when the database lacks something."
         ),
     },
     {
@@ -451,6 +460,7 @@ def api_routers(
         (remote.router, None),
         (transfers.router, features_.VOLUMES),
         (db.router, features_.DB_ADMIN),
+        (health.router, None),
         (indexes.router, features_.DB_ADMIN),
         (legal.router, None),
         (status.router, None),

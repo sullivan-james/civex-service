@@ -244,7 +244,7 @@ React + TypeScript (Vite), React Router, TanStack Query v5. `api/` typed fetch w
 | New domain types | `src/civex/domain/dtos.py` or `domain/exceptions.py` |
 | Add a frontend API call | `frontend/src/api/<resource>.ts` + `frontend/src/hooks/use<Resource>.ts` |
 
-**Migrations**: a committed migration's parent never changes (`tests/db/test_migration_parents.py` / `migration_parents.json`); join side-by-side migrations with a merge migration. A batch rebuild of `audit_log` drops the `local_seq` trigger.
+**Migrations**: a committed migration's parent never changes (`tests/db/test_migration_parents.py` / `migration_parents.json`); join side-by-side migrations with a merge migration. A batch rebuild of `audit_log` drops the `local_seq` trigger. **Never edit a migration after it has run on any machine** (a database stamped past it then lacks the change, and Alembic can't tell): add a new revision. `civex doctor --repair` / the Health page (`services/health_service.py`) is the safety net for a database that lacks tables or columns, not a licence to edit.
 
 ## Documentation
 

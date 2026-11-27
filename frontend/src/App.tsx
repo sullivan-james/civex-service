@@ -24,6 +24,7 @@ const WorkflowsPage = lazy(() => import('./pages/WorkflowsPage'))
 const WorkflowEditorPage = lazy(() => import('./pages/WorkflowEditorPage'))
 const WorkflowPage = lazy(() => import('./pages/WorkflowPage'))
 const JobsPage = lazy(() => import('./pages/JobsPage'))
+const HealthPage = lazy(() => import('./pages/HealthPage'))
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'))
 /** The old Recently Deleted address: history showing what is deleted. */
 const DELETED_VIEW = `/activity?activity.filter=${encodeURIComponent(
@@ -163,6 +164,7 @@ export default function App() {
               }
             />
             <Route path="/analytics" element={<AnalyticsPage />} />
+            <Route path="/health" element={<HealthPage />} />
             <Route path="/activity" element={<ActivityPage />} />
             <Route path="/exports" element={<ExportsPage />} />
             <Route
