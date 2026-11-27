@@ -799,6 +799,9 @@ class Hello:
 # What copying a project is doing, for whoever shows how far along it is.
 COPYING = "copying"  # a device joining: reading the authority's things
 FILLING = "filling"  # a device filling an empty authority with its own
+PULLING = "pulling"  # getting the authority's changes (done of total, by number)
+PREPARING = "preparing"  # working out what to send (total, when it is many)
+PUSHING = "pushing"  # sending this device's changes (done of total)
 FILES = "files"  # a device downloading the files its records cite
 SENDING = "sending"  # a device uploading files the authority lacks
 

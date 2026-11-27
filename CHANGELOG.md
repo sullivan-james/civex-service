@@ -8,6 +8,15 @@ final version's entry or `## Unreleased` instead of one of its own. The version 
 
 ## Unreleased
 
+- **A sync with many unsent changes starts sending at once, and says what it is
+  doing.** Before the first push it loaded and named every record with an
+  unsent change (twice or more per page of changes from the host): 26 seconds
+  for 150,000 edits on a local database, minutes on a slow one, with nothing
+  shown. It now finds the records above them by id alone (1.2 seconds), and
+  skips the check for held changes when there are none. A long pull shows
+  "Getting changes from the host", then "Preparing 150,000 changes to send" and
+  "Sending changes to the host" with how far it has got, in the app and in
+  `civex sync`.
 - **Files download several at a time.** The background download of a copy's
   files fetched one file per request, one after another, and committed after
   each. It now takes up to six at once (each still checked against its hash,

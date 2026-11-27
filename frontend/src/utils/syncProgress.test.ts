@@ -93,4 +93,23 @@ describe('describeSyncProgress', () => {
     expect(text.count).toContain('2 not readable here')
     expect(text.count).toContain('8 of 10 files')
   })
+
+  it('says how many changes are being prepared, and counts those pulled', () => {
+    const prep = describeSyncProgress({
+      phase: 'preparing',
+      done: 0,
+      total: 168084,
+      kind: null,
+    })
+    expect(prep.title).toBe('Preparing 168,084 changes to send')
+    expect(prep.fraction).toBeNull()
+    const pull = describeSyncProgress({
+      phase: 'pulling',
+      done: 400,
+      total: 1000,
+      kind: null,
+    })
+    expect(pull.title).toBe('Getting changes from the host')
+    expect(pull.detail).toBe('changes · 400 of 1,000')
+  })
 })

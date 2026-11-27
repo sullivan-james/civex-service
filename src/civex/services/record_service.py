@@ -4050,6 +4050,20 @@ class RecordService:
         chain.reverse()
         return chain
 
+    def ancestor_ids(self, parents: Iterable[uuid.UUID]) -> set[uuid.UUID]:
+        """These records and every one above them (deleted ones too), by id:
+        a level at a time over two columns, no record loaded or named."""
+        above: set[uuid.UUID] = set()
+        frontier = set(parents)
+        for _ in range(_MAX_TRAIL_DEPTH):
+            frontier -= above
+            if not frontier:
+                break
+            above |= frontier
+            links = self._records.parent_links(list(frontier))
+            frontier = {p for p in links.values() if p}
+        return above
+
     def ancestor_trails(
         self, records: list[RecordDTO]
     ) -> dict[uuid.UUID, list[RecordDTO]]:
