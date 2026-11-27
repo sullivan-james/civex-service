@@ -62,6 +62,7 @@ UNLIMITED = frozenset(
         "files_missing",
         "upload_file",
         "upload_pack",
+        "download_pack",
         "begin_parts",
         "upload_part",
         "complete_parts",

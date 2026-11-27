@@ -30,6 +30,8 @@ class FileService:
         # Whether content may be given to this caller (set by `context.py`
         # for one who cannot read every collection; always, for one who can).
         self.readable: Callable[[str], bool] = lambda sha256: True
+        # The same for many at once: which of these may be given.
+        self.readable_many: Callable[[Iterable[str]], set[str]] = lambda shas: set(shas)
 
     # `collection_id` (here and below) is the id of the collection the file is
     # for. It only steers where new content is written -- see
@@ -158,6 +160,18 @@ class FileService:
 
     def size_of(self, sha256: str) -> int | None:
         return self._store.size_of(sha256)
+
+    def sizes_of(self, shas: Iterable[str]) -> dict[str, int]:
+        """The size of each of these that is held, the inventory asked once
+        for all (a file it doesn't know is looked for one at a time)."""
+        wanted = list(dict.fromkeys(shas))
+        out = {
+            sha: rows[0][1] for sha, rows in self._store.copies(wanted).items() if rows
+        }
+        for sha in wanted:
+            if sha not in out and (size := self._store.size_of(sha)) is not None:
+                out[sha] = size
+        return out
 
     def object_path(self, sha256: str) -> Path:
         """The object's path on disk. Only for files on drives on this machine."""

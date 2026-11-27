@@ -599,3 +599,36 @@ def test_the_env_names_round_trip_through_config(tmp_path: Path):
     )
     again = parse_config(tomllib.loads(render_config(config)), tmp_path)
     assert again.store_config.s3 == config.store_config.s3
+
+
+def test_one_client_is_kept_for_a_config_and_its_credentials(monkeypatch):
+    import threading
+
+    built = []
+    real = s3_module._build_client
+    monkeypatch.setattr(
+        s3_module, "_build_client", lambda cfg: built.append(cfg) or real(cfg)
+    )
+    monkeypatch.setenv("FP_K_KEY", "AKIAKEEP")
+    monkeypatch.setenv("FP_K_SECRET", "keep")
+    cfg = S3Config(
+        bucket="kept", access_key_env="FP_K_KEY", secret_key_env="FP_K_SECRET"
+    )
+    got: list = []
+    threads = [
+        threading.Thread(target=lambda: got.append(s3_module.boto_client(cfg)))
+        for _ in range(8)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(built) == 1 and all(c is got[0] for c in got)
+    # Another bucket, or the same config with changed credentials, is another.
+    other = S3Config(
+        bucket="other", access_key_env="FP_K_KEY", secret_key_env="FP_K_SECRET"
+    )
+    assert s3_module.boto_client(other) is not got[0]
+    monkeypatch.setenv("FP_K_KEY", "AKIAROTATED")
+    rotated = s3_module.boto_client(cfg)
+    assert rotated is not got[0] and _key_of(rotated)[0] == "AKIAROTATED"

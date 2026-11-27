@@ -14,6 +14,7 @@ point leaves the project as it was or one step further, never between.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import tempfile
 import logging
 import functools
@@ -138,7 +139,11 @@ PACKS_IN_FLIGHT = 4
 PACKED_CHECK_PAGE = 4000
 # Files downloaded together: one is held in memory up to this many bytes, then
 # in a temp file, until this side has written it to the drive.
-DOWNLOAD_SPOOL_BYTES = 4 * 1024 * 1024
+DOWNLOAD_SPOOL_BYTES = 2 * 1024 * 1024
+# Small files are asked for this many to a request where the authority takes
+# that (`file_pack_downloads`), and at most this many requests are open at once.
+PACK_DOWNLOAD_FILES = 100
+PACKS_DOWNLOADING = 6
 FILE_READ_BYTES = 256 * 1024
 FEED_PAGE = 200
 # How many feed windows one request for earlier history reads at most.
@@ -3479,19 +3484,28 @@ class SyncService:
         threads = max(1, int(getattr(transport, "download_threads", 1)))
         pool = ThreadPoolExecutor(threads) if threads > 1 else None
         window = threads * 2
-        flying: deque[
-            tuple[str, str | None, Future[tempfile.SpooledTemporaryFile[bytes] | None]]
-        ] = deque()
+        # Where the authority takes it, small files come many to a request (a
+        # pack: one answer held in one spool, each file a slice of it); the
+        # authority says which are too big for one, and those are fetched alone.
+        accepts = getattr(transport, "accepts_pack_downloads", None)
+        packing = pool is not None and callable(accepts) and bool(accepts())
+        fetch_whole = getattr(transport, "fetch_file", None)
+        # Each is (the files, their answer, whether it is a pack's).
+        flying: deque[tuple[list[tuple[str, str | None]], Future[Any], bool]] = deque()
+        batch: list[tuple[str, str | None]] = []
+        alone: deque[tuple[str, str | None]] = deque()
         arrived: list[str] = []
         group_began: list[float] = []
         stop = threading.Event()
 
-        def pull(sha: str) -> tempfile.SpooledTemporaryFile[bytes] | None:
+        def pull(sha: str) -> Any:
             """The file's bytes in a spool, or None when the authority hasn't
             got it. Runs on a pool thread: touches the transport only."""
             if stop.is_set():
                 return None
             try:
+                if fetch_whole is not None:
+                    return fetch_whole(sha, stop)
                 chunks = transport.file_chunks(sha)
             except FileNotFoundError:
                 return None
@@ -3509,6 +3523,11 @@ class SyncService:
                 spool.close()
                 raise
 
+        def pull_pack(shas: list[str]) -> Any:
+            if stop.is_set():
+                return None
+            return transport.fetch_pack(shas, stop)  # type: ignore[attr-defined]
+
         def record() -> None:
             """What arrived is confirmed and committed together."""
             if not arrived:
@@ -3518,28 +3537,33 @@ class SyncService:
             arrived.clear()
             group_began.clear()
 
-        def settle_one() -> None:
-            sha, collection, future = flying.popleft()
-            spool = future.result()
-            if spool is None:
-                report.absent.append(sha)
-                # A file asked for by name (opened) doesn't lengthen the
-                # background wait.
-                self._repo.note_server_lacks([sha], backoff=shas is None)
-                return
-            try:
-                # Straight onto the drive (the one asked for, when it is
-                # fetched to go there, else its collection's).
-                stored = self._files.put_chunks(
-                    _counted(iter(lambda: spool.read(FILE_READ_BYTES), b""), on_bytes),
-                    sha,
-                    collection_id=collection,
-                    volume=volume,
-                )
-            finally:
-                spool.close()
-            if stored.sha256 != sha:
-                self._files.delete(stored.sha256)
+        def keep(
+            sha: str,
+            collection: str | None,
+            fresh: Callable[[], Callable[[int], bytes]],
+            digest: str | None = None,
+        ) -> None:
+            """Put a file that arrived on the drive, and count it for the next
+            confirm. `fresh()` gives a reader of its bytes from the start. The
+            hash is checked before anything is written: a file with other
+            content is refused, and nothing is stored (or deleted: what the
+            device holds under another hash is not ours to remove)."""
+            if digest is None:  # not taken as it arrived (ranges): one pass now
+                hasher = hashlib.sha256()
+                read = fresh()
+                while block := read(FILE_READ_BYTES):
+                    hasher.update(block)
+                digest = hasher.hexdigest()
+            if digest != sha:
+                raise SyncError("The server sent the wrong content for a file")
+            read = fresh()
+            stored = self._files.put_chunks(
+                _counted(iter(lambda: read(FILE_READ_BYTES), b""), on_bytes),
+                sha,
+                collection_id=collection,
+                volume=volume,
+            )
+            if stored.sha256 != sha:  # it changed as it was read
                 raise SyncError("The server sent the wrong content for a file")
             if not arrived:
                 group_began.append(time.monotonic())
@@ -3553,17 +3577,97 @@ class SyncService:
             ):
                 record()
 
+        def lacks(missing: list[str]) -> None:
+            report.absent.extend(missing)
+            # A file asked for by name (opened) doesn't lengthen the
+            # background wait.
+            self._repo.note_server_lacks(missing, backoff=shas is None)
+
+        def fill() -> None:
+            """Files a pack said to ask for alone go on their way as the window
+            allows: never more than `window` requests are open or waiting."""
+            while alone and len(flying) < window and pool is not None:
+                sha, collection = alone.popleft()
+                flying.append(([(sha, collection)], pool.submit(pull, sha), False))
+
+        def settle_one() -> None:
+            items, future, packed = flying.popleft()
+            try:
+                settle(items, future, packed)
+            finally:
+                fill()
+
+        def settle(items, future, packed) -> None:
+            if not packed:
+                sha, collection = items[0]
+                spool = future.result()
+                if spool is None:
+                    if not stop.is_set():
+                        lacks([sha])
+                    return
+                try:
+                    # Straight onto the drive (the one asked for, when it is
+                    # fetched to go there, else its collection's).
+                    def again() -> Callable[[int], bytes]:
+                        spool.seek(0)
+                        return spool.read
+
+                    keep(sha, collection, again, getattr(spool, "digest", None))
+                finally:
+                    spool.close()
+                return
+            answer = future.result()
+            if answer is None:
+                return
+            where = dict(items)
+            try:
+                for sha, (offset, size, digest) in answer.files.items():
+
+                    def pack_again(
+                        offset: int = offset, size: int = size
+                    ) -> Callable[[int], bytes]:
+                        answer.spool.seek(offset)
+                        left = [size]
+
+                        def read(n: int) -> bytes:
+                            data = answer.spool.read(min(n, left[0]))
+                            left[0] -= len(data)
+                            return data
+
+                        return read
+
+                    keep(sha, where[sha], pack_again, digest)
+                if answer.absent:
+                    lacks(sorted(answer.absent))
+                for sha in answer.alone:  # one at a time, in ranges when big
+                    alone.append((sha, where[sha]))
+            finally:
+                answer.close()
+
         def submit(sha: str, collection: str | None) -> None:
             if pool is None:
-                done: Future[tempfile.SpooledTemporaryFile[bytes] | None] = Future()
+                done: Future[Any] = Future()
                 try:
                     done.set_result(pull(sha))
                 except BaseException as e:  # noqa: BLE001 - raised when settled
                     done.set_exception(e)
-                flying.append((sha, collection, done))
+                flying.append(([(sha, collection)], done, False))
             else:
-                flying.append((sha, collection, pool.submit(pull, sha)))
+                flying.append(([(sha, collection)], pool.submit(pull, sha), False))
             while len(flying) >= window:
+                settle_one()
+
+        def send_batch() -> None:
+            items = list(batch)
+            batch.clear()
+            if len(items) < 2 or pool is None:
+                for sha, collection in items:
+                    submit(sha, collection)
+                return
+            flying.append((items, pool.submit(pull_pack, [s for s, _ in items]), True))
+            while len(flying) >= window or (
+                sum(1 for _, _, p in flying if p) >= PACKS_DOWNLOADING
+            ):
                 settle_one()
 
         try:
@@ -3589,7 +3693,18 @@ class SyncService:
                     if self._files.exists(sha):  # on a drive, just not inventoried
                         report.fetched += 1
                         continue
-                    submit(sha, str(collection) if collection else None)
+                    where = str(collection) if collection else None
+                    if packing:
+                        batch.append((sha, where))
+                        if len(batch) >= PACK_DOWNLOAD_FILES:
+                            send_batch()
+                    else:
+                        submit(sha, where)
+                if packing and batch:
+                    send_batch()  # asked for before the next page is read
+            if batch:
+                send_batch()
+            fill()
             while flying:  # what is on its way is kept, not thrown away
                 settle_one()
         finally:
@@ -3597,15 +3712,15 @@ class SyncService:
             # already reached the drive is confirmed and committed: nothing
             # stored is lost.
             stop.set()
-            for _, _, future in flying:
+            for _, future, _ in flying:
                 future.cancel()
             if pool is not None:
                 pool.shutdown(wait=True)
-            for _, _, future in flying:
+            for _, future, packed in flying:
                 if not future.cancelled() and future.exception() is None:
-                    spool = future.result()
-                    if spool is not None:
-                        spool.close()
+                    got = future.result()
+                    if got is not None:
+                        got.close()
             flying.clear()
             record()
         return report

@@ -632,7 +632,18 @@ def build_context(
     )
     file_svc = FileService(file_store, volumes, permissions=may)
     if not may.read_scope().unrestricted:
-        file_svc.readable = LocalFileReferenceRepository(session).is_readable
+        file_refs = LocalFileReferenceRepository(session)
+        file_svc.readable = file_refs.is_readable
+
+        def _readable_many(shas):
+            # What `is_readable` answers, for many (two queries per chunk).
+            return {
+                sha
+                for sha, (seen, used) in file_refs.uses(shas).items()
+                if seen or not used
+            }
+
+        file_svc.readable_many = _readable_many
         record_svc.readable = file_svc.readable
 
         def _may_cite(sha: str) -> bool:

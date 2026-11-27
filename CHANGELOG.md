@@ -8,6 +8,21 @@ final version's entry or `## Unreleased` instead of one of its own. The version 
 
 ## Unreleased
 
+- **A host with files in a bucket no longer builds a new S3 client for every
+  request.** Making the client took about 0.3 seconds of processor time, so a
+  host serving files from a bucket managed about 3 files a second and held over
+  400 MB. One client is now kept for each bucket setting and set of credentials
+  (a changed credential makes a new one).
+- **Files come down in packs and in ranges.** Small files were still one request
+  each on the way down. A copy now asks the host for up to 100 at a time and
+  gets them in one answer, sent file by file in small blocks (the host holds one
+  block per request, whatever the size of the pack), and a file of 32 MB or more
+  comes in 16 MB ranges, six at a time, written where each belongs and checked
+  against its hash once at the end. Files the person may not read are never in
+  an answer, and a host without packs, or a host that keeps files in a bucket,
+  is asked one file at a time as before. An answer cut short keeps the files
+  that arrived whole and fetches the rest alone. A download holds at most about
+  48 MB in memory, however many files or how big.
 - **A sync with many unsent changes starts sending at once, and says what it is
   doing.** Before the first push it loaded and named every record with an
   unsent change (twice or more per page of changes from the host): 26 seconds

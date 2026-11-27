@@ -22,7 +22,8 @@ import uuid
 from collections import deque
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
-from typing import Any, cast
+from pathlib import Path
+from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import (
@@ -32,7 +33,7 @@ from fastapi.responses import (
     Response,
     StreamingResponse,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 from pydantic import ValidationError as PydanticValidationError
 from starlette.concurrency import run_in_threadpool
 
@@ -56,6 +57,10 @@ from civex.domain.sync import (
     FILE_PARTS,
     MAX_FILE_PARTS,
     NOT_SYNCED_AFTER,
+    PACK_DOWNLOAD_FILE_MAX,
+    PACK_DOWNLOAD_MAX_BYTES,
+    PACK_DOWNLOAD_MAX_FILES,
+    FILE_PACK_DOWNLOADS,
     PACK_FILE_MAX,
     PACK_MAX_BYTES,
     PACK_MAX_FILES,
@@ -94,6 +99,8 @@ router = APIRouter(
 )
 
 _CHUNK = 1024 * 1024
+# The block a pack's answer is read and sent in.
+PACK_BLOCK = 128 * 1024
 
 
 class SyncHelloResponse(BaseModel):
@@ -225,6 +232,13 @@ class SyncPackResponse(BaseModel):
     undo the ones that went in."""
 
     results: list[SyncPackedFile]
+
+
+class SyncPackAsk(BaseModel):
+    sha256: list[Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]] = Field(
+        description="Content hashes of the files wanted.",
+        max_length=PACK_DOWNLOAD_MAX_FILES,
+    )
 
 
 class SyncPartsRequest(BaseModel):
@@ -997,6 +1011,83 @@ def download_file(sha256: str, call: Peer = Depends(peer)):
     except (FileNotFoundError, VolumeUnavailableError):
         raise HTTPException(404, detail="That file is not here")
     return StreamingResponse(svc.stream(sha256), media_type="application/octet-stream")
+
+
+@router.post(
+    "/files/pack/download",
+    response_class=StreamingResponse,
+    responses={200: {"content": {"application/octet-stream": {}}}},
+)
+def download_pack(body: SyncPackAsk, call: Peer = Depends(peer)):
+    """Many small files in one answer (capability `file_pack_downloads`). The
+    answer is, for each hash asked (once), `<sha256> <size>\\n` and the bytes;
+    `<sha256> absent\\n` when the authority has no such file or the caller may
+    not read it (the two look the same, as they do on `GET /files/{sha}`); or
+    `<sha256> big <size>\\n` when it is too big for a pack (or the pack is
+    full), to be asked for alone, in ranges. A file only the caller's hidden
+    collections use is never in a pack."""
+    if DIRECT_FILES in call.ctx.features:
+        # Bucket bytes never go through the host: each is a presigned download.
+        raise FeatureUnavailableError(FILE_PACK_DOWNLOADS)
+    svc = call.ctx.file_svc
+    wanted = list(dict.fromkeys(body.sha256))
+    held = list(svc.readable_many(wanted))
+    try:
+        sizes = svc.sizes_of(held)
+    except VolumeUnavailableError as e:
+        raise HTTPException(507, detail=str(e))
+    # Planned here, where the database is: the stream below touches only files.
+    plan: list[tuple[str, int | None, Path | None, bool]] = []
+    total = 0
+    for sha in wanted:
+        size = sizes.get(sha)
+        if size is None:
+            plan.append((sha, None, None, False))
+        elif size > PACK_DOWNLOAD_FILE_MAX or total + size > PACK_DOWNLOAD_MAX_BYTES:
+            plan.append((sha, size, None, False))
+        else:
+            total += size
+            try:
+                path = svc.local_path(sha)
+            except (FileNotFoundError, VolumeUnavailableError):
+                plan.append((sha, None, None, False))
+                continue
+            plan.append((sha, size, path, True))
+
+    def head(sha: str, size: int | None, packed: bool) -> bytes:
+        if size is None:
+            return f"{sha} absent\n".encode("ascii")
+        return f"{sha} {size if packed else f'big {size}'}\n".encode("ascii")
+
+    def frames():
+        # File by file in small blocks: what is held is one block, whatever the
+        # size of the pack or of its files.
+        for sha, size, path, packed in plan:
+            yield head(sha, size, packed)
+            if not (packed and size):
+                continue
+            sent = 0
+            if path is not None:
+                with path.open("rb") as f:
+                    while block := f.read(PACK_BLOCK):
+                        sent += len(block)
+                        yield block
+            else:
+                for block in svc.stream(sha):
+                    sent += len(block)
+                    yield block
+            if sent != size:  # it changed under us: cut the stream, not lie
+                raise OSError(f"{sha} is not {size} bytes here")
+
+    length = sum(
+        len(head(sha, size, packed)) + (size or 0) * packed
+        for sha, size, _, packed in plan
+    )
+    return StreamingResponse(
+        frames(),
+        media_type="application/octet-stream",
+        headers={"Content-Length": str(length)},
+    )
 
 
 # -- the library: workflows and plugins shared through this authority ----------
