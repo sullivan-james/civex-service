@@ -6,7 +6,7 @@ One section per tagged release: `## vX.Y.Z — <label> (YYYY-MM-DD)`. Every
 PRODUCTION_READINESS.md §4a). A pre-release tag (`v1.3.0rc1`) may use the
 final version's entry or `## Unreleased` instead of one of its own. The version itself has one source of truth,
 
-## Unreleased
+## v2.3.4 — faster copies, spreadsheet import, held-back releases (2026-11-27)
 
 - **A host can read which files a release it is holding back cites.** Who may make releases (the permission that publishes or discards one) can now plan a held-back release's files (`POST /releases/{name}/files/plan`, `ReleaseService.file_plan`): `total` files cited, `available` present, `missing.files` not here, as the release froze them (later edits to records do not change it). A host waiting for files to arrive can use it before publishing. Everyone else still gets 404 for a held-back release; downloads, the zip, the export, the bundle and the citation still need it published (422).
 
