@@ -165,6 +165,15 @@ export const auditApi = {
   events: (query: AuditEventQuery, offset = 0, limit = 25) =>
     api.get<PaginatedAuditEvents>(eventsUrl(query, offset, limit)),
 
+  /** History from before this project was copied, read from the server now
+   * and not kept here. `before` is the previous page's `next_before`. */
+  earlier: (before: number | null, limit = 25, under?: string) => {
+    const qs = new URLSearchParams({ limit: String(limit) })
+    if (before != null) qs.set('before', String(before))
+    if (under) qs.set('under', under)
+    return api.get<EarlierAudit>(`/audit/earlier?${qs}`)
+  },
+
   /** The changes in one batch. */
   batchEntries: (id: string, offset = 0, limit = 25) =>
     api.get<PaginatedAuditLog>(
@@ -291,6 +300,15 @@ export interface PaginatedAuditEvents {
   total: number
   offset: number
   limit: number
+}
+
+/** A page of history from before the project was copied. `next_before` asks for
+ * the page before it (null: that was the start); `offline` means the server
+ * could not be reached, so nothing was read. */
+export interface EarlierAudit {
+  items: AuditEvent[]
+  next_before: number | null
+  offline: boolean
 }
 
 /** What the whole-project history can be asked for: the filter tree (over the

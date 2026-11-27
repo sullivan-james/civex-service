@@ -90,36 +90,8 @@ def _connect_showing_progress(c, url: str, invite: str | None) -> str:
 
         mode = c.sync_svc.connect(url, invite, progress=show, on_code=approve)
         c.commit()
-    if mode == "joined":
-        _fetch_history_showing_progress(c)
     _files_owed(c)
     return mode
-
-
-def _fetch_history_showing_progress(c) -> None:
-    from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn
-
-    with Progress(
-        TextColumn("{task.description}"),
-        BarColumn(),
-        MofNCompleteColumn(),
-        console=console,
-        transient=True,
-    ) as bar:
-        task = bar.add_task("Fetching history (Ctrl+C to leave it to run later)")
-        try:
-            c.sync_svc.fetch_history(
-                lambda p: bar.update(task, completed=p.done, total=p.total)
-            )
-        except KeyboardInterrupt:
-            console.print(
-                "History from before joining will carry on arriving the next time "
-                "this project syncs."
-            )
-        except SyncError as e:
-            console.print(
-                f"[warning]History not fetched yet: {escape(str(e))}[/warning]"
-            )
 
 
 def _fail(e: Exception) -> typer.Exit:

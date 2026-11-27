@@ -12,6 +12,7 @@ import pytest
 from civex.domain.sync import SyncEntry
 from civex.services import sync_authority, sync_service
 from civex.testing import connect, device
+from civex.testing.peers import read_earlier
 
 from .test_scoped_devices import (  # noqa: F401
     SECRET,
@@ -154,21 +155,13 @@ def test_history_is_read_again_after_a_grant(
     authority.commit()
     late = device(study.project, study.only_open, "late")
     connect(late)
-    for _ in range(3):
-        late.sync_svc.fetch_history(pages=1)
-        late.commit()
-    assert late.sync_repo.history_scan() is not None
     late._holder["inner"]._authority = scoped(
         authority, reads(study.open.id, study.vault.id)
     )
     late.sync_svc.sync()
     late.commit()
-    for _ in range(80):
-        if late.sync_svc.fetch_history(pages=1):
-            break
-        late.commit()
     late.commit()
-    text = _history(late)
+    text = str([e.to_dict() for e in read_earlier(late)])
     assert all(str(v) in text for v in vids)
 
 

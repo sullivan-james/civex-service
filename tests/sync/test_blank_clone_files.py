@@ -141,8 +141,6 @@ def test_download_progress_counts_every_pass_in_bytes_and_rate(
     contents = [b"a" * 1000, b"b" * 2000, b"c" * 3000]
     _cite(laptop, record, contents)
     tablet = _clone(project, authority)
-    while not tablet.sync_svc.fetch_history(pages=1):
-        pass
     tablet.sync_svc.set_download_files("all")
 
     class OneAtATime:
@@ -225,3 +223,20 @@ def test_joining_sets_a_new_copy_to_open_and_leaves_old_settings(
     assert fresh.config.sync.download_files == "all"  # as before joining
     assert connect(fresh) == "joined"
     assert fresh.sync_svc.status().download_files == "opened"
+
+
+def test_files_download_right_after_a_copy_with_history_left_on_the_server(
+    pair, project, authority
+):
+    laptop, _, record = pair
+    _cite(laptop, record, [b"a" * 100, b"b" * 200])
+    tablet = _clone(project, authority)
+    tablet.sync_svc.set_download_files("all")
+    # Where the copy starts is kept (earlier history stays on the server), and
+    # it must not hold the file downloads back.
+    assert tablet.sync_repo.meta().history_from
+    worker = SyncWorker(lambda: tablet.config, lambda c: tablet)
+    worker._fetch_files(
+        SimpleNamespace(sync_svc=tablet.sync_svc, sync_repo=tablet.sync_repo)
+    )
+    assert tablet.sync_svc.files_to_fetch() == 0

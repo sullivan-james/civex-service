@@ -799,7 +799,6 @@ class Hello:
 # What copying a project is doing, for whoever shows how far along it is.
 COPYING = "copying"  # a device joining: reading the authority's things
 FILLING = "filling"  # a device filling an empty authority with its own
-HISTORY = "history"  # a joined device fetching the history from before it joined
 FILES = "files"  # a device downloading the files its records cite
 SENDING = "sending"  # a device uploading files the authority lacks
 
@@ -997,8 +996,9 @@ class SyncMetaDTO:
     last_error_at: str | None
     # Authority: the highest number its feed no longer holds (pruned).
     feed_floor: int = 0
-    # Device: history up to this number (where it joined) is still to be
-    # fetched from the authority; None when it holds all of it.
+    # Device: where it joined. History up to this number is on the authority
+    # and read from it when looked at, not kept here; None when this device
+    # holds all of it.
     history_from: int | None = None
 
 

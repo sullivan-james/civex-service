@@ -83,6 +83,12 @@ class RemoteStatusResponse(BaseModel):
         description="Files records here cite that no drive here holds and the "
         "server hasn't said it lacks: what keeping every file would download.",
     )
+    earlier_history: bool = Field(
+        default=False,
+        description="This project was copied from a server that held history "
+        "before it: Activity can read further back from the server "
+        "(`GET /audit/earlier`), nothing of it is stored here.",
+    )
     files_to_send: int = Field(
         default=0,
         description="Files records here cite that the server hasn't said it "
@@ -102,8 +108,7 @@ class RemoteStatusResponse(BaseModel):
     progress: SyncProgressResponse | None = Field(
         default=None,
         description="How far a long step has got while one runs here: copying "
-        "the project from the authority, filling an empty one, or fetching the "
-        "history from before joining.",
+        "the project from the authority or filling an empty one.",
     )
     files_progress: SyncProgressResponse | None = Field(
         default=None,
@@ -455,6 +460,7 @@ def _status(ctx: AppContext) -> RemoteStatusResponse:
         files_missing=s.files_missing,
         files_arriving=s.files_arriving,
         files_not_here=s.files_not_here,
+        earlier_history=s.earlier_history,
         files_to_send=s.files_to_send,
         files_waiting=(
             FilesWaitingResponse(

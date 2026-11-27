@@ -60,7 +60,10 @@ def test_a_record_added_beneath_a_tree_here_keeps_the_tree(project):
     gone = f.deleted(roots)
     # a record beneath the first tree, made here after the device last looked
     late = ctx.record_svc.add(
-        "mine", "recording", {"label": "late", "must": "m"}, parent_record_id=str(roots[0])
+        "mine",
+        "recording",
+        {"label": "late", "must": "m"},
+        parent_record_id=str(roots[0]),
     )
     ctx.commit()
     answers, _ = send(ctx, gone)

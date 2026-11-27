@@ -75,7 +75,6 @@ from civex.domain.sync import (
     COPYING,
     DeviceCredentials,
     FILLING,
-    HISTORY,
     REJECTED,
     SENDING,
     Hello,
@@ -133,6 +132,8 @@ PACKS_IN_FLIGHT = 4
 # still on their way (the authority answers up to 5000 per request).
 PACKED_CHECK_PAGE = 4000
 FEED_PAGE = 200
+# How many feed windows one request for earlier history reads at most.
+EARLIER_WINDOWS = 25
 # The fewest changes of one kind in a row that a pulled page applies as a set.
 RUN_MIN = 3
 # The actions that put a record somewhere (a place is checked before they apply).
@@ -306,6 +307,18 @@ class SyncStatus:
     # downloaded (the authority hasn't said it lacks them): what choosing to
     # keep every file would fetch, whatever the collections' own settings.
     files_not_here: int = 0
+    # This copy was made from an authority that held history before it: Activity
+    # can read further back from the server (`SyncService.earlier`).
+    earlier_history: bool = False
+
+
+@dataclass
+class EarlierEntries:
+    """A page of history read from the authority (see `SyncService.earlier`):
+    newest first, and the number to ask below for the page before it."""
+
+    entries: list[SyncEntry]
+    next_before: int | None
 
 
 @dataclass
@@ -497,6 +510,7 @@ class SyncService:
             files_missing=missing,
             files_arriving=arriving,
             files_not_here=self.files_not_here(),
+            earlier_history=bool(meta.history_from and self.fetches_files),
             files_to_send=(
                 waiting.ready + sum(n for _, n, _ in waiting.offline) if waiting else 0
             ),
@@ -2893,7 +2907,8 @@ class SyncService:
         the feed, and applying it over the copy is harmless. Anything changed
         here while joining is a change of this device's own and is sent like any
         other. The history from before is not read here: the copy is usable
-        without it, and `fetch_history` brings it after."""
+        without it; what came before is read from the authority when someone
+        looks back (`earlier`), never stored here."""
         self._repo.finish_seed()  # a copy has no first upload to finish
         # What this project recorded before it joined is about nothing the copy
         # holds (a joining project is empty), so there is nothing to send. Until
@@ -2905,8 +2920,7 @@ class SyncService:
         head, _ = self._copy_state(transport, hello, progress)
         head = head or 0
         self._repo.set_cursor(head)
-        self._repo.set_history_from(head or None)
-        self._repo.set_history_scan(None)
+        self._repo.set_history_from(head or None)  # where this copy's history starts
         if hello.readable is not None:
             self._repo.set_readable({c["id"] for c in hello.readable})
         self._commit()
@@ -2992,11 +3006,6 @@ class SyncService:
                 self._copy_collection(
                     transport, collection, hello.protocol_version, cursor
                 )
-                if self._repo.meta().history_from:
-                    # What this device was sent of the earlier history was
-                    # without that collection: it is read again from the start
-                    # (what is held is not stored twice).
-                    self._repo.set_history_scan(0)
             had.add(collection)
             self._repo.set_readable(had)
             self._commit()
@@ -3096,53 +3105,56 @@ class SyncService:
         self._flags_stale = True  # (everything was rewritten as the authority has it)
 
     @_closes_transports
-    def fetch_history(
-        self, progress: ProgressFn | None = None, pages: int | None = None
-    ) -> bool:
-        """Fetch the history from before this project joined, oldest first, a
-        page at a time (each saved as it arrives, so stopping loses nothing and
-        the next call carries on). `pages` limits how much one call does, for a
-        background sync that shouldn't hold the lock for long. Returns True once
-        all of it is here. It is history only: nothing is applied, since the
-        copy already holds where it all ended up."""
-        upto = self._repo.meta().history_from
-        if not upto:
-            return True
-        with sync_lock(self._config.civex_dir):
-            transport = self._transport()
-            # Where it got to, which a device that may not read everything can
-            # have taken past the last entry it holds (a hidden run).
-            scan = self._repo.history_scan()
-            after = scan if scan is not None else self._repo.history_fetched_upto(upto)
-            read = 0
-            while after < upto and (pages is None or read < pages):
-                page = transport.feed(after, FEED_PAGE)
-                read += 1
-                for entry in page.entries:
-                    if entry.hub_seq is None or entry.hub_seq > upto:
-                        break
-                    if not self._repo.has_entry(entry.id):
-                        self._repo.insert_entry(entry, hub_seq=entry.hub_seq)
-                    after = entry.hub_seq
-                # (A device that may not read everything is told how far the
-                # authority looked: past entries it was not sent too.)
-                if page.through is not None and page.through > after:
-                    after = min(page.through, upto)
-                self._repo.set_history_scan(after)
-                self._commit()
-                if progress:
-                    progress(SyncProgress(HISTORY, min(after, upto), upto))
-                last = page.entries[-1].hub_seq if page.entries else None
-                if page.through is not None and page.more and after < upto:
-                    continue  # more to look through, nothing to conclude yet
-                if not page.more or last is None or last > upto:
-                    after = upto  # nothing more up to it (some may be pruned)
-            if after >= upto:
-                self._repo.set_history_from(None)
-                self._repo.set_history_scan(None)
-                self._commit()
-                return True
-            return False
+    def earlier(self, before: int | None = None, limit: int = 25) -> EarlierEntries:
+        """A page of the history from before this copy was made, read from the
+        authority now and not kept here: the newest `limit` changes numbered
+        below `before` (default: all of the earlier history), oldest first, as
+        the authority lets this device read them. `next_before` is where to ask
+        for the page before it (None: that was the start). The feed only reads
+        forward, so it is read a window at a time, backwards, and no more than
+        `EARLIER_WINDOWS` of them in one request (an empty or short page can
+        still have a `next_before`: a long run this device may not read)."""
+        top = self._repo.meta().history_from
+        if not top:
+            return EarlierEntries([], None)
+        end = min(before - 1, top) if before is not None else top
+        if end <= 0:
+            return EarlierEntries([], None)
+        transport = self._transport()
+        found: list[SyncEntry] = []
+        start = end
+        for _ in range(EARLIER_WINDOWS):
+            start = max(0, end - FEED_PAGE)
+            found = self._read_window(transport, start, end) + found
+            end = start
+            if len(found) >= limit or start == 0:
+                break
+        if len(found) > limit:
+            found = found[-limit:]
+            return EarlierEntries(found[::-1], found[0].hub_seq)
+        return EarlierEntries(found[::-1], start + 1 if start else None)
+
+    def _read_window(
+        self, transport: SyncTransport, start: int, end: int
+    ) -> list[SyncEntry]:
+        """What the authority sends numbered above `start` up to `end`, leaving
+        out what this project already holds."""
+        out: list[SyncEntry] = []
+        after = start
+        while after < end:
+            page = transport.feed(after, FEED_PAGE)
+            moved = after
+            for entry in page.entries:
+                if entry.hub_seq is None or entry.hub_seq > end:
+                    return out
+                if not self._repo.has_entry(entry.id):
+                    out.append(entry)
+                after = entry.hub_seq
+            if page.through is not None and page.through > after:
+                after = min(page.through, end)
+            if not page.more or after == moved:
+                break
+        return out
 
     # -- files from the authority ----------------------------------------
 

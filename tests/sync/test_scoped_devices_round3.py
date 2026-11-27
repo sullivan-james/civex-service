@@ -11,6 +11,7 @@ import pytest
 from civex.domain.sync import OpResult, SyncEntry
 from civex.services import sync_authority, sync_service
 from civex.testing import connect, device, snapshots
+from civex.testing.peers import read_earlier
 
 from .test_scoped_devices import (  # noqa: F401
     SECRET,
@@ -72,11 +73,8 @@ def test_a_legacy_claimed_entry_of_a_record_now_out_of_sight_is_not_sent(study: 
     assert "LEGACY" not in text_of(limited) and "LEGACY" not in _history_text(limited)
     late = device(study.project, study.only_open, "late")
     connect(late)
-    for _ in range(20):
-        if late.sync_svc.fetch_history():
-            break
-    late.commit()
-    assert "LEGACY" not in _history_text(late) and "LEGACY" not in text_of(late)
+    earlier = str([e.to_dict() for e in read_earlier(late)])
+    assert "LEGACY" not in earlier and "LEGACY" not in text_of(late)
 
 
 def test_a_legacy_delta_claiming_the_old_collection_is_not_sent(study: Study):
@@ -164,17 +162,9 @@ def test_fetching_history_in_single_steps_gets_past_a_long_hidden_run(
     authority.commit()
     late = device(study.project, study.only_open, "late")
     connect(late)
-    done = False
-    for _ in range(60):
-        if late.sync_svc.fetch_history(pages=1):
-            done = True
-            break
-        late.commit()
-    late.commit()
-    assert done
-    assert late.sync_repo.meta().history_from is None
-    assert str(visible.id) in _history_text(late)
-    assert SECRET not in _history_text(late)
+    earlier = str([e.to_dict() for e in read_earlier(late)])
+    assert str(visible.id) in earlier
+    assert SECRET not in earlier
 
 
 def test_a_small_page_size_does_not_multiply_the_work(study: Study, monkeypatch):

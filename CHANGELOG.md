@@ -8,6 +8,18 @@ final version's entry or `## Unreleased` instead of one of its own. The version 
 
 ## Unreleased
 
+- **Earlier history is read from the server when you look, not downloaded.** A
+  copy of a project no longer fetches the history from before it was made: on a
+  large project that took a long time, a lot of database space, and held back
+  the files. Activity (and a record's History) now shows a button to read
+  further back; each page comes from the server as it is asked for and is not
+  stored, so the cost follows what is looked at. Only what the device may read
+  comes back, and offline it says "Earlier activity is on the server." The
+  host API is `GET /audit/earlier` (`before`, `limit`, `under`), and the sync
+  status says `earlier_history`. File downloads and the look at the server's
+  files no longer wait for history: they start as soon as the copy is done.
+  The "Fetching earlier history" step is gone from the app and the command line.
+
 - **Switching project in the desktop app no longer shows the previous project's
   sync.** The app keeps one process and swaps projects in it; the sync status
   (copy, history and file progress, the server's version, connect errors) was

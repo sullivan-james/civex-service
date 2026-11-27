@@ -11,6 +11,7 @@ from civex.domain.audit_filters import AUDIT_FIELDS
 from civex.domain.dtos import BatchRevertDTO
 from civex.domain.exceptions import ValidationError
 from civex.domain.permissions import MANAGE_MEMBERS
+from civex.domain.sync import SyncError
 from civex.server.deps import allows, get_ctx, reads_whole_project
 from civex.server.models import (
     BatchRevertRequest,
@@ -18,6 +19,7 @@ from civex.server.models import (
     AuditBatchResponse,
     AuditEventResponse,
     AuditLogResponse,
+    EarlierAuditResponse,
     OpenBatchRequest,
     PaginatedAuditEventsResponse,
     PaginatedAuditLogResponse,
@@ -163,6 +165,38 @@ def list_audit_events(
         total=total,
         offset=offset,
         limit=limit,
+    )
+
+
+@router.get("/audit/earlier", response_model=EarlierAuditResponse)
+def earlier_audit(
+    before: int | None = Query(
+        default=None,
+        ge=1,
+        description="The previous page's `next_before`; omit for the newest of "
+        "the earlier history.",
+    ),
+    limit: int = Query(default=25, ge=1, le=200),
+    under: str | None = Query(
+        default=None, description="Only what happened to this record and beneath it."
+    ),
+    ctx: AppContext = Depends(get_ctx),
+):
+    """History from before this project was copied from its server: read from
+    the server now, a page at a time, and not stored here (nothing is
+    downloaded in advance, so the cost follows what is looked at). Only what
+    this device may read comes back. Offline, `offline` is true and nothing is
+    read."""
+    try:
+        page = ctx.sync_svc.earlier(before, limit)
+    except SyncError:
+        return EarlierAuditResponse(items=[], next_before=before, offline=True)
+    return EarlierAuditResponse(
+        items=[
+            AuditEventResponse.from_dto(e)
+            for e in ctx.history_svc.events_of_entries(page.entries, under)
+        ],
+        next_before=page.next_before,
     )
 
 
