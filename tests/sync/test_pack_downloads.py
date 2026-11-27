@@ -353,3 +353,13 @@ def test_a_server_that_ignores_ranges_costs_one_download_not_many(
     phone.commit()
     assert len(asked) == 1
     _all_there(phone, files)
+
+
+def test_a_pack_longer_than_the_read_buffer_comes_whole(project, server, monkeypatch):
+    # 100 files of 7 KB: the answer is read in several refills of the buffer.
+    calls = _spy(monkeypatch)
+    phone, files = _phone(project, server, [7000 + i for i in range(100)])
+    report = phone.sync_svc.fetch_files()
+    phone.commit()
+    assert report.fetched == 100 and calls["alone"] == []
+    _all_there(phone, files)

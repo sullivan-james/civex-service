@@ -3541,17 +3541,20 @@ class SyncService:
             sha: str,
             collection: str | None,
             fresh: Callable[[], Callable[[int], bytes]],
+            digest: str | None = None,
         ) -> None:
             """Put a file that arrived on the drive, and count it for the next
             confirm. `fresh()` gives a reader of its bytes from the start. The
             hash is checked before anything is written: a file with other
             content is refused, and nothing is stored (or deleted: what the
             device holds under another hash is not ours to remove)."""
-            digest = hashlib.sha256()
-            read = fresh()
-            while block := read(FILE_READ_BYTES):
-                digest.update(block)
-            if digest.hexdigest() != sha:
+            if digest is None:  # not taken as it arrived (ranges): one pass now
+                hasher = hashlib.sha256()
+                read = fresh()
+                while block := read(FILE_READ_BYTES):
+                    hasher.update(block)
+                digest = hasher.hexdigest()
+            if digest != sha:
                 raise SyncError("The server sent the wrong content for a file")
             read = fresh()
             stored = self._files.put_chunks(
@@ -3609,7 +3612,7 @@ class SyncService:
                         spool.seek(0)
                         return spool.read
 
-                    keep(sha, collection, again)
+                    keep(sha, collection, again, getattr(spool, "digest", None))
                 finally:
                     spool.close()
                 return
@@ -3618,7 +3621,7 @@ class SyncService:
                 return
             where = dict(items)
             try:
-                for sha, (offset, size) in answer.files.items():
+                for sha, (offset, size, digest) in answer.files.items():
 
                     def pack_again(
                         offset: int = offset, size: int = size
@@ -3633,7 +3636,7 @@ class SyncService:
 
                         return read
 
-                    keep(sha, where[sha], pack_again)
+                    keep(sha, where[sha], pack_again, digest)
                 if answer.absent:
                     lacks(sorted(answer.absent))
                 for sha in answer.alone:  # one at a time, in ranges when big

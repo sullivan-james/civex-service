@@ -13,6 +13,7 @@ mismatch cannot, and retrying them would only hammer a server that has said no.
 from __future__ import annotations
 
 import gzip
+import hashlib
 import json
 import logging
 import tempfile
@@ -81,12 +82,12 @@ log = logging.getLogger(__name__)
 @dataclass
 class PackAnswer:
     """What a pack download brought: the answer held in `spool`, each file a
-    slice of it (`files`: hash -> (offset, size)); those the authority has no
+    slice of it (`files`: hash -> (offset, size, the sha256 of those bytes, taken as they arrived)); those the authority has no
     readable copy of (`absent`); and those to ask for alone (`alone`: too big
     for a pack, or the answer ended before it got to them)."""
 
     spool: Any = None
-    files: dict[str, tuple[int, int]] = field(default_factory=dict)
+    files: dict[str, tuple[int, int, str]] = field(default_factory=dict)
     absent: set[str] = field(default_factory=set)
     alone: list[str] = field(default_factory=list)
 
@@ -128,13 +129,17 @@ class _FrameReader:
                     raise SyncError("The pack was cut short", retryable=True)
                 return None
 
-    def copy(self, size: int, sink: Any) -> None:
+    def copy(self, size: int, sink: Any, digest: Any = None) -> None:
         left = size
         while left:
             if self._pos >= len(self._buf) and not self._more():
                 raise SyncError("The pack was cut short", retryable=True)
             take = min(left, len(self._buf) - self._pos)
-            sink.write(memoryview(self._buf)[self._pos : self._pos + take])
+            block = memoryview(self._buf)[self._pos : self._pos + take]
+            if digest is not None:
+                digest.update(block)
+            sink.write(block)
+            block.release()  # the buffer may be resized next
             self._pos += take
             left -= take
 
@@ -538,8 +543,9 @@ class HttpSyncTransport:
                             ):
                                 raise SyncError("That is not a pack", retryable=True)
                             answer.spool.seek(offset)
-                            reader.copy(size, answer.spool)
-                            answer.files[sha] = (offset, size)
+                            digest = hashlib.sha256()
+                            reader.copy(size, answer.spool, digest)
+                            answer.files[sha] = (offset, size, digest.hexdigest())
                             offset += size
                         wanted.discard(sha)
                 except (SyncError, OSError, ValueError, UnicodeError) as e:
@@ -616,7 +622,9 @@ class HttpSyncTransport:
             return self._stream_from(sha256, total, stop, reply)
         spool = tempfile.SpooledTemporaryFile(max_size=FILE_SPOOL_BYTES)
         try:
-            self._drain(reply, spool, 0, stop)
+            digest = hashlib.sha256()
+            self._drain(reply, spool, 0, stop, digest)
+            spool.digest = digest.hexdigest()  # type: ignore[attr-defined]
             spool.seek(0)
             return spool
         except BaseException:
@@ -624,7 +632,12 @@ class HttpSyncTransport:
             raise
 
     def _drain(
-        self, reply: Reply, out: Any, at: int, stop: threading.Event | None
+        self,
+        reply: Reply,
+        out: Any,
+        at: int,
+        stop: threading.Event | None,
+        digest: Any = None,
     ) -> int:
         """Write a reply's body to `out` from offset `at`; the offset after it.
         A body shorter than its Content-Length is a SyncError."""
@@ -636,6 +649,8 @@ class HttpSyncTransport:
                     return at
                 out.seek(at)
                 out.write(chunk)
+                if digest is not None:
+                    digest.update(chunk)
                 at += len(chunk)
         if want.isdigit() and at - start != int(want):
             raise SyncError("A file came down cut short", retryable=True)
@@ -646,11 +661,13 @@ class HttpSyncTransport:
     ) -> Any:
         spool = tempfile.SpooledTemporaryFile(max_size=FILE_SPOOL_BYTES)
         try:
-            at = self._drain(first, spool, 0, stop)
+            digest = hashlib.sha256()
+            at = self._drain(first, spool, 0, stop, digest)
             while at < total and not (stop is not None and stop.is_set()):
                 last = min(total, at + DOWNLOAD_PART_BYTES) - 1
                 reply = self._open_range(sha256, at, last)
-                at = self._drain(reply, spool, at, stop)
+                at = self._drain(reply, spool, at, stop, digest)
+            spool.digest = digest.hexdigest()  # type: ignore[attr-defined]
             spool.seek(0)
             return spool
         except BaseException:
