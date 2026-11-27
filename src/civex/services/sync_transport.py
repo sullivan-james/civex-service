@@ -72,6 +72,8 @@ class HttpSyncTransport:
     # How many small files the sender may upload at once over this transport
     # (each is its own HTTP request; the session token is shared).
     upload_threads = 4
+    # And how many files it may download at once.
+    download_threads = 6
 
     def __init__(
         self,
