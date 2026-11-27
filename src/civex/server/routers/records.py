@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Optional
+from typing import Generator, Optional, TypeVar
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 
 from civex.context import AppContext, context_factory
 from civex.domain.delete_policy import delete_tier
-from civex.domain.dtos import RecordBulkEditResultDTO
+from civex.domain.dtos import (
+    RecordBulkEditResultDTO,
+    RecordMoveResultDTO,
+    RestoreSetResultDTO,
+)
 from civex.domain.exceptions import NotFoundError, ValidationError
 from civex.domain.query import RecordQuery
 from civex.domain.summary import (
@@ -59,6 +64,30 @@ from civex.server.routers.file_access import report_progress
 from civex.services.archive import write_zip
 from civex.services.progress import Progress
 from civex.services.table_files import write_table
+
+T = TypeVar("T")
+
+
+def _in_chunks(
+    ctx: AppContext,
+    chunks: Generator[T, None, None],
+    progress: Progress | None,
+    empty: T,
+) -> tuple[T, bool]:
+    """Drive work done a chunk at a time: commit after each (so other saves go
+    in between two and nothing holds the database for the whole job), and stop
+    before the next when the person asked to. What was committed stays. Returns
+    what the last chunk said, and whether it was stopped."""
+    last, stopped = empty, False
+    with ctx.chunked_writes() as turn:
+        for last in chunks:
+            turn()
+            if progress is not None and progress.cancelled:
+                stopped = True
+                chunks.close()
+                break
+    return last, stopped
+
 
 router = APIRouter(tags=["records"])
 
@@ -442,14 +471,25 @@ def get_record_sync(record_id: str, ctx: AppContext = Depends(get_read_ctx)):
 
 
 @router.post("/records/{record_id}/restore-above", response_model=list[RecordResponse])
-def restore_above(record_id: str, ctx: AppContext = Depends(get_ctx)):
+def restore_above(
+    record_id: str,
+    ctx: AppContext = Depends(get_ctx),
+    progress: Progress | None = Depends(report_progress),
+):
     """Bring back what a live record sits under that is deleted: each deleted
     record directly above it, by itself, so their other children stay deleted.
     Refused (422) while the collection or schema of the topmost is deleted, or
     when one would clash with a live record's unique key."""
     try:
-        restored = ctx.record_svc.restore_above(record_id)
+        above = [a.id for a in ctx.record_svc.deleted_above(record_id)]
+        _in_chunks(
+            ctx,
+            ctx.record_svc.restore_above_chunks(record_id, progress=progress),
+            None,
+            0,
+        )
         ctx.commit()
+        restored = [ctx.record_svc.get(str(i)) for i in above]
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except ValidationError as e:
@@ -528,9 +568,19 @@ def delete_record(
     record_id: str,
     force: bool = Query(default=False),
     ctx: AppContext = Depends(get_ctx),
+    progress: Progress | None = Depends(report_progress),
 ):
+    """Delete a record with everything beneath it. The record and its subtree
+    are one action, so the whole of it goes in one commit: tag the request
+    with `X-Civex-Progress` to follow it (records of records), but it cannot
+    be stopped part way."""
     try:
-        ctx.record_svc.delete(record_id, force=force)
+        _in_chunks(
+            ctx,
+            ctx.record_svc.delete_chunks(record_id, force=force, progress=progress),
+            None,
+            (0, 0),
+        )
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     ctx.commit()
@@ -565,15 +615,25 @@ def restore_record(
         "deleted.",
     ),
     ctx: AppContext = Depends(get_ctx),
+    progress: Progress | None = Depends(report_progress),
 ):
     """Restore a deleted record with what was deleted alongside it. Refused while
     its collection or schema is deleted, or a record above it is (unless
     `with_parents`)."""
     try:
-        dto = ctx.record_svc.restore(
-            record_id, only_this=only_this, with_parents=with_parents
+        _in_chunks(
+            ctx,
+            ctx.record_svc.restore_chunks(
+                record_id,
+                only_this=only_this,
+                with_parents=with_parents,
+                progress=progress,
+            ),
+            None,
+            0,
         )
         ctx.commit()
+        dto = ctx.record_svc.get(record_id)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except ValidationError as e:
@@ -583,16 +643,33 @@ def restore_record(
 
 @router.post("/records/restore-selected", response_model=RestoreSelectedResponse)
 def restore_selected_records(
-    body: RestoreSelectedRequest, ctx: AppContext = Depends(get_ctx)
+    body: RestoreSelectedRequest,
+    ctx: AppContext = Depends(get_ctx),
+    progress: Progress | None = Depends(report_progress),
 ):
     """Restore exactly these deleted records, not what was deleted alongside
     them: for taking back three of the sixty records one delete took. The
     deleted records above a chosen one come back too (each by itself) unless
-    `with_parents` is false, in which case such a record is left."""
-    result = ctx.record_svc.restore_records(body.ids, body.with_parents)
+    `with_parents` is false, in which case such a record is left.
+
+    It is written a chunk of whole trees at a time, each chunk committed on its
+    own. Tag the request with `X-Civex-Progress` to follow it (records of
+    records) and to stop it (`POST /file-access/progress/{id}/cancel`): a
+    stopped restore keeps what has come back (`stopped` in the answer)."""
+    result, stopped = _in_chunks(
+        ctx,
+        ctx.record_svc.restore_records_chunks(
+            body.ids, body.with_parents, progress=progress
+        ),
+        progress,
+        RestoreSetResultDTO(restored=0, came_back=0, left=[]),
+    )
     ctx.commit()
     return RestoreSelectedResponse(
-        restored=result.restored, came_back=result.came_back, left=len(result.left)
+        restored=result.restored,
+        came_back=result.came_back,
+        left=len(result.left),
+        stopped=stopped,
     )
 
 
@@ -610,14 +687,30 @@ def purge_plan(record_id: str, ctx: AppContext = Depends(get_ctx)):
 
 
 @router.delete("/records/{record_id}/purge", status_code=204)
-def purge_record(record_id: str, ctx: AppContext = Depends(get_ctx)):
+def purge_record(
+    record_id: str,
+    ctx: AppContext = Depends(get_ctx),
+    progress: Progress | None = Depends(report_progress),
+):
+    """Permanently remove a deleted record and everything beneath it, deepest
+    first and a chunk at a time (each committed on its own), so a stop leaves
+    the rest in Recently Deleted whole. Tag the request with `X-Civex-Progress`
+    to follow it and to stop it; a stopped purge answers 200 with
+    `{"stopped": true, "purged": n}` instead of 204."""
     try:
-        ctx.record_svc.purge(record_id)
+        done, stopped = _in_chunks(
+            ctx,
+            ctx.record_svc.purge_chunks(record_id, progress=progress),
+            progress,
+            0,
+        )
         ctx.commit()
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except ValidationError as e:
         raise HTTPException(422, detail=str(e))
+    if stopped:
+        return JSONResponse({"stopped": True, "purged": done})
 
 
 @router.post("/records/bulk-delete")
@@ -625,10 +718,23 @@ def bulk_delete_records(
     ids: list[str] = Body(..., embed=True),
     force: bool = Body(default=False, embed=True),
     ctx: AppContext = Depends(get_ctx),
+    progress: Progress | None = Depends(report_progress),
 ):
-    deleted = ctx.record_svc.delete_many(ids, force=force)
+    """Delete these records, each with everything beneath it. Written a chunk
+    of whole trees at a time, each committed on its own, so other saves go in
+    between two. Tag the request with `X-Civex-Progress` to follow it (records
+    of records) and to stop it (`POST /file-access/progress/{id}/cancel`): a
+    stopped delete keeps what it deleted (`stopped` in the answer; `deleted`
+    counts the chosen records gone, `records` all of them with what sat under
+    them)."""
+    (deleted, records), stopped = _in_chunks(
+        ctx,
+        ctx.record_svc.delete_many_chunks(ids, force=force, progress=progress),
+        progress,
+        (0, 0),
+    )
     ctx.commit()
-    return {"deleted": deleted}
+    return {"deleted": deleted, "records": records, "stopped": stopped}
 
 
 @router.post("/records/delete-preview", response_model=RecordDeletePreviewResponse)
@@ -799,22 +905,40 @@ def plan_move_records(body: MoveRecordsRequest, ctx: AppContext = Depends(get_ct
 
 
 @router.post("/records/move", response_model=MoveRecordsResponse)
-def move_records(body: MoveRecordsRequest, ctx: AppContext = Depends(get_ctx)):
+def move_records(
+    body: MoveRecordsRequest,
+    ctx: AppContext = Depends(get_ctx),
+    progress: Progress | None = Depends(report_progress),
+):
     """Move records to another collection, or inside another record, with
     everything beneath them. A record keeps its id, values and history; the
     move is logged as an edit of each record (one event), so it is undoable
     from Activity. Files are not copied: they are stored by content. Refused
     whole (422, saying why) when anything is in the way; `POST
-    /records/move/plan` says so beforehand."""
+    /records/move/plan` says so beforehand.
+
+    Moved a chunk of whole trees at a time, each committed on its own. Tag the
+    request with `X-Civex-Progress` to follow it and to stop it: a stopped move
+    keeps the trees already moved (`stopped` in the answer)."""
     try:
-        result = ctx.record_svc.move(body.to, body.parent, **_selection(body, "move"))
+        result, stopped = _in_chunks(
+            ctx,
+            ctx.record_svc.move_chunks(
+                body.to, body.parent, progress=progress, **_selection(body, "move")
+            ),
+            progress,
+            RecordMoveResultDTO(roots=0, records=0, collection=""),
+        )
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except (ValueError, ValidationError) as e:
         raise HTTPException(422, detail=str(e))
     ctx.commit()
     return MoveRecordsResponse(
-        roots=result.roots, records=result.records, collection=result.collection
+        roots=result.roots,
+        records=result.records,
+        collection=result.collection,
+        stopped=stopped,
     )
 
 
@@ -890,20 +1014,29 @@ def delete_all_records(
     query: RecordQuery = Depends(record_query),
     force: bool = Query(default=False),
     ctx: AppContext = Depends(get_ctx),
+    progress: Progress | None = Depends(report_progress),
 ):
     """Delete every record the query matches -- with no filters, all of the
     collection's records (of 'schema', if given). The same filters as the
     list endpoint, so "delete all N matching" deletes exactly what a list
-    with those filters shows."""
+    with those filters shows. Chunked, followed and stopped as
+    `POST /records/bulk-delete`."""
     query.dataset = dataset_name
     try:
-        deleted = ctx.record_svc.delete_matching(query, force=force)
+        (deleted, records), stopped = _in_chunks(
+            ctx,
+            ctx.record_svc.delete_matching_chunks(
+                query, force=force, progress=progress
+            ),
+            progress,
+            (0, 0),
+        )
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     except (ValueError, ValidationError) as e:
         raise HTTPException(422, detail=str(e))
     ctx.commit()
-    return {"deleted": deleted}
+    return {"deleted": deleted, "records": records, "stopped": stopped}
 
 
 @router.get("/collections/{collection_name}/export.csv")

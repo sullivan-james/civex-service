@@ -10,6 +10,7 @@ import { useCallback } from 'react'
 import {
   recordsApi,
   type CivexRecord,
+  type DeleteManyResult,
   type FileSaver,
   type FileUpload,
   type PaginatedRecords,
@@ -23,6 +24,7 @@ import {
 } from '../api/records'
 import type { RecordQueryParams } from '../api/query'
 import { ApiError } from '../api/client'
+import { withProgress } from '../components/files/fileFlows'
 import { useToast } from '../components/ui/ToastProvider'
 import { errorMessage } from '../lib/errors'
 import { invalidateRecordNames } from './useRecordName'
@@ -302,12 +304,24 @@ export function useRecordFileSaver(recordId: string): FileSaver {
   )
 }
 
+const records = (n: number) =>
+  `${n.toLocaleString()} record${n === 1 ? '' : 's'}`
+
+/** What a delete of many records did, or how far it got before it was stopped
+ * (what is deleted stays deleted). */
+function deletedMessage(result: DeleteManyResult): string {
+  const n = records(result.records)
+  return result.stopped ? `Stopped. ${n} deleted.` : `${n} deleted`
+}
+
 export function useDeleteRecord(datasetName: string) {
   const qc = useQueryClient()
   const toast = useToast()
   return useMutation({
     mutationFn: (vars: { id: string; undo?: () => Promise<unknown> }) =>
-      recordsApi.delete(vars.id),
+      withProgress('Deleting records…', (pid) =>
+        recordsApi.delete(vars.id, pid),
+      ),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ['records', datasetName] })
       qc.invalidateQueries({ queryKey: ['record-counts', datasetName] })
@@ -355,12 +369,19 @@ export function usePurgeRecord() {
   const qc = useQueryClient()
   const toast = useToast()
   return useMutation({
-    mutationFn: recordsApi.purge,
-    onSuccess: () => {
+    mutationFn: (id: string) =>
+      withProgress(
+        'Deleting records for good…',
+        (pid) => recordsApi.purge(id, pid),
+        true,
+      ),
+    onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ['records-deleted'] })
       qc.invalidateQueries({ queryKey: ['trash'] })
       invalidateRecordNames(qc)
-      toast.success('Record permanently deleted')
+      if (result?.stopped)
+        toast.success(`Stopped. ${records(result.purged)} deleted.`)
+      else toast.success('Record permanently deleted')
     },
     onError: (err) => toast.error(errorMessage(err)),
   })
@@ -370,14 +391,18 @@ export function useDeleteManyRecords(datasetName: string) {
   const qc = useQueryClient()
   const toast = useToast()
   return useMutation({
-    mutationFn: (ids: string[]) => recordsApi.deleteMany(ids),
+    mutationFn: (ids: string[]) =>
+      withProgress(
+        'Deleting records…',
+        (pid) => recordsApi.deleteMany(ids, pid),
+        true,
+      ),
     onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ['records', datasetName] })
       qc.invalidateQueries({ queryKey: ['record-counts', datasetName] })
       qc.invalidateQueries({ queryKey: ['collections'] })
-      toast.success(
-        `${result.deleted} record${result.deleted === 1 ? '' : 's'} deleted`,
-      )
+      qc.invalidateQueries({ queryKey: ['records-deleted'] })
+      toast.success(deletedMessage(result))
     },
     onError: (err) => toast.error(errorMessage(err)),
   })
@@ -389,14 +414,17 @@ export function useDeleteMatchingRecords(datasetName: string) {
   const toast = useToast()
   return useMutation({
     mutationFn: (params: RecordQueryParams) =>
-      recordsApi.deleteMatching(datasetName, params),
+      withProgress(
+        'Deleting records…',
+        (pid) => recordsApi.deleteMatching(datasetName, params, pid),
+        true,
+      ),
     onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ['records', datasetName] })
       qc.invalidateQueries({ queryKey: ['record-counts', datasetName] })
       qc.invalidateQueries({ queryKey: ['collections'] })
-      toast.success(
-        `${result.deleted} record${result.deleted === 1 ? '' : 's'} deleted`,
-      )
+      qc.invalidateQueries({ queryKey: ['records-deleted'] })
+      toast.success(deletedMessage(result))
     },
     onError: (err) => toast.error(errorMessage(err)),
   })
@@ -439,7 +467,12 @@ export function useMoveRecords() {
   const qc = useQueryClient()
   const toast = useToast()
   return useMutation({
-    mutationFn: (body: MoveRecordsRequest) => recordsApi.move(body),
+    mutationFn: (body: MoveRecordsRequest) =>
+      withProgress(
+        'Moving records…',
+        (pid) => recordsApi.move(body, pid),
+        true,
+      ),
     onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ['records'] })
       qc.invalidateQueries({ queryKey: ['record'] })
@@ -447,7 +480,9 @@ export function useMoveRecords() {
       qc.invalidateQueries({ queryKey: ['collections'] })
       qc.invalidateQueries({ queryKey: ['record-move-plan'] })
       toast.success(
-        `${result.records} record${result.records === 1 ? '' : 's'} moved to ${result.collection}`,
+        result.stopped
+          ? `Stopped. ${records(result.records)} moved.`
+          : `${records(result.records)} moved to ${result.collection}`,
       )
     },
     onError: (err) => toast.error(errorMessage(err)),

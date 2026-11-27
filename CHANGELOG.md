@@ -26,6 +26,19 @@ final version's entry or `## Unreleased` instead of one of its own. The version 
   page share one check. A host without a machine of its own gets neither the
   install nor the drive checks, and no Repair. The message shown when syncing
   stops on a database of the wrong shape now points to the page too.
+- **Long deletes, restores and moves show how far they have got, and can be
+  stopped.** Deleting many records (selected, or a whole collection), restoring
+  selected records, permanently deleting and moving records now run a chunk at a
+  time like a bulk edit: the status bar shows "12,400 of 50,000", and Stop keeps
+  what is done ("Stopped. 12,400 records deleted."). A chunk is whole trees (a
+  record and everything beneath it), so another device never sees a tree half
+  done, and the history and sync entries are the ones a single request writes.
+  A permanent delete now removes a tree deepest first, so a stop leaves the top
+  of it whole in Recently Deleted. Deleting or restoring one record with a large
+  subtree, and deleting, restoring or permanently deleting a collection or schema,
+  show their progress but cannot be stopped: each is one action that is never
+  committed in part. The requests are tagged with `X-Civex-Progress` as before;
+  without it they answer as they did.
 - **Files download several at a time.** The background download of a copy's
   files fetched one file per request, one after another, and committed after
   each. It now takes up to six at once (each still checked against its hash,

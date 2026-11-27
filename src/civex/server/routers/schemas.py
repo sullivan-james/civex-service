@@ -7,6 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from civex.context import AppContext
 from civex.domain import filename_extract
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
+from civex.server.routers.file_access import report_progress
+from civex.services.progress import Progress
 from civex.server.deps import get_ctx
 from civex.server.models import (
     AddFieldRequest,
@@ -207,9 +209,13 @@ def get_schema_delete_impact(name: str, ctx: AppContext = Depends(get_ctx)):
 
 
 @router.delete("/{name}", status_code=204)
-def delete_schema(name: str, ctx: AppContext = Depends(get_ctx)):
+def delete_schema(
+    name: str,
+    ctx: AppContext = Depends(get_ctx),
+    progress: Progress | None = Depends(report_progress),
+):
     try:
-        ctx.schema_svc.delete(name)
+        ctx.schema_svc.delete(name, progress=progress)
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
     ctx.commit()
@@ -228,9 +234,13 @@ def restore_schema_plan(name: str, ctx: AppContext = Depends(get_ctx)):
 
 
 @router.post("/{name}/restore", response_model=SchemaResponse)
-def restore_schema(name: str, ctx: AppContext = Depends(get_ctx)):
+def restore_schema(
+    name: str,
+    ctx: AppContext = Depends(get_ctx),
+    progress: Progress | None = Depends(report_progress),
+):
     try:
-        dto = ctx.schema_svc.restore(name)
+        dto = ctx.schema_svc.restore(name, progress=progress)
         ctx.commit()
     except NotFoundError as e:
         raise HTTPException(404, detail=str(e))
@@ -240,8 +250,14 @@ def restore_schema(name: str, ctx: AppContext = Depends(get_ctx)):
 
 
 @router.delete("/{name}/purge", status_code=204)
-def purge_schema(name: str, ctx: AppContext = Depends(get_ctx)):
+def purge_schema(
+    name: str,
+    ctx: AppContext = Depends(get_ctx),
+    progress: Progress | None = Depends(report_progress),
+):
     try:
+        if progress:
+            progress.phase("Deleting for good")
         ctx.schema_svc.purge(name)
         ctx.commit()
     except NotFoundError as e:

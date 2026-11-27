@@ -303,6 +303,16 @@ export interface MoveRecordsResult {
   roots: number
   records: number
   collection: string
+  /** Stopped by the person before it was done: what moved stays moved. */
+  stopped?: boolean
+}
+
+/** What a delete of many records did: the chosen records gone, all of them
+ * with what sat beneath them, and whether it was stopped part way. */
+export interface DeleteManyResult {
+  deleted: number
+  records: number
+  stopped: boolean
 }
 
 export interface CivexRecord {
@@ -355,6 +365,8 @@ export interface RestoreSelectedResult {
   came_back: number
   /** Chosen records that stayed deleted. */
   left: number
+  /** Stopped by the person before it was done: what came back stays. */
+  stopped?: boolean
 }
 
 export interface DeletedFieldValue {
@@ -566,11 +578,19 @@ export const recordsApi = {
       xhr.send(file)
     }),
 
-  delete: (id: string) =>
-    api.delete<void>(`/records/${encodeURIComponent(id)}`),
+  /** Tag the request with a progress id to follow it (as every one below). */
+  delete: (id: string, progressId?: string) =>
+    api.delete<void>(
+      `/records/${encodeURIComponent(id)}`,
+      progressHeaders(progressId),
+    ),
 
-  deleteMany: (ids: string[]) =>
-    api.post<{ deleted: number }>('/records/bulk-delete', { ids }),
+  deleteMany: (ids: string[], progressId?: string) =>
+    api.post<DeleteManyResult>(
+      '/records/bulk-delete',
+      { ids },
+      progressHeaders(progressId),
+    ),
 
   /** What deleting the chosen records would take, with everything beneath
    * them, and the confirmation to ask: `plain`, or `type` for a large delete.
@@ -581,9 +601,14 @@ export const recordsApi = {
   /** Deletes every record the query matches (no filters: the whole
    * collection). The same query the list shows, so "all N matching" is
    * exactly what is on screen. */
-  deleteMatching: (datasetName: string, params?: RecordQueryParams) =>
-    api.delete<{ deleted: number }>(
+  deleteMatching: (
+    datasetName: string,
+    params?: RecordQueryParams,
+    progressId?: string,
+  ) =>
+    api.delete<DeleteManyResult>(
       `/collections/${encodeURIComponent(datasetName)}/records${recordQueryString(params)}`,
+      progressHeaders(progressId),
     ),
 
   /** What moving the chosen records (ids, or everything a query lists) to
@@ -595,8 +620,12 @@ export const recordsApi = {
   /** Re-points the chosen records (with everything beneath them) at another
    * collection, or inside another record. Refused whole (422) when
    * anything is in the way. */
-  move: (body: MoveRecordsRequest) =>
-    api.post<MoveRecordsResult>('/records/move', body),
+  move: (body: MoveRecordsRequest, progressId?: string) =>
+    api.post<MoveRecordsResult>(
+      '/records/move',
+      body,
+      progressHeaders(progressId),
+    ),
 
   /** What setting (or clearing) fields on the chosen records would do: how
    * many change, how many already hold the values, which can't and why, and
@@ -675,31 +704,41 @@ export const recordsApi = {
     return api.get<CivexRecord[]>(`/records/deleted${qs}`)
   },
 
-  restore: (id: string) =>
-    api.post<CivexRecord>(`/records/${encodeURIComponent(id)}/restore`, {}),
+  restore: (id: string, progressId?: string) =>
+    api.post<CivexRecord>(
+      `/records/${encodeURIComponent(id)}/restore`,
+      {},
+      progressHeaders(progressId),
+    ),
   /** Live records under a deleted record, with what they sit under. */
   orphans: (limit = 200) =>
     api.get<{ total: number; items: Orphan[] }>(
       `/records/orphans?limit=${limit}`,
     ),
   /** Bring back the deleted records a live record sits under, each by itself. */
-  restoreAbove: (id: string) =>
+  restoreAbove: (id: string, progressId?: string) =>
     api.post<CivexRecord[]>(
       `/records/${encodeURIComponent(id)}/restore-above`,
       {},
+      progressHeaders(progressId),
     ),
 
   /** Restore exactly these deleted records, not what was deleted alongside
    * them. The deleted records above a chosen one come back too (each by
    * itself) unless `withParents` is false, when such a record is left. */
-  restoreSelected: (ids: string[], withParents = true) =>
-    api.post<RestoreSelectedResult>('/records/restore-selected', {
-      ids,
-      with_parents: withParents,
-    }),
+  restoreSelected: (ids: string[], withParents = true, progressId?: string) =>
+    api.post<RestoreSelectedResult>(
+      '/records/restore-selected',
+      { ids, with_parents: withParents },
+      progressHeaders(progressId),
+    ),
 
-  purge: (id: string) =>
-    api.delete<void>(`/records/${encodeURIComponent(id)}/purge`),
+  /** Answers 204, or `{ stopped: true, purged }` when it was stopped. */
+  purge: (id: string, progressId?: string) =>
+    api.delete<{ stopped: true; purged: number } | undefined>(
+      `/records/${encodeURIComponent(id)}/purge`,
+      progressHeaders(progressId),
+    ),
 
   /** What a permanent delete would take (the record and those deleted with
    * it), and which releases keep files of theirs, so the files stay. */

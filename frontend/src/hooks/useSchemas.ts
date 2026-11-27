@@ -10,6 +10,7 @@ import { displayLabel } from '../utils/naming'
 import { useToast } from '../components/ui/ToastProvider'
 import { invalidateRecordNames } from './useRecordName'
 import { errorMessage } from '../lib/errors'
+import { withProgress } from '../components/files/fileFlows'
 import { useDebouncedValue } from './useDebouncedValue'
 
 /**
@@ -230,7 +231,9 @@ export function useDeleteSchema() {
   const toast = useToast()
   return useMutation({
     mutationFn: (vars: { name: string; undo?: () => Promise<unknown> }) =>
-      schemasApi.delete(vars.name),
+      withProgress('Deleting records…', (pid) =>
+        schemasApi.delete(vars.name, pid),
+      ),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ['schemas'] })
       qc.invalidateQueries({ queryKey: ['schemas-deleted'] })
@@ -269,7 +272,8 @@ export function usePurgeSchema() {
   const qc = useQueryClient()
   const toast = useToast()
   return useMutation({
-    mutationFn: schemasApi.purge,
+    mutationFn: (name: string) =>
+      withProgress('Deleting for good…', (pid) => schemasApi.purge(name, pid)),
     onSuccess: (_data, schemaName) => {
       qc.invalidateQueries({ queryKey: ['schemas'] })
       qc.invalidateQueries({ queryKey: ['schemas-deleted'] })

@@ -54,9 +54,7 @@ def _cite(laptop, record, contents):
     for i, content in enumerate(contents):
         ref = laptop.file_svc.store_bytes(content, f"s{i}.bin")
         rec = laptop.record_svc.add("study", "encounter", {"site": f"s{i}"})
-        laptop.record_svc.update(
-            str(rec.id), {"site": f"s{i}", "scan": ref.to_dict()}
-        )
+        laptop.record_svc.update(str(rec.id), {"site": f"s{i}", "scan": ref.to_dict()})
         files[ref.sha256] = content
     laptop.commit()
     laptop.sync_svc.sync()
@@ -88,9 +86,7 @@ def test_several_files_come_at_once_and_each_is_stored(pair, monkeypatch):
     assert phone.sync_svc.files_missing() == 0
 
 
-def test_a_file_with_the_wrong_content_is_refused_and_the_rest_stays(
-    pair, monkeypatch
-):
+def test_a_file_with_the_wrong_content_is_refused_and_the_rest_stays(pair, monkeypatch):
     seen = {}
 
     def make(files):

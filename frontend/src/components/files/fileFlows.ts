@@ -136,6 +136,19 @@ export async function tracked<T>(
   }
 }
 
+/** Run one request that takes a while (a delete, a restore, a move) as a job:
+ * the status bar shows how far the server has got, and with `stoppable` offers
+ * Stop (the server stops between two chunks of its work; what is done stays).
+ * The answer, or the error, is handed back to the caller. */
+export function withProgress<T>(
+  title: string,
+  run: (progressId: string) => Promise<T>,
+  stoppable = false,
+  ctx: Pick<FlowContext, 'progressMs'> = {},
+): Promise<T> {
+  return runFileJob({ title }, (j) => tracked(ctx, j, run, stoppable))
+}
+
 /** Write one file civex makes (a copy of the project, a release's) onto a
  * drive: a job like any other, so it carries on in the status bar with its
  * progress after the dialog that asked for it has closed, and says where the

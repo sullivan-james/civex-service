@@ -1,4 +1,5 @@
 import { api } from './client'
+import { progressHeaders } from './fileAccess'
 
 export type RestoreKind = 'record' | 'collection' | 'schema' | 'field'
 
@@ -92,8 +93,12 @@ export const restoreApi = {
   plan: (target: RestoreTarget) =>
     api.get<RestorePlan>(`${pathOf(target)}/restore-plan`),
 
-  restore: (target: RestoreTarget) =>
-    api.post<unknown>(`${pathOf(target)}/restore${restoreQuery(target)}`, {}),
+  restore: (target: RestoreTarget, progressId?: string) =>
+    api.post<unknown>(
+      `${pathOf(target)}/restore${restoreQuery(target)}`,
+      {},
+      progressHeaders(progressId),
+    ),
 }
 
 /** The target for a blocker, which is what to restore first. */

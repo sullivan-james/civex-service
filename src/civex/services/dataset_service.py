@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Callable
 from contextlib import contextmanager, nullcontext
 
 from civex.services.cascades import States, log_cascade, record_states
+from civex.services.progress import Progress
 from civex.domain.dtos import DatasetDTO, RestorePlanDTO
 from civex.domain.exceptions import AlreadyExistsError, NotFoundError, ValidationError
 from civex.domain import permissions
@@ -185,7 +186,7 @@ class DatasetService:
             )
         return updated
 
-    def delete(self, name: str) -> None:
+    def delete(self, name: str, progress: Progress | None = None) -> None:
         """Soft-delete: the collection (and every record in it — see
         DatasetRepository.delete) moves to Recently Deleted, reversible via
         restore() within the retention window. A global collection that other
@@ -208,7 +209,7 @@ class DatasetService:
                     timestamp=stamp,
                 )
             self._datasets.delete(dataset.id, stamp)
-            self._log_cascade(dataset.id, before)
+            self._log_cascade(dataset.id, before, progress, "Deleting records")
 
     def _records_repo(self):
         return self._record_svc.records_repo if self._record_svc else None
@@ -217,12 +218,25 @@ class DatasetService:
         records = self._records_repo()
         return record_states(records, dataset_id=dataset_id) if records else {}
 
-    def _log_cascade(self, dataset_id: uuid.UUID, before: States) -> None:
+    def _log_cascade(
+        self,
+        dataset_id: uuid.UUID,
+        before: States,
+        progress: Progress | None = None,
+        label: str = "Recording changes",
+    ) -> None:
         """An entry for each of the collection's records its delete or restore
         changed (`services/cascades`)."""
         records = self._records_repo()
         if records:
-            log_cascade(records, self._audit, before, dataset_id=dataset_id)
+            log_cascade(
+                records,
+                self._audit,
+                before,
+                dataset_id=dataset_id,
+                progress=progress,
+                label=label,
+            )
 
     def _one_event(self, kind: str, before: States, stamp: datetime | None):
         if not self._audit:
@@ -260,7 +274,7 @@ class DatasetService:
             raise ValidationError(f"Dataset '{name}' is not deleted")
         return dataset
 
-    def restore(self, name: str) -> DatasetDTO:
+    def restore(self, name: str, progress: Progress | None = None) -> DatasetDTO:
         """Undo delete(): the collection and the records cascade-deleted
         with it become live again (see DatasetRepository.restore)."""
         self._permissions.require(permissions.CHANGE_STRUCTURE)
@@ -280,7 +294,7 @@ class DatasetService:
                     dataset.to_dict(),
                     restored.to_dict(),
                 )
-            self._log_cascade(dataset.id, before)
+            self._log_cascade(dataset.id, before, progress, "Restoring records")
         return restored
 
     def purge(self, name: str) -> None:
