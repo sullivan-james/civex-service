@@ -91,6 +91,7 @@ def test_files_travel_both_ways_over_ssh(project, lab):
     authority.commit()
     tablet = project("tablet")
     tablet.sync_svc.connect(url, invite2)
+    tablet.config.sync.download_files = "all"  # joining sets "opened"
     tablet.commit()
     tablet.sync_svc.fetch_files()
     tablet.commit()

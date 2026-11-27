@@ -1904,10 +1904,14 @@ def _comparable(state: dict[str, Any]) -> dict[str, Any]:
 
 def _already_done(entry: SyncEntry, head: dict[str, Any]) -> bool:
     """A record change that is already true of the state held here (a delete of
-    a deleted record; a restore, edit or move that leaves a live record as it
-    is): there is nothing to take or to write down."""
+    a restore, edit or move that leaves a live record as it is): there is
+    nothing to take or to write down. A delete of a record already deleted is
+    never this: it is a second change's delete, written down like the one an
+    action carries, so history says who else deleted it (undoing one delete then
+    leaves what another also deleted; `AuditService._deleted_elsewhere`). A
+    resend of the same change never gets here (`_settle` answers it from the op)."""
     if entry.action == "delete":
-        return bool(head.get("deleted_at"))
+        return False
     if entry.action not in ("restore", "update") or head.get("deleted_at"):
         return False
     _, incoming = _sides(entry, head)

@@ -118,7 +118,7 @@ def test_a_second_sync_waits_for_the_first_to_finish(pair, monkeypatch):
 # -- the log ------------------------------------------------------------------
 
 
-def test_files_that_cant_be_sent_are_one_info_line(pair, caplog):
+def test_a_file_this_project_never_stored_is_not_owed(pair, caplog):
     laptop, record = pair
     laptop.schema_svc.add_field("encounter", "scan", "file")
     laptop.commit()
@@ -132,16 +132,12 @@ def test_files_that_cant_be_sent_are_one_info_line(pair, caplog):
     laptop.sync_svc.sync()
     with caplog.at_level(logging.DEBUG, logger="civex.services.sync_service"):
         report = laptop.sync_svc.send_files()
-    infos = [
-        r
-        for r in caplog.records
-        if r.levelno == logging.INFO and " not sent: " in r.getMessage()
-    ]
-    assert infos == []
-    summaries = [r for r in caplog.records if "cannot be read here" in r.getMessage()]
-    assert len(summaries) == 1 and summaries[0].levelno == logging.INFO
-    assert report.never_stored == [ref.sha256]
-    assert "never stored" in summaries[0].getMessage()
+    # Nothing is stored here for it, so it is not this computer's to send: no
+    # asking, no line about it.
+    assert report.owed == [] and report.sent == 0
+    assert not [r for r in caplog.records if "cannot be read here" in r.getMessage()]
+    assert laptop.sync_repo.count_unconfirmed() == 0
+    assert ref.sha256
 
 
 # -- refusals for permission --------------------------------------------------

@@ -54,6 +54,11 @@ def _print_plan(plan: BundlePlan, title: str) -> None:
             f"  [warning]{plan.files_unreachable} file(s) are on no drive that can "
             "be reached now and were left out; the records still cite them.[/warning]"
         )
+        if plan.files_not_on_server:
+            console.print(
+                f"  [warning]{plan.files_not_on_server} of them aren't on the server "
+                "either: the device that added them hasn't uploaded them.[/warning]"
+            )
 
 
 @app.command("export")

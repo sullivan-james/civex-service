@@ -74,6 +74,9 @@ class BundlePlan:
     file_bytes: int = 0
     # Files cited by the records but on no reachable drive here.
     files_unreachable: int = 0
+    # Of those, files a server this project follows said it hasn't got either
+    # (the device that added them hasn't uploaded them).
+    files_not_on_server: int = 0
     workflows: int = 0
     plugins: int = 0
     include_files: bool = True
@@ -86,6 +89,7 @@ class BundlePlan:
             "files": self.files,
             "file_bytes": self.file_bytes,
             "files_unreachable": self.files_unreachable,
+            "files_not_on_server": self.files_not_on_server,
             "workflows": self.workflows,
             "plugins": self.plugins,
             "include_files": self.include_files,
@@ -177,6 +181,10 @@ class BundleService:
         # The ids of the records the last walk chose (a query's or exactly
         # some), None when it took whole collections.
         self.written_ids: list[uuid.UUID] | None = None
+        # Injected by the context when this project follows a server: fetches
+        # files not on a drive here (`SyncService.fetch_files`), so an export
+        # from a computer that downloads files when opened carries them.
+        self.fetch_missing: Callable[[list[str]], Any] | None = None
         self._cited: dict[str, int] = {}
 
         # `index_svc.after_bulk_write`: the planner's statistics, refreshed
@@ -204,18 +212,22 @@ class BundleService:
             plan, schemas, collections = self._walk(options, sink=zf, progress=progress)
             refs = self._cited  # set by _walk
             missing: list[str] = []
+            absent: set[str] = set()
             if options.include_files and refs:
                 if progress:
                     progress.phase("Adding files", len(refs), plan.file_bytes)
                 written = 0
                 for sha, size in refs.items():
-                    if not self.write_file(zf, sha):
+                    if not self.write_file(zf, sha) and not self._fetched_then_written(
+                        zf, sha, absent
+                    ):
                         missing.append(sha)
                     written += 1
                     if progress:
                         progress.advance(written)
                         progress.add_bytes(size)
             plan.files_unreachable = len(missing)
+            plan.files_not_on_server = len(absent.intersection(missing))
             workflows = plugins = 0
             if options.include_workflows and self._civex_dir:
                 workflows = self._add_members(
@@ -435,6 +447,21 @@ class BundleService:
         except (FileNotFoundError, OSError, VolumeUnavailableError):
             return None
         return itertools.chain([first], chunks)
+
+    def _fetched_then_written(
+        self, zf: zipfile.ZipFile, sha: str, absent: set[str]
+    ) -> bool:
+        """A file on no drive here, downloaded from the server this project
+        follows (when it follows one), then written. `absent` collects those
+        the server hasn't got either."""
+        if self.fetch_missing is None:
+            return False
+        try:
+            report = self.fetch_missing([sha])
+        except Exception:  # noqa: BLE001 — unreachable server: left out, as before
+            return False
+        absent.update(getattr(report, "absent", None) or [])
+        return self.write_file(zf, sha)
 
     def write_file(self, zf: zipfile.ZipFile, sha: str) -> bool:
         """Copy one stored file into the bundle, uncompressed (media rarely

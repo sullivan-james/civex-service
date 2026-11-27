@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 import logging
 from typing import Any
 
@@ -160,6 +159,37 @@ class Plugin(PluginBase):
             description="Which sheet of an Excel file to read, by name. The "
             "first sheet when empty.",
         )
+        as_text: bool = Field(
+            title="Keep every value as written",
+            json_schema_extra=advanced(),
+            default=False,
+            description="Read every cell as the text it shows, with nothing "
+            "guessed: 007 stays 007, a blank cell is empty text. Off: numbers, "
+            "dates and yes/no are worked out from the file.",
+        )
+        skip_rows: int = Field(
+            title="Skip this many rows after the headings",
+            json_schema_extra=advanced(),
+            default=0,
+            ge=0,
+            description="Leave out this many rows after the heading row, to "
+            "read a large file a part at a time.",
+        )
+        max_rows: int | None = Field(
+            title="Read at most this many rows",
+            json_schema_extra=advanced(),
+            default=None,
+            ge=0,
+            description="Stop after this many rows (after any skipped). All "
+            "of them when empty.",
+        )
+        only_columns: list[str] | None = Field(
+            title="Read only these columns",
+            json_schema_extra=advanced(),
+            default=None,
+            description="Read just the columns with these headings. All of "
+            "them when empty.",
+        )
 
         @field_validator("delimiters")
         @classmethod
@@ -185,7 +215,7 @@ class Plugin(PluginBase):
         refs = _files_to_read(inputs, config, ctx)
         frames = []
         for ref in refs:
-            frames.append(_read_one(pd, ctx.get_file(ref.sha256), ref.filename, config))
+            frames.append(_read_one(pd, ctx, ref, config))
         df = frames[0] if len(frames) == 1 else pd.concat(frames, ignore_index=True)
         log.info(
             "Read table: %d rows x %d columns %s",
@@ -221,12 +251,77 @@ def _files_to_read(inputs: dict[str, Any], config: Any, ctx: Ctx) -> list[FileRe
 _EXCEL = (".xlsx", ".xlsm", ".xls")
 
 
-def _read_one(pd: Any, raw: bytes, filename: str, config: Any) -> Any:
+def _options(pd: Any, config: Any) -> dict[str, Any]:
+    """What `config` asks of the reader, in pandas' words, the same for text
+    and Excel files."""
+    opts: dict[str, Any] = {}
+    if config.as_text:
+        opts.update(dtype=str, keep_default_na=False)
+    # Rows to skip and to read are counted in rows of data, never in lines of
+    # the file (a text file may have blank lines, which hold no row): see
+    # `_read_part`. Excel rows are rows already, blank ones included.
+    if config.only_columns:
+        wanted = set(config.only_columns)
+        opts["usecols"] = lambda name: str(name) in wanted
+    return opts
+
+
+#: Rows of a text file passed over at a time when skipping to a part.
+_SKIP_CHUNK = 50_000
+
+
+def _read_part(pd: Any, read: Any, config: Any) -> Any:
+    """The rows `skip_rows` to `skip_rows + max_rows` of a text file. The parser
+    drops blank lines, so rows are counted as it hands them over, not by line:
+    skipping by line would shift every part after a blank line."""
+    if not config.skip_rows:
+        return read(nrows=config.max_rows)
+    columns = read(nrows=0).columns
+    frames: list[Any] = []
+    with read(chunksize=_SKIP_CHUNK) as reader:
+        skipped, taken = 0, 0
+        limit = config.max_rows
+        while limit is None or taken < limit:
+            if skipped < config.skip_rows:
+                size = min(config.skip_rows - skipped, _SKIP_CHUNK)
+            else:
+                size = _SKIP_CHUNK if limit is None else min(limit - taken, _SKIP_CHUNK)
+            try:
+                chunk = reader.get_chunk(size)
+            except StopIteration:
+                break
+            if skipped < config.skip_rows:
+                skipped += len(chunk)
+            else:
+                frames.append(chunk)
+                taken += len(chunk)
+    if not frames:
+        return pd.DataFrame(columns=columns)
+    return pd.concat(frames, ignore_index=True)
+
+
+def _sample_text(path: Any, encoding: str) -> str:
+    """The first part of a text file, enough to tell its separator."""
+    with open(path, encoding=encoding, errors="replace") as f:
+        return f.read(65536)
+
+
+def _read_one(pd: Any, ctx: Ctx, ref: FileRef, config: Any) -> Any:
+    filename = ref.filename
     try:
+        # Read from the file where it is kept, not from a copy in memory: a
+        # large table is read in pieces by pandas.
+        path = ctx.file_path(ref.sha256)
+        opts = _options(pd, config)
         if filename.lower().endswith(_EXCEL):
             try:
+                extra: dict[str, Any] = {}
+                if config.skip_rows:
+                    extra["skiprows"] = range(1, config.skip_rows + 1)
+                if config.max_rows is not None:
+                    extra["nrows"] = config.max_rows
                 return pd.read_excel(
-                    io.BytesIO(raw), sheet_name=config.sheet or 0, engine=None
+                    path, sheet_name=config.sheet or 0, engine=None, **opts, **extra
                 )
             except ImportError as e:
                 raise ValidationError(
@@ -237,11 +332,12 @@ def _read_one(pd: Any, raw: bytes, filename: str, config: Any) -> Any:
                 raise ValidationError(f"Could not read '{filename}': {e}") from e
         # utf-8-sig drops a byte-order mark, which would otherwise end up
         # glued to the first column's name.
-        text = raw.decode(
+        encoding = (
             "utf-8-sig"
             if config.encoding.lower() in ("utf-8", "utf8")
             else config.encoding
         )
+        text = _sample_text(path, encoding)
         if config.delimiters:
             candidates = [resolve_delimiter(t) for t in config.delimiters]
             delimiter = detect_delimiter(text, candidates)
@@ -251,7 +347,13 @@ def _read_one(pd: Any, raw: bytes, filename: str, config: Any) -> Any:
             log.info("Read '%s' as separated by %r", filename, delimiter)
         else:
             delimiter = resolve_delimiter(config.delimiter, single_char=False)
-        return pd.read_csv(io.StringIO(text), sep=delimiter)
+        return _read_part(
+            pd,
+            lambda **kw: pd.read_csv(
+                path, sep=delimiter, encoding=encoding, **opts, **kw
+            ),
+            config,
+        )
     except UnicodeDecodeError as e:
         raise ValidationError(
             f"Could not decode '{filename}' as {config.encoding}: {e}"

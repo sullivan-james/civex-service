@@ -51,6 +51,7 @@ if TYPE_CHECKING:
     from civex.services.file_service import FileService
     from civex.services.gc_service import GCService
     from civex.services.file_access_service import FileAccessService
+    from civex.services.import_service import ImportService
     from civex.services.file_info_service import FileInfoService
     from civex.services.transfer_service import TransferService
     from civex.services.plugin_service import PluginService
@@ -111,6 +112,7 @@ class AppContext:
     gc_svc: GCService
     file_info_svc: FileInfoService
     file_access_svc: FileAccessService
+    import_svc: ImportService
     audit_svc: LocalAuditRepository
     history_svc: AuditService
     retention_svc: RetentionService
@@ -522,6 +524,7 @@ def build_context(
     from civex.services.file_service import FileService
     from civex.services.gc_service import GCService
     from civex.services.file_access_service import FileAccessService
+    from civex.services.import_service import ImportService
     from civex.services.file_info_service import FileInfoService
     from civex.repositories.local.transfer_repo import LocalTransferRepository
     from civex.services.transfer_service import TransferService
@@ -668,6 +671,7 @@ def build_context(
         record_svc, schema_svc, file_store, config.civex_dir, volumes
     )
     file_access_svc.refs = LocalFileReferenceRepository(session)
+    import_svc = ImportService()
     transfer_svc: TransferService | None = None
     if volumes is not None and store_svc is not None:
         transfer_svc = TransferService(
@@ -840,6 +844,7 @@ def build_context(
         batch=history_svc.batch,
         after_bulk_write=index_svc.after_bulk_write,
     )
+    bundle_svc.fetch_missing = lambda shas: _sync().fetch_files(shas=shas)
     release_svc = ReleaseService(
         release_repo,
         bundle_svc,
@@ -888,6 +893,7 @@ def build_context(
         gc_svc=gc_svc,
         file_info_svc=file_info_svc,
         file_access_svc=file_access_svc,
+        import_svc=import_svc,
         audit_svc=audit_repo,
         history_svc=history_svc,
         compaction_svc=HistoryCompactionService(
@@ -934,4 +940,5 @@ def build_context(
         on_read_engine=on_read_engine,
     )
     ai_svc._app_ctx = ctx
+    import_svc._app_ctx = ctx
     return ctx

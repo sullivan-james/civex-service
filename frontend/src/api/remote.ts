@@ -16,6 +16,12 @@ export interface RemoteStatus {
   /** Files records here cite that nothing can supply: not on a drive here, and
    * the server said it hasn't got them either. Not downloading. */
   files_missing?: number
+  /** Like `files_missing`, but a record citing them changed lately: the
+   * device that added them may still be uploading them. */
+  files_arriving?: number
+  /** Files records here cite that aren't on this computer and can be
+   * downloaded: what keeping every file would fetch. */
+  files_not_here?: number
   /** Files records here cite that the server hasn't said it holds yet. */
   files_to_send: number
   /** Why those haven't gone; null when there are none. */
@@ -41,12 +47,19 @@ export interface RemoteStatus {
   /** Why the last connect started here failed, in a person's words, and the
    * technical text behind it. */
   connect_error: string | null
+  /** `no_access`: the hub refused this computer; a person there must let it in. */
+  connect_error_kind?: string | null
   connect_error_detail?: string | null
   /** The civex this computer runs. */
   version?: string
   /** This computer asked to join and waits for a person to approve the code
    * on the server. */
-  awaiting_approval?: { code: string; expires_at: number } | null
+  awaiting_approval?: {
+    code: string
+    expires_at: number
+    /** Where a person approves it, when the server has a page for that. */
+    verify_url?: string | null
+  } | null
 }
 
 export interface SyncDevice {
@@ -190,13 +203,6 @@ export interface FilesWaiting {
   ready: number
   /** Only on drives that can't be read right now, in the drive's own words. */
   offline: { volume: string; files: number; reason: string }[]
-  /** On no drive here, and the server said it hasn't got them either:
-   * nothing here can send them (not counted in `files_to_send`). */
-  missing: number
-  /** Of `missing`, those this project never stored. */
-  never_stored?: number
-  /** Missing files a person chose to stop being told about. */
-  ignored?: number
 }
 
 export interface SyncResult {
@@ -437,9 +443,16 @@ export const remoteApi = {
    * the background (see `progress`). Without an invite, this computer must
    * have joined that address before. */
   connect: (url: string, invite?: string) =>
-    api.post<{ mode: string; code: string | null; expires_at: number | null }>(
-      '/remote/connect',
-      { url, invite },
+    api.post<{
+      mode: string
+      code: string | null
+      expires_at: number | null
+      verify_url?: string | null
+    }>('/remote/connect', { url, invite }),
+  /** Whether this computer has joined that address before. */
+  known: (url: string) =>
+    api.get<{ joined: boolean }>(
+      `/remote/known?url=${encodeURIComponent(url)}`,
     ),
   disconnect: () => api.post<RemoteStatus>('/remote/disconnect', {}),
   syncNow: () => api.post<{ requested: boolean }>('/remote/sync', {}),

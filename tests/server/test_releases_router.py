@@ -271,3 +271,53 @@ def test_created_range_selects_records_and_scopes_a_release(client: TestClient):
         json={"query": {"schema_name": "sample", "created_before": past}},
     )
     assert none.status_code == 200 and none.json()["records"] == 0
+
+
+def test_a_release_plan_counts_the_files_the_store_lacks(client: TestClient):
+    from civex.config import load_config
+    from civex.context import build_local_context
+
+    client.post("/api/schemas", json={"name": "sample"})
+    client.post("/api/schemas/sample/fields", json={"name": "a", "type": "file"})
+    client.post("/api/schemas/sample/fields", json={"name": "b", "type": "file"})
+    files = {}
+    for name, body in (("kept", b"kept"), ("gone", b"gone!")):
+        files[name] = client.put(
+            f"/api/files/stream?filename={name}.bin",
+            content=body,
+            headers={"content-length": str(len(body))},
+        ).json()
+    client.post("/api/collections", json={"name": "c"})
+    client.post(
+        "/api/collections/c/records",
+        json={
+            "schema_name": "sample",
+            "data": {"a": files["kept"], "b": files["gone"]},
+        },
+    )
+    client.post("/api/releases", json={"name": "v1", "title": "T"})
+    whole = client.post("/api/releases/v1/files/plan").json()
+    assert whole["missing"] == {"files": 0, "bytes": 0}
+
+    ctx = build_local_context(load_config())
+    ctx.file_svc.discard(files["gone"]["sha256"])
+    ctx.commit()
+    ctx.close()
+    plan = client.post("/api/releases/v1/files/plan").json()
+    assert (plan["total"], plan["available"]) == (2, 1)
+    assert plan["missing"] == {"files": 1, "bytes": 5}
+    assert plan["complete"] is False
+
+
+def test_a_releases_files_can_be_listed_with_the_inventory(client: TestClient):
+    from civex.config import load_config
+    from civex.context import build_local_context
+
+    _study(client)
+    client.post("/api/releases", json={"name": "v1", "title": "Survey"})
+    ctx = build_local_context(load_config())
+    with ctx.release_svc.file_access("v1") as (access, selection):
+        listed = access.listing(selection)
+    ctx.close()
+    assert listed.total == 1 and [i.filename for i in listed.items] == ["p.jpg"]
+    assert sum(p.files for p in listed.summary) == 1

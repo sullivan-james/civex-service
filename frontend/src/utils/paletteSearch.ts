@@ -37,6 +37,8 @@ export interface PaletteSources {
   /** Saved exports (optional: older callers have none). */
   exports?: NavTarget[]
   records: NavTarget[]
+  /** Things to do rather than open (optional): found by typing. */
+  actions?: NavTarget[]
 }
 
 /** The groups to show for `query`, empty groups left out. Places are the
@@ -49,6 +51,7 @@ export function buildGroups(
   const q = query.trim()
   const groups: PaletteGroup[] = q
     ? [
+        { heading: 'Actions', items: pick(q, src.actions ?? []) },
         { heading: 'Collections', items: pick(q, src.collections) },
         { heading: 'Schemas', items: pick(q, src.schemas) },
         { heading: 'Saved lists and analyses', items: pick(q, src.views) },

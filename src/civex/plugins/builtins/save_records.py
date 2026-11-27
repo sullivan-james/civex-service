@@ -43,6 +43,15 @@ class Plugin(PluginBase):
             description="The files to save, one record for each file, with the "
             "file in the field chosen in Put the file in field.",
         ),
+        IOSpec(
+            name="earlier",
+            type="table",
+            required=False,
+            description="Rows that come before the table, already dealt with "
+            "(same columns): their keys count when a repeated one is looked "
+            "for, so a table saved in parts treats repeats as one saved whole. "
+            "Nothing is saved from them.",
+        ),
     ]
     outputs = [
         IOSpec(name="created", type="number", description="How many records it made."),
@@ -141,6 +150,23 @@ class Plugin(PluginBase):
             description="Tables only: maps table column names to field names. "
             "Empty means columns are used as field names directly.",
         )
+        as_written: bool = Field(
+            title="Values are as a spreadsheet shows them",
+            json_schema_extra=advanced(),
+            default=False,
+            description="Tables only: every cell is the text it shows. Blank "
+            "cells are left out and each other cell becomes the value its field "
+            "holds (a whole number, a date, yes or no); a row with a cell that "
+            "can't be that is skipped and named.",
+        )
+        first_row: int = Field(
+            title="Number of the first row",
+            json_schema_extra=advanced(),
+            default=1,
+            ge=1,
+            description="Tables only: the number said of the first row when a "
+            "row is named (2 for the first row under a heading row).",
+        )
         dataset: str = Field(
             title="Collection",
             json_schema_extra=advanced(hint("collection")),
@@ -180,6 +206,9 @@ class Plugin(PluginBase):
                 mapping=config.field_mapping,
                 parent_record_id=config.parent_record_id,
                 if_exists=config.if_exists,
+                as_written=config.as_written,
+                first_row=config.first_row,
+                earlier=inputs.get("earlier"),
             )
         if not config.file_field or files is None:
             raise ValidationError("Say which field the file goes in (file_field).")

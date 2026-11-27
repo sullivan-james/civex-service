@@ -89,30 +89,64 @@ def _entry_visible(scope: ReadScope) -> ColumnElement[bool]:
     )
 
 
+def _record_rule(scope: ReadScope) -> Callable[[Any], ColumnElement[bool]]:
+    """The rule for a record as a function of the entity it meets, so a query
+    naming the table under an alias (a join of `aliased(Record)`) gets it on
+    its own alias, not on the bare table (which is not in its FROM). One
+    lambda per shape, the values bound as parameters, so SQLAlchemy keeps its
+    statement cache. (Not built from a column name: the lambda machinery
+    cannot take a string in its closure.)"""
+    if scope.only is not None:
+        only = list(scope.only)
+        if not only:
+            return lambda cls: false()
+        return lambda cls: cls.dataset_id.in_(only)
+    hidden = list(scope.hidden)
+    if not hidden:
+        return lambda cls: true()
+    return lambda cls: cls.dataset_id.notin_(hidden)
+
+
+def _dataset_rule(scope: ReadScope) -> Callable[[Any], ColumnElement[bool]]:
+    """`_record_rule` for a collection (its own id)."""
+    if scope.only is not None:
+        only = list(scope.only)
+        if not only:
+            return lambda cls: false()
+        return lambda cls: cls.id.in_(only)
+    hidden = list(scope.hidden)
+    if not hidden:
+        return lambda cls: true()
+    return lambda cls: cls.id.notin_(hidden)
+
+
 def criteria(scope: ReadScope) -> list[Any]:
-    """The loader criteria that keep a session within `scope`."""
+    """The loader criteria that keep a session within `scope`. Each is a
+    function of the entity (see `_scope_rule`) so it adapts to every alias."""
     seen = select(Record.id).where(_in_scope(Record.dataset_id, scope))
     return [
+        with_loader_criteria(Record, _record_rule(scope), include_aliases=True),
+        with_loader_criteria(Dataset, _dataset_rule(scope), include_aliases=True),
         with_loader_criteria(
-            Record, _in_scope(Record.dataset_id, scope), include_aliases=True
+            RecordNote,
+            lambda cls: cls.record_id.in_(seen),
+            include_aliases=True,
         ),
         with_loader_criteria(
-            Dataset, _in_scope(Dataset.id, scope), include_aliases=True
-        ),
-        with_loader_criteria(
-            RecordNote, RecordNote.record_id.in_(seen), include_aliases=True
-        ),
-        with_loader_criteria(
-            RecordReference, RecordReference.record_id.in_(seen), include_aliases=True
+            RecordReference,
+            lambda cls: cls.record_id.in_(seen),
+            include_aliases=True,
         ),
         # Only uses by records the caller can see: a file a job or a release
         # holds is not theirs by that (a release bundles records from anywhere).
         with_loader_criteria(
-            FileReference, FileReference.record_id.in_(seen), include_aliases=True
+            FileReference,
+            lambda cls: cls.record_id.in_(seen),
+            include_aliases=True,
         ),
         with_loader_criteria(
             JobAffectedRecord,
-            JobAffectedRecord.record_id.in_(seen),
+            lambda cls: cls.record_id.in_(seen),
             include_aliases=True,
         ),
         # A history entry is about a thing; it is visible when the thing is. A

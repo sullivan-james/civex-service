@@ -5,6 +5,7 @@ import { recordsApi, type CivexRecord } from '../api/records'
 import { useCollections } from '../hooks/useCollections'
 import { usePins, useRecents } from '../hooks/usePins'
 import { TargetLabel } from './TargetLabel'
+import { useHasFeature } from '../hooks/useFeatures'
 import { useSchemas } from '../hooks/useSchemas'
 import { useAllViews } from '../hooks/useViews'
 import { buildGroups } from '../utils/paletteSearch'
@@ -64,6 +65,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   })
   const foundRecords = recordSearch.data ?? NO_RECORDS
 
+  const dials = useHasFeature()('remote_dial')
   const groups = useMemo(
     () =>
       buildGroups(query, {
@@ -81,6 +83,9 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           viewTarget({ id: v.schema_id, name: v.schema_name }, v.name),
         ),
         exports: (exportDefs ?? []).map(exportTarget),
+        actions: dials
+          ? [placeTarget('/connect', 'Connect to a hub', 'sync, remote, clone')]
+          : [],
         records:
           recordQuery.length >= MIN_RECORD_QUERY
             ? foundRecords.map(recordTarget)
@@ -94,6 +99,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       schemas,
       views,
       exportDefs,
+      dials,
       recordQuery,
       foundRecords,
     ],

@@ -6,6 +6,63 @@ One section per tagged release: `## vX.Y.Z — <label> (YYYY-MM-DD)`. Every
 PRODUCTION_READINESS.md §4a). A pre-release tag (`v1.3.0rc1`) may use the
 final version's entry or `## Unreleased` instead of one of its own. The version itself has one source of truth,
 
+## Unreleased
+
+- **App wording: "project", not "repository".** The web app's Connect page and sync settings now say "project" where they said "repo" or "repository". Text only; addresses, API paths and keys are unchanged.
+- **Connect to a host from the app.** A new `/connect?url=` page joins a
+  project to a repository on a host: paste its address (the page's own address
+  or its `/data` sync address), and it says first what will happen (an empty
+  project becomes a copy; one with data can only fill an empty repo), opens the
+  host's approval page with the code filled in, carries on by itself once it is
+  approved, shows the copy, and lands on Home. Reached from Home on an empty
+  project, the Ctrl+K palette and Settings -> Sync. `GET /api/remote` and
+  `POST /api/remote/connect` now return the approval page's `verify_url`,
+  kept only when it is an http(s) page on the authority's own origin (also in
+  the CLI); `GET /api/remote` says when a refusal means no access, and
+  `GET /api/remote/known` whether this computer joined an address before.
+
+- **Two people deleting the same records no longer double-count.** When a
+  push and another person's bulk delete (or two bulk deletes) hit the same
+  records at once, both wrote a delete in history, so undoing one batch also
+  brought back records the other had deleted. A delete or restore now puts in
+  history only the records its own write changed (the second is a no-op for
+  records already deleted or restored), so undoing a batch restores exactly
+  what that batch deleted. Undoing a delete (a batch or one entry) also leaves a
+  record another change deleted too, as "Deleted again by another change". A pushed delete of a record
+  already deleted by another change is written down too (the record is not
+  changed); a resend of the same change is not.
+  PostgreSQL and SQLite.
+- **Sync: a blank copy only downloads.** A computer that copies a project owes
+  the server only files it stored itself; files that came with the records it
+  pulled were counted as owed, so the copy flipped between "Copying the
+  project" and "Sending files to the server" (really asking about files it
+  never had) and blamed the computer for files the server lacks. They are now
+  never sent or asked about. Files the server doesn't hold are reported apart:
+  `files_arriving` (a record citing them changed within `sync.arriving_hours`:
+  the device that added them may still be uploading) and `files_missing`
+  (after that), neither this computer's to send. The status also carries
+  `files_not_here`, what keeping every file would download.
+- **Sync: a new copy fetches files when they are opened.** A project made by
+  joining an authority sets `sync.download_files` to `opened`; existing
+  projects, and settings that don't name it, keep `all`; choosing `all` still downloads every
+  file in the background.
+- **Sync: file download progress counts the whole run.** The bytes and speed
+  shown while downloading restarted with each pass of the run, so a finished
+  download could show a few kilobytes beside hundreds of files.
+- **Files: a release plan counts the files the store lacks.**
+  `POST /releases/{name}/files/plan` carries `missing: {files, bytes}`, the
+  files neither reachable here nor fetchable from a server.
+- **Sync: a computer that downloads files when opened looks at the server once
+  the copy is done.** It asks which cited files the server holds (a page at a
+  time, later only for newly cited ones), so files the server lacks are counted
+  as arriving or missing and not offered for download. An export of a project
+  bundle fetches the files it lacks from the server first, and reports those the
+  server hasn't got either (`files_not_on_server`).
+- **Files: a release's files can be listed.** The file inventory
+  (`FileAccessService.listing`) failed on a release's frozen records; it now
+  lists them, by where each file is.
+- **Files: a file past the arriving window is "Missing"** in the app on a host;
+  "not uploaded yet" is said only while a file is still arriving.
 - **Sync: failed joins are counted per project.** The limit on failed joins and
   sign-ins was one per process, keyed by caller address alone, so on a host
   serving many projects junk joins on one made joins on another answer 429
@@ -47,6 +104,29 @@ below is a single retroactively-written entry consolidating everything
 that shipped across that whole range — not nineteen fabricated
 per-tag entries reconstructed after the fact. Discipline applies starting
 from the next tag forward.
+
+## Unreleased
+
+- **Import a spreadsheet in the app.** The records list's New menu has "Import
+  spreadsheet": choose a CSV, TSV or Excel file (it is sent from the browser, so
+  it works embedded in a host), say which column goes in which field (a new kind
+  of record gets a field for each heading, with a type guessed from the first rows
+  that can be changed), and see what will happen before anything is saved: how
+  many records are added, changed or not saved, and why each row that won't work
+  won't. Importing again can update the records already there by a column, leave
+  them, or add new ones. A large file is read and saved in parts with progress,
+  and the whole import is one event in History. New endpoints `POST
+  /api/import/inspect` and `POST /api/import/run` (`check` saves nothing and gives
+  the counts the save will give). There is no second import engine: it runs the
+  Table and Save-as-records steps, which gained what it needed: Table reads a part
+  of a file (`skip_rows`, `max_rows`, `only_columns`) and every cell as written
+  (`as_text`, so `007` stays `007`), and Save-as-records matches a table's rows
+  with one question per few hundred rows instead of one per row, saves rows at the
+  top of a collection (no record to run on), converts each cell to its field's
+  type naming the rows it can't (`as_written`), and counts the keys of earlier rows
+  so a file saved in parts repeats nothing (`earlier`, `first_row`). Saving many
+  records in one run no longer slows with every record (the run's list of touched
+  records was searched from the start each time).
 
 ## v2.3.3 — bulk delete and restore over sync, files on a host (2026-11-26)
 

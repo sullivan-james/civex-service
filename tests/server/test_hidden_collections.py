@@ -423,3 +423,77 @@ def test_a_dashboard_card_over_a_hidden_collection_says_so(world: World):
     # to someone who sees everything it is the same card, with its collection
     full = _client(world, Permissions.everything()).get("/api/dashboard")
     assert f"{SECRET.lower()}-vault" in full.text
+
+
+def test_the_file_inventory_leaves_out_a_hidden_collections_files(
+    outsider: TestClient, owner: TestClient, world: World
+):
+    seen = owner.post("/api/file-access/files", json={}).json()
+    assert world.sha in str(seen) and sum(p["files"] for p in seen["summary"]) == 1
+    assert {u["record_id"] for i in seen["items"] for u in i["uses"]} == {
+        str(r.id) for r in world.hidden
+    }
+
+    hidden = outsider.post("/api/file-access/files", json={}).json()
+    assert hidden["total"] == 0 and hidden["items"] == []
+    assert sum(p["files"] for p in hidden["summary"]) == 0
+    assert world.sha not in str(hidden) and SECRET not in str(hidden)
+    for r in world.hidden:
+        assert str(r.id) not in str(hidden)
+    # Asking for the hidden collection by name finds nothing either.
+    named = outsider.post(
+        "/api/file-access/files", json={"collection": f"{SECRET.lower()}-vault"}
+    )
+    assert named.status_code == 404 or named.json()["total"] == 0
+
+
+def test_a_limited_reader_lists_the_files_of_their_collections_only(
+    outsider: TestClient, owner: TestClient, world: World
+):
+    """A file used by a visible and a hidden record is listed (no 500 from the
+    use counts), with only the visible record citing it."""
+    mine = owner.put(
+        "/api/files/stream?filename=mine.bin",
+        content=b"my own bytes",
+        headers={"content-length": "12"},
+    ).json()
+    both = {"sha256": world.sha, "filename": "vault.bin", "size": len(SECRET) + 6}
+    made = [
+        owner.post(
+            "/api/collections/open/records",
+            json={"schema_name": "sample", "data": {"label": "a", "scan": ref}},
+        )
+        for ref in (mine, both)
+    ]
+    assert all(m.status_code == 201 for m in made), [m.text for m in made]
+    visible_ids = {m.json()["id"] for m in made}
+
+    answer = outsider.post("/api/file-access/files", json={})
+    assert answer.status_code == 200, answer.text
+    body = answer.json()
+    assert {i["sha256"] for i in body["items"]} == {mine["sha256"], world.sha}
+    cited = {u["record_id"] for i in body["items"] for u in i["uses"]}
+    assert cited == visible_ids
+    assert sum(p["files"] for p in body["summary"]) == 2
+    for r in world.hidden:
+        assert str(r.id) not in str(body)
+
+
+def test_two_scopes_through_one_engine_never_share_a_statement(
+    outsider: TestClient, owner: TestClient, world: World
+):
+    """The read-scope rule is a lambda criterion: alternating callers with
+    different scopes, on the same engine, each get their own rule."""
+    for _ in range(3):
+        full = owner.post("/api/file-access/files", json={}).json()
+        limited = outsider.post("/api/file-access/files", json={}).json()
+        assert world.sha in str(full) and world.sha not in str(limited)
+        assert sum(p["files"] for p in full["summary"]) == 1
+        assert sum(p["files"] for p in limited["summary"]) == 0
+        counts = {
+            who: c.get("/api/records/count", params={"schema": "sample"}).json()[
+                "count"
+            ]
+            for who, c in (("owner", owner), ("outsider", outsider))
+        }
+        assert counts == {"owner": 6, "outsider": 2}

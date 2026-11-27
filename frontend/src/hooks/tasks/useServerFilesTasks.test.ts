@@ -18,14 +18,13 @@ describe('files and the server, as their own task', () => {
     expect(serverFilesTasks(status(), send)).toEqual([])
   })
 
-  it('counts only what this computer can send, and says missing files apart', () => {
-    const [task, missing] = serverFilesTasks(
+  it('counts only what this computer can send', () => {
+    const [task] = serverFilesTasks(
       status({
         files_to_send: 1,
         files_waiting: {
           ready: 0,
           offline: [{ volume: 'test1', files: 1, reason: 'path missing' }],
-          missing: 1,
         },
       }),
       send,
@@ -36,33 +35,13 @@ describe('files and the server, as their own task', () => {
     expect(task.detail).toBe(
       '1 file is on the drive “test1”, which can’t be read (path missing); it goes once it is plugged in.',
     )
-    expect(missing.title).toBe('1 file missing')
-    expect(missing.tone).toBe('attention')
-    expect(missing.detail).toBe(
-      'It isn’t on this computer, and the server hasn’t got it, so nothing here can send it.',
-    )
-    expect(missing.actions?.[0]).toMatchObject({
-      label: 'See which',
-      to: '/collections?tab=records&show=files&files.place=missing',
-    })
-  })
-
-  it('says missing files even when nothing is left to send', () => {
-    const tasks = serverFilesTasks(
-      status({
-        files_to_send: 0,
-        files_waiting: { ready: 0, offline: [], missing: 2 },
-      }),
-      send,
-    )
-    expect(tasks.map((t) => t.title)).toEqual(['2 files missing'])
   })
 
   it('offers Send now when files can go', () => {
     const [task] = serverFilesTasks(
       status({
         files_to_send: 3,
-        files_waiting: { ready: 3, offline: [], missing: 0 },
+        files_waiting: { ready: 3, offline: [] },
       }),
       send,
     )
@@ -94,10 +73,64 @@ describe('files and the server, as their own task', () => {
       whyWaiting({
         ready: 2,
         offline: [{ volume: 'a', files: 1, reason: '' }],
-        missing: 0,
       }),
     ).toBe(
       '2 files will go up in the background. 1 file is on the drive “a”, which can’t be read; it goes once it is plugged in.',
     )
+  })
+})
+
+describe('a blank copy only downloads', () => {
+  it('says files the server lacks are the other device’s, never ours to send', () => {
+    const tasks = serverFilesTasks(
+      status({ files_arriving: 2, files_missing: 1 }),
+      send,
+    )
+    expect(tasks.map((t) => t.title)).toEqual([
+      '2 files aren’t on the server yet',
+      '1 file missing',
+    ])
+    expect(tasks[0].detail).toBe(
+      'The device that added them hasn’t uploaded them.',
+    )
+    const said = JSON.stringify(tasks)
+    expect(said).not.toMatch(/nothing here can send|Ignore|Send now/)
+  })
+
+  it('holds the counts back until the copy is done', () => {
+    const tasks = serverFilesTasks(
+      status({
+        files_arriving: 2,
+        files_missing: 1,
+        progress: { phase: 'copying', done: 5, total: 100, kind: 'record' },
+      }),
+      send,
+    )
+    expect(tasks).toEqual([])
+  })
+
+  it('offers to download every file once, with how many', () => {
+    const keepAll = { disabled: false, onClick: vi.fn(), bytes: 2_000_000_000 }
+    const [offer] = serverFilesTasks(
+      status({
+        download_files: 'opened',
+        files_not_here: 3854,
+        serving: false,
+      }),
+      send,
+      keepAll,
+    )
+    expect(offer.actions?.[0].label).toMatch(
+      /^Download all files \(3,854 files, [\d.]+ GB\)$/,
+    )
+    offer.actions?.[0].onClick?.()
+    expect(keepAll.onClick).toHaveBeenCalled()
+    expect(
+      serverFilesTasks(
+        status({ download_files: 'all', files_not_here: 3854 }),
+        send,
+        keepAll,
+      ),
+    ).toEqual([])
   })
 })

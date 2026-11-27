@@ -18,6 +18,8 @@ const RecordDetailPage = lazy(() => import('./pages/RecordDetailPage'))
 const ReleasesPage = lazy(() => import('./pages/ReleasesPage'))
 const ReleasePage = lazy(() => import('./pages/ReleasePage'))
 const NewRecordPage = lazy(() => import('./pages/NewRecordPage'))
+const ImportPage = lazy(() => import('./pages/ImportPage'))
+const ConnectPage = lazy(() => import('./pages/ConnectPage'))
 const WorkflowsPage = lazy(() => import('./pages/WorkflowsPage'))
 const WorkflowEditorPage = lazy(() => import('./pages/WorkflowEditorPage'))
 const WorkflowPage = lazy(() => import('./pages/WorkflowPage'))
@@ -88,6 +90,9 @@ export default function App() {
             <Route path="/collections" element={<CollectionsPage />} />
             <Route path="/collections/:id" element={<CollectionDetailPage />} />
             <Route path="/collections/:id/new" element={<NewRecordPage />} />
+            <Route path="/collections/:id/import" element={<ImportPage />} />
+            <Route path="/import" element={<ImportPage />} />
+            <Route path="/connect" element={<ConnectPage />} />
             <Route
               path="/views"
               element={<Navigate replace to="/collections" />}

@@ -105,14 +105,16 @@ class SyncConfig:
     # How often the background sync looks for changes, in seconds. 0 = never:
     # it syncs only when asked (Sync now, `civex sync`).
     interval_seconds: int = 60
-    # Serving: how long a file cited by a pushed record counts as `arriving`
+    # How long a file cited by a pushed (or pulled) record counts as `arriving`
     # (its device is still uploading) before it is reported missing, in hours.
     # 0: never arriving, a file not here is missing at once.
     arriving_hours: int = 24
     # Which files a device keeps a copy of (`DOWNLOAD_MODES`): "all" fetches
     # every file the project's records cite in the background, a few at a time;
     # "opened" fetches one only when it is opened or exported (for a computer
-    # short of space). Either way a file is fetched on demand.
+    # short of space). Either way a file is fetched on demand. A project
+    # whose settings don't name it keeps "all"; a new copy made by joining an
+    # authority is set to "opened" (see `SyncService.connect`).
     download_files: str = "all"
     # Per collection (by id), overriding `download_files` for its files: "keep"
     # (a copy stays on this computer, fetched in the background) or "opened"

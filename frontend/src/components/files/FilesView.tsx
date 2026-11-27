@@ -26,7 +26,7 @@ import { PlaceStatus, PlacesBar } from './Where'
 import { useHostedFiles } from '../../hooks/useFeatures'
 import {
   hostedMessage,
-  notOnHub,
+  missingOnHub,
   TEMPORARILY_UNAVAILABLE,
 } from '../../utils/hostedFiles'
 import { formatSize } from '../../utils/storage'
@@ -334,7 +334,7 @@ export function FilesView({
 function HostedFileStatus({ file }: { file: ListedFile }) {
   const text =
     file.place_kind === 'missing'
-      ? notOnHub(file.reason)
+      ? missingOnHub(file.reason)
       : file.place_kind === 'unreachable'
         ? TEMPORARILY_UNAVAILABLE
         : file.place_kind === 'arriving'
@@ -363,7 +363,12 @@ function HostedStatus({
   const count = (kind: string) =>
     summary.filter((p) => p.kind === kind).reduce((n, p) => n + p.files, 0)
   const parts = [
-    { place: 'missing', label: 'Not on the hub yet', files: count('missing') },
+    {
+      place: 'arriving',
+      label: 'Not on the hub yet',
+      files: count('arriving'),
+    },
+    { place: 'missing', label: 'Missing', files: count('missing') },
     {
       place: 'unreachable',
       label: 'Temporarily unavailable',

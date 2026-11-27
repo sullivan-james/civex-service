@@ -54,6 +54,8 @@ from civex.services.dataset_service import DatasetService
 from civex.services.record_service import MAX_REPORTED, RecordService
 from civex.services.schema_service import SchemaResolver, SchemaService
 
+DELETED_AGAIN = "Deleted again by another change."
+
 # Bulk operations whose changes can be undone together (`revert_batch`), and
 # the kind of batch the undo of each is.
 REVERTIBLE_BATCHES = ("edit", "delete", "restore")
@@ -512,6 +514,20 @@ class AuditService:
             if field.deleted_at
         )
         records = [str(i) for kind, i in things if kind == "record"]
+        if batch and records:  # an undo of one batch: the same policy as `revert_batch`
+            mine: dict[uuid.UUID, set[uuid.UUID]] = {}
+            for entry_id, entity_type, action, entity_id in self._audit.batch_entries(
+                batch
+            ):
+                if entity_type == "record" and action == "delete":
+                    mine.setdefault(entity_id, set()).add(entry_id)
+            elsewhere = {
+                str(i)
+                for i in self._deleted_elsewhere(
+                    {uuid.UUID(r): mine.get(uuid.UUID(r), set()) for r in records}
+                )
+            }
+            records = [r for r in records if r not in elsewhere]
         return collections, schemas, fields, records
 
     # ------------------------------------------------------------------
@@ -535,7 +551,23 @@ class AuditService:
             and entry.action in ("update", "create", "delete")
             else []
         )
-        return self._plan(entry, found[0] if found else None, fields)
+        plan = self._plan(entry, found[0] if found else None, fields)
+        if plan.kind == "restore" and not plan.blocked:
+            if self._deleted_elsewhere({entry.entity_id: {entry.id}}):
+                plan.blocked = DELETED_AGAIN
+        return plan
+
+    def _deleted_elsewhere(
+        self, mine: dict[uuid.UUID, set[uuid.UUID]]
+    ) -> set[uuid.UUID]:
+        """The records, of these (each with the delete entries being undone),
+        that another change also deleted since they were last restored. The one
+        policy for undoing a delete: a record comes back only when the delete
+        being undone is its only one, or undoing it would bring back what
+        someone else deleted (a push and a bulk delete that met on the same
+        records both write a delete for them)."""
+        since = self._audit.deletes_since_restore(list(mine))
+        return {rid for rid, entries in since.items() if entries - mine[rid]}
 
     def _plan(
         self,
@@ -717,6 +749,16 @@ class AuditService:
                 leave(entity_id, f"A '{action}' entry can't be reverted.")
         undelete = list(dict.fromkeys(undelete))
         delete = list(dict.fromkeys(delete))
+        if undelete:
+            mine: dict[uuid.UUID, set[uuid.UUID]] = {}
+            for entry_id, entity_type, action, entity_id in entries:
+                if entity_type == "record" and action == "delete":
+                    mine.setdefault(entity_id, set()).add(entry_id)
+            elsewhere = self._deleted_elsewhere(mine)
+            for entity_id in undelete:
+                if entity_id in elsewhere:
+                    leave(entity_id, DELETED_AGAIN)
+            undelete = [i for i in undelete if i not in elsewhere]
 
         label = f"Undo {batch.label}" if batch.label else f"Undo a bulk {batch.kind}"
         with self.batch(_UNDO_KIND[batch.kind], label):
@@ -732,6 +774,8 @@ class AuditService:
                 result.applied += done.restored + done.deleted_asked
                 result.same += done.unchanged
                 left_by(done)
+                yield result
+            elif result.left:  # the policy left everything: that is the answer
                 yield result
 
             # Changes to put fields back, waiting to be saved as one set.

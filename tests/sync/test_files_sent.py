@@ -122,19 +122,20 @@ def test_files_waiting_say_why_they_havent_gone(pair):
     laptop.sync_svc.sync()
     waiting = laptop.sync_svc.status().files_waiting
     assert waiting is not None
-    assert (waiting.ready, waiting.offline, waiting.missing) == (1, [], 0)
+    assert (waiting.ready, waiting.offline) == (1, [])
 
-    # Not on this computer at all (lost here, say).
+    # Not on this computer at all (lost here, say): nothing is stored for it,
+    # so it is not this computer's to send, and nothing says it is missing
+    # until the server is asked.
     laptop.file_svc._store.delete(ref.sha256)
     laptop.commit()
-    # Until the server is asked, nothing says it is missing (just not here).
-    assert laptop.sync_svc.status().files_waiting.missing == 0
+    assert laptop.sync_svc.status().files_waiting is None
     assert _location(laptop, record)["state"] == "remote"
-    laptop.sync_svc.send_files()  # asks: the server hasn't got it either
+    laptop.sync_svc.missing_files(with_groups=False)  # asks: not there either
+    laptop.config.sync.arriving_hours = 0
     status = laptop.sync_svc.status()
-    # Missing, not "to send": nothing here can send it.
-    assert (status.files_waiting.ready, status.files_waiting.missing) == (0, 1)
-    assert status.files_to_send == 0
+    assert status.files_waiting is None and status.files_to_send == 0
+    assert (status.files_arriving, status.files_missing) == (0, 1)
     location = _location(laptop, record)
     assert (location["state"], location["sent"]) == ("absent", False)
     # Which computer added it, by the name the server knows it by (never the
@@ -145,7 +146,7 @@ def test_files_waiting_say_why_they_havent_gone(pair):
     )
 
     laptop.sync_repo.confirm_on_server([ref.sha256])
-    assert laptop.sync_svc.status().files_waiting is None  # nothing waiting
+    assert laptop.sync_svc.status().files_missing == 0
 
 
 def test_each_pass_sends_a_file_and_the_next_asks_only_about_the_rest(

@@ -18,7 +18,14 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session
 
 from civex.db.migrate import ensure_schema_current
-from civex.db.models import Dataset, FileReference, Record, Schema, ServerFile
+from civex.db.models import (
+    Dataset,
+    FileReference,
+    Record,
+    Schema,
+    ServerFile,
+    StoredObject,
+)
 from civex.repositories.local.sync_repo import LocalSyncRepository
 
 _PG_URL = os.environ.get("CIVEX_TEST_POSTGRES_URL")
@@ -63,6 +70,8 @@ def test_pages_are_ordered_filtered_and_exclude_deleted(session: Session) -> Non
     dead = f"{tag}dead".ljust(64, "0")
     session.add(FileReference(sha256=dead, record_id=gone.id))
     session.add(ServerFile(sha256=shas[3]))
+    # Owed = stored here and not confirmed there.
+    session.add_all(StoredObject(sha256=sha, volume="v", size=1) for sha in shas)
     session.flush()
 
     repo = LocalSyncRepository(session)

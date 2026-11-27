@@ -67,8 +67,21 @@ class RemoteStatusResponse(BaseModel):
     files_missing: int = Field(
         default=0,
         description="Files records here cite that no drive here holds and the "
-        "server said it hasn't got either (less any ignored): missing "
-        "everywhere, so not downloading. `civex files missing` lists them.",
+        "server said it hasn't got either (less any ignored), past the wait "
+        "for the device that added them to upload them (`sync.arriving_hours`): "
+        "missing everywhere, so not downloading. Never this computer's to "
+        "send. `civex files missing` lists them.",
+    )
+    files_arriving: int = Field(
+        default=0,
+        description="Like `files_missing`, but a record citing them changed "
+        "within `sync.arriving_hours`: the device that added them may still be "
+        "uploading them.",
+    )
+    files_not_here: int = Field(
+        default=0,
+        description="Files records here cite that no drive here holds and the "
+        "server hasn't said it lacks: what keeping every file would download.",
     )
     files_to_send: int = Field(
         default=0,
@@ -103,6 +116,11 @@ class RemoteStatusResponse(BaseModel):
     connect_error: str | None = Field(
         default=None, description="Why the last connect started here failed."
     )
+    connect_error_kind: str | None = Field(
+        default=None,
+        description="`no_access` when the authority refused this computer; a person "
+        "there has to let it in.",
+    )
     connect_error_detail: str | None = Field(
         default=None,
         description="The technical text behind `connect_error`, for whoever needs it.",
@@ -119,6 +137,11 @@ class AwaitingApprovalResponse(BaseModel):
     code: str = Field(description="The code to approve on the server.")
     expires_at: int = Field(
         description="Unix seconds; the code stops working after it."
+    )
+    verify_url: str | None = Field(
+        default=None,
+        description="Where a person approves the code, when the server has a page "
+        "for that.",
     )
 
 
@@ -183,16 +206,6 @@ class FilesWaitingResponse(BaseModel):
     offline: list[OfflineDriveFiles] = Field(
         description="Files only on drives that can't be read right now."
     )
-    missing: int = Field(
-        description="Files on no drive here that the server said it hasn't got "
-        "either: nothing here can send them (not in `files_to_send`)."
-    )
-    never_stored: int = Field(
-        default=0, description="Of `missing`, those this project never stored."
-    )
-    ignored: int = Field(
-        default=0, description="Missing files a person chose to stop hearing about."
-    )
 
 
 class SyncResultResponse(BaseModel):
@@ -231,6 +244,11 @@ class RemoteConnectResponse(BaseModel):
     )
     expires_at: int | None = Field(
         default=None, description="Unix seconds; the code stops working after it."
+    )
+    verify_url: str | None = Field(
+        default=None,
+        description="Where a person approves the code, when the server has a page "
+        "for that (mode approval).",
     )
 
 
@@ -435,6 +453,8 @@ def _status(ctx: AppContext) -> RemoteStatusResponse:
         download_files=s.download_files,
         files_to_fetch=s.files_to_fetch,
         files_missing=s.files_missing,
+        files_arriving=s.files_arriving,
+        files_not_here=s.files_not_here,
         files_to_send=s.files_to_send,
         files_waiting=(
             FilesWaitingResponse(
@@ -443,9 +463,6 @@ def _status(ctx: AppContext) -> RemoteStatusResponse:
                     OfflineDriveFiles(volume=v, files=n, reason=r)
                     for v, n, r in w.offline
                 ],
-                missing=w.missing,
-                never_stored=w.never_stored,
-                ignored=w.ignored,
             )
             if (w := s.files_waiting)
             else None
@@ -461,10 +478,15 @@ def _status(ctx: AppContext) -> RemoteStatusResponse:
         ),
         connecting=sync_jobs.connecting,
         connect_error=sync_jobs.connect_error,
+        connect_error_kind=sync_jobs.connect_error_kind,
         connect_error_detail=sync_jobs.connect_error_detail,
         version=__version__,
         awaiting_approval=(
-            AwaitingApprovalResponse(code=login.user_code, expires_at=login.expires_at)
+            AwaitingApprovalResponse(
+                code=login.user_code,
+                expires_at=login.expires_at,
+                verify_url=login.verify_url,
+            )
             if (login := sync_jobs.awaiting) and sync_jobs.connecting
             else None
         ),
@@ -482,6 +504,23 @@ def _refuse(e: SyncError) -> HTTPException:
 def status(ctx: AppContext = Depends(get_ctx)):
     """How this project stands with its authority."""
     return _status(ctx)
+
+
+class RemoteKnownResponse(BaseModel):
+    joined: bool = Field(
+        description="This computer has joined that address before, so connecting "
+        "needs no approval."
+    )
+
+
+@router.get(
+    "/known",
+    response_model=RemoteKnownResponse,
+    dependencies=[requires(REMOTE_DIAL)],
+)
+def known(url: str, ctx: AppContext = Depends(get_ctx)):
+    """Whether this computer has joined the authority at `url` before."""
+    return RemoteKnownResponse(joined=not ctx.sync_svc.needs_approval(url, None))
 
 
 @router.post(
@@ -506,7 +545,10 @@ def connect(body: RemoteConnectRequest, ctx: AppContext = Depends(get_ctx)):
             started = ctx.sync_svc.request_login(body.url)
             sync_jobs.start_connect(body.url, login=started)
             return RemoteConnectResponse(
-                mode="approval", code=started.user_code, expires_at=started.expires_at
+                mode="approval",
+                code=started.user_code,
+                expires_at=started.expires_at,
+                verify_url=started.verify_url,
             )
         mode = ctx.sync_svc.check_connect(body.url, body.invite)
     except SyncError as e:

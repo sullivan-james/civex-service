@@ -289,9 +289,17 @@ class SyncStatus:
     files_waiting: FilesWaiting | None = None
     # Missing files a person chose to stop being told about.
     files_ignored: int = 0
-    # files records here cite that the server said it hasn't got and no drive
-    # here holds (less the ignored): missing everywhere, not downloading
+    # Files records here cite that the server said it hasn't got and no drive
+    # here holds (less the ignored): not downloading, and not this computer's
+    # to send. Those a record changed lately cites are `files_arriving` (the
+    # device that added them may still be uploading, `sync.arriving_hours`);
+    # the rest, `files_missing`.
     files_missing: int = 0
+    files_arriving: int = 0
+    # Files records here cite that no drive here holds and that can be
+    # downloaded (the authority hasn't said it lacks them): what choosing to
+    # keep every file would fetch, whatever the collections' own settings.
+    files_not_here: int = 0
 
 
 @dataclass
@@ -333,21 +341,13 @@ class DeviceIdentity:
 
 @dataclass
 class FilesWaiting:
-    """Why files records here cite aren't on the server: what sending can
-    move now, what is on a drive that can't be read (by drive, with its own
-    reason), and what is missing: on no drive here, and the server said it
-    hasn't got it either, so nothing here can send it (`files_to_send`
-    doesn't count those)."""
+    """Why files this computer holds aren't on the server yet: what sending
+    can move now, and what is on a drive that can't be read (by drive, with its
+    own reason). Files that only came with pulled records are never this
+    computer's to send: they are `files_arriving` / `files_missing`."""
 
     ready: int = 0
     offline: list[tuple[str, int, str]] = field(default_factory=list)
-    missing: int = 0
-    # Of `missing`, those this project never stored (no drive has ever held
-    # them), and the collections whose records cite them, as (name, records).
-    never_stored: int = 0
-    never_stored_in: list[tuple[str, int]] = field(default_factory=list)
-    # Missing files a person chose to stop being told about.
-    ignored: int = 0
 
 
 _F = TypeVar("_F", bound=Callable[..., Any])
@@ -368,6 +368,28 @@ def _closes_transports(fn: _F) -> _F:
                 self._close_transports()
 
     return wrapper  # type: ignore[return-value]
+
+
+def _own_page(login: LoginStarted, url: str) -> LoginStarted:
+    """The authority names a page where a person approves the code, and the app
+    and CLI send people there: only an http(s) page on the authority's own
+    origin (no embedded credentials) is kept, anything else is dropped so a
+    hostile server cannot aim a person elsewhere."""
+    page = login.verify_url
+    if not page:
+        return login
+    try:
+        theirs, ours = urllib.parse.urlsplit(page), urllib.parse.urlsplit(url)
+        ok = (
+            theirs.scheme in ("http", "https")
+            and theirs.username is None
+            and theirs.password is None
+            and (theirs.scheme, theirs.hostname, theirs.port)
+            == (ours.scheme, ours.hostname, ours.port)
+        )
+    except ValueError:
+        ok = False
+    return login if ok else replace(login, verify_url=None)
 
 
 class SyncService:
@@ -442,6 +464,7 @@ class SyncService:
         meta = self._repo.meta()
         # Files the server hasn't got, and why (asked only when there are any).
         owed = self._repo.count_unconfirmed() if self.fetches_files else 0
+        arriving, missing = self.files_lacked()
         waiting = self.files_waiting() if owed else None
         return SyncStatus(
             configured=self.configured,
@@ -465,7 +488,9 @@ class SyncService:
             download_files=self._config.sync.download_files,
             files_ignored=len(self._repo.ignored_missing()),
             files_to_fetch=self.files_to_fetch(),
-            files_missing=self.files_missing(),
+            files_missing=missing,
+            files_arriving=arriving,
+            files_not_here=self.files_not_here(),
             files_to_send=(
                 waiting.ready + sum(n for _, n, _ in waiting.offline) if waiting else 0
             ),
@@ -533,13 +558,8 @@ class SyncService:
         status: dict[str, Any] = {}
         offline: dict[str, int] = {}
         copies = self._repo.unconfirmed_copies(limit)
-        lacking = self._repo.server_lacks_of({s for s, v in copies.items() if not v})
-        for sha, volumes in copies.items():
+        for volumes in copies.values():
             if not volumes:
-                # Not here: missing once the server said it hasn't got it
-                # either, else not asked about yet (nothing to send from here
-                # whichever it is).
-                waiting.missing += sha in lacking
                 continue
             for v in volumes:
                 if v not in status:
@@ -549,14 +569,6 @@ class SyncService:
             else:
                 offline[volumes[0]] = offline.get(volumes[0], 0) + 1
         waiting.offline = [(v, n, status[v].reason) for v, n in sorted(offline.items())]
-        ignored = self._repo.ignored_missing()
-        absent = {s for s, v in copies.items() if not v and s in lacking}
-        waiting.ignored = len(absent & ignored)
-        waiting.missing -= waiting.ignored
-        if waiting.missing:
-            never = self._repo.never_stored(absent - ignored)
-            waiting.never_stored = len(never)
-            waiting.never_stored_in = self._citing_collections(never)
         return waiting
 
     # -- files nothing can supply -----------------------------------------
@@ -880,7 +892,7 @@ class SyncService:
         url = url.strip().rstrip("/")
         self._refuse_following_while_serving()
         _check_address(url)
-        return self._made(url).request_login()
+        return _own_page(self._made(url).request_login(), url)
 
     @_closes_transports
     def check_connect(self, url: str, invite: str | None) -> str:
@@ -1046,6 +1058,10 @@ class SyncService:
             )
             self._commit()
         self._config.sync.remote = url
+        if mode == "joined":
+            # A new copy fetches files when they are opened (it was `all`:
+            # existing projects keep what they have).
+            self._config.sync.download_files = "opened"
         self._config_store.save(self._config)
 
         with sync_lock(self._config.civex_dir):
@@ -3148,14 +3164,64 @@ class SyncService:
             return 0
         return self._repo.count_files_not_here(self._kept_collections(), "wait")
 
+    def probe_files(
+        self,
+        seconds: float | None = None,
+        should_stop: Callable[[], bool] | None = None,
+    ) -> int:
+        """Ask the authority about the files records here cite that no drive
+        here holds and that it hasn't been asked about yet, a page at a time:
+        those it holds are noted as on the server, those it lacks as missing
+        (so they are counted apart and not offered for download). Only
+        newly cited files are asked about later. Not while the project is
+        still being copied. Returns how many were settled; `SyncError` when
+        the authority can't be reached."""
+        if not self.fetches_files or self._repo.meta().cursor == JOINING:
+            return 0
+        transport = self._transport()
+        started = time.monotonic()
+        settled, after = 0, ""
+        while page := self._repo.unprobed_files(after, FILE_CHECK_PAGE):
+            if (seconds is not None and time.monotonic() - started >= seconds) or (
+                should_stop is not None and should_stop()
+            ):
+                break
+            after = page[-1]
+            lacking = set(transport.missing_files(page))
+            self._repo.confirm_on_server(set(page) - lacking)
+            self._repo.note_server_lacks(lacking, backoff=False)
+            self._commit()
+            settled += len(page)
+        return settled
+
+    def files_lacked(self) -> tuple[int, int]:
+        """(arriving, missing): the files records here cite that no drive here
+        holds and the server said it hasn't got (less the ignored), so nothing
+        is downloading them (`civex files missing` lists them). Arriving: a
+        record citing one changed within `sync.arriving_hours`, so the device
+        that added it may still be uploading it; missing: the rest. They are
+        not this computer's to send: it never had them."""
+        if not self.fetches_files:
+            return 0, 0
+        hours = self._config.sync.arriving_hours
+        since = (
+            datetime.now(timezone.utc) - timedelta(hours=hours) if hours > 0 else None
+        )
+        return self._repo.count_files_lacked(since)
+
     def files_missing(self) -> int:
         """How many files records here cite that no drive here holds and the
-        server said it hasn't got: missing everywhere, so nothing is
-        downloading them (`civex files missing` lists them). Files a person
-        chose to ignore are not counted."""
+        server said it hasn't got, past the wait for the device that added
+        them to upload them (`files_lacked`)."""
+        return self.files_lacked()[1]
+
+    def files_not_here(self) -> int:
+        """How many files records here cite that no drive here holds and that
+        the authority hasn't said it lacks: what keeping every file would
+        download (the offer after joining)."""
         if not self.fetches_files:
             return 0
-        return self._repo.count_files_not_here(None, "only")
+        return self._repo.count_files_not_here(None)
 
     def collection_mode(self, collection_id: str) -> str:
         """Whether a collection's files are kept on this computer (`keep`) or

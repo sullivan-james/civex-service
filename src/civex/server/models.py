@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from civex.domain.audit_diff import entry_snapshots
 from civex.domain.query import RecordQuery
 from civex.domain.release import ReleaseScope
+from civex.domain.table_import import ColumnChoice, ImportSpec
 from civex.domain.dtos import (
     POINTS_DEFAULT_LIMIT,
     RecordPoints,
@@ -3862,3 +3863,83 @@ class ReleaseScopeRequest(BaseModel):
             records=self.records or None,
             below=self.below and bool(self.query or self.records),
         )
+
+
+class ImportColumnResponse(BaseModel):
+    heading: str = Field(description="The column as the reader names it.")
+    label: str = Field(description="The heading to show.")
+    key: str = Field(description="The field key the column would become.")
+    dtype: str = Field(description="What the first rows look like.")
+    blanks: int = Field(description="Blank cells among the first rows.")
+
+
+class ImportSheetResponse(BaseModel):
+    filename: str
+    sheets: list[str] = Field(description="An Excel file's sheets; none for text.")
+    sheet: str | None
+    columns: list[ImportColumnResponse]
+    rows: list[list[str]] = Field(description="The first rows, as text.")
+    total: int = Field(description="Rows under the headings, in all.")
+
+
+class ImportColumnChoice(BaseModel):
+    heading: str
+    field: str | None = Field(
+        default=None, description="The field it goes in; none to leave it out."
+    )
+    create: bool = Field(default=False, description="Make the field first.")
+    dtype: str = Field(default="string", description="The type of a field made.")
+    label: str | None = Field(default=None, description="The name of a field made.")
+
+
+class ImportRunRequest(BaseModel):
+    sha256: str
+    filename: str
+    sheet: str | None = None
+    collection: str = Field(description="The collection the records go in.")
+    new_collection: bool = Field(
+        default=False,
+        description="Make the collection, named `collection`, if it isn't there.",
+    )
+    kind: str = Field(description="The kind of record, by key.")
+    kind_label: str | None = Field(
+        default=None, description="Makes the kind, named this, if it isn't there."
+    )
+    columns: list[ImportColumnChoice]
+    match_on: list[str] = Field(
+        default_factory=list,
+        description="Fields a row and a record must agree on to be the same.",
+    )
+    if_exists: Literal["update", "skip", "add_new"] = "update"
+    start: int = Field(default=0, ge=0, description="Rows already dealt with.")
+    limit: int = Field(default=1000, ge=1, le=5000, description="Rows in this part.")
+    check: bool = Field(
+        default=False,
+        description="Only say what would happen: nothing is kept, and the "
+        "answer is what saving the same rows will give.",
+    )
+
+    def spec(self) -> ImportSpec:
+        return ImportSpec(
+            sha256=self.sha256,
+            filename=self.filename,
+            sheet=self.sheet,
+            collection=self.collection,
+            new_collection=self.new_collection,
+            kind=self.kind,
+            kind_label=self.kind_label,
+            columns=[ColumnChoice(**c.model_dump()) for c in self.columns],
+            match_on=self.match_on,
+            if_exists=self.if_exists,
+        )
+
+
+class ImportBatchResponse(BaseModel):
+    start: int
+    read: int = Field(description="Rows in this part.")
+    created: int
+    updated: int
+    unchanged: int
+    skipped: int
+    problems: list[str] = Field(description="Why rows were skipped, by row.")
+    done: bool = Field(description="No rows are left after this part.")
