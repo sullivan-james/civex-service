@@ -50,9 +50,9 @@ app.add_typer(library_app, name="library")
 _PHASES = {
     COPYING: "Copying from the server",
     FILLING: "Filling the server",
-    PULLING: "Getting changes from the host",
+    PULLING: "Getting changes from the server",
     PREPARING: "Preparing changes to send",
-    PUSHING: "Sending changes to the host",
+    PUSHING: "Sending changes to the server",
 }
 _KINDS = {"dataset": "collections"}
 

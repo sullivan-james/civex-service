@@ -109,7 +109,7 @@ describe('describeSyncProgress', () => {
       total: 1000,
       kind: null,
     })
-    expect(pull.title).toBe('Getting changes from the host')
+    expect(pull.title).toBe('Getting changes from the server')
     expect(pull.detail).toBe('changes · 400 of 1,000')
   })
 })

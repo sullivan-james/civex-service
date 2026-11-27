@@ -7,7 +7,7 @@ import re
 import uuid
 from datetime import date as _date, datetime as _dt, timezone
 from pathlib import Path
-from typing import Any, Callable, Generator, Iterable, Iterator
+from typing import Any, Callable, Generator, Iterable, Iterator, Mapping
 from zoneinfo import ZoneInfo
 
 from civex.domain.bundle import plain_data
@@ -4050,11 +4050,26 @@ class RecordService:
         chain.reverse()
         return chain
 
-    def ancestor_ids(self, parents: Iterable[uuid.UUID]) -> set[uuid.UUID]:
-        """These records and every one above them (deleted ones too), by id:
-        a level at a time over two columns, no record loaded or named."""
+    def ancestor_ids(
+        self,
+        ids: Iterable[uuid.UUID],
+        known: Mapping[uuid.UUID, uuid.UUID | None] | None = None,
+    ) -> set[uuid.UUID]:
+        """The ids of the records above these (deleted ones too), a level at a
+        time over two columns: no record is loaded or named. `known` holds the
+        parents of some of them already (a caller that read them with its own
+        query); only the rest are looked up. A parent id is taken before it is
+        known to exist, so a dangling one is included (extra holding only,
+        never less)."""
+        asked = list(dict.fromkeys(ids))
+        links = dict(known or {})
+        rest = [i for i in asked if i not in links]
+        if rest:
+            links.update(self._records.parent_links(rest))
+        return self._climb({p for i in asked if (p := links.get(i))})
+
+    def _climb(self, frontier: set[uuid.UUID]) -> set[uuid.UUID]:
         above: set[uuid.UUID] = set()
-        frontier = set(parents)
         for _ in range(_MAX_TRAIL_DEPTH):
             frontier -= above
             if not frontier:
@@ -4063,6 +4078,31 @@ class RecordService:
             links = self._records.parent_links(list(frontier))
             frontier = {p for p in links.values() if p}
         return above
+
+    def ancestor_sets(
+        self, ids: Iterable[uuid.UUID]
+    ) -> dict[uuid.UUID, set[uuid.UUID]]:
+        """`ancestor_ids` for each of these on its own, from one lookup per
+        level of the hierarchy. A record that isn't here has none."""
+        wanted = list(dict.fromkeys(ids))
+        links: dict[uuid.UUID, uuid.UUID | None] = {}
+        frontier = set(wanted)
+        for _ in range(_MAX_TRAIL_DEPTH):
+            frontier -= links.keys()
+            if not frontier:
+                break
+            found = self._records.parent_links(list(frontier))
+            links.update(found)
+            frontier = {p for p in found.values() if p}
+        out: dict[uuid.UUID, set[uuid.UUID]] = {}
+        for rid in wanted:
+            chain: set[uuid.UUID] = set()
+            parent = links.get(rid)
+            while parent and parent not in chain and len(chain) < _MAX_TRAIL_DEPTH:
+                chain.add(parent)
+                parent = links.get(parent)
+            out[rid] = chain
+        return out
 
     def ancestor_trails(
         self, records: list[RecordDTO]

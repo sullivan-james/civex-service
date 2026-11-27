@@ -1518,6 +1518,13 @@ class SyncService:
             self._sync_progress(SyncProgress(phase, done, total))
 
     def _pull(self, transport: SyncTransport) -> int:
+        long: list[int] = []  # the size of a pull that said how far it was
+        applied = self._pull_pages(transport, long)
+        if long:
+            self._say(PULLING, long[0], long[0])  # (however the pull ended)
+        return applied
+
+    def _pull_pages(self, transport: SyncTransport, long: list[int]) -> int:
         self._at_head = False
         dirty = self._catch_up()
         cursor = self._repo.meta().cursor
@@ -1535,9 +1542,9 @@ class SyncService:
             entries = list(page.entries)
             if page.more or said:  # a long pull says so; a short one is quick
                 said = True
-                self._say(
-                    PULLING, max(0, cursor - start), max(0, page.head_seq - start)
-                )
+                size = max(0, page.head_seq - start)
+                long[:] = [size]
+                self._say(PULLING, min(max(0, cursor - start), size), size)
             # The trailing run of one action, when the page may end inside it.
             tail = len(entries)
             if page.more and entries and entries[-1].op:
@@ -1806,7 +1813,7 @@ class SyncService:
         ids = {eid for kind, eid in dirty if kind == "record"}
         if not ids:
             return set()
-        return ids | self._records.ancestor_ids(self._repo.unsent_parents())
+        return ids | self._records.ancestor_ids(ids, self._repo.unsent_record_parents())
 
     def _places(self, entry: SyncEntry) -> tuple[uuid.UUID, uuid.UUID | None] | None:
         """The record and the parent it would sit under, when applying `entry`
@@ -1874,12 +1881,7 @@ class SyncService:
     def _trails(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, set[uuid.UUID]]:
         """The ids of the records above each of these (the ones here; deleted
         ones too), from one lookup of the trails."""
-        if not ids:
-            return {}
-        trails = self._records.ancestor_trails(
-            self._records.labels([str(i) for i in dict.fromkeys(ids)])
-        )
-        return {rid: {a.id for a in trail} for rid, trail in trails.items()}
+        return self._records.ancestor_sets(ids)
 
     def _run(
         self,
@@ -2168,8 +2170,16 @@ class SyncService:
         return True
 
     def _push(self, transport: SyncTransport, report: SyncReport) -> int:
+        owed = [0]  # how many were waiting when a long push began (0: not long)
+        total = self._push_batches(transport, report, owed)
+        if owed[0]:
+            self._say(PUSHING, total, total)  # (however the push ended)
+        return total
+
+    def _push_batches(
+        self, transport: SyncTransport, report: SyncReport, owed: list[int]
+    ) -> int:
         total = 0
-        owed = 0  # how many were waiting when a long push began (0: not long)
         last_first: uuid.UUID | None = None
         while True:
             pending = self._repo.pending_entries(PUSH_BATCH)
@@ -2181,10 +2191,10 @@ class SyncService:
                 report.waiting += len(pending)
                 return total
             last_first = pending[0].id
-            if len(pending) == PUSH_BATCH and not owed:
+            if len(pending) >= PUSH_BATCH and not owed[0]:
                 # Many changes: say so before the work of readying them.
-                owed = self._repo.count_pending()
-                self._say(PREPARING, 0, owed)
+                owed[0] = self._repo.count_pending()
+                self._say(PREPARING, 0, owed[0])
             ready, folded = self._send_whole(pending)
             if not ready:
                 report.waiting += len(pending)
@@ -2204,8 +2214,8 @@ class SyncService:
             held = self._note(result.results, sent, report, set(folded))
             self._commit()
             total += len(result.results) - held
-            if owed:
-                self._say(PUSHING, total, max(owed, total))
+            if owed[0]:
+                self._say(PUSHING, total, max(owed[0], total))
             if held:
                 report.waiting += held + (len(pending) - len(result.results))
                 return total

@@ -8,10 +8,13 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import update
 
+import civex.services.record_service as record_service
 import civex.services.sync_service as sync_service
-from civex.db.models import Record
+from civex.db.models import AuditLog, Record
 from civex.domain.sync import PREPARING, PULLING, PUSHING
+import civex.services.sync_authority as sync_authority
 from civex.testing.peers import connect, device
+from .test_scoped_devices import SECRET, Study
 
 
 def tree(project, authority):
@@ -60,7 +63,7 @@ def test_the_records_above_an_unsent_change_are_the_same_as_before(project, auth
     assert new == old == {sample.id, visit.id, site.id}
     assert other.id not in new
 
-    # A change to a deleted parent's child, and to a top record, still agree.
+    # Another change, to a record whose parent is not touched, still agrees.
     a.record_svc.update(str(other.id), {"name": "z"})
     a.commit()
     a.sync_svc.sync()
@@ -68,6 +71,76 @@ def test_the_records_above_an_unsent_change_are_the_same_as_before(project, auth
     a.commit()
     new, old = above(a)
     assert new == old == {visit.id, site.id}
+
+
+def test_a_pending_delete_under_a_soft_deleted_parent_agrees(project, authority):
+    a, site, other, visit, sample = tree(project, authority)
+    a.record_svc.delete(str(visit.id), force=True)  # soft: the visit and below
+    a.commit()
+    # (The delete reaches the sample beneath too: its parent is deleted.)
+    assert ("record", sample.id) in a.sync_repo.dirty_entities()
+    new, old = above(a)
+    assert new == old
+    assert {visit.id, site.id} <= new
+
+
+def test_a_seeding_change_with_no_number_counts_like_a_pending_one(project, authority):
+    a, site, other, visit, sample = tree(project, authority)
+    a.record_svc.update(str(sample.id), {"tag": "u"})
+    a.commit()
+    a._session.execute(
+        update(AuditLog)
+        .where(AuditLog.sync_state == "pending", AuditLog.hub_seq.is_(None))
+        .values(sync_state="seeding")
+    )
+    a.commit()
+    dirty = a.sync_repo.dirty_entities()
+    assert ("record", sample.id) in dirty
+    new, old = above(a)
+    assert new == old == {sample.id, visit.id, site.id}
+
+
+def test_the_records_above_come_from_the_snapshot_not_from_what_is_numbered_now(
+    project, authority
+):
+    """Mid-pull a page of the feed numbers this device's own changes (they come
+    back echoed): what is above them was worked out from the snapshot taken
+    when the pull began, and stays so for the pages after."""
+    a, site, other, visit, sample = tree(project, authority)
+    a.record_svc.update(str(sample.id), {"tag": "u"})
+    a.commit()
+    dirty = a.sync_repo.dirty_entities()
+    before = a.sync_svc._above_dirty(dirty)
+    rows = a._session.query(AuditLog).filter(AuditLog.entity_id == sample.id).all()
+    a.sync_repo.mark_seqs(
+        [(r.id, 10_000 + k, None) for k, r in enumerate(rows) if r.hub_seq is None]
+    )
+    a.commit()
+    assert a.sync_svc._above_dirty(dirty) == before == old_above(a, dirty)
+    assert {visit.id, site.id} <= before
+
+
+def test_a_parent_loop_ends(project, authority):
+    a, site, other, visit, sample = tree(project, authority)
+    a.record_svc.update(str(sample.id), {"tag": "u"})
+    a.commit()
+    a._session.execute(
+        update(Record).where(Record.id == visit.id).values(parent_record_id=sample.id)
+    )
+    a.commit()
+    got = a.sync_svc._above_dirty(a.sync_repo.dirty_entities())
+    assert {sample.id, visit.id} <= got
+    assert set(a.record_svc.ancestor_sets([sample.id])[sample.id]) <= {
+        sample.id,
+        visit.id,
+    }
+
+
+def test_the_climb_stops_at_the_depth_guard(project, authority, monkeypatch):
+    a, site, other, visit, sample = tree(project, authority)
+    monkeypatch.setattr(record_service, "_MAX_TRAIL_DEPTH", 1)
+    assert a.record_svc.ancestor_ids([sample.id]) == {visit.id}
+    assert a.record_svc.ancestor_sets([sample.id]) == {sample.id: {visit.id}}
 
 
 def test_nothing_unsent_means_nothing_above(project, authority):
@@ -168,6 +241,50 @@ def test_a_long_start_says_what_it_is_on(project, authority, small_pages):
     assert prepared.total == pending
     pushed = [p for p in seen if p.phase == PUSHING]
     assert pushed[-1].done == pushed[-1].total == pending
+
+
+def test_an_action_larger_than_a_batch_still_says_so(project, authority, small_pages):
+    a, site, other, visit, sample = tree(project, authority)
+    a.dataset_svc.create("archive")
+    for i in range(12):
+        a.record_svc.add(
+            "survey",
+            "visit",
+            {"when": f"v{i}"},
+            parent_record_id=str(site.id),
+            with_labels=False,
+        )
+    a.commit()
+    a.sync_svc.sync()
+    a.record_svc.move("archive", ids=[str(site.id)])
+    a.commit()
+    # One action of many changes: a batch of 5 carries all of it.
+    assert len(a.sync_repo.pending_entries(5)) > 12
+    seen = []
+    a.sync_svc.sync(seen.append)
+    phases = [p.phase for p in seen]
+    assert PREPARING in phases and PUSHING in phases
+    pushed = [p for p in seen if p.phase == PUSHING]
+    assert pushed[-1].done == pushed[-1].total
+
+
+def test_a_restricted_reader_ends_its_pull_at_the_total(
+    project, authority, small_pages, monkeypatch
+):
+    monkeypatch.setattr(sync_authority, "FEED_SCAN_MAX", 25)
+    study = Study(project, authority)
+    for i in range(80):
+        authority.record_svc.add("vault", "encounter", {"site": f"{SECRET} {i}"})
+    for i in range(12):
+        authority.record_svc.add("open", "encounter", {"site": f"it may see {i}"})
+        authority.record_svc.add("vault", "encounter", {"site": f"{SECRET} {i}"})
+    authority.commit()
+    seen = []
+    study.limited.sync_svc.sync(seen.append)
+    pulled = [p for p in seen if p.phase == PULLING]
+    assert pulled
+    assert all(p.done <= p.total for p in pulled)
+    assert pulled[-1].done == pulled[-1].total
 
 
 def test_a_short_sync_says_nothing(project, authority):

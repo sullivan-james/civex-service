@@ -6,9 +6,9 @@ const PHASES: Record<string, string> = {
   filling: 'Sending this project to the server',
   files: 'Downloading files from the server',
   sending: 'Sending files to the server',
-  pulling: 'Getting changes from the host',
+  pulling: 'Getting changes from the server',
   preparing: 'Preparing changes to send',
-  pushing: 'Sending changes to the host',
+  pushing: 'Sending changes to the server',
 }
 
 const KINDS: Record<string, string> = {
