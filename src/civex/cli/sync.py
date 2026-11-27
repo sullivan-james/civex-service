@@ -24,7 +24,16 @@ from civex.cli.utils import cli_load_config, get_ctx as _ctx
 from civex.console import console
 from civex.domain.exceptions import CivexError
 from civex.services.sync_lock import SyncBusy
-from civex.domain.sync import COPYING, FILLING, INVITE_HOURS, SyncError, SyncProgress
+from civex.domain.sync import (
+    COPYING,
+    FILLING,
+    INVITE_HOURS,
+    PREPARING,
+    PULLING,
+    PUSHING,
+    SyncError,
+    SyncProgress,
+)
 
 app = typer.Typer(
     help="Keep this project in step with an authority: another civex that holds "
@@ -41,6 +50,9 @@ app.add_typer(library_app, name="library")
 _PHASES = {
     COPYING: "Copying from the server",
     FILLING: "Filling the server",
+    PULLING: "Getting changes from the server",
+    PREPARING: "Preparing changes to send",
+    PUSHING: "Sending changes to the server",
 }
 _KINDS = {"dataset": "collections"}
 
@@ -157,7 +169,18 @@ def now() -> None:
                 "[error]No authority is set. Use `civex sync connect`.[/error]"
             )
             raise typer.Exit(1)
-        _describe(c.sync_svc.sync())
+        with console.status("Syncing") as status:
+
+            def show(p: SyncProgress) -> None:
+                label = _PHASES.get(p.phase, p.phase)
+                if p.phase == PREPARING and p.total:
+                    label = f"Preparing {p.total:,} changes to send"
+                elif p.total:
+                    label = f"{label} {p.done:,} of {p.total:,}"
+                status.update(label)
+
+            report = c.sync_svc.sync(show)
+        _describe(report)
         _files_owed(c)
     except SyncBusy as e:
         console.print(f"[warning]{escape(str(e))}[/warning]")

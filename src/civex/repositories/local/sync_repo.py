@@ -2314,6 +2314,22 @@ class LocalSyncRepository:
         )
         return found | {(t, i) for t, i in kept}
 
+    def unsent_record_parents(self) -> dict[uuid.UUID, uuid.UUID | None]:
+        """The parent of each record that has a change waiting to be sent (those
+        of `dirty_entities` that are records, and exist), in one statement
+        over ids: nothing is loaded."""
+        rows = self._s.execute(
+            select(Record.id, Record.parent_record_id)
+            .distinct()
+            .join(AuditLog, AuditLog.entity_id == Record.id)
+            .where(
+                AuditLog.entity_type == "record",
+                AuditLog.sync_state.in_(("pending", "seeding")),
+                AuditLog.hub_seq.is_(None),
+            )
+        )
+        return {rid: parent for rid, parent in rows}
+
     def has_unsent(self, kind: str, entity_id: uuid.UUID) -> bool:
         """Whether a change to this thing is still waiting to be sent, or (for
         a schema or a field) one to a record that sits under it: a record of

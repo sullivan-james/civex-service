@@ -6,6 +6,9 @@ const PHASES: Record<string, string> = {
   filling: 'Sending this project to the server',
   files: 'Downloading files from the server',
   sending: 'Sending files to the server',
+  pulling: 'Getting changes from the server',
+  preparing: 'Preparing changes to send',
+  pushing: 'Sending changes to the server',
 }
 
 const KINDS: Record<string, string> = {
@@ -36,7 +39,9 @@ export function describeSyncProgress(p: SyncProgress): SyncProgressText {
   const what =
     p.phase === 'files' || p.phase === 'sending'
       ? 'files'
-      : (KINDS[p.kind ?? ''] ?? '')
+      : p.phase === 'pulling' || p.phase === 'pushing'
+        ? 'changes'
+        : (KINDS[p.kind ?? ''] ?? '')
   // With the size known, the bar and the time left go by bytes: one big file
   // among small ones is most of the wait.
   const bytesTotal = p.bytes_total ?? 0
@@ -55,6 +60,16 @@ export function describeSyncProgress(p: SyncProgress): SyncProgressText {
     rate: p.rate,
     eta,
   })
+  if (p.phase === 'preparing') {
+    // Nothing to count yet: how many are coming is the news.
+    const n = p.total != null ? `${p.total.toLocaleString()} ` : ''
+    return {
+      title: `Preparing ${n}changes to send`,
+      detail: '',
+      count: '',
+      fraction: null,
+    }
+  }
   return {
     title: PHASES[p.phase] ?? 'Syncing',
     detail: what ? `${what} · ${count}` : count,

@@ -77,6 +77,9 @@ from civex.domain.sync import (
     COPYING,
     DeviceCredentials,
     FILLING,
+    PREPARING,
+    PULLING,
+    PUSHING,
     REJECTED,
     SENDING,
     Hello,
@@ -1508,7 +1511,20 @@ class SyncService:
 
     # -- pull -------------------------------------------------------------
 
+    def _say(self, phase: str, done: int, total: int | None) -> None:
+        """Tell whoever listens (the app's status, the command line) what the
+        sync is on, when it is going to take a while."""
+        if self._sync_progress is not None:
+            self._sync_progress(SyncProgress(phase, done, total))
+
     def _pull(self, transport: SyncTransport) -> int:
+        long: list[int] = []  # the size of a pull that said how far it was
+        applied = self._pull_pages(transport, long)
+        if long:
+            self._say(PULLING, long[0], long[0])  # (however the pull ended)
+        return applied
+
+    def _pull_pages(self, transport: SyncTransport, long: list[int]) -> int:
         self._at_head = False
         dirty = self._catch_up()
         cursor = self._repo.meta().cursor
@@ -1520,9 +1536,15 @@ class SyncService:
         # its last entry has arrived.
         arriving, to_hold = self._repo.arriving_action()
         start = cursor  # what was staged before this pass is at or below it
+        said = False
         while True:
             page = transport.feed(cursor, FEED_PAGE)
             entries = list(page.entries)
+            if page.more or said:  # a long pull says so; a short one is quick
+                said = True
+                size = max(0, page.head_seq - start)
+                long[:] = [size]
+                self._say(PULLING, min(max(0, cursor - start), size), size)
             # The trailing run of one action, when the page may end inside it.
             tail = len(entries)
             if page.more and entries and entries[-1].op:
@@ -1785,18 +1807,13 @@ class SyncService:
 
     def _above_dirty(self, dirty: set[tuple[str, uuid.UUID]]) -> set[uuid.UUID]:
         """Every record here that an unsent change is to or beneath: those
-        records, and the ones above them."""
-        ids = [eid for kind, eid in dirty if kind == "record"]
-        return set(ids) | self._tree(ids)
-
-    def _tree(self, ids: list[uuid.UUID]) -> set[uuid.UUID]:
-        """The records above these, here (deleted ones too)."""
+        records, and the ones above them. Worked out from the parents' ids
+        alone (no record is loaded or named), however many changes are unsent;
+        not kept between calls, since records move."""
+        ids = {eid for kind, eid in dirty if kind == "record"}
         if not ids:
             return set()
-        trails = self._records.ancestor_trails(
-            self._records.labels([str(i) for i in ids])
-        )
-        return {above.id for trail in trails.values() for above in trail}
+        return ids | self._records.ancestor_ids(ids, self._repo.unsent_record_parents())
 
     def _places(self, entry: SyncEntry) -> tuple[uuid.UUID, uuid.UUID | None] | None:
         """The record and the parent it would sit under, when applying `entry`
@@ -1864,12 +1881,7 @@ class SyncService:
     def _trails(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, set[uuid.UUID]]:
         """The ids of the records above each of these (the ones here; deleted
         ones too), from one lookup of the trails."""
-        if not ids:
-            return {}
-        trails = self._records.ancestor_trails(
-            self._records.labels([str(i) for i in dict.fromkeys(ids)])
-        )
-        return {rid: {a.id for a in trail} for rid, trail in trails.items()}
+        return self._records.ancestor_sets(ids)
 
     def _run(
         self,
@@ -2131,6 +2143,8 @@ class SyncService:
         record above it (a child still where a change of this device's own
         put it, whose settled state is still to arrive)."""
         every = self._repo.held_entries()
+        if not every:
+            return False
         above = self._above_dirty(dirty)
         # An action waits whole while any part of it must (`_waits`).
         blocked = {e.op for e in every if e.op and self._waits(e, dirty, above)}
@@ -2156,6 +2170,15 @@ class SyncService:
         return True
 
     def _push(self, transport: SyncTransport, report: SyncReport) -> int:
+        owed = [0]  # how many were waiting when a long push began (0: not long)
+        total = self._push_batches(transport, report, owed)
+        if owed[0]:
+            self._say(PUSHING, total, total)  # (however the push ended)
+        return total
+
+    def _push_batches(
+        self, transport: SyncTransport, report: SyncReport, owed: list[int]
+    ) -> int:
         total = 0
         last_first: uuid.UUID | None = None
         while True:
@@ -2168,6 +2191,10 @@ class SyncService:
                 report.waiting += len(pending)
                 return total
             last_first = pending[0].id
+            if len(pending) >= PUSH_BATCH and not owed[0]:
+                # Many changes: say so before the work of readying them.
+                owed[0] = self._repo.count_pending()
+                self._say(PREPARING, 0, owed[0])
             ready, folded = self._send_whole(pending)
             if not ready:
                 report.waiting += len(pending)
@@ -2187,6 +2214,8 @@ class SyncService:
             held = self._note(result.results, sent, report, set(folded))
             self._commit()
             total += len(result.results) - held
+            if owed[0]:
+                self._say(PUSHING, total, max(owed[0], total))
             if held:
                 report.waiting += held + (len(pending) - len(result.results))
                 return total
