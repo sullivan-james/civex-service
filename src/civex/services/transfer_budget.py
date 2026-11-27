@@ -11,7 +11,16 @@ Sizes (`CIVEX_SYNC_MEMORY_MB` sets the budget in MiB and wins over the rest):
 
 - 128 MiB, with 16 MiB parts, 6 parts and 2 big files in flight; or
 - 64 MiB, with 8 MiB parts, 4 parts and 2 big files in flight, on a machine
-  with under 8 GiB of RAM (or any budget below 128 MiB).
+  with under 8 GiB of RAM (or any budget below 128 MiB), or when the RAM can't
+  be told. The RAM is the machine's, or the container's if a cgroup limit
+  (v1 or v2) is lower.
+
+The windows are sized to fit: `TransferWindows.held_bytes` is the most they
+hold at once (parts, plus a fixed amount per pack in flight): 104 of 128 MiB,
+36 of 64 MiB. What is left is for the other paths that draw on the budget
+(spools of downloads, pulls). The parts live in a fixed set of reusable
+buffers (one per part in flight), so memory does not grow with the number of
+files sent, whatever the allocator does.
 
 Use `process_budget()` for the budget and `windows()` for the windows that go
 with it; take bytes with `with budget.hold(n): ...`.
@@ -35,6 +44,9 @@ SMALL_BUDGET_BYTES = 64 * MiB
 SMALL_RAM_BYTES = 8 * 1024 * MiB
 # A body held in memory up to this many bytes, then in a temp file.
 SPOOL_BYTES = 4 * MiB
+# What a pack in flight holds (the chunk of its stream in hand, with room for
+# the copy made when it is cut up for the socket).
+PACK_HELD_BYTES = 2 * MiB
 
 
 class TransferBudget:
@@ -91,9 +103,46 @@ class TransferWindows:
     def small(self) -> bool:
         return self.budget_bytes < DEFAULT_BUDGET_BYTES
 
+    @property
+    def held_bytes(self) -> int:
+        """The most the windows hold at once, all full."""
+        return self.part_threads * self.part_bytes + self.packs * PACK_HELD_BYTES
+
+
+def _cgroup_limit() -> int | None:
+    """The memory limit of this process's cgroup (v2 `memory.max`, v1
+    `memory.limit_in_bytes`), None when there is none."""
+    paths: list[str] = []
+    try:
+        with open("/proc/self/cgroup", encoding="ascii") as f:
+            for line in f:
+                _, _, rest = line.strip().partition(":")
+                controllers, _, where = rest.partition(":")
+                if controllers in ("", "memory") and where:
+                    paths.append(where.strip("/"))
+    except OSError:
+        pass
+    candidates: list[str] = []
+    for where in [*paths, ""]:
+        candidates += [
+            f"/sys/fs/cgroup/{where}/memory.max",
+            f"/sys/fs/cgroup/memory/{where}/memory.limit_in_bytes",
+        ]
+    limits: list[int] = []
+    for path in candidates:
+        try:
+            with open(path, encoding="ascii") as f:
+                text = f.read().strip()
+        except OSError:
+            continue
+        if text.isdigit() and 0 < int(text) < 1 << 60:  # v1 says ~2^63 for none
+            limits.append(int(text))
+    return min(limits) if limits else None
+
 
 def total_ram_bytes() -> int | None:
-    """The machine's RAM, or None when it can't be told. Linux, macOS, Windows."""
+    """The machine's RAM (or the container's, where a cgroup limit is lower),
+    or None when it can't be told. Linux, macOS, Windows."""
     try:
         if sys.platform == "win32":
 
@@ -119,7 +168,10 @@ def total_ram_bytes() -> int | None:
             with open("/proc/meminfo", encoding="ascii") as f:
                 for line in f:
                     if line.startswith("MemTotal:"):
-                        return int(line.split()[1]) * 1024
+                        total = int(line.split()[1]) * 1024
+                        limit = _cgroup_limit()
+                        return min(total, limit) if limit else total
+            return None
         # macOS and other Unix
         return int(os.sysconf("SC_PAGE_SIZE")) * int(os.sysconf("SC_PHYS_PAGES"))
     except (OSError, ValueError, AttributeError, KeyError):
@@ -128,16 +180,16 @@ def total_ram_bytes() -> int | None:
 
 def budget_bytes(ram: int | None = None, environ: dict[str, str] | None = None) -> int:
     """The budget for this machine: `CIVEX_SYNC_MEMORY_MB`, else 128 MiB, or
-    64 MiB under 8 GiB of RAM."""
+    64 MiB under 8 GiB of RAM (or when it can't be told)."""
     env = os.environ if environ is None else environ
     try:
         wanted = int(float(env.get("CIVEX_SYNC_MEMORY_MB", "")) * MiB)
-    except ValueError:
+    except (ValueError, OverflowError):  # not a number, or inf
         wanted = 0
     if wanted > 0:
         return max(MiB, wanted)
     ram = total_ram_bytes() if ram is None else ram
-    if ram is not None and ram < SMALL_RAM_BYTES:
+    if ram is None or ram < SMALL_RAM_BYTES:  # unknown: assume little
         return SMALL_BUDGET_BYTES
     return DEFAULT_BUDGET_BYTES
 

@@ -6,6 +6,7 @@ process-wide memory budget."""
 from __future__ import annotations
 
 import io
+import sys
 import threading
 import time
 
@@ -116,9 +117,9 @@ def test_parts_are_read_in_order():
     read_at: list[int] = []
 
     class Source(io.BytesIO):
-        def read(self, n=-1):
+        def readinto(self, b):
             read_at.append(self.tell())
-            return super().read(n)
+            return super().readinto(b)
 
     sync_transport._in_parts(
         Source(b"z" * 9000), 9000, 1000, set(), lambda n, d: time.sleep(0.001)
@@ -143,7 +144,7 @@ def test_a_machine_with_little_ram_gets_a_smaller_budget_and_windows(monkeypatch
     gib = 1024 * MiB
     assert transfer_budget.budget_bytes(ram=16 * gib, environ={}) == 128 * MiB
     assert transfer_budget.budget_bytes(ram=4 * gib, environ={}) == 64 * MiB
-    assert transfer_budget.budget_bytes(environ={}) == 128 * MiB  # unknown RAM
+    assert transfer_budget.budget_bytes(environ={}) == 64 * MiB  # unknown RAM
     assert (
         transfer_budget.budget_bytes(
             ram=4 * gib, environ={"CIVEX_SYNC_MEMORY_MB": "256"}
@@ -158,7 +159,22 @@ def test_a_machine_with_little_ram_gets_a_smaller_budget_and_windows(monkeypatch
     assert small.packs < big.packs
     # What the windows can hold at once fits their budget.
     for w in (big, small):
-        assert w.part_threads * w.part_bytes <= w.budget_bytes
+        # parts and packs in flight, all full, fit the budget
+        assert w.held_bytes <= w.budget_bytes
+    assert big.held_bytes == 104 * MiB and small.held_bytes == 36 * MiB
+
+
+def test_a_bad_size_or_a_container_limit_is_handled(monkeypatch):
+    gib = 1024 * MiB
+    for text in ("inf", "nan", "-5", "abc", ""):
+        got = transfer_budget.budget_bytes(
+            ram=16 * gib, environ={"CIVEX_SYNC_MEMORY_MB": text}
+        )
+        assert got == 128 * MiB
+    if sys.platform.startswith("linux"):
+        monkeypatch.setattr(transfer_budget, "_cgroup_limit", lambda: 2 * gib)
+        ram = transfer_budget.total_ram_bytes()
+        assert ram is not None and ram <= 2 * gib  # the container, not the host
 
 
 def test_the_machines_ram_is_found():
@@ -321,3 +337,200 @@ def test_a_failure_mid_file_keeps_the_others_and_the_retry_sends_the_rest(
     assert laptop.sync_svc.status().files_to_send == 0
     # No part went twice: the retry sent only what the authority lacked.
     assert max(stored.values()) == 1
+
+
+def test_parts_are_read_into_a_fixed_set_of_buffers():
+    transfer_budget.reset(10_000)
+    width = transfer_budget.windows().part_threads
+    seen: set[int] = set()
+    lock = threading.Lock()
+
+    def put(number: int, data) -> None:
+        with lock:
+            seen.add(id(data.obj))  # the bytearray the part was read into
+        assert bytes(data) == b"q" * len(data)
+        time.sleep(0.001)
+
+    sync_transport._in_parts(io.BytesIO(b"q" * 60_000), 60_000, 1000, set(), put)
+    assert 1 <= len(seen) <= width  # 60 parts, never more buffers than slots
+
+
+def test_an_upload_stops_between_parts_and_gives_everything_back():
+    transfer_budget.reset(5000)
+    budget = transfer_budget.process_budget()
+    sent: list[int] = []
+
+    def put(number: int, data) -> None:
+        sent.append(number)
+
+    asked = {"n": 0}
+
+    def stop() -> bool:
+        asked["n"] += 1
+        return asked["n"] > 3
+
+    with pytest.raises(sync_transport.UploadStopped):
+        sync_transport._in_parts(
+            io.BytesIO(b"x" * 20_000), 20_000, 1000, set(), put, stop
+        )
+    assert sent and len(sent) < 20  # it ended early
+    assert sorted(sent) == list(range(1, len(sent) + 1))  # the first ones, in order
+    assert budget.in_hand == 0
+
+
+# -- stopping and failing with files in flight ----------------------------------
+
+
+def _slow_packs(monkeypatch, delay=0.1, fail=None):
+    """Packs that take a while; `fail(sha_list)` says which one fails."""
+    real = HttpSyncTransport.upload_pack
+    order: list[list[str]] = []
+
+    def pack(self, items):
+        shas = [sha for sha, _, _ in items]
+        order.append(shas)
+        mine = len(order)  # which to start, counted before waiting
+        time.sleep(delay)
+        if fail is not None and fail(shas, mine):
+            raise SyncError("the line dropped", retryable=True, status=503)
+        return real(self, items)
+
+    monkeypatch.setattr(HttpSyncTransport, "upload_pack", pack)
+    return order
+
+
+def _small_slices(monkeypatch):
+    monkeypatch.setattr(sync_service, "PACKED_CHECK_PAGE", 4)
+    monkeypatch.setattr(sync_service, "FILE_CHECK_PAGE", 4)
+    monkeypatch.setattr(sync_service, "PACK_FILES", 3)
+
+
+def _held(authority, shas, upto):
+    return [s for s in shas if s <= upto and not authority.file_svc.exists(s)]
+
+
+def test_a_stop_across_a_slice_boundary_never_passes_a_file_that_is_not_there(
+    project, server, monkeypatch
+):
+    _small_slices(monkeypatch)
+    _slow_packs(monkeypatch)
+    laptop, shas = _laptop(project, server, [2000 + i for i in range(30)])
+    calls = {"n": 0}
+
+    def should_stop() -> bool:
+        calls["n"] += 1
+        return calls["n"] >= 2  # after the first slice
+
+    report = laptop.sync_svc.send_files(should_stop=should_stop)
+    laptop.commit()
+    assert report.stopped
+    assert report.resume_after  # it got somewhere
+    # Everything up to the point it says it got to is on the authority.
+    assert _held(server[2], shas, report.resume_after) == []
+    # And the pack that was held back when it stopped was sent, not dropped.
+    assert any(server[2].file_svc.exists(s) for s in shas)
+    done = laptop.sync_svc.send_files(after=report.resume_after)
+    laptop.commit()
+    assert not done.stopped and not done.owed
+    assert all(server[2].file_svc.exists(s) for s in shas)
+    assert laptop.sync_svc.status().files_to_send == 0
+
+
+def test_running_out_of_seconds_with_packs_in_flight_keeps_the_mark_honest(
+    project, server, monkeypatch
+):
+    _small_slices(monkeypatch)
+    _slow_packs(monkeypatch, delay=0.2)
+    laptop, shas = _laptop(project, server, [2000 + i for i in range(30)])
+    report = laptop.sync_svc.send_files(seconds=0.1)
+    laptop.commit()
+    assert report.stopped
+    assert _held(server[2], shas, report.resume_after) == []
+    rest = laptop.sync_svc.send_files()
+    laptop.commit()
+    assert not rest.owed
+    assert all(server[2].file_svc.exists(s) for s in shas)
+
+
+def test_a_pack_that_fails_raises_even_when_a_later_pack_arrives(
+    project, server, monkeypatch
+):
+    _small_slices(monkeypatch)
+    # The second pack to start fails (after a while); later ones go through.
+    order = _slow_packs(monkeypatch, delay=0.15, fail=lambda shas, n: n == 2)
+    laptop, shas = _laptop(project, server, [2000 + i for i in range(30)])
+    with pytest.raises(SyncError):
+        laptop.sync_svc.send_files()
+    laptop.commit()
+    failed = set(order[1])
+    # Whatever is confirmed is really there, and the failed pack's files are
+    # still to send (the mark never passes them).
+    still = {s for s in shas if not server[2].file_svc.exists(s)}
+    assert failed & still == failed  # none of the failed pack arrived
+    assert len(still) < len(shas)  # but others did
+    again = laptop.sync_svc.send_files()
+    laptop.commit()
+    assert not again.owed
+    assert all(server[2].file_svc.exists(s) for s in shas)
+
+
+def test_a_slow_big_file_does_not_hold_up_the_small_ones_behind_it(
+    project, server, monkeypatch
+):
+    _small_parts(monkeypatch)
+    monkeypatch.setattr(sync_service, "PACK_FILES", 3)
+    from civex.services.file_service import FileService
+
+    real_put = FileService.put_part
+
+    async def slow(self, sha256, number, chunks):
+        import asyncio
+
+        await asyncio.sleep(0.15)
+        await real_put(self, sha256, number, chunks)
+
+    monkeypatch.setattr(FileService, "put_part", slow)
+    sizes = [30_001] + [1000 + i for i in range(12)]
+    laptop, shas = _laptop(project, server, sizes)
+    big = shas[0]
+    events: list[tuple[str, frozenset[str]]] = []
+    repo = type(laptop.sync_repo)
+    real_confirm = repo.confirm_on_server
+
+    def confirm(self_, got):
+        got = list(got)
+        events.append(("confirm", frozenset(got)))
+        return real_confirm(self_, got)
+
+    monkeypatch.setattr(repo, "confirm_on_server", confirm)
+    report = laptop.sync_svc.send_files()
+    laptop.commit()
+    assert report.sent == 13 and not report.owed
+    at = next(i for i, (_, got) in enumerate(events) if big in got)
+    smalls_before = {s for _, got in events[:at] for s in got if s != big}
+    assert smalls_before  # some small files were kept before the big one finished
+
+
+def test_a_big_file_that_cannot_be_read_is_owed_not_a_failed_pass(
+    project, server, monkeypatch
+):
+    _small_parts(monkeypatch)
+    from civex.domain.exceptions import VolumeUnavailableError
+
+    sizes = [30_001, 30_002, 1000, 1001]
+    laptop, shas = _laptop(project, server, sizes)
+    victim = shas[1]
+    real = HttpSyncTransport.upload_file
+
+    def upload_file(self, sha, source, size):
+        if sha == victim:
+            raise VolumeUnavailableError("the drive was unplugged")
+        return real(self, sha, source, size)
+
+    monkeypatch.setattr(HttpSyncTransport, "upload_file", upload_file)
+    report = laptop.sync_svc.send_files()
+    laptop.commit()
+    assert report.owed == [victim]
+    assert report.sent == 3
+    assert all(server[2].file_svc.exists(s) for s in shas if s != victim)
+    assert transfer_budget.process_budget().in_hand == 0

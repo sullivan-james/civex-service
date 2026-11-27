@@ -17,6 +17,7 @@ import hashlib
 import json
 import logging
 import tempfile
+import queue
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 import time
@@ -170,6 +171,9 @@ class HttpSyncTransport:
     # Big files sent at once: their parts share one pool, and the round trips
     # that open and finish one overlap the parts of the other.
     upload_large_files = 2
+    # Asked between the parts of a big file: True ends the upload (the parts
+    # sent stay with the authority, for the next try) with `UploadStopped`.
+    cancel: Callable[[], bool] | None = None
     # And how many files it may download at once.
     download_threads = 6
 
@@ -390,7 +394,7 @@ class HttpSyncTransport:
             )
         held = set(begun.get("received", []))
 
-        def put(number: int, data: bytes) -> None:
+        def put(number: int, data: memoryview) -> None:
             def send() -> None:
                 self._call(
                     "PUT",
@@ -403,7 +407,7 @@ class HttpSyncTransport:
 
             self._again_if_expired(send)
 
-        _in_parts(source, size, part_size, held, put)
+        _in_parts(source, size, part_size, held, put, self.cancel)
         self._json(
             "POST",
             f"/files/{sha256}/parts/complete",
@@ -436,10 +440,10 @@ class HttpSyncTransport:
             urls = {p.number: p.url for p in target.parts}
             etags: dict[int, str] = {}
 
-            def put(number: int, data: bytes) -> None:
+            def put(number: int, data: memoryview) -> None:
                 etags[number] = self._put_to_storage(urls[number], {}, data, len(data))
 
-            _in_parts(source, size, target.part_size, set(), put)
+            _in_parts(source, size, target.part_size, set(), put, self.cancel)
             parts = [{"number": n, "etag": etags[n]} for n in sorted(etags)]
         self._json(
             "POST",
@@ -993,7 +997,8 @@ def _range_total(reply: Reply) -> int | None:
 class _PackBody:
     """A pack's request body, read as it is sent: for each file a line
     `<sha256> <size>` and the file's bytes (a megabyte at a time). It can be
-    rewound, to send again."""
+    rewound, to send again. It holds the one chunk in hand (a megabyte), and
+    hands it out in slices, without copying it again."""
 
     def __init__(self, items: list[tuple[str, UploadSource, int]]) -> None:
         self._items = items
@@ -1004,7 +1009,7 @@ class _PackBody:
         for _, source, _ in self._items:
             source.seek(0)
         self._frames = self._generate()
-        self._buf = b""
+        self._chunk = memoryview(b"")
         self._pos = 0
 
     def _generate(self) -> Iterator[bytes]:
@@ -1019,44 +1024,73 @@ class _PackBody:
                 yield chunk
 
     def read(self, n: int = -1) -> bytes:
-        while n < 0 or len(self._buf) - self._pos < n:
-            chunk = next(self._frames, None)
-            if chunk is None:
-                break
-            self._buf = self._buf[self._pos :] + chunk
-            self._pos = 0
-        end = len(self._buf) if n < 0 else self._pos + n
-        out = self._buf[self._pos : end]
-        self._pos += len(out)
-        return out
+        out: list[bytes] = []
+        want = n
+        while want != 0:
+            if self._pos >= len(self._chunk):
+                nxt = next(self._frames, None)
+                if nxt is None:
+                    break
+                self._chunk = memoryview(nxt)
+                self._pos = 0
+            take = (
+                len(self._chunk) - self._pos
+                if want < 0
+                else min(want, len(self._chunk) - self._pos)
+            )
+            out.append(self._chunk[self._pos : self._pos + take].tobytes())
+            self._pos += take
+            if want > 0:
+                want -= take
+        return out[0] if len(out) == 1 else b"".join(out)
 
 
 def _part_size_for(size: int) -> int:
     """The part size asked for: FILE_PART_BYTES (smaller on a small machine),
-    but a file is cut into at least PARTS_PER_FILE parts (not under
-    FILE_PART_MIN) so that a middling file is not a single stream either."""
+    but a file is cut into about PARTS_PER_FILE parts (each a whole number of
+    MiB, none under FILE_PART_MIN) when that is smaller, so that a middling
+    file is not a single stream either: 16 MiB goes as 4 parts of 4 MiB, 8 MiB
+    and a byte as 3 of 3 MiB."""
     even = -(-size // PARTS_PER_FILE)
     even = -(-even // FILE_PART_MIN) * FILE_PART_MIN
     return max(1, min(FILE_PART_BYTES, transfer_budget.windows().part_bytes, even))
 
 
+class UploadStopped(Exception):
+    """An upload was ended between parts because the sender is stopping."""
+
+
 _lane_lock = threading.Lock()
-_lane: tuple[int, ThreadPoolExecutor, threading.BoundedSemaphore] | None = None
+_lane: tuple[int, ThreadPoolExecutor, queue.Queue[bytearray]] | None = None
 
 
-def _part_lane() -> tuple[ThreadPoolExecutor, threading.BoundedSemaphore]:
-    """The pool every part of every file goes through, and the semaphore that
-    keeps the parts held (queued or sending) to its width."""
+def _part_lane() -> tuple[ThreadPoolExecutor, queue.Queue[bytearray]]:
+    """The pool every part of every file goes through, and the buffers its
+    parts are read into: one per part in flight, reused for every part, so
+    the parts held (queued or sending) are at most the pool's width and memory
+    does not grow with the number of parts sent."""
     global _lane
     width = transfer_budget.windows().part_threads
     with _lane_lock:
         if _lane is None or _lane[0] != width:
+            buffers: queue.Queue[bytearray] = queue.Queue()
+            for _ in range(width):
+                buffers.put(bytearray())
             _lane = (
                 width,
                 ThreadPoolExecutor(width, thread_name_prefix="civex-part"),
-                threading.BoundedSemaphore(width),
+                buffers,
             )
         return _lane[1], _lane[2]
+
+
+def _read_into(source: Any, view: memoryview) -> int:
+    readinto = getattr(source, "readinto", None)
+    if readinto is not None:
+        return int(readinto(view))
+    data = source.read(len(view))
+    view[: len(data)] = data
+    return len(data)
 
 
 def _in_parts(
@@ -1064,32 +1098,37 @@ def _in_parts(
     size: int,
     part_size: int,
     held: set[int],
-    put: Callable[[int, bytes], None],
+    put: Callable[[int, memoryview], None],
+    stop: Callable[[], bool] | None = None,
 ) -> None:
     """Read `source` a part at a time and `put` each (but those in `held`)
     through the shared part pool. One thread per file reads, in order, so the
-    file is read once; before a part is read it takes a slot (the pool's
+    file is read once; before a part is read it takes a buffer (the pool's
     width, all files together) and its bytes from the process budget, and gives
     both back when the part is sent, so memory holds at most that many parts
-    however many files are on their way. The first failure stops reading, lets
-    this file's parts in flight finish (they stay with the authority, for the
-    next try), and is raised."""
+    however many files are on their way. `put` gets a view of the buffer, valid
+    until it returns. The first failure stops reading, lets this file's parts
+    in flight finish (they stay with the authority, for the next try), and is
+    raised; `stop` is asked before each part and ends the upload the same way
+    with `UploadStopped`."""
     count = max(1, -(-size // part_size)) if size else 0
-    pool, slots = _part_lane()
+    pool, buffers = _part_lane()
     budget = transfer_budget.process_budget()
     flying: set[Future[None]] = set()
     failure: list[BaseException] = []
+    stopped = False
 
-    def send(number: int, data: bytes, charged: int) -> None:
+    def send(number: int, buf: bytearray, length: int, charged: int) -> None:
         try:
-            put(number, data)
+            with memoryview(buf) as view:
+                put(number, view[:length])
         except BaseException as e:
-            failure.append(e)
+            # (without the traceback: its frames would hold the part)
+            failure.append(e.with_traceback(None))
             raise
         finally:
-            del data
             budget.release(charged)
-            slots.release()
+            buffers.put(buf)
 
     try:
         for number in range(1, count + 1):
@@ -1099,33 +1138,41 @@ def _in_parts(
                 continue
             if failure:
                 break
-            slots.acquire()
+            if stop is not None and stop():
+                stopped = True
+                break
+            buf = buffers.get()
             try:
                 charged = budget.acquire(length)
             except BaseException:
-                slots.release()
+                buffers.put(buf)
                 raise
-            if failure:
+            if failure or (stop is not None and stop()):
+                stopped = not failure
                 budget.release(charged)
-                slots.release()
+                buffers.put(buf)
                 break
             try:
-                data = source.read(length)
+                if len(buf) < length:
+                    buf = bytearray(length)
+                with memoryview(buf) as view:
+                    got = _read_into(source, view[:length])
             except BaseException:
                 budget.release(charged)
-                slots.release()
+                buffers.put(buf)
                 raise
-            if len(data) != length:
+            if got != length:
                 budget.release(charged)
-                slots.release()
+                buffers.put(buf)
                 raise SyncError("A file being sent was cut short", retryable=True)
-            flying.add(pool.submit(send, number, data, charged))
-            del data
+            flying.add(pool.submit(send, number, buf, length, charged))
             flying -= {f for f in flying if f.done()}
     finally:
         wait(flying)
     if failure:
         raise failure[0]
+    if stopped:
+        raise UploadStopped()
 
 
 def build_transport(base_url: str, credentials: DeviceCredentials) -> HttpSyncTransport:

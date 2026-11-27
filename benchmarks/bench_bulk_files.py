@@ -362,6 +362,12 @@ def run(args, work: Path, procs: list) -> dict:
     moved = report.fetched if args.direction == "down" else report.sent
     owed = len(report.absent) if args.direction == "down" else len(report.owed)
     device_mb, authority_mb = _peak_mb(os.getpid()), _peak_mb(server.pid)
+    try:  # the most the transfer budget had in hand (an older civex has none)
+        from civex.services import transfer_budget
+
+        budget_mb = round(transfer_budget.process_budget().peak / 1048576, 1)
+    except ImportError:
+        budget_mb = None
     projects.close()
     if moved != len(sizes) or owed:  # a run that lost files is not a fast run
         raise SystemExit(
@@ -380,6 +386,8 @@ def run(args, work: Path, procs: list) -> dict:
         "prepare_seconds": round(prepared, 1),
         "peak_rss_mb_device": device_mb,
         "peak_rss_mb_authority": authority_mb,
+        "budget_peak_mb": budget_mb,
+        "delay_ms": args.delay_ms,
     }
 
 

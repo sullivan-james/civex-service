@@ -246,11 +246,11 @@ def test_parts_in_memory_are_bounded():
     lock = threading.Lock()
 
     class Source(io.BytesIO):
-        def read(self, n=-1):
+        def readinto(self, b):
             with lock:
                 live["now"] += 1
                 live["max"] = max(live["max"], live["now"])
-            return super().read(n)
+            return super().readinto(b)
 
     def put(number: int, data: bytes) -> None:
         time.sleep(0.002)
