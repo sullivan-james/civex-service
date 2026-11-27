@@ -6,6 +6,17 @@ One section per tagged release: `## vX.Y.Z — <label> (YYYY-MM-DD)`. Every
 PRODUCTION_READINESS.md §4a). A pre-release tag (`v1.3.0rc1`) may use the
 final version's entry or `## Unreleased` instead of one of its own. The version itself has one source of truth,
 
+## Unreleased
+
+- **Switching project in the desktop app no longer shows the previous project's
+  sync.** The app keeps one process and swaps projects in it; the sync status
+  (copy, history and file progress, the server's version, connect errors) was
+  kept from the project open before, so a new, empty project could read
+  "Fetching earlier history" and "ready to use". Each project now starts with its
+  own status and its own background sync; a copy still running for the previous
+  project finishes into its own database and is not shown. Nothing was ever
+  written to the wrong project.
+
 ## v2.3.4 — faster copies, spreadsheet import, held-back releases (2026-11-27)
 
 - **A host can read which files a release it is holding back cites.** Who may make releases (the permission that publishes or discards one) can now plan a held-back release's files (`POST /releases/{name}/files/plan`, `ReleaseService.file_plan`): `total` files cited, `available` present, `missing.files` not here, as the release froze them (later edits to records do not change it). A host waiting for files to arrive can use it before publishing. Everyone else still gets 404 for a held-back release; downloads, the zip, the export, the bundle and the citation still need it published (422).

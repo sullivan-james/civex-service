@@ -32,9 +32,22 @@ class SyncJobs:
         self._load_config = load_config
         self._open_context = open_context
         self._lock = threading.Lock()
-        self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._connecting: threading.Thread | None = None
+        self._begin()
+
+    def _begin(self) -> None:
+        """A fresh start, for the project served from now on: a new worker and
+        stop signal, and nothing shown that was about the one before. The
+        desktop app serves one project after another in one process (the
+        server stops and another starts), and everything here outlives a
+        server: kept, the last project's progress, last result and errors
+        were shown as the next one's. A thread still finishing for the one
+        before (a page of history, a file, a copy) keeps its own stop signal,
+        already set, and what it says afterwards is dropped (`_run`)."""
+        run = object()
+        self._run = run
+        self._stop = threading.Event()
         # The copy started by `start_connect`, while it runs.
         self.copy_progress: SyncProgress | None = None
         # The history from before joining, while the worker fetches it.
@@ -51,34 +64,39 @@ class SyncJobs:
         # The request to join a person must approve, while the connect waits.
         self.awaiting: LoginStarted | None = None
         self.worker = SyncWorker(
-            load_config,
-            open_context,
-            on_progress=self._history,
-            on_files=self._files,
+            self._load_config,
+            self._open_context,
+            on_progress=lambda p: self._history(run, p),
+            on_files=lambda p: self._files(run, p),
         )
 
     @property
     def progress(self) -> SyncProgress | None:
         """What to show for syncing: a copy going on first, else history
-        arriving. Files moving are shown apart (`files_progress`)."""
-        return self.copy_progress or self.history_progress
+        arriving. Files moving are shown apart (`files_progress`). Never
+        history while a copy runs: the app says the project is ready to use
+        during history, and it is not until the copy is done."""
+        if self.copy_progress is not None or self.connecting:
+            return self.copy_progress
+        return self.history_progress
 
     @property
     def connecting(self) -> bool:
         thread = self._connecting
         return thread is not None and thread.is_alive()
 
-    def _history(self, progress: SyncProgress | None) -> None:
-        self.history_progress = progress
+    def _history(self, run: object, progress: SyncProgress | None) -> None:
+        if run is self._run:
+            self.history_progress = progress
 
-    def _files(self, progress: SyncProgress | None) -> None:
-        self.files_progress = progress
+    def _files(self, run: object, progress: SyncProgress | None) -> None:
+        if run is self._run:
+            self.files_progress = progress
 
     def ensure_worker(self) -> None:
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
                 return
-            self._stop.clear()
             self._thread = threading.Thread(
                 target=self.worker.run,
                 args=(self._stop,),
@@ -88,12 +106,20 @@ class SyncJobs:
             self._thread.start()
 
     def shutdown(self) -> None:
-        self._stop.set()
-        self.worker.wake()
+        """Stop syncing, and forget the project: the next `ensure_worker`
+        starts afresh (in the desktop app, for another project). A copy under
+        way carries on into its own project, untouched, until it ends; it is
+        no longer shown, and a connect may start for the next project."""
         with self._lock:
-            thread = self._thread
+            stop, worker, thread = self._stop, self.worker, self._thread
+        stop.set()
+        worker.wake()
         if thread is not None:
             thread.join(2.0)
+        with self._lock:
+            self._thread = None
+            self._connecting = None
+            self._begin()
 
     def fetch_now(self, total: int) -> None:
         """Start downloading what this computer keeps (a collection was just
@@ -120,6 +146,7 @@ class SyncJobs:
         with self._lock:
             if self.connecting:
                 return
+            run = self._run
             self.connect_error = None
             self.connect_error_detail = None
             self.connect_error_kind = None
@@ -127,34 +154,50 @@ class SyncJobs:
             self.awaiting = login
             self._connecting = threading.Thread(
                 target=self._connect,
-                args=(url, login),
+                args=(url, login, run),
                 daemon=True,
                 name="sync-connect",
             )
             self._connecting.start()
 
-    def _connect(self, url: str, login: LoginStarted | None = None) -> None:
+    def _connect(
+        self,
+        url: str,
+        login: LoginStarted | None = None,
+        run: object | None = None,
+    ) -> None:
+        # Which project's run this connect belongs to: what it says after a
+        # switch is not shown, and it starts no other project's worker.
+        run = self._run if run is None else run
         ctx = self._open_context(self._load_config())
         try:
-            ctx.sync_svc.connect(url, None, progress=self._copied, login=login)
+            ctx.sync_svc.connect(
+                url, None, progress=lambda p: self._copied(run, p), login=login
+            )
             ctx.commit()
         except Exception as raw:  # noqa: BLE001 - said in the app, not lost
             e = plain_failure(raw)
             log.warning("connecting to %s failed: %s", url, e, exc_info=e is not raw)
-            self.connect_error = str(e) or type(raw).__name__
-            self.connect_error_detail = e.detail or None
-            self.connect_error_kind = (
-                "no_access" if not e.retryable and e.status in (401, 403, 404) else None
-            )
+            if run is self._run:
+                self.connect_error = str(e) or type(raw).__name__
+                self.connect_error_detail = e.detail or None
+                self.connect_error_kind = (
+                    "no_access"
+                    if not e.retryable and e.status in (401, 403, 404)
+                    else None
+                )
             return
         finally:
             ctx.close()
-            self.copy_progress = None
-            self.awaiting = None
-        self.sync_now()
+            if run is self._run:
+                self.copy_progress = None
+                self.awaiting = None
+        if run is self._run:  # not another project's worker
+            self.sync_now()
 
-    def _copied(self, progress: SyncProgress) -> None:
-        self.copy_progress = progress
+    def _copied(self, run: object, progress: SyncProgress) -> None:
+        if run is self._run:
+            self.copy_progress = progress
 
 
 sync_jobs = SyncJobs()
