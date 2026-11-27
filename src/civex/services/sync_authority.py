@@ -1083,7 +1083,12 @@ class SyncAuthorityService:
                     return denied, REFUSAL_PERMISSION
         return None
 
-    def _settle_action(self, who: Principal, action: list[SyncEntry]) -> list[OpResult]:
+    def _settle_action(
+        self,
+        who: Principal,
+        action: list[SyncEntry],
+        earlier: list[SyncEntry] | None = None,
+    ) -> list[OpResult]:
         """Settle the entries one action wrote (a field renamed with the
         templates it rewrote, a record deleted with everything beneath it) as
         one: all go in, or none does. Each is merged as it would be alone, then
@@ -1106,15 +1111,25 @@ class SyncAuthorityService:
             return [dataclasses.replace(p, replayed=True) for p in priors if p]
         if any(p is not None for p in priors):
             # Sent again after only some of it was answered (a lost answer, a
-            # timeout): those are answered again from what was stored, and
-            # only the rest is settled, so no answer is written twice.
+            # timeout): those are answered again from what was stored, and the
+            # rest follows them. An action goes in whole or not at all, so if
+            # what was answered did not go in, the rest is answered the same
+            # way, not settled; only if all of it went in is the rest settled
+            # (with what was answered counting as part of the action).
             rest = [e for e, p in zip(action, priors) if p is None]
-            settled = {r.op_id: r for r in self._settle_action(who, rest)}
+            done = [e for e, p in zip(action, priors) if p is not None]
+            held = [p for p in priors if p is not None]
+            if all(p.status in (APPLIED, MERGED) for p in held):
+                settled = self._settle_action(who, rest, earlier=done)
+            else:
+                settled = self._answer_like(who, rest, held)
+            by_id = {r.op_id: r for r in settled}
             return [
-                dataclasses.replace(p, replayed=True) if p else settled[e.id]
+                dataclasses.replace(p, replayed=True) if p else by_id[e.id]
                 for e, p in zip(action, priors)
             ]
-        self._covered = {(e.entity_type, e.entity_id) for e in action}
+        every = action + (earlier or [])
+        self._covered = {(e.entity_type, e.entity_id) for e in every}
         # What the caller may see decides what its answers can say: a thing
         # held where it may not look is answered as one that is not here, so
         # it is set aside first. Only what it can see counts as part of the
@@ -1123,7 +1138,7 @@ class SyncAuthorityService:
         # thing from an absent one.
         hidden = [e for e in action if self._unseen(e)]
         self._covered_seen = {
-            (e.entity_type, e.entity_id) for e in action if e not in hidden
+            (e.entity_type, e.entity_id) for e in every if e not in hidden
         }
         for entry in action:
             # Every entry meets the checks an absent one would meet, in order;
@@ -1167,6 +1182,29 @@ class SyncAuthorityService:
         for entry, result in zip(action, results):
             self._repo.save_op(entry, result, who.device_id, who.name)
         return results
+
+    def _answer_like(
+        self, who: Principal, rest: list[SyncEntry], held: list[OpResult]
+    ) -> list[OpResult]:
+        """The entries of an action that was refused (or kept) as a whole,
+        sent again after only some were answered: answered the way the others
+        were, never settled on their own."""
+        first = next(p for p in held if p.status not in (APPLIED, MERGED))
+        if not rest:
+            return []
+        kinds = {c.get("kind") for p in held for c in p.conflicts}
+        if "edit_vs_delete" in kinds:
+            return self._keep_instead_of_delete(who, rest, held)
+        prefix = "Part of one change that could not go in whole: "
+        why = (
+            first.message or "Something it changes was changed on the server meanwhile"
+        )
+        why = why.removeprefix(prefix)
+        code = next((c.get("code") for c in first.conflicts if c.get("code")), None)
+        data = code == UNFIT_DATA
+        return self._refuse_action(
+            who, rest, why, code=None if data else code, data=data
+        )
 
     def _refuse_action(
         self,
