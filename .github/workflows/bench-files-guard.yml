@@ -1,0 +1,96 @@
+name: bench-files-guard
+
+# File transfer between a device and an authority in its own process on
+# PostgreSQL (benchmarks/bench_bulk_files.py), up and down, small files and
+# huge ones, before (the PR's base) and after (this branch): the base's source
+# is run with this branch's benchmark. Fails when this branch moves files at
+# less than 70% of the base's speed in any of the four (best of two runs each
+# side; loopback on a shared runner is noisy, and a lost pack or parallel path
+# costs 2x or more, so 0.7 catches that without flaking).
+on:
+  pull_request:
+    paths:
+      - .github/workflows/bench-files-guard.yml
+      - benchmarks/bench_bulk_files.py
+      - benchmarks/compare_bench.py
+      - src/civex/services/sync_service.py
+      - src/civex/services/sync_transport.py
+      - src/civex/services/http_wire.py
+      - src/civex/services/file_service.py
+      - src/civex/server/routers/sync_peer.py
+      - src/civex/server/sync_policy.py
+      - src/civex/repositories/local/file_store.py
+      - src/civex/repositories/s3/**
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Branch (or commit) to compare against
+        default: main
+      tolerance:
+        description: Fail below this fraction of the base's MB/s
+        default: "0.7"
+
+env:
+  BENCH_BASE: ${{ inputs.base || github.base_ref }}
+  BENCH_TOLERANCE: ${{ inputs.tolerance || '0.7' }}
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: civex
+          POSTGRES_PASSWORD: civex
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PG_URL: postgresql+psycopg2://civex:civex@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --extra server --extra workflows --extra dev
+
+      - name: The base's source
+        run: |
+          mkdir /tmp/base
+          git archive "origin/${BENCH_BASE}" src | tar -x -C /tmp/base
+
+      - name: Run both
+        run: |
+          run() {  # source dir, output file
+            for dir in up down; do
+              for shape in "small --gb 0.4" "huge --big-count 2 --big-gb 0.25"; do
+                PYTHONPATH="$1" uv run python benchmarks/bench_bulk_files.py \
+                  --direction "$dir" --store fs --shape $shape | tail -1 >> "$2"
+              done
+            done
+          }
+          for round in 1 2; do
+            run /tmp/base/src /tmp/before.jsonl
+            run "$PWD/src" /tmp/after.jsonl
+          done
+
+      - name: Compare
+        run: |
+          set -o pipefail
+          uv run python benchmarks/compare_bench.py /tmp/before.jsonl /tmp/after.jsonl \
+            --tolerance "${BENCH_TOLERANCE}" | tee /tmp/compare.txt
+          {
+            echo "## File transfer, base ${BENCH_BASE} vs this branch (MB/s, best of 2)"
+            echo '```'; cat /tmp/compare.txt; echo; cat /tmp/before.jsonl /tmp/after.jsonl; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

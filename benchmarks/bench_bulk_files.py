@@ -1,4 +1,5 @@
-"""How fast files go to an authority: many small files (the 0.3 MB research
+"""How fast files go to an authority (--direction up, the default) or come down
+from one (--direction down): many small files (the 0.3 MB research
 case) or a few huge ones, over HTTP to an authority in its own process, files
 on its drive or in a bucket (moto standing in for S3, handing out presigned
 URLs: files go direct).
@@ -7,7 +8,9 @@ URLs: files go direct).
     python benchmarks/bench_bulk_files.py --shape huge --big-count 5 --big-gb 2 \
         --store s3
 
-Only the upload is timed (`send_files`, after the records went). The numbers
+Only the transfer is timed (`send_files` up, `fetch_files` down on a second
+device that already has the records). Peak memory (RSS, MB) of the authority
+and of the device are reported for the timed part (Linux). The numbers
 are MB/s of file bytes; on loopback the line is not the limit, so they show
 what the two ends can do, to compare with 62 MB/s (500 Mbps) to 125 MB/s
 (1 Gbps). Everything is made under --work (default ~/.cache/bench-bulk) and
@@ -33,6 +36,23 @@ def _content(i: int, size: int) -> bytes:
     head = i.to_bytes(8, "big")
     reps = size // len(BLOCK) + 1
     return (head + BLOCK * reps)[:size]
+
+
+def _peak_reset(pid: int | str) -> None:
+    try:  # Linux: forget the peak so far, to measure the timed part alone
+        Path(f"/proc/{pid}/clear_refs").write_text("5")
+    except OSError:
+        pass
+
+
+def _peak_mb(pid: int | str) -> float | None:
+    try:
+        for line in Path(f"/proc/{pid}/status").read_text().splitlines():
+            if line.startswith("VmHWM:"):
+                return round(int(line.split()[1]) / 1024, 1)
+    except OSError:
+        pass
+    return None
 
 
 def _free_port() -> int:
@@ -115,6 +135,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--shape", choices=["small", "huge"], required=True)
     ap.add_argument("--store", choices=["fs", "s3"], default="fs")
+    ap.add_argument("--direction", choices=["up", "down"], default="up")
     ap.add_argument("--gb", type=float, default=10.0)
     ap.add_argument("--small-mb", type=float, default=0.3)
     ap.add_argument("--big-count", type=int, default=5)
@@ -204,6 +225,7 @@ def run(args, work: Path, procs: list) -> dict:
     toml.write_text(toml.read_text() + extra)
     authority = build_local_context(load_config_at(root))
     _, invite = authority.device_keys.invite("laptop")
+    _, invite2 = authority.device_keys.invite("phone")
     authority.commit()
     authority.close()
 
@@ -220,7 +242,8 @@ def run(args, work: Path, procs: list) -> dict:
             "import faulthandler; faulthandler.dump_traceback_later(3, repeat=True)\n"
             + code
         )
-    procs.append(subprocess.Popen([sys.executable, "-c", code]))
+    server = subprocess.Popen([sys.executable, "-c", code])
+    procs.append(server)
     _wait(port)
     if args.per_conn_mb:
         shaped = _free_port()
@@ -275,28 +298,52 @@ def run(args, work: Path, procs: list) -> dict:
     laptop.sync_svc.sync()
     laptop.commit()
     total = sum(sizes)
+    if args.direction == "down":
+        laptop.sync_svc.send_files()  # not timed
+        laptop.commit()
+        phone = projects("phone")
+        phone.sync_svc.connect(url, invite2)
+        phone.commit()
+        phone.sync_svc.sync()
+        phone.commit()
+        phone.sync_svc.set_download_files("all")
+        phone.commit()
+        mover = phone.sync_svc.fetch_files
+    else:
+        mover = laptop.sync_svc.send_files
+    import gc
+
+    gc.collect()
+    _peak_reset(os.getpid())
+    _peak_reset(server.pid)
     start = time.monotonic()
-    if os.environ.get("BENCH_PROFILE"):  # stacks of the sending threads, every 3 s
+    if os.environ.get("BENCH_PROFILE"):  # stacks of the working threads, every 3 s
         import faulthandler
 
         faulthandler.dump_traceback_later(3, repeat=True)
-        report = laptop.sync_svc.send_files()
+        report = mover()
         faulthandler.cancel_dump_traceback_later()
     else:
-        report = laptop.sync_svc.send_files()
-    laptop.commit()
+        report = mover()
+    (phone if args.direction == "down" else laptop).commit()
     took = time.monotonic() - start
+    moved = report.fetched if args.direction == "down" else report.sent
+    owed = len(report.absent) if args.direction == "down" else len(report.owed)
+    device_mb, authority_mb = _peak_mb(os.getpid()), _peak_mb(server.pid)
     projects.close()
     return {
         "shape": args.shape,
         "store": args.store,
         "files": len(sizes),
         "bytes": total,
-        "sent": report.sent,
-        "owed": len(report.owed),
+        "direction": args.direction,
+        "moved": moved,
+        "owed": owed,
         "seconds": round(took, 1),
         "MB_per_s": round(total / 1e6 / took, 1),
         "prepare_seconds": round(prepared, 1),
+        "peak_rss_mb_device": device_mb,
+        "peak_rss_mb_authority": authority_mb,
     }
 
 

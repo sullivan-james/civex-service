@@ -42,6 +42,7 @@ CAPABILITIES: tuple[str, ...] = (
     "library",
     "device_login",
     "file_packs",
+    "file_pack_downloads",
     "gzip_requests",
     "snapshot_pages",
 )
@@ -60,6 +61,15 @@ GZIP_REQUESTS = "gzip_requests"
 # stored, and the answer says which went in. Offered by every authority that
 # serves; one without it is sent the files one request each.
 FILE_PACKS = "file_packs"
+# Many small files in one answer (`POST /files/pack/download`): the device names
+# the hashes it wants, the authority streams, for each, `<sha256> <size>\n` and
+# the bytes, or `<sha256> absent\n` (it has none the caller may read), or
+# `<sha256> big <size>\n` (not in the pack: ask for it alone, in ranges). A file
+# is in a pack when it is at most PACK_DOWNLOAD_FILE_MAX bytes and the pack is
+# within PACK_MAX_BYTES. Offered by every authority that serves; one without
+# it is asked for the files one request each.
+FILE_PACK_DOWNLOADS = "file_pack_downloads"
+PACK_DOWNLOAD_FILE_MAX = 2 * 1024 * 1024
 # A big file in numbered parts, several at a time, resumable: `POST
 # /files/{sha}/parts` (answers which parts are held), `PUT /files/{sha}/parts/{n}`
 # and `POST /files/{sha}/parts/complete`. Offered when the authority's files are

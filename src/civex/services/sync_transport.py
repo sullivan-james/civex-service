@@ -14,18 +14,21 @@ from __future__ import annotations
 
 import gzip
 import json
+import logging
+import tempfile
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 import time
 import urllib.parse
 from collections.abc import Callable, Iterator
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from civex import keys
 from civex.domain.dtos import DirectUpload
 from civex.domain.sync import (
     DIRECT_FILES,
+    FILE_PACK_DOWNLOADS,
     FILE_PACKS,
     GZIP_REQUESTS,
     FILE_PART_BYTES,
@@ -54,6 +57,86 @@ _CHUNK = 1024 * 1024
 # held in memory while it is sent, so at most PART_THREADS x the part size is).
 PARTS_MIN_BYTES = 2 * FILE_PART_BYTES
 PART_THREADS = 4
+# A file coming down is fetched in ranges, this many at a time (shared by all
+# the files being fetched), when it is at least DOWNLOAD_PARTS_MIN_BYTES: a
+# range is written where it belongs in a temporary file as it arrives, so
+# memory holds a chunk per range, and the hash is checked once, by whoever
+# stores the whole.
+DOWNLOAD_PART_THREADS = 6
+DOWNLOAD_PART_BYTES = FILE_PART_BYTES
+DOWNLOAD_PARTS_MIN_BYTES = 2 * DOWNLOAD_PART_BYTES
+# A range that fails in the middle is asked for again, on its own, this often.
+DOWNLOAD_PART_TRIES = 3
+# What a pack's answer, and a file's, is held in: memory up to this, then a
+# temporary file. With 6 packs and 12 files in hand, 6 ranges and their
+# buffers, a download holds at most about 48 MB.
+PACK_SPOOL_BYTES = 2 * 1024 * 1024
+FILE_SPOOL_BYTES = 2 * 1024 * 1024
+
+log = logging.getLogger(__name__)
+
+
+@dataclass
+class PackAnswer:
+    """What a pack download brought: the answer held in `spool`, each file a
+    slice of it (`files`: hash -> (offset, size)); those the authority has no
+    readable copy of (`absent`); and those to ask for alone (`alone`: too big
+    for a pack, or the answer ended before it got to them)."""
+
+    spool: Any = None
+    files: dict[str, tuple[int, int]] = field(default_factory=dict)
+    absent: set[str] = field(default_factory=set)
+    alone: list[str] = field(default_factory=list)
+
+    def close(self) -> None:
+        if self.spool is not None:
+            self.spool.close()
+            self.spool = None
+
+
+class _FrameReader:
+    """A pack's answer read line by line and in exact lengths."""
+
+    def __init__(self, reply: Reply) -> None:
+        self._reply = reply
+        self._buf = bytearray()
+        self._pos = 0
+
+    def _more(self) -> bool:
+        chunk = self._reply.read(256 * 1024)
+        if not chunk:
+            return False
+        del self._buf[: self._pos]
+        self._pos = 0
+        self._buf += chunk
+        return True
+
+    def line(self) -> str | None:
+        """The next line, None at the clean end of the answer."""
+        while True:
+            end = self._buf.find(b"\n", self._pos)
+            if end >= 0:
+                text = self._buf[self._pos : end].decode("ascii")
+                self._pos = end + 1
+                return text
+            if len(self._buf) - self._pos > 512:
+                raise SyncError("That is not a pack", retryable=True)
+            if not self._more():
+                if len(self._buf) > self._pos:
+                    raise SyncError("The pack was cut short", retryable=True)
+                return None
+
+    def copy(self, size: int, sink: Any) -> None:
+        left = size
+        while left:
+            if self._pos >= len(self._buf) and not self._more():
+                raise SyncError("The pack was cut short", retryable=True)
+            take = min(left, len(self._buf) - self._pos)
+            sink.write(memoryview(self._buf)[self._pos : self._pos + take])
+            self._pos += take
+            left -= take
+
+
 # Finishing a big file takes the authority a while (it reads the whole once, or
 # storage joins the parts): a longer wait than an ordinary call.
 FINISH_SECONDS = 600.0
@@ -93,9 +176,15 @@ class HttpSyncTransport:
         self._session_lock = threading.RLock()
         # What the authority said it offers (`Hello.capabilities`), once asked.
         self._capabilities: frozenset[str] | None = None
+        # Set once an authority has refused the pack download route.
+        self._no_pack_downloads = False
+        self._parts: ThreadPoolExecutor | None = None
 
     def close(self) -> None:
         """Close the connections this transport holds open."""
+        parts, self._parts = self._parts, None
+        if parts is not None:
+            parts.shutdown(wait=False, cancel_futures=True)
         self._wire.close()
 
     def __del__(self) -> None:  # a backstop: whoever has it should close it
@@ -379,6 +468,220 @@ class HttpSyncTransport:
             )
         return reply.header("ETag")
 
+    def accepts_pack_downloads(self) -> bool:
+        """Whether small files come down many to a request. Not when the
+        authority's files are in a bucket (`direct_files`): there each is a
+        presigned download that never touches the authority."""
+        return (
+            not self._no_pack_downloads
+            and self._offers(FILE_PACK_DOWNLOADS)
+            and not self._offers(DIRECT_FILES)
+        )
+
+    def fetch_pack(
+        self, shas: list[str], stop: threading.Event | None = None
+    ) -> PackAnswer:
+        """Ask for many files in one request. Whatever arrived whole is kept
+        (each slice of one spool), and the rest is named in `alone` for the
+        caller to ask for one at a time: a request that fails before anything
+        arrived raises `SyncError`, but one that is cut off part way (or
+        garbled) costs only the files after the cut."""
+        body = json.dumps({"sha256": shas}).encode("utf-8")
+        answer = PackAnswer(
+            spool=tempfile.SpooledTemporaryFile(max_size=PACK_SPOOL_BYTES)
+        )
+        try:
+            try:
+                reply = self._again_if_expired(
+                    lambda: self._call(
+                        "POST",
+                        "/files/pack/download",
+                        body=body,
+                        content_type="application/json",
+                        length=len(body),
+                        timeout=UPLOAD_TIMEOUT_SECONDS,
+                        stream=True,
+                        gzip=False,
+                        idempotent=True,  # it only reads
+                    )
+                )
+            except SyncError as e:
+                if e.status in (404, 405, 501):  # not this authority's: one by one
+                    self._no_pack_downloads = True
+                    answer.alone = list(shas)
+                    return answer
+                raise
+            wanted = set(shas)
+            offset = 0
+            with reply:
+                reader = _FrameReader(reply)
+                try:
+                    while not (stop is not None and stop.is_set()):
+                        line = reader.line()
+                        if line is None:
+                            break
+                        sha, _, rest = line.partition(" ")
+                        if sha not in wanted or sha in answer.files:
+                            raise SyncError("That is not a pack", retryable=True)
+                        if rest == "absent":
+                            answer.absent.add(sha)
+                        elif rest.startswith("big "):
+                            answer.alone.append(sha)
+                        else:
+                            size = int(rest)
+                            if size < 0:
+                                raise SyncError("That is not a pack", retryable=True)
+                            answer.spool.seek(offset)
+                            reader.copy(size, answer.spool)
+                            answer.files[sha] = (offset, size)
+                            offset += size
+                        wanted.discard(sha)
+                except (SyncError, OSError, ValueError, UnicodeError) as e:
+                    log.debug("A pack was cut off: %s", e)
+            # What the answer never got to is asked for alone.
+            answer.alone += [s for s in shas if s in wanted and s not in answer.alone]
+            return answer
+        except BaseException:
+            answer.close()
+            raise
+
+    def _open_file(
+        self, sha256: str, byte_range: tuple[int, int] | None = None
+    ) -> Reply:
+        """A file's answer, open: the authority's own, or storage's when it
+        sends the device there (a 307; the session never goes with it).
+        FileNotFoundError when it has not got the file."""
+        extra = (
+            {"Range": f"bytes={byte_range[0]}-{byte_range[1]}"} if byte_range else None
+        )
+        try:
+            response = self._again_if_expired(
+                lambda: self._call(
+                    "GET", f"/files/{sha256}", stream=True, gzip=False, extra=extra
+                )
+            )
+            if response.status in (301, 302, 303, 307, 308):
+                location = response.header("Location")
+                response.close()
+                response = self._open_storage(location, sha256, extra)
+                response.from_storage = True  # type: ignore[attr-defined]
+        except SyncError as e:
+            if e.status == 404:  # the server answered: it doesn't have it
+                raise FileNotFoundError(sha256) from e
+            raise
+        return response
+
+    def fetch_file(self, sha256: str, stop: threading.Event | None = None) -> Any:
+        """A file's bytes from the server in a spool, read from its start; None
+        when the server has not got it. A big one comes in ranges, several at
+        a time, written into a temporary file where each belongs. The caller
+        checks the hash of the whole, and closes the spool."""
+        reply = self._open_file(sha256)
+        size = reply.header("Content-Length")
+        total = int(size) if size.isdigit() else None
+        # Ranges only for what the authority serves itself: a bucket's presigned
+        # download is one stream as before (measured: against a stand-in bucket
+        # ranges were slower, and an authority asked afresh for every range's
+        # URL is slow where it signs one per request).
+        if (
+            total is not None
+            and total >= DOWNLOAD_PARTS_MIN_BYTES
+            and not getattr(reply, "from_storage", False)
+        ):
+            reply.close()
+            try:
+                return self._fetch_in_ranges(sha256, total, stop)
+            except _NoRanges:  # it sends the whole whatever is asked
+                reply = self._open_file(sha256)
+        spool = tempfile.SpooledTemporaryFile(max_size=FILE_SPOOL_BYTES)
+        try:
+            got = 0
+            with reply:
+                while chunk := reply.read(_CHUNK):
+                    if stop is not None and stop.is_set():
+                        break
+                    spool.write(chunk)
+                    got += len(chunk)
+            if total is not None and got != total and not (stop and stop.is_set()):
+                raise SyncError("A file came down cut short", retryable=True)
+            spool.seek(0)
+            return spool
+        except BaseException:
+            spool.close()
+            raise
+
+    def _fetch_in_ranges(
+        self, sha256: str, total: int, stop: threading.Event | None
+    ) -> Any:
+        out = tempfile.TemporaryFile()
+        lock = threading.Lock()
+        failed = threading.Event()
+        try:
+            out.truncate(total)
+
+            def fetch(first: int) -> None:
+                last = min(total, first + DOWNLOAD_PART_BYTES) - 1
+                for attempt in range(1, DOWNLOAD_PART_TRIES + 1):
+                    if failed.is_set() or (stop is not None and stop.is_set()):
+                        return
+                    try:
+                        with self._open_file(sha256, (first, last)) as reply:
+                            if reply.status != 206 or not reply.header(
+                                "Content-Range"
+                            ).startswith(f"bytes {first}-{last}/"):
+                                raise _NoRanges()
+                            at = first
+                            while chunk := reply.read(_CHUNK):
+                                if at + len(chunk) > last + 1:
+                                    raise SyncError("A range was longer than asked")
+                                with lock:
+                                    out.seek(at)
+                                    out.write(chunk)
+                                at += len(chunk)
+                                if failed.is_set():
+                                    return
+                        if at != last + 1:
+                            raise SyncError(
+                                "A range came down cut short", retryable=True
+                            )
+                        return
+                    except (OSError, SyncError) as e:
+                        if isinstance(e, FileNotFoundError):
+                            raise
+                        if attempt == DOWNLOAD_PART_TRIES or (
+                            isinstance(e, SyncError) and not e.retryable
+                        ):
+                            raise
+
+            pool = self._part_pool()
+            futures = [
+                pool.submit(fetch, first)
+                for first in range(0, total, DOWNLOAD_PART_BYTES)
+            ]
+            error: BaseException | None = None
+            for future in futures:
+                try:
+                    future.result()
+                except BaseException as e:  # noqa: BLE001 - raised below
+                    failed.set()
+                    error = error or e
+            if error is not None:
+                raise error
+            if stop is not None and stop.is_set():
+                out.close()  # not all of it came: nothing for the caller to keep
+                return None
+            out.seek(0)
+            return out
+        except BaseException:
+            out.close()
+            raise
+
+    def _part_pool(self) -> ThreadPoolExecutor:
+        with self._session_lock:
+            if self._parts is None:
+                self._parts = ThreadPoolExecutor(DOWNLOAD_PART_THREADS)
+            return self._parts
+
     def file_chunks(self, sha256: str) -> Iterator[bytes]:
         """A file's bytes from the server, as they arrive. Asks at once, so a
         file the server hasn't got raises FileNotFoundError here, before
@@ -591,7 +894,9 @@ class HttpSyncTransport:
 
         return self._again_if_expired(call)
 
-    def _open_storage(self, url: str, sha256: str) -> Reply:
+    def _open_storage(
+        self, url: str, sha256: str, extra: dict[str, str] | None = None
+    ) -> Reply:
         """GET from storage (a presigned URL), with none of the authority's
         headers. Storage saying it hasn't the object is FileNotFoundError."""
         if not url:
@@ -599,6 +904,7 @@ class HttpSyncTransport:
         reply = self._wire.request(
             "GET",
             url,
+            headers=extra,
             timeout=self._timeout,
             stream=True,
             raise_for_status=False,
@@ -614,6 +920,10 @@ class HttpSyncTransport:
             retryable=retries(reply.status),
             status=reply.status,
         )
+
+
+class _NoRanges(Exception):
+    """The authority answered a range with the whole file."""
 
 
 class _PackBody:
