@@ -363,3 +363,28 @@ def test_a_private_project_is_not_called_a_non_civex_server():
                 raise AssertionError("no refusal")
         finally:
             keys.public_of = keys_public
+
+
+def test_a_failed_check_is_refused_not_turned_into_a_sign_in(client, monkeypatch):
+    """Only `not_a_device` means ask to join: a busy host, a network failure or
+    a skewed clock is said as it is, and no request to join is made."""
+    from civex.domain.sync import SyncError
+    from civex.services.sync_service import SyncService
+
+    for err in (
+        SyncError("busy", retryable=True, status=503),
+        SyncError("Could not reach it", retryable=True),
+        SyncError("clock", retryable=False, status=401, code="clock_skew"),
+    ):
+        _authority_that(monkeypatch, err)
+
+        def never(self, url):
+            raise AssertionError("asked to join")
+
+        monkeypatch.setattr(SyncService, "request_login", never)
+        answer = client.post("/api/remote/connect", json={"url": "https://hub.example"})
+        assert answer.status_code == (502 if err.retryable else 400), err
+        assert answer.json()["detail"] == str(err)
+        # The same failure is "could not check", not "not joined".
+        known = client.get("/api/remote/known", params={"url": "https://hub.example"})
+        assert known.json() == {"joined": None}

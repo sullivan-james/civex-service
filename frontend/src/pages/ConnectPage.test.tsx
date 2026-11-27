@@ -23,7 +23,7 @@ const idle = {
 
 let status: Record<string, unknown>
 let collections: unknown[]
-let joined: boolean
+let joined: boolean | null
 let answer: Record<string, unknown>
 let calls: { path: string; body: unknown }[]
 const open = vi.fn()
@@ -130,6 +130,14 @@ describe('ConnectPage', () => {
         name: /hub.civex.uk.evil.com, a hub I have not used before/,
       }),
     ).toBeInTheDocument()
+  })
+
+  it('says nothing about a hub it could not check', async () => {
+    joined = null
+    renderPage('?url=https://hub.example/ada/notes')
+    expect(await screen.findByTestId('plan')).toBeInTheDocument()
+    await new Promise((r) => setTimeout(r, 800))
+    expect(screen.queryByText(/has not connected to/)).toBeNull()
   })
 
   it('refuses an address with a user name in it', async () => {

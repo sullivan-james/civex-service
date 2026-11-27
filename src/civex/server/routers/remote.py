@@ -507,9 +507,10 @@ def status(ctx: AppContext = Depends(get_ctx)):
 
 
 class RemoteKnownResponse(BaseModel):
-    joined: bool = Field(
-        description="This computer has joined that address before, so connecting "
-        "needs no approval."
+    joined: bool | None = Field(
+        description="This project's device is known to that address, so connecting "
+        "needs no approval. Null when that could not be checked (unreachable, "
+        "refused, busy): nothing is promised either way."
     )
 
 
@@ -523,7 +524,7 @@ def known(url: str, ctx: AppContext = Depends(get_ctx)):
     try:
         return RemoteKnownResponse(joined=not ctx.sync_svc.needs_approval(url, None))
     except SyncError:
-        return RemoteKnownResponse(joined=False)  # can't ask: nothing to promise
+        return RemoteKnownResponse(joined=None)  # can't ask: nothing to promise
 
 
 @router.post(

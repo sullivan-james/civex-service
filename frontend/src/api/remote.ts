@@ -449,9 +449,9 @@ export const remoteApi = {
       expires_at: number | null
       verify_url?: string | null
     }>('/remote/connect', { url, invite }),
-  /** Whether this computer has joined that address before. */
+  /** Whether this project's device is known there; null: could not check. */
   known: (url: string) =>
-    api.get<{ joined: boolean }>(
+    api.get<{ joined: boolean | null }>(
       `/remote/known?url=${encodeURIComponent(url)}`,
     ),
   disconnect: () => api.post<RemoteStatus>('/remote/disconnect', {}),
