@@ -22,6 +22,8 @@ export interface RemoteStatus {
   /** Files records here cite that aren't on this computer and can be
    * downloaded: what keeping every file would fetch. */
   files_not_here?: number
+  /** History from before this copy was made can be read from the server. */
+  earlier_history?: boolean
   /** Files records here cite that the server hasn't said it holds yet. */
   files_to_send: number
   /** Why those haven't gone; null when there are none. */
@@ -184,7 +186,7 @@ export interface InstallOptions {
 export interface SyncProgress {
   /** copying: from the authority; filling: an empty authority from here;
    * history: fetching what happened before this project joined. */
-  phase: 'copying' | 'filling' | 'history' | 'files' | 'sending' | string
+  phase: 'copying' | 'filling' | 'files' | 'sending' | string
   done: number
   total: number | null
   kind: string | null

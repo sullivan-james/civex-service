@@ -51,8 +51,6 @@ DEBOUNCE = 3.0
 FILE_CHECK_EVERY = 600.0
 BASE_BACKOFF = 5.0
 MAX_BACKOFF = 900.0
-# Pages of history from before joining fetched per tick (200 entries a page).
-HISTORY_PAGES = 10
 # How long a tick spends downloading files before it lets a sync run again (it
 # stops between files, so one large file can take longer).
 FILES_SECONDS = 20.0
@@ -193,10 +191,7 @@ class SyncWorker:
             return None  # pausing stops the schedule; asking for one still works
         ctx = self._open(config)
         try:
-            report = self._maybe_sync(ctx, config)
-            if not config.sync.paused:
-                self._fetch_history(ctx)
-            return report
+            return self._maybe_sync(ctx, config)
         finally:
             ctx.close()
 
@@ -232,8 +227,6 @@ class SyncWorker:
         """Ask the authority which files the records here cite it holds (the
         ones nothing here has), so the missing ones are counted apart. Only
         once the copy is done, and later only for newly cited files."""
-        if ctx.sync_repo.meta().history_from:
-            return
         try:
             ctx.sync_svc.probe_files(
                 seconds=FILES_SECONDS, should_stop=self._should_stop_sending
@@ -305,27 +298,12 @@ class SyncWorker:
             return False
         return bool(config.sync.paused and not asked) or not config.sync.remote
 
-    def _fetch_history(self, ctx: AppContext) -> None:
-        """A few pages of the history from before this project joined, while
-        any is still to come and the authority is answering."""
-        if not ctx.sync_repo.meta().history_from:
-            return
-        if self._clock() < self._backoff_until:
-            return
-        try:
-            if ctx.sync_svc.fetch_history(self._on_progress, pages=HISTORY_PAGES):
-                self._on_progress(None)
-        except SyncBusy:
-            return
-        except SyncError as e:
-            log.info("fetching history failed (%s); it carries on later", e)
-
     def _fetch_files(self, ctx: AppContext, asked: bool = False) -> None:
         """Download files this project's records cite that aren't here, for a
         while, while the authority is answering (or at once, when `asked`)."""
         now = self._clock()
         waiting = now < self._files_backoff_until and not asked
-        if waiting or ctx.sync_repo.meta().history_from:
+        if waiting:
             return
         # What the server said it hasn't got is remembered by the project (and
         # asked about again on a backoff), so it is not counted or requested here.

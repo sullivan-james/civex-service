@@ -2603,6 +2603,23 @@ class PaginatedAuditEventsResponse(BaseModel):
     limit: int
 
 
+class EarlierAuditResponse(BaseModel):
+    items: list[AuditEventResponse] = Field(
+        description="Events from before this project was copied, read from the "
+        "server just now and not kept here; newest first."
+    )
+    next_before: int | None = Field(
+        description="Pass as `before` for the page before this one; null when "
+        "there is nothing earlier. A page can be empty with this set (a long "
+        "run the device may not read): ask again."
+    )
+    offline: bool = Field(
+        default=False,
+        description="The server could not be reached, so nothing was read; "
+        "`next_before` is the same as asked.",
+    )
+
+
 class OpenBatchRequest(BaseModel):
     kind: Literal["import"] = Field(
         default="import",

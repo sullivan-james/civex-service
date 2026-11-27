@@ -14,6 +14,7 @@ the revert can itself be reverted.
 from __future__ import annotations
 
 import dataclasses
+from datetime import datetime
 import json
 from dataclasses import replace
 import uuid
@@ -49,6 +50,7 @@ from civex.domain.dtos import (
     RevertResultDTO,
 )
 from civex.domain.exceptions import NotFoundError, ValidationError
+from civex.domain.sync import SyncEntry
 from civex.repositories.protocols import AuditRepository, ObjectStore
 from civex.services.dataset_service import DatasetService
 from civex.services.record_service import MAX_REPORTED, RecordService
@@ -120,6 +122,87 @@ class AuditService:
             if ev.entry is not None:
                 ev.entry = singles[ev.entry.id]
         return found, total
+
+    def events_of_entries(
+        self, entries: list[SyncEntry], under: str | None = None
+    ) -> list[AuditEventDTO]:
+        """History the authority sent (see `SyncService.earlier`) as events,
+        like `events` but read from what was passed, not from this project's own
+        history, and newest first: a batch is one event with the changes of it
+        in `entries`, any other change is its own. `under` keeps only what
+        happened to that record and beneath it."""
+        if under:
+            try:
+                ids = set(self._records.subtree_ids(under))
+            except NotFoundError:
+                ids = {uuid.UUID(under)}
+            entries = [e for e in entries if e.entity_id in ids]
+        dtos = {
+            d.id: d
+            for d in self._with_changes(
+                [
+                    AuditLogDTO(
+                        id=e.id,
+                        action=e.action,
+                        entity_type=e.entity_type,
+                        entity_id=e.entity_id,
+                        old_data=e.old_data,
+                        new_data=e.new_data,
+                        timestamp=datetime.fromisoformat(e.timestamp),
+                        actor=e.actor,
+                        device=e.device,
+                        delta=e.delta,
+                        format=2 if e.delta is not None else 1,
+                    )
+                    for e in entries
+                ]
+            )
+        }
+        out: list[AuditEventDTO] = []
+        batches: dict[uuid.UUID, AuditEventDTO] = {}
+        for e in entries:
+            dto = dtos[e.id]
+            if e.batch is None:
+                out.append(
+                    AuditEventDTO(
+                        id=e.id,
+                        timestamp=dto.timestamp,
+                        count=1,
+                        entry=dto,
+                        actor=e.actor,
+                        device=e.device,
+                    )
+                )
+                continue
+            event = batches.get(e.batch.id)
+            if event is None:
+                event = batches[e.batch.id] = AuditEventDTO(
+                    id=e.batch.id,
+                    timestamp=dto.timestamp,
+                    count=0,
+                    batch=AuditBatchDTO(
+                        id=e.batch.id,
+                        kind=e.batch.kind,
+                        label=e.batch.label,
+                        ref=e.batch.ref,
+                        created_at=datetime.fromisoformat(e.batch.created_at),
+                    ),
+                    actor=e.actor,
+                )
+                out.append(event)
+            event.count += 1
+            event.timestamp = max(event.timestamp, dto.timestamp)
+            if event.actor != e.actor:
+                event.actor = None
+            for part in event.parts:
+                if (part["entity_type"], part["action"]) == (e.entity_type, e.action):
+                    part["count"] += 1
+                    break
+            else:
+                event.parts.append(
+                    {"entity_type": e.entity_type, "action": e.action, "count": 1}
+                )
+        return sorted(out, key=lambda ev: ev.timestamp, reverse=True)
 
     def _resolve(self, node: FilterNode) -> FilterNode:
         """The filter with what a person picked turned into what the repository

@@ -390,6 +390,18 @@ def follow(ctx, other, name):
     ctx._invite = invite
 
 
+def read_earlier(ctx, limit: int = 5) -> list:
+    """Every change of the history from before `ctx` was copied, read from its
+    authority a page at a time as the app does (none of it is stored)."""
+    out, before = [], None
+    while True:
+        page = ctx.sync_svc.earlier(before, limit)
+        out += page.entries
+        before = page.next_before
+        if before is None:
+            return out
+
+
 def connect(ctx, authority_url: str = "https://authority.test") -> str:
     """Connect as a person would: with the invite the first time, and without
     once this computer has joined that address."""

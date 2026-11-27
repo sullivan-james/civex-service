@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 
 from civex.testing import principal  # noqa: F401
+from civex.testing.peers import read_earlier
 
 from .test_scoped_devices import (  # noqa: F401
     SECRET,
@@ -162,9 +163,5 @@ def test_history_before_joining_is_fetched_across_a_long_hidden_run(
         and (e.new_data or {}).get("dataset_id") == str(study.open.id)
     ]
     assert mine
-    for _ in range(20):
-        if late.sync_svc.fetch_history():
-            break
-    late.commit()
-    assert late.sync_repo.meta().history_from is None
-    assert all(late.sync_repo.has_entry(e.id) for e in mine)
+    got = {e.id for e in read_earlier(late)}
+    assert all(e.id in got for e in mine)

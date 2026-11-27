@@ -32,6 +32,7 @@ import { AuditEntryDialog } from './AuditEntryDialog'
 import { BatchDialog } from './BatchDialog'
 import { EntrySubject } from './EntrySubject'
 import { SyncBadge } from './SyncOutcome'
+import { EarlierActivity } from './EarlierActivity'
 import { formatTimestamp } from '../../utils/dates'
 
 type Variant = 'default' | 'accent' | 'success' | 'danger' | 'attention'
@@ -52,6 +53,13 @@ const BATCH_LABEL: Record<string, string> = {
   move: 'move',
   edit: 'edit',
   workflow: 'workflow',
+}
+
+/** The record a page's scope is under, if that is what it is. */
+function scopeUnder(scope: FilterTreeWire | null | undefined): string | null {
+  return scope && 'field' in scope && scope.field === 'under'
+    ? String(scope.value)
+    : null
 }
 
 /** What became of the record an entry is about, said only when it is not
@@ -122,6 +130,14 @@ export function ActivityFeed({
   const [undoingBatch, setUndoingBatch] = useState<string | null>(null)
   const [confirmAll, setConfirmAll] = useState(false)
   const narrowed = !!(filter || list.q)
+  // Earlier history comes from the server: all of it, or a record's, newest
+  // first, once the project's own end is in view.
+  const underId = scopeUnder(scope)
+  const readsEarlier =
+    !narrowed &&
+    (!scope || underId != null) &&
+    list.sortParam !== 'timestamp:asc' &&
+    (!data || (list.page + 1) * list.size >= data.total)
   const deletedOn = isDeletedView(filter)
   const query = {
     filter: withScope(scope, filter),
@@ -286,6 +302,7 @@ export function ActivityFeed({
           onPageSize={(size) => list.set({ size })}
         />
       )}
+      {readsEarlier && <EarlierActivity under={underId ?? undefined} />}
       {open?.entry && (
         <AuditEntryDialog
           entry={open.entry}

@@ -133,11 +133,6 @@ function Copying({ s }: { s: RemoteStatus }) {
           )}
           <span className="text-fg-muted">{text.detail}</span>
         </div>
-        {s.progress.phase === 'history' && (
-          <p className="mt-2 text-xs text-fg-muted">
-            The project is ready to use; this only fills in Activity.
-          </p>
-        )}
         {s.progress.phase === 'files' && (
           <p className="mt-2 text-xs text-fg-muted">
             Everything else works meanwhile; a file opened now is downloaded

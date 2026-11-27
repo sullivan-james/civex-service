@@ -1,5 +1,5 @@
 """Copying a project, either way, says how far it has got; the history from before
-joining arrives after the copy, a piece at a time; and a copy that stops part way
+joining is not downloaded but read from the server when looked at; and a copy that stops part way
 is finished by connecting again, never synced from half a copy."""
 
 from __future__ import annotations
@@ -7,7 +7,7 @@ from __future__ import annotations
 import pytest
 
 import civex.services.sync_service as sync_service
-from civex.domain.sync import COPYING, FILLING, HISTORY, SyncError
+from civex.domain.sync import COPYING, FILLING, SyncError
 from civex.services.sync_worker import SyncWorker
 
 from civex.testing.peers import build_study, connect, device, flaky, snapshots
@@ -54,45 +54,79 @@ def test_filling_an_empty_authority_says_how_far_it_has_got(project, authority):
     assert seen[-1].done == seen[-1].total == laptop.sync_repo.entity_count()
 
 
-def test_history_from_before_joining_arrives_a_piece_at_a_time(
+def test_a_copy_downloads_no_history_and_the_worker_never_fetches_it(
     project, authority, study
 ):
     phone = device(project, authority, "phone")
     assert connect(phone) == "joined"
     head = authority.sync_repo.head_seq()
+    assert phone.sync_repo.meta().history_from == head  # where its history starts
+    assert not hasattr(phone.sync_svc, "fetch_history")
+
+    worker = SyncWorker(lambda: phone.sync_svc._config, lambda config: phone)
+    worker._open = lambda config: _Unclosed(phone)  # the test's context stays open
+    for _ in range(5):
+        worker.tick()
+    assert phone.history_svc.page(limit=1000) == []  # nothing stored
     assert phone.sync_repo.meta().history_from == head
 
-    seen = []
-    assert phone.sync_svc.fetch_history(seen.append, pages=1) is False
-    assert phone.sync_repo.meta().history_from == head  # more to come
-    while not phone.sync_svc.fetch_history(seen.append, pages=1):
-        pass
 
-    assert all(p.phase == HISTORY and p.total == head for p in seen)
-    assert phone.sync_repo.meta().history_from is None
-    mine = {e.id for e in phone.history_svc.page(limit=1000)}
-    theirs = {e.id for e in authority.history_svc.page(limit=1000)}
-    assert theirs <= mine
-    assert phone.sync_svc.fetch_history() is True  # nothing left: says so at once
-
-
-def test_the_background_worker_fetches_history_in_slices(project, authority, study):
+def test_earlier_history_is_read_from_the_server_and_not_stored(
+    project, authority, study
+):
     phone = device(project, authority, "phone")
     connect(phone)
-    shown = []
-    worker = SyncWorker(
-        lambda: phone.sync_svc._config,
-        lambda config: phone,
-        on_progress=shown.append,
-    )
-    worker._open = lambda config: _Unclosed(phone)  # the test's context stays open
-    for _ in range(50):
-        worker.tick()
-        if phone.sync_repo.meta().history_from is None:
+    theirs = {e.id for e in authority.history_svc.page(limit=1000)}
+    seen: list = []
+    before = None
+    pages = 0
+    while True:
+        page = phone.sync_svc.earlier(before, limit=7)
+        assert len(page.entries) <= 7
+        seen += [e.id for e in page.entries]
+        pages += 1
+        before = page.next_before
+        if before is None:
             break
-    assert phone.sync_repo.meta().history_from is None
-    assert shown[-1] is None  # done: nothing left to show
-    assert any(p is not None and p.phase == HISTORY for p in shown)
+    assert pages > 1
+    assert set(seen) == theirs and len(seen) == len(theirs)
+    stamps = [e.hub_seq for e in phone.sync_svc.earlier(None, 7).entries]
+    assert stamps == sorted(stamps, reverse=True)  # newest first
+    assert phone.history_svc.page(limit=1000) == []  # none of it was kept
+    assert phone.sync_repo.meta().history_from == authority.sync_repo.head_seq()
+
+
+def test_earlier_events_carry_changes_and_group_a_batch(project, authority, study):
+    phone = device(project, authority, "phone")
+    connect(phone)
+    page = phone.sync_svc.earlier(None, 200)
+    events = phone.history_svc.events_of_entries(page.entries)
+    assert events and sum(e.count for e in events) == len(page.entries)
+    assert [e.timestamp for e in events] == sorted(
+        (e.timestamp for e in events), reverse=True
+    )
+    single = next(e for e in events if e.entry and e.entry.entity_type == "record")
+    assert single.entry.changes  # worked out like local history
+    only = phone.history_svc.events_of_entries(
+        page.entries, under=str(single.entry.entity_id)
+    )
+    assert only and all(e.entry.entity_id == single.entry.entity_id for e in only)
+    assert phone.history_svc.page(limit=1000) == []
+
+
+def test_earlier_history_is_empty_without_a_copy_point(project, authority, study):
+    assert authority.sync_svc.earlier(None, 10).entries == []
+
+
+def test_earlier_history_offline_says_so_over_the_api(project, authority, study):
+    from civex.server.routers.audit import earlier_audit
+
+    phone = device(project, authority, "phone", flaky=True)
+    connect(phone)
+    flaky(phone).fail("feed", times=5)
+    assert phone.sync_svc.status().earlier_history is True
+    r = earlier_audit(None, 25, None, phone)
+    assert (r.items, r.next_before, r.offline) == ([], None, True)
 
 
 def test_a_copy_that_stopped_part_way_is_finished_by_connecting_again(

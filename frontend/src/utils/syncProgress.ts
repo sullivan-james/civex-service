@@ -4,7 +4,6 @@ import { describeAmounts } from './amounts'
 const PHASES: Record<string, string> = {
   copying: 'Copying the project from the server',
   filling: 'Sending this project to the server',
-  history: 'Fetching earlier history',
   files: 'Downloading files from the server',
   sending: 'Sending files to the server',
 }
@@ -35,11 +34,9 @@ export function describeSyncProgress(p: SyncProgress): SyncProgressText {
       ? `${p.done.toLocaleString()} of ${p.total.toLocaleString()}`
       : p.done.toLocaleString()
   const what =
-    p.phase === 'history'
-      ? 'changes'
-      : p.phase === 'files' || p.phase === 'sending'
-        ? 'files'
-        : (KINDS[p.kind ?? ''] ?? '')
+    p.phase === 'files' || p.phase === 'sending'
+      ? 'files'
+      : (KINDS[p.kind ?? ''] ?? '')
   // With the size known, the bar and the time left go by bytes: one big file
   // among small ones is most of the wait.
   const bytesTotal = p.bytes_total ?? 0

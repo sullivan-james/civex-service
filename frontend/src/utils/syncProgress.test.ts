@@ -18,18 +18,6 @@ describe('describeSyncProgress', () => {
     })
   })
 
-  it('counts history in changes, and has no bar when the total is unknown', () => {
-    const text = describeSyncProgress({
-      phase: 'history',
-      done: 400,
-      total: null,
-      kind: null,
-    })
-    expect(text.title).toBe('Fetching earlier history')
-    expect(text.detail).toBe('changes · 400')
-    expect(text.fraction).toBeNull()
-  })
-
   it('counts files while downloading them', () => {
     const text = describeSyncProgress({
       phase: 'files',

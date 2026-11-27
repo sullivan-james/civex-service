@@ -15,7 +15,10 @@ from .test_bulk_push import send
 def _tree(project):
     f = Flow(project)
     parent = f.make("mine", "encounter", {"site": "p", "depth": 1.0})
-    kids = [f.make("mine", "recording", {"label": f"k{i}", "must": "m"}, str(parent)) for i in range(3)]
+    kids = [
+        f.make("mine", "recording", {"label": f"k{i}", "must": "m"}, str(parent))
+        for i in range(3)
+    ]
     return f, parent, kids
 
 

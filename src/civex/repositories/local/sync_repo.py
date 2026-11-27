@@ -242,26 +242,6 @@ class LocalSyncRepository:
         where the authority really had the record (see `SyncMeta.placed_from`)."""
         return int(self._meta_row().placed_from or 0)
 
-    def history_scan(self) -> int | None:
-        """Where fetching the earlier history carries on from, when it has
-        looked past what it holds (None: from the last entry held)."""
-        found = self._meta_row().history_scan
-        return None if found is None else int(found)
-
-    def set_history_scan(self, seq: int | None) -> None:
-        self._meta_row().history_scan = seq
-        self._s.flush()
-
-    def history_fetched_upto(self, upto: int) -> int:
-        """The last number up to `upto` whose entry is held here: where
-        fetching the history from before joining carries on from."""
-        return (
-            self._s.query(func.max(AuditLog.hub_seq))
-            .filter(AuditLog.hub_seq <= upto)
-            .scalar()
-            or 0
-        )
-
     def referenced_shas(
         self, after: str, limit: int, unconfirmed: bool = False
     ) -> list[str]:

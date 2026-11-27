@@ -1219,9 +1219,8 @@ class SyncMeta(Base):
     seed_open: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=false()
     )
-    # Device: how far fetching the history from before joining has looked, which
-    # can be past the last entry stored (a device that may not read everything is
-    # not sent what it may not see). NULL when not fetching.
+    # Unused: history from before joining is no longer fetched (see
+    # `history_from`). The column stays so no migration is needed.
     history_scan: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     # Device: the number it was copied at. Its own history starts there; what
     # came before is the authority's to show.
