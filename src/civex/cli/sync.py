@@ -443,12 +443,23 @@ def fetch() -> None:
         total = c.sync_svc.files_to_try()
         if not total:
             missing = c.sync_svc.files_missing()
-            console.print(
-                f"Every file the server has is here. {missing} more are missing "
-                "everywhere (`civex files missing`)."
-                if missing
-                else "Every file is here."
-            )
+            here = sum(r.files_here for r in c.sync_svc.collection_files())
+            elsewhere = c.sync_svc.files_not_here()
+            parts = []
+            if elsewhere:
+                parts.append(
+                    f"{here} file(s) are on this computer and {elsewhere} are "
+                    "not: this project fetches a file when it is opened. To keep "
+                    "them here, run `civex sync keep <collection>` (or "
+                    "`civex sync files all`), then `civex sync fetch`."
+                )
+            else:
+                parts.append(f"Every file the server has is here ({here}).")
+            if missing:
+                parts.append(
+                    f"{missing} more are missing everywhere (`civex files missing`)."
+                )
+            console.print(" ".join(parts))
             return
         with Progress(
             TextColumn("Downloading files"),
