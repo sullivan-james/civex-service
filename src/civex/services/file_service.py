@@ -30,6 +30,8 @@ class FileService:
         # Whether content may be given to this caller (set by `context.py`
         # for one who cannot read every collection; always, for one who can).
         self.readable: Callable[[str], bool] = lambda sha256: True
+        # The same for many at once: which of these may be given.
+        self.readable_many: Callable[[Iterable[str]], set[str]] = lambda shas: set(shas)
 
     # `collection_id` (here and below) is the id of the collection the file is
     # for. It only steers where new content is written -- see

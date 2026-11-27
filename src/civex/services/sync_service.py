@@ -14,6 +14,7 @@ point leaves the project as it was or one step further, never between.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import tempfile
 import logging
 import functools
@@ -3492,6 +3493,7 @@ class SyncService:
         # Each is (the files, their answer, whether it is a pack's).
         flying: deque[tuple[list[tuple[str, str | None]], Future[Any], bool]] = deque()
         batch: list[tuple[str, str | None]] = []
+        alone: deque[tuple[str, str | None]] = deque()
         arrived: list[str] = []
         group_began: list[float] = []
         stop = threading.Event()
@@ -3536,18 +3538,29 @@ class SyncService:
             group_began.clear()
 
         def keep(
-            sha: str, collection: str | None, read: Callable[[int], bytes]
+            sha: str,
+            collection: str | None,
+            fresh: Callable[[], Callable[[int], bytes]],
         ) -> None:
-            """Put a file that arrived on the drive, checked against its hash,
-            and count it for the next confirm."""
+            """Put a file that arrived on the drive, and count it for the next
+            confirm. `fresh()` gives a reader of its bytes from the start. The
+            hash is checked before anything is written: a file with other
+            content is refused, and nothing is stored (or deleted: what the
+            device holds under another hash is not ours to remove)."""
+            digest = hashlib.sha256()
+            read = fresh()
+            while block := read(FILE_READ_BYTES):
+                digest.update(block)
+            if digest.hexdigest() != sha:
+                raise SyncError("The server sent the wrong content for a file")
+            read = fresh()
             stored = self._files.put_chunks(
                 _counted(iter(lambda: read(FILE_READ_BYTES), b""), on_bytes),
                 sha,
                 collection_id=collection,
                 volume=volume,
             )
-            if stored.sha256 != sha:
-                self._files.delete(stored.sha256)
+            if stored.sha256 != sha:  # it changed as it was read
                 raise SyncError("The server sent the wrong content for a file")
             if not arrived:
                 group_began.append(time.monotonic())
@@ -3567,8 +3580,21 @@ class SyncService:
             # background wait.
             self._repo.note_server_lacks(missing, backoff=shas is None)
 
+        def fill() -> None:
+            """Files a pack said to ask for alone go on their way as the window
+            allows: never more than `window` requests are open or waiting."""
+            while alone and len(flying) < window and pool is not None:
+                sha, collection = alone.popleft()
+                flying.append(([(sha, collection)], pool.submit(pull, sha), False))
+
         def settle_one() -> None:
             items, future, packed = flying.popleft()
+            try:
+                settle(items, future, packed)
+            finally:
+                fill()
+
+        def settle(items, future, packed) -> None:
             if not packed:
                 sha, collection = items[0]
                 spool = future.result()
@@ -3579,7 +3605,11 @@ class SyncService:
                 try:
                     # Straight onto the drive (the one asked for, when it is
                     # fetched to go there, else its collection's).
-                    keep(sha, collection, spool.read)
+                    def again() -> Callable[[int], bytes]:
+                        spool.seek(0)
+                        return spool.read
+
+                    keep(sha, collection, again)
                 finally:
                     spool.close()
                 return
@@ -3589,23 +3619,25 @@ class SyncService:
             where = dict(items)
             try:
                 for sha, (offset, size) in answer.files.items():
-                    answer.spool.seek(offset)
-                    left = [size]
 
-                    def read(n: int, left: list[int] = left) -> bytes:
-                        data = answer.spool.read(min(n, left[0]))
-                        left[0] -= len(data)
-                        return data
+                    def pack_again(
+                        offset: int = offset, size: int = size
+                    ) -> Callable[[int], bytes]:
+                        answer.spool.seek(offset)
+                        left = [size]
 
-                    keep(sha, where[sha], read)
-                    if left[0]:
-                        raise SyncError("A pack came down cut short")
+                        def read(n: int) -> bytes:
+                            data = answer.spool.read(min(n, left[0]))
+                            left[0] -= len(data)
+                            return data
+
+                        return read
+
+                    keep(sha, where[sha], pack_again)
                 if answer.absent:
                     lacks(sorted(answer.absent))
                 for sha in answer.alone:  # one at a time, in ranges when big
-                    flying.append(
-                        ([(sha, where[sha])], pool.submit(pull, sha), False)  # type: ignore[union-attr]
-                    )
+                    alone.append((sha, where[sha]))
             finally:
                 answer.close()
 
@@ -3669,6 +3701,7 @@ class SyncService:
                     send_batch()  # asked for before the next page is read
             if batch:
                 send_batch()
+            fill()
             while flying:  # what is on its way is kept, not thrown away
                 settle_one()
         finally:

@@ -35,6 +35,12 @@ def main() -> int:
     args = ap.parse_args()
     before, after = best(args.before), best(args.after)
     failed = False
+    if set(before) != set(after):  # a side that lost a shape (a crash) is a failure
+        print(
+            "FAILED: different runs on the two sides: "
+            f"{sorted(set(before) ^ set(after))}"
+        )
+        failed = True
     print(f"{'direction shape store':<28}{'before':>10}{'after':>10}{'ratio':>8}")
     for key in sorted(before):
         b, a = before[key], after.get(key, 0.0)

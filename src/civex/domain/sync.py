@@ -70,6 +70,9 @@ FILE_PACKS = "file_packs"
 # it is asked for the files one request each.
 FILE_PACK_DOWNLOADS = "file_pack_downloads"
 PACK_DOWNLOAD_FILE_MAX = 2 * 1024 * 1024
+PACK_DOWNLOAD_MAX_FILES = 100
+# What the two limits above allow at most; no pack answer is longer.
+PACK_DOWNLOAD_MAX_BYTES = PACK_DOWNLOAD_MAX_FILES * PACK_DOWNLOAD_FILE_MAX
 # A big file in numbered parts, several at a time, resumable: `POST
 # /files/{sha}/parts` (answers which parts are held), `PUT /files/{sha}/parts/{n}`
 # and `POST /files/{sha}/parts/complete`. Offered when the authority's files are

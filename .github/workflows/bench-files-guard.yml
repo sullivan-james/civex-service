@@ -30,6 +30,13 @@ on:
         description: Fail below this fraction of the base's MB/s
         default: "0.7"
 
+permissions:
+  contents: read
+
+concurrency:
+  group: bench-files-guard-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   BENCH_BASE: ${{ inputs.base || github.base_ref }}
   BENCH_TOLERANCE: ${{ inputs.tolerance || '0.7' }}
@@ -37,7 +44,7 @@ env:
 jobs:
   bench:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16
@@ -72,11 +79,15 @@ jobs:
 
       - name: Run both
         run: |
+          set -euo pipefail
           run() {  # source dir, output file
             for dir in up down; do
-              for shape in "small --gb 0.4" "huge --big-count 2 --big-gb 0.25"; do
-                PYTHONPATH="$1" uv run python benchmarks/bench_bulk_files.py \
-                  --direction "$dir" --store fs --shape $shape | tail -1 >> "$2"
+              for shape in "small --gb 0.3" "huge --big-count 2 --big-gb 0.2"; do
+                # A crash, or a run that moved fewer files than it made, fails
+                # the step (the script exits non-zero; pipefail sees it).
+                out=$(PYTHONPATH="$1" uv run python benchmarks/bench_bulk_files.py \
+                  --direction "$dir" --store fs --shape $shape)
+                echo "$out" | tail -1 >> "$2"
               done
             done
           }

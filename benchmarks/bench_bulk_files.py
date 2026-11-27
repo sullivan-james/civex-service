@@ -331,6 +331,10 @@ def run(args, work: Path, procs: list) -> dict:
     owed = len(report.absent) if args.direction == "down" else len(report.owed)
     device_mb, authority_mb = _peak_mb(os.getpid()), _peak_mb(server.pid)
     projects.close()
+    if moved != len(sizes) or owed:  # a run that lost files is not a fast run
+        raise SystemExit(
+            f"moved {moved} of {len(sizes)} files, {owed} owed: not a valid run"
+        )
     return {
         "shape": args.shape,
         "store": args.store,

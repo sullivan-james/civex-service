@@ -89,7 +89,9 @@ def _spy(monkeypatch):
         return real_pack(self, shas, stop)
 
     def opened(self, sha, byte_range=None):
-        calls["ranges" if byte_range else "alone"].append((sha, byte_range))
+        # The first request for a file asks for its first range (or all of it).
+        later = byte_range is not None and byte_range[0] > 0
+        calls["ranges" if later else "alone"].append((sha, byte_range))
         return real_open(self, sha, byte_range)
 
     monkeypatch.setattr(HttpSyncTransport, "fetch_pack", pack)
@@ -127,9 +129,11 @@ def test_a_big_file_comes_in_ranges_and_is_checked_whole(project, server, monkey
     report = phone.sync_svc.fetch_files()
     phone.commit()
     assert report.fetched == 2
-    assert len(calls["ranges"]) == 11  # 700001 bytes in parts of 64 KiB
+    # 700001 bytes in parts of 64 KiB: the first comes with the question of
+    # the size (one request, no aborted full download), ten more follow.
+    assert len(calls["alone"]) == 1
     assert {r for _, r in calls["ranges"]} == {
-        (i * 65536, min(700_001, (i + 1) * 65536) - 1) for i in range(11)
+        (i * 65536, min(700_001, (i + 1) * 65536) - 1) for i in range(1, 11)
     }
     _all_there(phone, files)
 
@@ -307,3 +311,45 @@ def test_a_hidden_collections_file_is_never_in_a_pack(project, authority):
     assert f"{unknown} absent\n".encode() in body  # the same answer as no file
     assert f"{refs['open']} 10\nopen bytes".encode() in body
     assert response.headers["content-length"] == str(len(body))
+
+
+@pytest.mark.parametrize("status", [402, 403, 429, 500, 503])
+def test_any_refusal_of_the_pack_route_falls_back_for_the_pass(
+    project, server, monkeypatch, status
+):
+    real = HttpSyncTransport._call
+
+    def call(self, method, path, **kw):
+        if path.endswith("/files/pack/download"):
+            raise SyncError("refused", retryable=False, status=status)
+        return real(self, method, path, **kw)
+
+    monkeypatch.setattr(HttpSyncTransport, "_call", call)
+    calls = _spy(monkeypatch)
+    phone, files = _phone(project, server, [2000 + i for i in range(6)])
+    report = phone.sync_svc.fetch_files()
+    phone.commit()
+    assert report.fetched == 6
+    assert len(calls["pack"]) == 1 and len(calls["alone"]) == 6
+    _all_there(phone, files)
+
+
+def test_a_server_that_ignores_ranges_costs_one_download_not_many(
+    project, server, monkeypatch
+):
+    monkeypatch.setattr(sync_peer, "PACK_DOWNLOAD_FILE_MAX", 5000)
+    monkeypatch.setattr(sync_transport, "DOWNLOAD_PART_BYTES", 64 * 1024)
+    monkeypatch.setattr(sync_transport, "DOWNLOAD_PARTS_MIN_BYTES", 128 * 1024)
+    real = HttpSyncTransport._open_file
+    asked = []
+
+    def ignoring(self, sha, byte_range=None):
+        asked.append(sha)
+        return real(self, sha)  # the whole file, whatever range was asked
+
+    monkeypatch.setattr(HttpSyncTransport, "_open_file", ignoring)
+    phone, files = _phone(project, server, [700_001])
+    phone.sync_svc.fetch_files()
+    phone.commit()
+    assert len(asked) == 1
+    _all_there(phone, files)

@@ -23,7 +23,7 @@ from collections import deque
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import (
@@ -33,7 +33,7 @@ from fastapi.responses import (
     Response,
     StreamingResponse,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 from pydantic import ValidationError as PydanticValidationError
 from starlette.concurrency import run_in_threadpool
 
@@ -58,6 +58,9 @@ from civex.domain.sync import (
     MAX_FILE_PARTS,
     NOT_SYNCED_AFTER,
     PACK_DOWNLOAD_FILE_MAX,
+    PACK_DOWNLOAD_MAX_BYTES,
+    PACK_DOWNLOAD_MAX_FILES,
+    FILE_PACK_DOWNLOADS,
     PACK_FILE_MAX,
     PACK_MAX_BYTES,
     PACK_MAX_FILES,
@@ -232,8 +235,9 @@ class SyncPackResponse(BaseModel):
 
 
 class SyncPackAsk(BaseModel):
-    sha256: list[str] = Field(
-        description="Content hashes of the files wanted.", max_length=PACK_MAX_FILES
+    sha256: list[Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]] = Field(
+        description="Content hashes of the files wanted.",
+        max_length=PACK_DOWNLOAD_MAX_FILES,
     )
 
 
@@ -1022,15 +1026,12 @@ def download_pack(body: SyncPackAsk, call: Peer = Depends(peer)):
     `<sha256> big <size>\\n` when it is too big for a pack (or the pack is
     full), to be asked for alone, in ranges. A file only the caller's hidden
     collections use is never in a pack."""
+    if DIRECT_FILES in call.ctx.features:
+        # Bucket bytes never go through the host: each is a presigned download.
+        raise FeatureUnavailableError(FILE_PACK_DOWNLOADS)
     svc = call.ctx.file_svc
     wanted = list(dict.fromkeys(body.sha256))
-    held = [
-        sha
-        for sha in wanted
-        if len(sha) == 64
-        and all(c in "0123456789abcdef" for c in sha)
-        and svc.readable(sha)
-    ]
+    held = list(svc.readable_many(wanted))
     try:
         sizes = svc.sizes_of(held)
     except VolumeUnavailableError as e:
@@ -1042,7 +1043,7 @@ def download_pack(body: SyncPackAsk, call: Peer = Depends(peer)):
         size = sizes.get(sha)
         if size is None:
             plan.append((sha, None, None, False))
-        elif size > PACK_DOWNLOAD_FILE_MAX or total + size > PACK_MAX_BYTES:
+        elif size > PACK_DOWNLOAD_FILE_MAX or total + size > PACK_DOWNLOAD_MAX_BYTES:
             plan.append((sha, size, None, False))
         else:
             total += size
