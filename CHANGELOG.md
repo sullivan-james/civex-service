@@ -17,6 +17,15 @@ final version's entry or `## Unreleased` instead of one of its own. The version 
   "Getting changes from the host", then "Preparing 150,000 changes to send" and
   "Sending changes to the host" with how far it has got, in the app and in
   `civex sync`.
+- **Health page, and `civex doctor --repair`.** What `civex doctor` checks (the
+  install, the database's tables and columns, dangling references, records under
+  a deleted record, files left on drives) is now a Health page in the app, with
+  Check and Repair. Repair saves a backup of the database in `_civex/backups`,
+  then adds any table or column it lacks (a database stamped up to date that
+  never got a change), and is refused while syncing runs. The command and the
+  page share one check. A host without a machine of its own gets neither the
+  install nor the drive checks, and no Repair. The message shown when syncing
+  stops on a database of the wrong shape now points to the page too.
 - **Files download several at a time.** The background download of a copy's
   files fetched one file per request, one after another, and committed after
   each. It now takes up to six at once (each still checked against its hash,

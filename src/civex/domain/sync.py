@@ -977,7 +977,8 @@ def plain_failure(error: Exception) -> SyncError:
     if type(error).__module__.split(".")[0] == "sqlalchemy":
         return SyncError(
             "This computer's database isn't in the shape this civex expects, so "
-            "syncing stopped. Run `civex doctor` to check it.",
+            "syncing stopped. Run `civex doctor` to check it, or open "
+            "Health in the app (/health).",
             retryable=False,
             detail=technical,
         )

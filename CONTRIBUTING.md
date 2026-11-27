@@ -15,6 +15,8 @@ Before opening a PR, run `make check` (mirrors CI) and `make pre-commit`
 locally — see [Dev setup](docs/contributing/dev-setup.md) for the full list
 of targets.
 
+**Migrations:** never edit a migration after it has run on any machine; add a new revision. A database stamped past an edited migration never gets the change and fails only when the missing part is used. (`civex doctor --repair` repairs such a database; it is not a reason to edit.)
+
 ## Testing an unreleased civex in civex-hub
 
 Every push to a branch of this repository builds a wheel (web app included) and publishes it as a GitHub prerelease tagged `dev-<sha12>` (workflow `dev-build.yml`). The version is `<next patch>.dev<commits since the last tag>`, e.g. `2.2.1.dev14`. These are not on PyPI, so `civex update` ignores them. Forks never publish.

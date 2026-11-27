@@ -364,14 +364,23 @@ def _message_page(text: str) -> str:
     )
 
 
-def _error_page(detail: str) -> str:
+def _error_page(detail: str, health_url: str | None = None) -> str:
+    """`health_url`: the app's Health page, when a server is up to show it."""
+    health = (
+        f"<p style='margin-top:1rem;font-size:13px'><a href='{html.escape(health_url)}'>"
+        "Open Health to check and repair this project</a></p>"
+        if health_url
+        else ""
+    )
     return (
         "<body style='font-family:sans-serif;padding:2rem;color:#d1242f'>"
         "<h2>civex couldn't open this project</h2>"
         f"<pre style='white-space:pre-wrap;font-size:13px'>{html.escape(detail)}</pre>"
         "<p style='margin-top:1rem;color:#57606a;font-size:13px'>"
         f"Details are in {html.escape(str(_LOG_FILE))}. Running "
-        "<code>civex doctor</code> in the project folder says what to fix.</p>"
+        "<code>civex doctor</code> in the project folder says what to fix "
+        "(<code>civex doctor --repair</code> repairs the database).</p>"
+        f"{health}"
         "<p style='margin-top:1.5rem'><button style='font:inherit;padding:6px 14px'"
         " onclick='window.pywebview.api.show_start()'>Back to the start screen"
         "</button></p></body>"
@@ -456,10 +465,14 @@ def _launch_project(path: Path) -> dict:
             port = _free_port()
             url = f"http://127.0.0.1:{port}"
             failure = _upgrade_before_serving(_window, path)
-            if failure is not None:
-                _window.load_html(_error_page(failure))
-                return
             errors: list[str] = []
+            if failure is not None:
+                # The server still starts without a current database (the
+                # Health page is reachable then), so offer the page.
+                thread = _server.start(port, errors)
+                up = _wait_for_server(url, timeout=10.0, running=thread)
+                _window.load_html(_error_page(failure, f"{url}/health" if up else None))
+                return
             thread = _server.start(port, errors)
             if _wait_for_server(url, running=thread):
                 _place_project_window(_window)

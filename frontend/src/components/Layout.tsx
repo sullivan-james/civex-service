@@ -55,6 +55,7 @@ import {
   ListChecks,
   BarChart3,
   SquareTerminal,
+  HeartPulse,
   Puzzle,
   PanelLeftClose,
   PanelLeftOpen,
@@ -175,6 +176,7 @@ const navGroups: NavGroupDef[] = [
         icon: Puzzle,
         feature: 'plugin_editor',
       },
+      { to: '/health', label: 'Health', icon: HeartPulse },
       {
         to: '/terminal',
         label: 'Terminal',
