@@ -78,8 +78,9 @@ def test_sync_jobs_stop_at_once_not_a_poll_later(tmp_path: Path):
     root = _project(tmp_path)
     jobs = SyncJobs(lambda: load_config_at(root), build_local_context)
     jobs.ensure_worker()
+    thread = jobs._thread
     time.sleep(0.2)  # into its wait
     started = time.monotonic()
     jobs.shutdown()
     assert time.monotonic() - started < 1.0
-    assert not jobs._thread.is_alive()
+    assert thread is not None and not thread.is_alive()
