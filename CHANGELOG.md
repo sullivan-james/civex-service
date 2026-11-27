@@ -13,6 +13,16 @@ final version's entry or `## Unreleased` instead of one of its own. The version 
   host serving files from a bucket managed about 3 files a second and held over
   400 MB. One client is now kept for each bucket setting and set of credentials
   (a changed credential makes a new one).
+- **Sending files keeps the line full, inside a fixed amount of memory.** Small
+  files no longer stop between slices of 4,000 (the next slice is checked with a
+  host while the packs of the last are still going), and big files go two at a
+  time, their parts sharing one pool of six, so the calls that open and finish a
+  file overlap the other file's parts. Files from 8 MiB up go in parts too, where
+  the host takes them, instead of as one stream that a slow line holds back. All
+  transfers draw on one memory budget per process: 128 MiB, or 64 MiB (smaller
+  parts, fewer at once) on a machine with under 8 GB of RAM; set
+  `CIVEX_SYNC_MEMORY_MB` to change it. A host should cap each device at two
+  pushes and six part uploads at a time.
 - **Files come down in packs and in ranges.** Small files were still one request
   each on the way down. A copy now asks the host for up to 100 at a time and
   gets them in one answer, sent file by file in small blocks (the host holds one

@@ -1,6 +1,7 @@
 """How fast files go to an authority (--direction up, the default) or come down
 from one (--direction down): many small files (the 0.3 MB research
-case) or a few huge ones, over HTTP to an authority in its own process, files
+case) or a few huge ones, or many middling ones (--shape mid: 200 x 16 MiB; --delay-ms
+puts a proxy between the ends that holds every chunk back that long each way), over HTTP to an authority in its own process, files
 on its drive or in a bucket (moto standing in for S3, handing out presigned
 URLs: files go direct).
 
@@ -93,21 +94,37 @@ class _Dropper:
 
 
 def _proxy(spec: str) -> None:
-    """listen:target:MBps — forward to the target, each connection held to MB/s
-    (what arrives from the client; answers are small)."""
+    """listen:target:MBps[:delay_ms] — forward to the target, each connection
+    held to MB/s (0 = unlimited; what arrives from the client; answers are
+    small), and every chunk, either way, held back by delay_ms."""
     import asyncio
 
-    listen, target, rate = spec.split(":")
+    parts = spec.split(":")
+    listen, target, rate = parts[:3]
+    delay = float(parts[3]) / 1000 if len(parts) > 3 else 0.0
     rate_bps = float(rate) * 1e6
 
     async def pipe(r, w, paced: bool) -> None:
         began = time.monotonic()
         total = 0
-        try:
-            while data := await r.read(65536):
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def writer() -> None:
+            while (item := await queue.get()) is not None:
+                at, data = item
+                wait = at + delay - time.monotonic()
+                if wait > 0:
+                    await asyncio.sleep(wait)
                 w.write(data)
                 await w.drain()
-                if paced:
+
+        task = asyncio.create_task(writer())
+        try:
+            while data := await r.read(65536):
+                queue.put_nowait((time.monotonic(), data))
+                if queue.qsize() > 64:  # a bounded line, not an unbounded buffer
+                    await asyncio.sleep(0.001 * (queue.qsize() - 64))
+                if paced and rate_bps:
                     total += len(data)
                     ahead = total / rate_bps - (time.monotonic() - began)
                     if ahead > 0:
@@ -115,6 +132,11 @@ def _proxy(spec: str) -> None:
         except ConnectionError:
             pass
         finally:
+            queue.put_nowait(None)
+            try:
+                await task
+            except ConnectionError:
+                pass
             w.close()
 
     async def handle(cr, cw) -> None:
@@ -133,7 +155,7 @@ def main() -> None:
     if len(sys.argv) == 3 and sys.argv[1] == "--proxy":
         return _proxy(sys.argv[2])
     ap = argparse.ArgumentParser()
-    ap.add_argument("--shape", choices=["small", "huge"], required=True)
+    ap.add_argument("--shape", choices=["small", "huge", "mid"], required=True)
     ap.add_argument("--store", choices=["fs", "s3"], default="fs")
     ap.add_argument("--direction", choices=["up", "down"], default="up")
     ap.add_argument("--gb", type=float, default=10.0)
@@ -146,6 +168,14 @@ def main() -> None:
         default=0.0,
         help="cap each connection to the authority at this many MB/s (a proxy "
         "stands in for a link where one TCP stream cannot fill the line)",
+    )
+    ap.add_argument("--mid-count", type=int, default=200)
+    ap.add_argument("--mid-mb", type=float, default=16.0)
+    ap.add_argument(
+        "--delay-ms",
+        type=float,
+        default=0.0,
+        help="hold every chunk back by this long each way (a proxy)",
     )
     ap.add_argument("--work", default=str(Path.home() / ".cache" / "bench-bulk"))
     ap.add_argument("--label", default="")
@@ -245,7 +275,7 @@ def run(args, work: Path, procs: list) -> dict:
     server = subprocess.Popen([sys.executable, "-c", code])
     procs.append(server)
     _wait(port)
-    if args.per_conn_mb:
+    if args.per_conn_mb or args.delay_ms:
         shaped = _free_port()
         procs.append(
             subprocess.Popen(
@@ -253,7 +283,7 @@ def run(args, work: Path, procs: list) -> dict:
                     sys.executable,
                     __file__,
                     "--proxy",
-                    f"{shaped}:{port}:{args.per_conn_mb}",
+                    f"{shaped}:{port}:{args.per_conn_mb}:{args.delay_ms}",
                 ]
             )
         )
@@ -269,6 +299,8 @@ def run(args, work: Path, procs: list) -> dict:
     if args.shape == "small":
         size = int(args.small_mb * 1024 * 1024)
         sizes = [size] * int(args.gb * 1024**3 // size)
+    elif args.shape == "mid":
+        sizes = [int(args.mid_mb * 1024 * 1024)] * args.mid_count
     else:
         sizes = [int(args.big_gb * 1024**3)] * args.big_count
     t0 = time.monotonic()
@@ -330,6 +362,12 @@ def run(args, work: Path, procs: list) -> dict:
     moved = report.fetched if args.direction == "down" else report.sent
     owed = len(report.absent) if args.direction == "down" else len(report.owed)
     device_mb, authority_mb = _peak_mb(os.getpid()), _peak_mb(server.pid)
+    try:  # the most the transfer budget had in hand (an older civex has none)
+        from civex.services import transfer_budget
+
+        budget_mb = round(transfer_budget.process_budget().peak / 1048576, 1)
+    except ImportError:
+        budget_mb = None
     projects.close()
     if moved != len(sizes) or owed:  # a run that lost files is not a fast run
         raise SystemExit(
@@ -348,6 +386,8 @@ def run(args, work: Path, procs: list) -> dict:
         "prepare_seconds": round(prepared, 1),
         "peak_rss_mb_device": device_mb,
         "peak_rss_mb_authority": authority_mb,
+        "budget_peak_mb": budget_mb,
+        "delay_ms": args.delay_ms,
     }
 
 
