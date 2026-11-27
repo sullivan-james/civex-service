@@ -822,17 +822,23 @@ class ReleaseService:
     # -- getting the data out --------------------------------------------------
 
     @contextmanager
-    def file_access(self, name: str) -> Iterator[tuple[Any, FileSelection]]:
+    def file_access(
+        self, name: str, *, inventory: bool = False
+    ) -> Iterator[tuple[Any, FileSelection]]:
         """`FileAccessService` reading this release's frozen records, and the
         selection of all of them: plan, export, gather or zip with it exactly
-        as with a live selection."""
+        as with a live selection. `inventory=True` lets who may publish the
+        release read a held-back one too (to plan with, never to hand out)."""
         from civex.services.release_records import FrozenRecords
 
         if self.files is None or self.locate is None:
             raise ValidationError("Files can't be laid out here")
         release = self.get(name)
         self._not_yanked(release)
-        self.require_published(release)
+        if inventory and release.published_at is None:
+            self._permissions.require(permissions.RELEASE)
+        else:
+            self.require_published(release)
         pointers = self._repo.owned_pointers(release.id)
         locate = self.locate
 
@@ -859,8 +865,10 @@ class ReleaseService:
 
     def file_plan(self, name: str, progress: Progress | None = None) -> FilePlan:
         """Every file the release cites, each at its path in the record
-        hierarchy, and whether it can be reached now (grouped by drive)."""
-        with self.file_access(name) as (access, selection):
+        hierarchy, and whether it can be reached now (grouped by drive). Who
+        may publish the release may plan a held-back one: the inventory of what
+        was frozen (cited, present, missing), nothing more."""
+        with self.file_access(name, inventory=True) as (access, selection):
             return access.plan(selection, progress=progress)
 
     def write_bag(

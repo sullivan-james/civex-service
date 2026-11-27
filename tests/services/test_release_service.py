@@ -872,7 +872,8 @@ def test_a_held_back_release_cannot_be_withdrawn_or_yanked(ctx, study):
 def test_a_held_back_release_gives_out_no_files_or_manifest(ctx, study, tmp_path):
     _make(ctx, "v1", publish=False)
     for attempt in (
-        lambda: ctx.release_svc.file_plan("v1"),
+        lambda: ctx.release_svc.full_bundle("v1"),
+        lambda: ctx.release_svc.write_copy("v1", tmp_path / "x"),
         lambda: ctx.release_svc.gather_spec("v1", "x"),
         lambda: ctx.release_svc.write_bag("v1", tmp_path, None),  # type: ignore[arg-type]
     ):
@@ -934,4 +935,50 @@ def test_who_may_discard_a_release(tmp_path: Path):
             writer.release_svc.publish("v1")
     finally:
         writer.close()
+        owner.close()
+
+
+def test_a_releaser_reads_the_inventory_of_a_held_back_release(ctx, study):
+    _make(ctx, "v1", publish=False)
+    plan = ctx.release_svc.file_plan("v1")
+    assert (plan.total, plan.available) == (1, 1)
+    assert [i.sha256 for i in plan.items] == [study["photo"].sha256]
+    # Handing the files out is still for a published release only.
+    with pytest.raises(ValidationError):
+        with ctx.release_svc.file_access("v1"):
+            pass
+
+
+def test_the_inventory_of_a_held_back_release_is_what_was_frozen(ctx, study):
+    _make(ctx, "v1", publish=False)
+    other = ctx.file_svc.store_bytes(b"another photo", "q.jpg")
+    ctx.record_svc.update(str(study["a"].id), {"photo": other.to_dict()})
+    ctx.commit()
+    plan = ctx.release_svc.file_plan("v1")
+    assert (plan.total, plan.available) == (1, 1)
+    assert [i.sha256 for i in plan.items] == [study["photo"].sha256]
+
+
+def test_a_non_releaser_cannot_read_a_held_back_inventory(tmp_path: Path):
+    from civex.domain.exceptions import NotFoundError
+
+    root = tmp_path / "study"
+    scaffold_project(root)
+    owner = build_local_context(load_config_at(root))
+    owner.schema_svc.create("sample")
+    owner.release_svc.create("held", "t", publish=False)
+    owner.commit()
+    reader = build_context(
+        Project(
+            config=load_config_at(root),
+            config_store=FileConfigStore(root),
+            actor="someone",
+            permissions=Permissions.of(p.READ, p.WRITE_RECORDS),
+        )
+    )
+    try:
+        with pytest.raises(NotFoundError):
+            reader.release_svc.file_plan("held")
+    finally:
+        reader.close()
         owner.close()

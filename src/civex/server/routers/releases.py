@@ -454,7 +454,10 @@ def plan_release_files(
     """Every file the release cites at its path in the record hierarchy (the
     same paths as any export), whether each can be reached now (what can't,
     grouped by drive, with what to do), and whether it is small enough to
-    download as a zip (`zip_allowed`)."""
+    download as a zip (`zip_allowed`). Who may make
+    releases can plan one held back too, to see which files it cites and how
+    many are here (`total` cited, `available` present, `missing.files`);
+    others get 404."""
     plan = ctx.release_svc.file_plan(name, progress)
     out = plan.to_dict(False)
     out["zip_allowed"] = _zip_allowed(plan)
