@@ -507,9 +507,10 @@ def status(ctx: AppContext = Depends(get_ctx)):
 
 
 class RemoteKnownResponse(BaseModel):
-    joined: bool = Field(
-        description="This computer has joined that address before, so connecting "
-        "needs no approval."
+    joined: bool | None = Field(
+        description="This project's device is known to that address, so connecting "
+        "needs no approval. Null when that could not be checked (unreachable, "
+        "refused, busy): nothing is promised either way."
     )
 
 
@@ -519,8 +520,11 @@ class RemoteKnownResponse(BaseModel):
     dependencies=[requires(REMOTE_DIAL)],
 )
 def known(url: str, ctx: AppContext = Depends(get_ctx)):
-    """Whether this computer has joined the authority at `url` before."""
-    return RemoteKnownResponse(joined=not ctx.sync_svc.needs_approval(url, None))
+    """Whether this project's device is known to the authority at `url`."""
+    try:
+        return RemoteKnownResponse(joined=not ctx.sync_svc.needs_approval(url, None))
+    except SyncError:
+        return RemoteKnownResponse(joined=None)  # can't ask: nothing to promise
 
 
 @router.post(
@@ -540,7 +544,8 @@ def connect(body: RemoteConnectRequest, ctx: AppContext = Depends(get_ctx)):
     it stopped if it did (`connect_error`)."""
     try:
         if ctx.sync_svc.needs_approval(body.url, body.invite):
-            # No invite, never joined: ask to join, and wait for a person to
+            # No invite and this project's device is not known there (never
+            # joined, joined for another project, revoked): ask to join, wait for a person to
             # approve the code in the background, then connect.
             started = ctx.sync_svc.request_login(body.url)
             sync_jobs.start_connect(body.url, login=started)

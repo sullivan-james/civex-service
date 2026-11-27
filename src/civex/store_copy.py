@@ -113,7 +113,18 @@ def _same_account(a: Any, b: Any) -> bool:
     if a._injected or b._injected:
         return a._client is b._client
     ca, cb = a._cfg, b._cfg
-    return (ca.endpoint, ca.profile, ca.region) == (cb.endpoint, cb.profile, cb.region)
+
+    def key(c: Any) -> tuple[Any, ...]:
+        return (
+            c.endpoint,
+            c.profile,
+            c.region,
+            c.access_key_env,
+            c.secret_key_env,
+            c.session_token_env,
+        )
+
+    return key(ca) == key(cb)
 
 
 def _read_or_none(source: Any, sha: str) -> Any:

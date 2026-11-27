@@ -544,3 +544,140 @@ def test_the_records_a_push_holds_follow_a_delete_restore_and_edit(project, pair
             text("SELECT count(*) FROM records WHERE deleted_at IS NULL")
         ).scalar()
         assert live == 3
+
+
+def _trees(f, n):
+    parents = f.many(n)
+    kids = [
+        f.make("mine", "recording", {"label": f"k{i}", "must": "m"}, str(p))
+        for i, p in enumerate(parents)
+    ]
+    return parents, kids
+
+
+def test_restores_of_records_with_what_was_deleted_with_them_go_in_bulk(
+    project, pair, spy
+):
+    """A record restored with its children is one action of several entries;
+    the whole run is written in bulk, as one at a time would write it."""
+    f = Flow(project)
+    parents, kids = _trees(f, 6)
+    first = f.structure + f.take()
+    for a in pair:
+        send(a, first)
+    both(pair, [f.deleted(parents)])
+    back = f.restored(parents)
+    assert any(e.op and sum(x.op == e.op for x in back) > 1 for e in back)
+    answers = both(pair, [back])
+    assert [r[1] for r in answers[0]] == ["applied"] * len(back) == ["applied"] * 12
+    assert spy["restore"] == [12]
+    # (sent again, it is answered as before)
+    again = both(pair, [back])
+    assert all(r[5] for r in again[0])
+
+
+def test_a_restore_action_that_cannot_go_in_bulk_is_settled_whole(
+    project, pair, spy, monkeypatch
+):
+    """One member of an action that the run cannot take leaves the whole action
+    to be settled as one at a time, and the other actions still go in bulk."""
+    f = Flow(project)
+    parents, kids = _trees(f, 3)
+    made = f.take()
+    for a in pair:
+        send(a, f.structure + made)
+    both(pair, [f.deleted(parents)])
+    svc = pair[0].authority_svc
+    real = svc._fast_change
+
+    def doubtful(who, entry, kind, run, cache, whole=False):
+        if entry.entity_id == kids[0]:
+            return None
+        return real(who, entry, kind, run, cache, whole=whole)
+
+    monkeypatch.setattr(svc, "_fast_change", doubtful)
+    back = f.restored(parents)
+    answers = both(pair, [back])
+    assert [r[1] for r in answers[0]] == ["applied"] * 6
+    assert spy["restore"] == [4]
+
+
+def _setup_trees(project, pair, n=3, dataset="mine"):
+    f = Flow(project)
+    lone = f.many(2)
+    parents = [f.make(dataset, "encounter", {"site": f"p{i}"}) for i in range(n)]
+    kids = [
+        f.make(dataset, "recording", {"label": f"k{i}", "must": "m"}, str(p))
+        for i, p in enumerate(parents)
+    ]
+    first = f.structure + f.take()
+    for a in pair:
+        send(a, first)
+    both(pair, [f.deleted(lone + parents)])
+    return f, lone, parents, kids
+
+
+def test_a_failed_bulk_write_settles_each_action_as_one_at_a_time(
+    project, pair, monkeypatch
+):
+    f, lone, parents, _ = _setup_trees(project, pair, 1)
+    back = f.restored([lone[0]]) + f.restored(parents) + f.restored([lone[1]])
+    assert len(back) == 4
+
+    def broken(ids):
+        raise ValueError("refused by the database")
+
+    monkeypatch.setattr(pair[0].sync_repo, "restore_records", broken)
+    answers = both(pair, [back])
+    assert [r[1] for r in answers[0]] == ["applied"] * 4
+
+
+def test_a_child_sent_before_its_parent_is_settled_whole(project, pair, spy):
+    f, lone, parents, _ = _setup_trees(project, pair, 2)
+    back = f.restored(parents)
+    swapped = []
+    for i in range(0, len(back), 2):
+        swapped += [back[i + 1], back[i]]
+    both(pair, [swapped])
+
+
+def test_a_group_with_a_member_already_live_is_settled_whole(project, pair, spy):
+    f, lone, parents, kids = _setup_trees(project, pair, 2)
+    back = f.restored(parents)
+    alone = dataclasses.replace(back[0], id=uuid.uuid4(), op=None)
+    both(pair, [[alone]])  # one parent is live already (by another change)
+    both(pair, [back])
+    assert spy["restore"][0] == 1
+
+
+def test_a_group_past_the_size_of_a_run_is_still_whole(project, pair, spy, monkeypatch):
+    from civex.services import sync_authority
+
+    monkeypatch.setattr(sync_authority, "RUN_MAX", 3)
+    f, lone, parents, kids = _setup_trees(project, pair, 4)
+    back = f.restored(parents)
+    answers = both(pair, [back])
+    assert [r[1] for r in answers[0]] == ["applied"] * 8
+    assert sum(spy["restore"]) == 8
+
+
+def test_a_group_with_a_member_the_caller_cannot_see_is_refused_whole(
+    project, pair, spy
+):
+    f = Flow(project)
+    mine = f.make("mine", "encounter", {"site": "a"})
+    kid = f.make("mine", "recording", {"label": "a", "must": "m"}, str(mine))
+    secret = f.make("secret", "encounter", {"site": "s"})
+    skid = f.make("secret", "recording", {"label": "s", "must": "m"}, str(secret))
+    first = f.structure + f.take()
+    for a in pair:
+        send(a, first)
+    both(pair, [f.deleted([mine, secret])])
+    back = f.restored([mine, secret])
+    limited = _limited(pair, ("mine", "taxa"))
+    answers = [send(c, back) for c in limited]
+    assert answers[0] == answers[1]
+    assert rows(pair[0]) == rows(pair[1])
+    got = {e.entity_id: r[1] for e, r in zip(back, answers[0][0])}
+    assert got[mine] == got[kid] == "applied"
+    assert got[secret] == got[skid] == "rejected"

@@ -126,3 +126,28 @@ def test_plain_http_is_a_warning_not_a_problem(project_dir: Path):
 def test_a_bucket_must_be_named():
     with pytest.raises(ValidationError):
         settings_of("  ")
+
+
+def test_changing_how_a_bucket_is_reached_keeps_its_credential_variables(
+    project_dir: Path,
+):
+    seen: list[object] = []
+    svc = BucketService(
+        FileConfigStore(project_dir),
+        lambda: {},
+        lambda settings: seen.append(settings) or FakeS3(),
+    )
+    keyed = settings_of("lab", endpoint="http://m:9000")
+    keyed.access_key_env, keyed.secret_key_env = "K", "S"
+    svc.use(keyed)
+
+    svc.use(settings_of("lab", endpoint="http://m:9000", direct=False))
+
+    saved = load_config_at(project_dir).store_config.s3
+    assert saved is not None and not saved.direct
+    assert (saved.access_key_env, saved.secret_key_env) == ("K", "S")
+    assert all(s.access_key_env == "K" for s in seen)  # type: ignore[attr-defined]
+
+    # A different bucket is another account's business: nothing is carried over.
+    svc.check(settings_of("other", endpoint="http://m:9000"))
+    assert seen[-1].access_key_env is None  # type: ignore[attr-defined]

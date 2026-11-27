@@ -516,6 +516,10 @@ class Release(Base):
     yanked_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
     yanked_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
     yanked_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # When it was published (made available to cite, download or copy). NULL
+    # while a host holds it back (`ReleaseService.create(publish=False)`): only
+    # then can it be discarded. Local, never sent.
+    published_at: Mapped[datetime | None] = mapped_column(_UTCDateTime(), nullable=True)
     # Whether this copy has written the release's file_references rows (from
     # its records, or from its bundle once that is here). Local, never sent.
     indexed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -670,6 +674,13 @@ class AuditLog(Base):
     # it rewrote; a record deleted and everything beneath it), so an authority
     # takes them, or refuses them, together. None for an entry on its own.
     op_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    # A delete this device sent that the authority answered as one of a record
+    # already deleted there (`OpResult.already_done`): the device's history
+    # counts it as the earlier change's, not its own. Only what the authority
+    # said, never worked out here.
+    already_done: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
 
 
 class WorkflowJob(Base):
@@ -1313,6 +1324,10 @@ class SyncOp(Base):
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
     conflicts: Mapped[list[Any]] = mapped_column(_JSON, default=list)
     hub_seq: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # A delete that found the record already deleted (`OpResult.already_done`).
+    already_done: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
     received_at: Mapped[datetime] = mapped_column(_UTCDateTime(), default=_now)
 
 

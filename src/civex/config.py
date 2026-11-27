@@ -88,6 +88,24 @@ class ProjectConfig:
 
 
 @dataclass
+class ImportConfig:
+    """How large a spreadsheet the import wizard will read (`[import]`). A file
+    over any limit is refused with the limit named, before it is parsed."""
+
+    # Largest file, in megabytes.
+    max_file_mb: int = 50
+    # Largest an Excel file may be once unpacked (it is a zip), in megabytes,
+    # and the most it may expand by, so a small file can't unpack into memory.
+    max_unpacked_mb: int = 200
+    # Largest an old-format .xls file may be (it can't be streamed).
+    max_xls_mb: int = 10
+    max_ratio: int = 100
+    # Most rows (under the headings) and columns.
+    max_rows: int = 1_000_000
+    max_columns: int = 1000
+
+
+@dataclass
 class SyncConfig:
     """Keeping this project in step with other copies of it (CIVEX-305): one
     instance is the *authority* and every other device follows it."""
@@ -314,6 +332,13 @@ class S3Config:
     region: str | None = None
     endpoint: str | None = None  # e.g. "http://127.0.0.1:9000" for MinIO
     profile: str | None = None  # an AWS profile name, else the default chain
+    # Names of environment variables holding the keys (never the keys). Take
+    # precedence over `profile`; a named variable that is unset or empty is an
+    # error, never a fallback to another source. They let one process hold
+    # several S3Configs with different credentials.
+    access_key_env: str | None = None
+    secret_key_env: str | None = None
+    session_token_env: str | None = None
     # Files go straight between a device or browser and the bucket by presigned
     # URL (`direct_files`), never through civex. Off: civex streams them.
     direct: bool = True
@@ -371,6 +396,7 @@ class Config:
     retention: RetentionConfig = field(default_factory=RetentionConfig)
     automation: AutomationConfig = field(default_factory=AutomationConfig)
     sync: SyncConfig = field(default_factory=SyncConfig)
+    import_: ImportConfig = field(default_factory=ImportConfig)
     identity: IdentityConfig = field(default_factory=IdentityConfig)
     project: ProjectConfig = field(default_factory=ProjectConfig)
 
@@ -487,6 +513,9 @@ def parse_config(data: dict, root: Path) -> Config:
                 region=s3d.get("region") or None,
                 endpoint=s3d.get("endpoint") or None,
                 profile=s3d.get("profile") or None,
+                access_key_env=s3d.get("access_key_env") or None,
+                secret_key_env=s3d.get("secret_key_env") or None,
+                session_token_env=s3d.get("session_token_env") or None,
                 direct=bool(s3d.get("direct", True)),
             )
         store = StoreConfig(
@@ -559,6 +588,14 @@ def parse_config(data: dict, root: Path) -> Config:
     project_cfg = ProjectConfig(
         read_only=bool(data.get("project", {}).get("read_only", False))
     )
+    import_data = data.get("import", {})
+    _imp = ImportConfig()
+    import_cfg = ImportConfig(
+        **{
+            name: max(1, int(import_data.get(name, getattr(_imp, name))))
+            for name in _imp.__dataclass_fields__
+        }
+    )
     sync_data = data.get("sync", {})
     sync_cfg = SyncConfig(
         remote=(str(sync_data["remote"]).rstrip("/") or None)
@@ -606,6 +643,7 @@ def parse_config(data: dict, root: Path) -> Config:
         plugins=plugins_cfg,
         ui=ui_cfg,
         map=map_cfg,
+        import_=import_cfg,
         retention=retention_cfg,
         automation=automation_cfg,
         sync=sync_cfg,
@@ -719,6 +757,9 @@ def render_config(config: Config) -> str:
                     lines.append(f"endpoint = {_tv(sc.s3.endpoint)}\n")
                 if sc.s3.profile:
                     lines.append(f"profile = {_tv(sc.s3.profile)}\n")
+                for _k in ("access_key_env", "secret_key_env", "session_token_env"):
+                    if getattr(sc.s3, _k):
+                        lines.append(f"{_k} = {_tv(getattr(sc.s3, _k))}\n")
                 if not sc.s3.direct:
                     lines.append("direct = false\n")
 
@@ -776,6 +817,14 @@ def render_config(config: Config) -> str:
         lines.append("\n[sync.collection_files]\n")
         for cid, mode in sorted(sync.collection_files.items()):
             lines.append(f"{_tv(cid)} = {_tv(mode)}\n")
+
+    import_lines = [
+        f"{name} = {getattr(config.import_, name)}\n"
+        for name in ImportConfig.__dataclass_fields__
+        if getattr(config.import_, name) != getattr(ImportConfig(), name)
+    ]
+    if import_lines:
+        lines += ["\n[import]\n", *import_lines]
 
     retention = config.retention
     retention_lines = []

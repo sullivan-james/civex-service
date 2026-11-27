@@ -278,3 +278,21 @@ def test_the_refusals_carry_a_code_and_the_http_answer_a_header_older_clients_ig
     with pytest.raises(SyncError) as e:
         authority.device_keys.start_session(device_uuid("nobody"), 0, "x")
     assert e.value.code == "not_a_device" and "never joined" in str(e.value)
+
+
+def test_a_really_revoked_device_needs_approval_again(project, authority):
+    from civex.testing.peers import build_study
+
+    build_study(authority)
+    laptop = device(project, authority, "laptop")
+    svc = object.__getattribute__(laptop.sync_svc, "_svc")
+    svc._sleep = lambda _s: None
+    laptop.sync_svc.connect(
+        "https://authority.test", None, on_code=_approver(authority, "laptop", [])
+    )
+    assert laptop.sync_svc.needs_approval("https://authority.test", None) is False
+    authority.device_keys.revoke_device("laptop")
+    authority.commit()
+    assert laptop.sync_svc.needs_approval("https://authority.test", None) is True
+    # An invite never needs it.
+    assert laptop.sync_svc.needs_approval("https://authority.test", "x") is False

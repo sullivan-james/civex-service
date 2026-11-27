@@ -171,6 +171,8 @@ function handle(method: string, path: string, p: URLSearchParams) {
   }
   if (path.includes('/views/') && method === 'DELETE')
     return new Response(null, { status: 204 })
+  if (path === '/api/records/delete-preview')
+    return json({ chosen: 2, records: 2, cascading: 0, confirm: 'plain' })
   if (method === 'DELETE') return json({ deleted: 1 })
   if (path.endsWith('/records')) {
     const schemaName = p.get('schema')
@@ -735,7 +737,9 @@ describe('RecordsExplorer', () => {
     override = (url, method) =>
       method === 'GET' && url.pathname.endsWith('/records')
         ? json(big)
-        : undefined
+        : url.pathname === '/api/records/delete-preview'
+          ? json({ chosen: 120, records: 120, cascading: 0, confirm: 'type' })
+          : undefined
 
     const filter = JSON.stringify(EMPTY_TABLES.filter_tree)
     renderExplorer(
@@ -765,6 +769,28 @@ describe('RecordsExplorer', () => {
     expect(del.params.get('within')).toBe('r1')
     expect(del.params.get('search')).toBe('a')
     expect(del.params.get('filter')).toBe(filter)
+  })
+
+  it('a plain bulk delete is confirmed with one click, nothing typed', async () => {
+    const user = userEvent.setup()
+    renderExplorer({}, '/collections/hb?schema=selection&within=r1')
+    await screen.findByText('a.txt')
+
+    await user.click(
+      screen.getByRole('checkbox', { name: 'Select all records' }),
+    )
+    await user.click(screen.getByRole('button', { name: /^Delete 2$/ }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).queryByRole('textbox')).toBeNull()
+    const confirm = within(dialog).getByRole('button', { name: 'Delete 2' })
+    await waitFor(() => expect(confirm).toBeEnabled())
+    await user.click(confirm)
+
+    await waitFor(() =>
+      expect(calls.some((c) => c.path === '/api/records/bulk-delete')).toBe(
+        true,
+      ),
+    )
   })
 
   describe('running a workflow on the selected records', () => {

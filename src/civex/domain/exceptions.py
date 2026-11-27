@@ -37,6 +37,20 @@ class AlreadyExistsError(CivexError):
     kind = "already_exists"
 
 
+class ReleasePublishedError(CivexError):
+    """The release was published (or is yanked or withdrawn), so it is part of
+    the record and can't be discarded; yank it. Answered 409."""
+
+    kind = "release_published"
+
+
+class ReleaseHeldBackError(CivexError):
+    """The release is held back (never published): it can be published or
+    discarded, not withdrawn or yanked. Answered 409."""
+
+    kind = "release_held_back"
+
+
 class FeatureUnavailableError(CivexError):
     """The server this request reached doesn't offer the feature the route is
     part of (`domain.features`). Answered 501, never a 404: the route exists,

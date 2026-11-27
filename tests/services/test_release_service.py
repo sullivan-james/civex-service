@@ -783,3 +783,202 @@ def test_write_copy_reports_bytes_written(ctx: AppContext, study, tmp_path: Path
     )
     assert seen and seen[-1] == (out.stat().st_size, release.bundle_size)
     assert [d for d, _ in seen] == sorted(d for d, _ in seen)
+
+
+def test_a_held_back_release_can_be_discarded_and_its_name_reused(ctx, study):
+    held = _make(ctx, "v1", publish=False)
+    assert held.published_at is None
+    assert _owned(ctx, held)
+    with pytest.raises(ValidationError):
+        ctx.release_svc.cite("v1")
+    with pytest.raises(ValidationError):
+        ctx.release_svc.full_bundle("v1")
+    ctx.release_svc.discard("v1")
+    ctx.commit()
+    assert ctx.release_svc.list_all() == []
+    assert not _owned(ctx, held)
+    entry = ctx._session.scalars(
+        select(AuditLog).where(
+            AuditLog.entity_type == "release", AuditLog.action == "delete"
+        )
+    ).one()
+    assert str(entry.entity_id) == str(held.id)
+    again = _make(ctx, "v1")
+    assert again.published_at is not None and again.id != held.id
+
+
+def test_a_published_release_cannot_be_discarded(ctx, study):
+    from civex.domain.exceptions import ReleasePublishedError
+
+    _make(ctx, "v1")
+    _make(ctx, "v2", publish=False)
+    ctx.release_svc.publish("v2")
+    ctx.commit()
+    for name in ("v1", "v2"):
+        with pytest.raises(ReleasePublishedError):
+            ctx.release_svc.discard(name)
+    ctx.release_svc.yank("v1", "gone")
+    ctx.commit()
+    with pytest.raises(ReleasePublishedError):  # yanked after publishing
+        ctx.release_svc.discard("v1")
+    assert {r.name for r in ctx.release_svc.list_all()} == {"v1", "v2"}
+
+
+def test_publishing_after_a_discard_or_twice_fails_cleanly(ctx, study):
+    _make(ctx, "v1", publish=False)
+    ctx.release_svc.publish("v1")
+    ctx.commit()
+    with pytest.raises(ValidationError):
+        ctx.release_svc.publish("v1")
+    from civex.domain.exceptions import NotFoundError
+
+    _make(ctx, "v2", publish=False)
+    ctx.release_svc.discard("v2")
+    ctx.commit()
+    with pytest.raises(NotFoundError):
+        ctx.release_svc.publish("v2")
+
+
+def test_publish_and_discard_race_is_decided_by_one_conditional_write(ctx, study):
+    """Each is a single conditional statement, so whichever runs second finds
+    nothing to do (no row lock needed, real SQLite)."""
+    from datetime import datetime, timezone
+
+    repo = ctx.release_svc._repo
+    now = datetime.now(timezone.utc)
+    a = _make(ctx, "v1", publish=False)
+    assert repo.mark_published(a.id, now) is True
+    assert repo.delete_held_back(a.id) is False  # discard lost
+    assert repo.get(a.id) is not None
+    assert repo.mark_published(a.id, now) is False
+    b = _make(ctx, "v2", publish=False)
+    assert repo.delete_held_back(b.id) is True
+    assert repo.mark_published(b.id, now) is False  # publish lost
+    assert repo.delete_held_back(b.id) is False
+    assert repo.get(b.id) is None
+
+
+def test_a_held_back_release_cannot_be_withdrawn_or_yanked(ctx, study):
+    from civex.domain.exceptions import ReleaseHeldBackError
+
+    _make(ctx, "v1", publish=False)
+    with pytest.raises(ReleaseHeldBackError):
+        ctx.release_svc.yank("v1", "x")
+    with pytest.raises(ReleaseHeldBackError):
+        ctx.release_svc.withdraw("v1", "x")
+    ctx.release_svc.discard("v1")
+
+
+def test_a_held_back_release_gives_out_no_files_or_manifest(ctx, study, tmp_path):
+    _make(ctx, "v1", publish=False)
+    for attempt in (
+        lambda: ctx.release_svc.full_bundle("v1"),
+        lambda: ctx.release_svc.write_copy("v1", tmp_path / "x"),
+        lambda: ctx.release_svc.gather_spec("v1", "x"),
+        lambda: ctx.release_svc.write_bag("v1", tmp_path, None),  # type: ignore[arg-type]
+    ):
+        with pytest.raises(ValidationError):
+            attempt()
+    with pytest.raises(ValidationError):
+        with ctx.release_svc.frozen("v1"):
+            pass
+
+
+def test_a_held_back_release_is_seen_only_by_who_may_make_releases(tmp_path: Path):
+    root = tmp_path / "study"
+    scaffold_project(root)
+    owner = build_local_context(load_config_at(root))
+    owner.schema_svc.create("sample")
+    owner.release_svc.create("held", "t", publish=False)
+    owner.release_svc.create("live", "t")
+    owner.commit()
+    reader = build_context(
+        Project(
+            config=load_config_at(root),
+            config_store=FileConfigStore(root),
+            actor="someone",
+            permissions=Permissions.of(p.READ),
+        )
+    )
+    try:
+        assert {r.name for r in owner.release_svc.list_all()} == {"held", "live"}
+        assert [r.name for r in reader.release_svc.list_all()] == ["live"]
+        assert reader.release_svc.get("live")
+        from civex.domain.exceptions import NotFoundError
+
+        with pytest.raises(NotFoundError):
+            reader.release_svc.get("held")
+    finally:
+        reader.close()
+        owner.close()
+
+
+def test_who_may_discard_a_release(tmp_path: Path):
+    root = tmp_path / "study"
+    scaffold_project(root)
+    owner = build_local_context(load_config_at(root))
+    owner.schema_svc.create("sample")
+    owner.release_svc.create("v1", "t", publish=False)
+    owner.commit()
+    writer = build_context(
+        Project(
+            config=load_config_at(root),
+            config_store=FileConfigStore(root),
+            actor="someone",
+            permissions=Permissions.of(p.READ, p.WRITE_RECORDS),
+        )
+    )
+    try:
+        with pytest.raises(NotAllowedError):
+            writer.release_svc.discard("v1")
+        with pytest.raises(NotAllowedError):
+            writer.release_svc.publish("v1")
+    finally:
+        writer.close()
+        owner.close()
+
+
+def test_a_releaser_reads_the_inventory_of_a_held_back_release(ctx, study):
+    _make(ctx, "v1", publish=False)
+    plan = ctx.release_svc.file_plan("v1")
+    assert (plan.total, plan.available) == (1, 1)
+    assert [i.sha256 for i in plan.items] == [study["photo"].sha256]
+    # Handing the files out is still for a published release only.
+    with pytest.raises(ValidationError):
+        with ctx.release_svc.file_access("v1"):
+            pass
+
+
+def test_the_inventory_of_a_held_back_release_is_what_was_frozen(ctx, study):
+    _make(ctx, "v1", publish=False)
+    other = ctx.file_svc.store_bytes(b"another photo", "q.jpg")
+    ctx.record_svc.update(str(study["a"].id), {"photo": other.to_dict()})
+    ctx.commit()
+    plan = ctx.release_svc.file_plan("v1")
+    assert (plan.total, plan.available) == (1, 1)
+    assert [i.sha256 for i in plan.items] == [study["photo"].sha256]
+
+
+def test_a_non_releaser_cannot_read_a_held_back_inventory(tmp_path: Path):
+    from civex.domain.exceptions import NotFoundError
+
+    root = tmp_path / "study"
+    scaffold_project(root)
+    owner = build_local_context(load_config_at(root))
+    owner.schema_svc.create("sample")
+    owner.release_svc.create("held", "t", publish=False)
+    owner.commit()
+    reader = build_context(
+        Project(
+            config=load_config_at(root),
+            config_store=FileConfigStore(root),
+            actor="someone",
+            permissions=Permissions.of(p.READ, p.WRITE_RECORDS),
+        )
+    )
+    try:
+        with pytest.raises(NotFoundError):
+            reader.release_svc.file_plan("held")
+    finally:
+        reader.close()
+        owner.close()

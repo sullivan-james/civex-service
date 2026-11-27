@@ -878,11 +878,19 @@ class SyncService:
     # Connecting
     # ------------------------------------------------------------------
 
+    @_closes_transports
     def needs_approval(self, url: str, invite: str | None) -> bool:
         """Whether connecting to `url` must first ask to join: no invite was
-        given and this computer has not joined that address before."""
+        given and the authority there does not know THIS project's device.
+        Asked, not guessed: this computer may have joined that address for
+        another project (each project is its own device), and a device may
+        have been revoked. The one rule the app and the CLI both follow."""
         url = url.strip().rstrip("/")
-        return not (invite and invite.strip()) and not user_state.authority_for(url)
+        if invite and invite.strip():
+            return False
+        self._refuse_following_while_serving()
+        _check_address(url)
+        return not self._is_a_device(self._made(url), url)
 
     @_closes_transports
     def request_login(self, url: str) -> LoginStarted:
@@ -930,11 +938,12 @@ class SyncService:
             joined = probe.join(invite.strip())
             user_state.save_authority(url, joined.authority_key)
         elif not self._is_a_device(probe, url):
-            # Never joined and no invite: ask to join, show the code (or take a
-            # request already made), and wait for a person to approve it.
+            # This device is not known there (never joined, joined for another
+            # project, or revoked) and no invite: ask to join, show the code (or
+            # take a request already made), and wait for a person to approve it.
             if login is None and on_code is None:
                 raise SyncError(
-                    "This computer hasn't joined that server: ask its admin for an "
+                    "This project hasn't joined that server: ask its admin for an "
                     "invite, or connect in a way that can wait to be approved",
                     retryable=False,
                 )

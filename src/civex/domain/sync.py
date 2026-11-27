@@ -549,6 +549,10 @@ class OpResult:
     # For `conflict`/`merged`: the values that did not go in.
     conflicts: list[dict[str, Any]] = field(default_factory=list)
     hub_seq: int | None = None
+    # A delete of a record that was already deleted here, by another change:
+    # taken and written down (so undo knows of it) but it changed nothing, so
+    # the device shows it as done by whoever got there first, not as its own.
+    already_done: bool = False
     # Set on an answer given again to a change sent before (never on the wire):
     # nothing was done this time, so it is not news to a host.
     replayed: bool = field(default=False, compare=False, repr=False)
@@ -560,6 +564,7 @@ class OpResult:
             "message": self.message,
             "conflicts": self.conflicts,
             "hub_seq": self.hub_seq,
+            **({"already_done": True} if self.already_done else {}),
         }
 
     @classmethod
@@ -570,6 +575,7 @@ class OpResult:
             message=d.get("message"),
             conflicts=list(d.get("conflicts") or []),
             hub_seq=d.get("hub_seq"),
+            already_done=bool(d.get("already_done", False)),
         )
 
 

@@ -321,3 +321,54 @@ def test_a_releases_files_can_be_listed_with_the_inventory(client: TestClient):
     ctx.close()
     assert listed.total == 1 and [i.filename for i in listed.items] == ["p.jpg"]
     assert sum(p.files for p in listed.summary) == 1
+
+
+def test_discard_a_held_back_release_over_http(client: TestClient):
+    _study(client)
+    made = client.post(
+        "/api/releases", json={"name": "v1", "title": "Survey", "publish": False}
+    )
+    assert made.status_code == 201 and made.json()["published_at"] is None
+    assert client.get("/api/releases/v1/citation").status_code == 422
+    assert client.post("/api/releases/v1/files/zip").status_code == 422
+    assert (
+        client.post("/api/releases/v1/files/plan").status_code == 200
+    )  # the inventory
+    assert (
+        client.post(
+            "/api/releases/v1/files/export", json={"mode": "copy", "folder": "/x"}
+        ).status_code
+        == 422
+    )
+    assert client.post("/api/releases/v1/yank", json={"reason": "r"}).status_code == 409
+    assert (
+        client.post("/api/releases/v1/withdraw", json={"reason": "r"}).status_code
+        == 409
+    )
+    assert client.post("/api/releases/v1/discard").status_code == 204
+    assert client.get("/api/releases/v1").status_code == 404
+    client.post("/api/releases", json={"name": "v1", "title": "Survey"})
+    refused = client.post("/api/releases/v1/discard")
+    assert refused.status_code == 409
+    assert "is published" in refused.json()["detail"]
+
+
+def test_a_held_back_release_has_an_inventory_but_no_downloads(client: TestClient):
+    _study(client)
+    made = client.post(
+        "/api/releases",
+        json={
+            "name": "v1",
+            "title": "Survey",
+            "collections": ["north"],
+            "publish": False,
+        },
+    )
+    assert made.status_code == 201, made.text
+    plan = client.post("/api/releases/v1/files/plan")
+    assert plan.status_code == 200, plan.text
+    body = plan.json()
+    assert (body["total"], body["available"], body["missing"]["files"]) == (1, 1, 0)
+    for path in ("files/zip", "files/export"):
+        assert client.post(f"/api/releases/v1/{path}").status_code in (422, 501)
+    assert client.get("/api/releases/v1/bundle").status_code == 422

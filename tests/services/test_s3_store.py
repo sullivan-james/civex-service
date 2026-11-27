@@ -481,3 +481,121 @@ def test_the_object_store_protocol_is_what_the_services_see():
         if not name.startswith("_") and not hasattr(S3ObjectStore, name)
     ]
     assert missing == []
+
+
+# -- credentials from named environment variables -----------------------------
+
+
+def _key_of(client) -> tuple[str, str | None]:
+    creds = client._request_signer._credentials
+    return creds.access_key, creds.token
+
+
+def test_named_env_keys_beat_the_profile(monkeypatch):
+    monkeypatch.setenv("FP_A_KEY", "AKIAAAAA")
+    monkeypatch.setenv("FP_A_SECRET", "secret-a")
+    monkeypatch.setenv("FP_A_TOKEN", "tok-a")
+    cfg = S3Config(
+        bucket="b",
+        profile="no-such-profile",
+        access_key_env="FP_A_KEY",
+        secret_key_env="FP_A_SECRET",
+        session_token_env="FP_A_TOKEN",
+    )
+    # The profile does not exist: it is never consulted.
+    assert _key_of(s3_module.boto_client(cfg)) == ("AKIAAAAA", "tok-a")
+
+
+@pytest.mark.parametrize("missing", ["FP_B_KEY", "FP_B_SECRET", "FP_B_TOKEN"])
+def test_a_named_variable_that_is_unset_or_empty_is_an_error(monkeypatch, missing):
+    from civex.domain.exceptions import ConfigError
+
+    for var in ("FP_B_KEY", "FP_B_SECRET", "FP_B_TOKEN"):
+        monkeypatch.setenv(var, "v-should-not-leak")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAFALLBACK")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "fallback")
+    for how in (monkeypatch.delenv, lambda v: monkeypatch.setenv(v, "")):
+        how(missing)
+        cfg = S3Config(
+            bucket="b",
+            access_key_env="FP_B_KEY",
+            secret_key_env="FP_B_SECRET",
+            session_token_env="FP_B_TOKEN",
+        )
+        with pytest.raises(ConfigError, match=missing) as err:
+            s3_module.boto_client(cfg)
+        assert "v-should-not-leak" not in str(err.value)
+        monkeypatch.setenv(missing, "v-should-not-leak")
+
+
+def test_access_and_secret_names_come_together():
+    from civex.domain.exceptions import ConfigError
+
+    with pytest.raises(ConfigError):
+        s3_module.boto_client(S3Config(bucket="b", access_key_env="X"))
+
+
+def test_two_configs_hold_two_credential_sets_without_touching_the_environment(
+    monkeypatch,
+):
+    import os
+
+    monkeypatch.setenv("FP_1_KEY", "AKIAONE")
+    monkeypatch.setenv("FP_1_SECRET", "s1")
+    monkeypatch.setenv("FP_2_KEY", "AKIATWO")
+    monkeypatch.setenv("FP_2_SECRET", "s2")
+    before = dict(os.environ)
+    one = S3Config(
+        bucket="b",
+        region="eu-west-2",
+        endpoint="http://127.0.0.1:9000",
+        access_key_env="FP_1_KEY",
+        secret_key_env="FP_1_SECRET",
+    )
+    two = S3Config(
+        bucket="b",
+        region="eu-west-2",
+        endpoint="http://127.0.0.1:9000",
+        access_key_env="FP_2_KEY",
+        secret_key_env="FP_2_SECRET",
+    )
+    c1, c2 = s3_module.boto_client(one), s3_module.boto_client(two)
+    assert _key_of(c1)[0] == "AKIAONE" and _key_of(c2)[0] == "AKIATWO"
+    for client, key in ((c1, "AKIAONE"), (c2, "AKIATWO")):
+        url = client.generate_presigned_url(
+            "get_object", Params={"Bucket": "b", "Key": "k"}, ExpiresIn=60
+        )
+        assert f"Credential={key}%2F" in url
+    assert dict(os.environ) == before
+
+
+def test_buckets_with_different_credential_variables_are_not_one_account():
+    from civex.store_copy import _same_account
+
+    def store(**kw):
+        s = S3ObjectStore.__new__(S3ObjectStore)
+        s._injected = False
+        s._cfg = S3Config(bucket="b", **kw)
+        return s
+
+    assert _same_account(store(access_key_env="A"), store(access_key_env="A"))
+    assert not _same_account(store(access_key_env="A"), store(access_key_env="B"))
+
+
+def test_the_env_names_round_trip_through_config(tmp_path: Path):
+    config = Config(
+        project_root=tmp_path,
+        db=DBConfig(url="sqlite:///x.db"),
+        store=StoreConfig(
+            volumes={},
+            volume_queue=[],
+            s3=S3Config(
+                bucket="b",
+                access_key_env="K",
+                secret_key_env="S",
+                session_token_env="T",
+            ),
+        ),
+    )
+    again = parse_config(tomllib.loads(render_config(config)), tmp_path)
+    assert again.store_config.s3 == config.store_config.s3

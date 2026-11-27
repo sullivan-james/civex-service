@@ -4274,6 +4274,33 @@ class RecordService:
         live = [r.id for r in self._records.list_by_ids(full) if r.deleted_at is None]
         return self.apply_changes(RecordChangesDTO(delete=live), force=force).deleted
 
+    def delete_preview(
+        self,
+        ids: list[str] | None = None,
+        query: RecordQuery | None = None,
+    ) -> tuple[int, int]:
+        """What a delete of these records (`ids`, or everything `query` lists)
+        would take, without doing it: (chosen, total), the live records chosen
+        and all that go, with everything beneath them."""
+        if ids is not None:
+            full: list[uuid.UUID] = []
+            for rid in ids:
+                try:
+                    full.append(uuid.UUID(rid))
+                except ValueError:
+                    record = self._records.get_by_prefix(rid)
+                    if record:
+                        full.append(record.id)
+            chosen = [
+                r.id for r in self._records.list_by_ids(full) if r.deleted_at is None
+            ]
+        elif query is not None:
+            chosen = self._records.list_ids(self.resolve(query))
+        else:
+            raise ValidationError("Choose the records: 'ids' or a query.")
+        levels = self._records.subtree_levels(chosen, deleted=False) if chosen else []
+        return len(set(chosen)), sum(len(level) for level in levels)
+
     def delete_matching(self, query: RecordQuery, force: bool = False) -> int:
         """Delete every record `query` matches -- what "select all N
         matching" means, as opposed to deleting the ids on one page."""

@@ -404,7 +404,9 @@ class SyncAuthorityService:
                     # left for the device's next push (never cut an action).
                     results += self._flush_run(who, run)
                     break
-                kind = _run_kind(action[0]) if len(action) == 1 else None
+                kind = (
+                    _run_kind(action[0]) if len(action) == 1 else _action_kind(action)
+                )
                 if run and run[0].kind != kind:
                     # A run is one kind of change: the next is judged with it
                     # written (a record made under one just deleted, ...).
@@ -413,7 +415,7 @@ class SyncAuthorityService:
                     if any(r.status == DEFERRED for r in flushed):
                         break
                 if self._bulk and kind in ("delete", "restore"):
-                    if cache.read.get(action[0].entity_id) != kind:
+                    if any(cache.read.get(e.entity_id) != kind for e in action):
                         self._prefetch_changes(cache, taken, position, kind)
                 elif self._bulk and len(action) == 1 and cache.stale:
                     # What the changes to come ask of the records is read
@@ -432,12 +434,25 @@ class SyncAuthorityService:
                     self._prefetch_uses(cache, taken, position)
                 position += len(action)
                 fast = None
+                group: list[_Fast] | None = None
                 if self._bulk and len(action) == 1:
                     fast = (
                         self._fast_change(who, action[0], kind, run, cache)
                         if kind in ("delete", "restore")
                         else self._fast(who, action[0], run, cache)
                     )
+                elif self._bulk and kind == "restore":
+                    group = self._fast_restores(who, action, run, cache)
+                elif self._bulk and kind == "delete":
+                    group = self._fast_deletes(who, action, run, cache)
+                if group is not None:
+                    run.extend(group)
+                    if len(run) >= RUN_MAX:
+                        flushed = self._flush_run(who, run)
+                        results += flushed
+                        if any(r.status == DEFERRED for r in flushed):
+                            break
+                    continue
                 if fast is not None:
                     run.append(fast)
                     if len(run) >= RUN_MAX:
@@ -609,6 +624,17 @@ class SyncAuthorityService:
             if _run_kind(e) != kind:
                 break
             stretch.append(e)
+        # (an action is read to its end, or it could not go in with the run)
+        at = position + len(stretch)
+        while (
+            stretch
+            and stretch[-1].op
+            and at < len(taken)
+            and taken[at].op == stretch[-1].op
+            and _run_kind(taken[at]) == kind
+        ):
+            stretch.append(taken[at])
+            at += 1
         self._stretch_left = len(stretch)
         heads = {
             e.entity_id: self._repo.snapshot("record", e.entity_id) for e in stretch
@@ -639,6 +665,8 @@ class SyncAuthorityService:
         kind: str,
         run: list[_Fast],
         cache: IncomingCache,
+        whole: bool = False,
+        beneath_ok: bool = False,
     ) -> _Fast | None:
         """A record deleted or brought back, which goes in with the rest of its
         run in bulk (`_flush_run`): None unless it is certain to be taken as it
@@ -673,6 +701,8 @@ class SyncAuthorityService:
         # (without the cache, as `_settle` asks: a file cited is asked of the
         # database, which says what a run not yet written cannot)
         if problem := self._problem(who, entry, None, held=held):
+            if whole:
+                return None  # (the action is refused as a whole by `_settle_action`)
             self._in_run.update((entry.id, entry.entity_id))
             return _Fast(
                 entry,
@@ -681,13 +711,16 @@ class SyncAuthorityService:
                 kind=kind,
             )
         if _already_done(entry, head):
+            if whole:
+                return None  # (an action's entries are never answered as done)
             self._in_run.update((entry.id, entry.entity_id))
             return _Fast(entry, None, head=head, kind=kind, done=True)
         if kind == "delete":
             if (
                 head.get("deleted_at")
                 or _edited_since(entry.old_data, head)
-                or entry.entity_id in cache.children
+                # (beneath_ok: what is beneath is the action's own, checked)
+                or (entry.entity_id in cache.children and not beneath_ok)
             ):
                 return None
             self._in_run.update((entry.id, entry.entity_id))
@@ -726,6 +759,77 @@ class SyncAuthorityService:
         self._records.note_made(cache, final, shape)
         self._in_run.update((entry.id, entry.entity_id))
         return _Fast(entry, final, unfit=unfit, head=head, kind=kind)
+
+    def _fast_restores(
+        self,
+        who: Principal,
+        action: list[SyncEntry],
+        run: list[_Fast],
+        cache: IncomingCache,
+    ) -> list[_Fast] | None:
+        """The records one action brought back (a record and what was deleted
+        with it, one `op`): all of them go in with the run, or none does and
+        `_settle_action` settles it whole. Each is judged as `_fast_change`
+        judges one, a parent first, so a record beneath it finds it back."""
+        group: list[_Fast] = []
+        for entry in action:
+            fast = self._fast_change(who, entry, "restore", run, cache, whole=True)
+            if fast is None:
+                for taken in group:
+                    self._in_run.discard(taken.entry.id)
+                    self._in_run.discard(taken.entry.entity_id)
+                cache.clear_records()  # (what it noted as made is not)
+                return None
+            fast.group = action[0].op
+            group.append(fast)
+        return group
+
+    def _fast_deletes(
+        self,
+        who: Principal,
+        action: list[SyncEntry],
+        run: list[_Fast],
+        cache: IncomingCache,
+    ) -> list[_Fast] | None:
+        """The records one action deleted (a record and everything beneath it,
+        one `op`): all go in with the run, or none does and `_settle_action`
+        settles it whole. They go in only when every live record beneath any of
+        them is deleted by the action too (one query for the lot); each is then
+        judged as `_fast_change` judges one, so anything in doubt is settled
+        whole."""
+        ids = [e.entity_id for e in action]
+        inside = set(ids)
+        if len(inside) != len(ids) or any(e.entity_type != "record" for e in action):
+            return None
+        if not self._beneath_is_within(ids):
+            return None  # something the device never saw is beneath: settled whole
+        group: list[_Fast] = []
+        for entry in action:
+            fast = self._fast_change(
+                who, entry, "delete", run, cache, whole=True, beneath_ok=True
+            )
+            if fast is None:
+                for taken in group:
+                    self._in_run.discard(taken.entry.id)
+                    self._in_run.discard(taken.entry.entity_id)
+                cache.clear_records()
+                return None
+            fast.group = action[0].op
+            group.append(fast)
+        return group
+
+    def _beneath_is_within(self, ids: list[uuid.UUID]) -> bool:
+        """Whether every live record beneath these records is one of them: what
+        a delete of the lot takes with it is exactly what was sent. Looks
+        beneath deleted records too (a live record under one the action does
+        not name is not the action's), so any doubt says no."""
+        inside = set(ids)
+        repo = self._records.records_repo
+        levels = repo.subtree_levels(ids, deleted=None)
+        beneath = [rid for level in levels for rid in level if rid not in inside]
+        if not beneath:
+            return True
+        return all(at is not None for at in repo.deleted_at_of(beneath).values())
 
     def _written(
         self, kind: str, taken: list[_Fast], cache: IncomingCache | None
@@ -785,6 +889,12 @@ class SyncAuthorityService:
                 if not writes:
                     pass
                 elif kind == "delete":
+                    # A tree goes in whole only if nothing live has come
+                    # beneath it since it was judged (read again here, inside
+                    # the write): else it is all settled as an action.
+                    for ids in _groups_of(writes):
+                        if not self._beneath_is_within(ids):
+                            raise ValidationError(NOT_WHOLE)
                     self._repo.soft_delete_records(
                         [(f.entry.entity_id, stamp_of(f.entry)) for f in writes]
                     )
@@ -821,8 +931,21 @@ class SyncAuthorityService:
             for f in taken:
                 self._repo.drop_op(f.entry.id)  # (answers kept before it failed)
             settled: list[OpResult] = []
-            for f in items:
-                settled.append(f.refused or self._settle(who, f.entry))
+            at = 0
+            while at < len(items):
+                f = items[at]
+                span = [f]
+                while (
+                    f.group is not None
+                    and at + len(span) < len(items)
+                    and items[at + len(span)].group == f.group
+                ):
+                    span.append(items[at + len(span)])
+                at += len(span)
+                if f.group is not None and len(span) > 1:
+                    settled += self._settle_action(who, [g.entry for g in span])
+                else:
+                    settled.append(f.refused or self._settle(who, f.entry))
                 if settled[-1].status == DEFERRED:
                     break
             return settled
@@ -1017,7 +1140,12 @@ class SyncAuthorityService:
                     return denied, REFUSAL_PERMISSION
         return None
 
-    def _settle_action(self, who: Principal, action: list[SyncEntry]) -> list[OpResult]:
+    def _settle_action(
+        self,
+        who: Principal,
+        action: list[SyncEntry],
+        earlier: list[SyncEntry] | None = None,
+    ) -> list[OpResult]:
         """Settle the entries one action wrote (a field renamed with the
         templates it rewrote, a record deleted with everything beneath it) as
         one: all go in, or none does. Each is merged as it would be alone, then
@@ -1038,7 +1166,27 @@ class SyncAuthorityService:
         if all(p is not None for p in priors):
             # sent before
             return [dataclasses.replace(p, replayed=True) for p in priors if p]
-        self._covered = {(e.entity_type, e.entity_id) for e in action}
+        if any(p is not None for p in priors):
+            # Sent again after only some of it was answered (a lost answer, a
+            # timeout): those are answered again from what was stored, and the
+            # rest follows them. An action goes in whole or not at all, so if
+            # what was answered did not go in, the rest is answered the same
+            # way, not settled; only if all of it went in is the rest settled
+            # (with what was answered counting as part of the action).
+            rest = [e for e, p in zip(action, priors) if p is None]
+            done = [e for e, p in zip(action, priors) if p is not None]
+            held = [p for p in priors if p is not None]
+            if all(p.status in (APPLIED, MERGED) for p in held):
+                settled = self._settle_action(who, rest, earlier=done)
+            else:
+                settled = self._answer_like(who, rest, held)
+            by_id = {r.op_id: r for r in settled}
+            return [
+                dataclasses.replace(p, replayed=True) if p else by_id[e.id]
+                for e, p in zip(action, priors)
+            ]
+        every = action + (earlier or [])
+        self._covered = {(e.entity_type, e.entity_id) for e in every}
         # What the caller may see decides what its answers can say: a thing
         # held where it may not look is answered as one that is not here, so
         # it is set aside first. Only what it can see counts as part of the
@@ -1047,7 +1195,7 @@ class SyncAuthorityService:
         # thing from an absent one.
         hidden = [e for e in action if self._unseen(e)]
         self._covered_seen = {
-            (e.entity_type, e.entity_id) for e in action if e not in hidden
+            (e.entity_type, e.entity_id) for e in every if e not in hidden
         }
         for entry in action:
             # Every entry meets the checks an absent one would meet, in order;
@@ -1091,6 +1239,29 @@ class SyncAuthorityService:
         for entry, result in zip(action, results):
             self._repo.save_op(entry, result, who.device_id, who.name)
         return results
+
+    def _answer_like(
+        self, who: Principal, rest: list[SyncEntry], held: list[OpResult]
+    ) -> list[OpResult]:
+        """The entries of an action that was refused (or kept) as a whole,
+        sent again after only some were answered: answered the way the others
+        were, never settled on their own."""
+        first = next(p for p in held if p.status not in (APPLIED, MERGED))
+        if not rest:
+            return []
+        kinds = {c.get("kind") for p in held for c in p.conflicts}
+        if "edit_vs_delete" in kinds:
+            return self._keep_instead_of_delete(who, rest, held)
+        prefix = "Part of one change that could not go in whole: "
+        why = (
+            first.message or "Something it changes was changed on the server meanwhile"
+        )
+        why = why.removeprefix(prefix)
+        code = next((c.get("code") for c in first.conflicts if c.get("code")), None)
+        data = code == UNFIT_DATA
+        return self._refuse_action(
+            who, rest, why, code=None if data else code, data=data
+        )
 
     def _refuse_action(
         self,
@@ -1330,6 +1501,17 @@ class SyncAuthorityService:
             # nothing is written (no second entry, no settling one).
             return OpResult(entry.id, APPLIED, replayed=True)
         cascade = self._cascade_before(entry, head)
+        # A record's delete that finds it deleted already: written down, but
+        # the answer says so, so the device shows it as the earlier change's.
+        # Not one of an action's entries: its own earlier entries (a parent's
+        # delete takes the records beneath) may be what deleted it.
+        found_deleted = bool(
+            alone
+            and kind == "record"
+            and entry.action == "delete"
+            and head is not None
+            and head.get("deleted_at")
+        )
         conflicts: list[dict[str, Any]] = []
         unfit: list[dict[str, Any]] = []
         final: dict[str, Any] | None = None  # the state the thing ends in, if it exists
@@ -1458,7 +1640,14 @@ class SyncAuthorityService:
             message = next(
                 c.get("message") for c in conflicts if c["kind"] == "edit_vs_delete"
             )
-        return OpResult(entry.id, status, message, conflicts, seq)
+        return OpResult(
+            entry.id,
+            status,
+            message,
+            conflicts,
+            seq,
+            already_done=found_deleted and not conflicts,
+        )
 
     def _check_note(self, who: Principal, state: dict[str, Any]) -> None:
         """A note goes in only on a record held here, with text a person's note
@@ -1708,6 +1897,18 @@ class SyncAuthorityService:
         return hlc.tick(self._repo.latest_hlc(), _now_ms())
 
 
+NOT_WHOLE = "Something was added beneath it meanwhile"
+
+
+def _groups_of(items: list[_Fast]) -> list[list[uuid.UUID]]:
+    """The records of each action in a run (an action's entries are together)."""
+    groups: dict[str, list[uuid.UUID]] = {}
+    for f in items:
+        if f.group is not None:
+            groups.setdefault(f.group, []).append(f.entry.entity_id)
+    return list(groups.values())
+
+
 PARENT_GONE = "The record it sits under is not here."
 NOT_HERE = "It is not on the server (deleted for good there, or never taken)"
 
@@ -1726,6 +1927,8 @@ class _Fast:
     kind: str = "create"
     # Already so on the authority: answered, nothing written.
     done: bool = False
+    # The `op` of the action it is one of, when it was taken with the rest of it.
+    group: str | None = None
 
 
 @dataclasses.dataclass
@@ -1891,6 +2094,15 @@ def _actions(entries: list[SyncEntry]) -> list[list[SyncEntry]]:
         else:
             runs.append([entry])
     return runs
+
+
+def _action_kind(action: list[SyncEntry]) -> str | None:
+    """ "restore" (or "delete") for an action of nothing but records brought
+    back (or deleted): they go in with a run of that kind, else None."""
+    kind = _run_kind(action[0])
+    if kind in ("restore", "delete") and all(_run_kind(e) == kind for e in action):
+        return kind
+    return None
 
 
 def _now_ms() -> int:

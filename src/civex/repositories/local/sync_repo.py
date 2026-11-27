@@ -1219,6 +1219,7 @@ class LocalSyncRepository:
             message=row.message,
             conflicts=list(row.conflicts or []),
             hub_seq=row.hub_seq,
+            already_done=bool(row.already_done),
         )
 
     def get_op(self, op_id: uuid.UUID) -> OpResult | None:
@@ -1247,6 +1248,7 @@ class LocalSyncRepository:
                 message=result.message,
                 conflicts=result.conflicts,
                 hub_seq=result.hub_seq,
+                already_done=result.already_done,
             )
         )
         self._s.flush()
@@ -1619,6 +1621,7 @@ class LocalSyncRepository:
                     "message": result.message,
                     "conflicts": result.conflicts,
                     "hub_seq": result.hub_seq,
+                    "already_done": result.already_done,
                 }
                 for entry, result in items
             ],
@@ -2380,6 +2383,12 @@ class LocalSyncRepository:
                     values["hub_seq"] = result.hub_seq
                 if result.status in ("merged", "conflict"):
                     values["apply_state"] = "superseded"
+                elif result.status == "applied" and result.already_done:
+                    # (the authority found the record already deleted: the
+                    # earlier change the feed carries did it; this one is
+                    # shown as done by it, and is never replayed)
+                    values["apply_state"] = "superseded"
+                    values["already_done"] = True
             else:
                 continue
             merged.setdefault(result.op_id, {}).update(values)

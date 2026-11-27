@@ -117,6 +117,38 @@ export function describeParts(parts: AuditPart[]): string {
 /** The title and detail of a line of history: a single change describes itself,
  * and a batch says what kind of operation it was and what it did. */
 export function describeAuditEvent(event: AuditEvent): AuditSummary {
+  const summary = describeEvent(event)
+  const done = event.already_done
+  if (!done || done.count < 1) return summary
+  const said = alreadyDeleted(done, !!event.entry)
+  return {
+    ...summary,
+    detail: summary.detail ? `${summary.detail}. ${said}` : said,
+  }
+}
+
+/** What the server found already made, as a plain statement: for one change
+ * "Already deleted on the server by X", for a batch "8 already deleted on the
+ * server by X". */
+function alreadyDeleted(
+  done: NonNullable<AuditEvent['already_done']>,
+  single: boolean,
+): string {
+  const own = done.own ?? 0
+  const who: string[] = []
+  if (done.by.length) who.push(`by ${done.by.join(', ')}`)
+  if (own) {
+    const devices = done.own_devices?.length
+      ? ` (${done.own_devices.join(', ')})`
+      : ''
+    who.push(`from another of your devices${devices}`)
+  }
+  const tail = who.length ? ` ${who.join(' and ')}` : ''
+  const lead = single ? 'Already' : `${done.count.toLocaleString()} already`
+  return `${lead} deleted on the server${tail}`
+}
+
+function describeEvent(event: AuditEvent): AuditSummary {
   if (event.entry) return describeAnyAuditEntry(event.entry)
   const batch = event.batch!
   const total = event.parts.reduce((n, p) => n + p.count, 0)

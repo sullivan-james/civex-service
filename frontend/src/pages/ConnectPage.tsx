@@ -72,10 +72,17 @@ export default function ConnectPage() {
   }, [done, navigate])
 
   const parsed = parseHubAddress(raw)
+  // Asking signs in over the network: wait until typing pauses.
+  const [asked, setAsked] = useState<string | undefined>()
+  useEffect(() => {
+    const t = setTimeout(() => setAsked(parsed?.address), 600)
+    return () => clearTimeout(t)
+  }, [parsed?.address])
   const known = useQuery({
-    queryKey: ['remote-known', parsed?.address],
-    queryFn: () => remoteApi.known(parsed!.address),
-    enabled: !!parsed,
+    queryKey: ['remote-known', asked],
+    queryFn: () => remoteApi.known(asked!),
+    enabled: !!asked && asked === parsed?.address,
+    retry: false,
   })
   if (!dials)
     return (
@@ -150,7 +157,7 @@ export default function ConnectPage() {
               </p>
               {joinedBefore === false && (
                 <p className="text-attention">
-                  This computer has not connected to {parsed.host} before. Check
+                  This project has not connected to {parsed.host} before. Check
                   that this is the hub you mean.
                 </p>
               )}
