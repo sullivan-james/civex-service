@@ -443,6 +443,8 @@ class SyncAuthorityService:
                     )
                 elif self._bulk and kind == "restore":
                     group = self._fast_restores(who, action, run, cache)
+                elif self._bulk and kind == "delete":
+                    group = self._fast_deletes(who, action, run, cache)
                 if group is not None:
                     run.extend(group)
                     if len(run) >= RUN_MAX:
@@ -664,6 +666,7 @@ class SyncAuthorityService:
         run: list[_Fast],
         cache: IncomingCache,
         whole: bool = False,
+        beneath_ok: bool = False,
     ) -> _Fast | None:
         """A record deleted or brought back, which goes in with the rest of its
         run in bulk (`_flush_run`): None unless it is certain to be taken as it
@@ -716,7 +719,8 @@ class SyncAuthorityService:
             if (
                 head.get("deleted_at")
                 or _edited_since(entry.old_data, head)
-                or entry.entity_id in cache.children
+                # (beneath_ok: what is beneath is the action's own, checked)
+                or (entry.entity_id in cache.children and not beneath_ok)
             ):
                 return None
             self._in_run.update((entry.id, entry.entity_id))
@@ -775,6 +779,41 @@ class SyncAuthorityService:
                     self._in_run.discard(taken.entry.id)
                     self._in_run.discard(taken.entry.entity_id)
                 cache.clear_records()  # (what it noted as made is not)
+                return None
+            fast.group = action[0].op
+            group.append(fast)
+        return group
+
+    def _fast_deletes(
+        self,
+        who: Principal,
+        action: list[SyncEntry],
+        run: list[_Fast],
+        cache: IncomingCache,
+    ) -> list[_Fast] | None:
+        """The records one action deleted (a record and everything beneath it,
+        one `op`): all go in with the run, or none does and `_settle_action`
+        settles it whole. They go in only when every live record beneath any of
+        them is deleted by the action too (one query for the lot); each is then
+        judged as `_fast_change` judges one, so anything in doubt is settled
+        whole."""
+        ids = [e.entity_id for e in action]
+        inside = set(ids)
+        if len(inside) != len(ids) or any(e.entity_type != "record" for e in action):
+            return None
+        levels = self._records.records_repo.subtree_levels(ids, deleted=False)
+        if any(rid not in inside for level in levels for rid in level):
+            return None  # something the device never saw is beneath: settled whole
+        group: list[_Fast] = []
+        for entry in action:
+            fast = self._fast_change(
+                who, entry, "delete", run, cache, whole=True, beneath_ok=True
+            )
+            if fast is None:
+                for taken in group:
+                    self._in_run.discard(taken.entry.id)
+                    self._in_run.discard(taken.entry.entity_id)
+                cache.clear_records()
                 return None
             fast.group = action[0].op
             group.append(fast)
@@ -1990,9 +2029,12 @@ def _actions(entries: list[SyncEntry]) -> list[list[SyncEntry]]:
 
 
 def _action_kind(action: list[SyncEntry]) -> str | None:
-    """ "restore" for an action of nothing but records brought back (they go in
-    with a run of restores), else None."""
-    return "restore" if all(_run_kind(e) == "restore" for e in action) else None
+    """ "restore" (or "delete") for an action of nothing but records brought
+    back (or deleted): they go in with a run of that kind, else None."""
+    kind = _run_kind(action[0])
+    if kind in ("restore", "delete") and all(_run_kind(e) == kind for e in action):
+        return kind
+    return None
 
 
 def _now_ms() -> int:
