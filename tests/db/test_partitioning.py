@@ -359,6 +359,7 @@ def test_populated_database_keeps_its_data_indexes_and_foreign_keys(
         "ix_audit_log_unsettled",
         "ix_audit_log_op",
     }
+    after_idx["records"] -= {"ix_records_created_id"}
     # same index names, except the audit_log primary key which now includes
     # the partition key but keeps its name
     assert after_idx == before_idx

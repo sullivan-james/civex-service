@@ -2603,7 +2603,15 @@ class LocalSyncRepository:
             return set()
         model = _MODELS[kind]
         wanted = [uuid.UUID(i) for i in ids]
-        return {str(i) for (i,) in self._s.query(model.id).filter(model.id.in_(wanted))}
+        found: set[str] = set()
+        for at in range(0, len(wanted), _ID_CHUNK):
+            found.update(
+                str(i)
+                for (i,) in self._s.query(model.id).filter(
+                    model.id.in_(wanted[at : at + _ID_CHUNK])
+                )
+            )
+        return found
 
     def seed_open(self) -> bool:
         """A first upload was begun and has not finished (whatever it set aside)."""

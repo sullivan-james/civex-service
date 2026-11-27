@@ -23,6 +23,7 @@ def test_a_join_misses_nothing_when_the_authority_removes_something_meanwhile(
     two of them must not shift the next page past a record that never changed
     (nothing in the feed would bring it back)."""
     monkeypatch.setattr(sync_service, "SNAPSHOT_PAGE", 2)
+    monkeypatch.setattr(sync_service, "SNAPSHOT_PAGE_BIG", 2)
     build_study(authority)
     made = [
         authority.record_svc.add("study", "encounter", {"site": f"s{i}"})
