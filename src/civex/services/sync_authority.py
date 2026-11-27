@@ -1104,6 +1104,16 @@ class SyncAuthorityService:
         if all(p is not None for p in priors):
             # sent before
             return [dataclasses.replace(p, replayed=True) for p in priors if p]
+        if any(p is not None for p in priors):
+            # Sent again after only some of it was answered (a lost answer, a
+            # timeout): those are answered again from what was stored, and
+            # only the rest is settled, so no answer is written twice.
+            rest = [e for e, p in zip(action, priors) if p is None]
+            settled = {r.op_id: r for r in self._settle_action(who, rest)}
+            return [
+                dataclasses.replace(p, replayed=True) if p else settled[e.id]
+                for e, p in zip(action, priors)
+            ]
         self._covered = {(e.entity_type, e.entity_id) for e in action}
         # What the caller may see decides what its answers can say: a thing
         # held where it may not look is answered as one that is not here, so
