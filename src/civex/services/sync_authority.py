@@ -801,8 +801,7 @@ class SyncAuthorityService:
         inside = set(ids)
         if len(inside) != len(ids) or any(e.entity_type != "record" for e in action):
             return None
-        levels = self._records.records_repo.subtree_levels(ids, deleted=False)
-        if any(rid not in inside for level in levels for rid in level):
+        if not self._beneath_is_within(ids):
             return None  # something the device never saw is beneath: settled whole
         group: list[_Fast] = []
         for entry in action:
@@ -818,6 +817,19 @@ class SyncAuthorityService:
             fast.group = action[0].op
             group.append(fast)
         return group
+
+    def _beneath_is_within(self, ids: list[uuid.UUID]) -> bool:
+        """Whether every live record beneath these records is one of them: what
+        a delete of the lot takes with it is exactly what was sent. Looks
+        beneath deleted records too (a live record under one the action does
+        not name is not the action's), so any doubt says no."""
+        inside = set(ids)
+        repo = self._records.records_repo
+        levels = repo.subtree_levels(ids, deleted=None)
+        beneath = [rid for level in levels for rid in level if rid not in inside]
+        if not beneath:
+            return True
+        return all(at is not None for at in repo.deleted_at_of(beneath).values())
 
     def _written(
         self, kind: str, taken: list[_Fast], cache: IncomingCache | None
@@ -877,6 +889,12 @@ class SyncAuthorityService:
                 if not writes:
                     pass
                 elif kind == "delete":
+                    # A tree goes in whole only if nothing live has come
+                    # beneath it since it was judged (read again here, inside
+                    # the write): else it is all settled as an action.
+                    for ids in _groups_of(writes):
+                        if not self._beneath_is_within(ids):
+                            raise ValidationError(NOT_WHOLE)
                     self._repo.soft_delete_records(
                         [(f.entry.entity_id, stamp_of(f.entry)) for f in writes]
                     )
@@ -1877,6 +1895,18 @@ class SyncAuthorityService:
         if stamp is None or not hlc.is_ahead(stamp, _now_ms()):
             return stamp
         return hlc.tick(self._repo.latest_hlc(), _now_ms())
+
+
+NOT_WHOLE = "Something was added beneath it meanwhile"
+
+
+def _groups_of(items: list[_Fast]) -> list[list[uuid.UUID]]:
+    """The records of each action in a run (an action's entries are together)."""
+    groups: dict[str, list[uuid.UUID]] = {}
+    for f in items:
+        if f.group is not None:
+            groups.setdefault(f.group, []).append(f.entry.entity_id)
+    return list(groups.values())
 
 
 PARENT_GONE = "The record it sits under is not here."

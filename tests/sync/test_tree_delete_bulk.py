@@ -69,3 +69,38 @@ def test_a_record_added_beneath_a_tree_here_keeps_the_tree(project):
     assert all(a[1] == "conflict" for a in first)
     assert ctx.record_svc.get(str(late.id)).deleted_at is None
     assert ctx.record_svc.get(str(roots[0])).deleted_at is None
+
+
+def test_a_record_added_beneath_a_tree_between_the_check_and_the_write_keeps_it(
+    project,
+):
+    ctx = project("authority")
+    f = Flow(project)
+    roots = _trees(f, 2, 2)
+    send(ctx, f.structure + f.take())
+    gone = f.deleted(roots)
+    svc = ctx.authority_svc
+    real = svc._flush_run
+    made = []
+
+    def racing(who, run):
+        if run and not made:  # after the trees were judged, before they are written
+            late = ctx.record_svc.add(
+                "mine",
+                "recording",
+                {"label": "late", "must": "m"},
+                parent_record_id=str(roots[0]),
+            )
+            made.append(late.id)
+        return real(who, run)
+
+    svc._flush_run = racing
+    answers, _ = send(ctx, gone)
+    assert made
+    first = [a for e in gone if e.op == gone[0].op for a in answers if a[0] == e.id]
+    assert all(a[1] == "conflict" for a in first)
+    assert ctx.record_svc.get(str(made[0])).deleted_at is None
+    assert ctx.record_svc.get(str(roots[0])).deleted_at is None
+    # the other tree, untouched by the late record, is deleted as one action
+    second = [a for e in gone if e.op != gone[0].op for a in answers if a[0] == e.id]
+    assert all(a[1] == "applied" for a in second)
