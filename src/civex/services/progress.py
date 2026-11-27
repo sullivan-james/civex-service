@@ -90,6 +90,13 @@ class Progress:
         with self._lock:
             return self._state.cancelled
 
+    @property
+    def unfinished(self) -> bool:
+        """Whether the stage has steps left: it has a known total and has not
+        reached it (a stop or a failure part way leaves it so)."""
+        with self._lock:
+            return self._state.total > 0 and self._state.done < self._state.total
+
     def finish(self, error: str | None = None) -> None:
         with self._lock:
             self._state.finished = True

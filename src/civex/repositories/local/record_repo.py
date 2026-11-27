@@ -1654,6 +1654,39 @@ class LocalRecordRepository:
             )
         self._s.expire_all()
 
+    def purge_deleted(self, ids: list[uuid.UUID]) -> set[uuid.UUID]:
+        """`purge_many` for only those of `ids` that are deleted when this
+        runs, and returns the ids it removed. The rows are locked first (where
+        the database locks rows), so a restore that came in meanwhile either
+        landed before (the record is live, and is left) or waits until this is
+        done: a live record is never removed, nor its history."""
+        gone: set[uuid.UUID] = set()
+        for chunk in _chunks(ids):
+            hit = list(
+                self._s.scalars(
+                    select(Record.id)
+                    .where(Record.id.in_(chunk), Record.deleted_at.is_not(None))
+                    .with_for_update()
+                )
+            )
+            if not hit:
+                continue
+            self._s.execute(
+                update(Record)
+                .where(Record.id.in_(hit))
+                .values(parent_record_id=None)
+                .execution_options(synchronize_session=False)
+            )
+            bulk_delete_jobs(self._s, WorkflowJob.record_id.in_(hit))
+            self._s.execute(
+                delete(Record)
+                .where(Record.id.in_(hit))
+                .execution_options(synchronize_session=False)
+            )
+            gone.update(hit)
+        self._s.expire_all()
+        return gone
+
     def delete(self, id: uuid.UUID) -> None:
         row = self._s.query(Record).filter_by(id=id).first()
         if row and row.deleted_at is None:

@@ -68,7 +68,12 @@ def test_an_untagged_bulk_delete_answers_as_before_with_the_counts(
     client: TestClient, trials
 ):
     done = _post(client, "/api/records/bulk-delete", {"ids": trials})
-    assert done == {"deleted": 4, "records": 4, "stopped": False}
+    assert done == {
+        "deleted": 4,
+        "records": 4,
+        "stopped": False,
+        "problem": None,
+    }
 
 
 def test_a_stopped_bulk_delete_keeps_what_it_deleted_and_again_finishes_it(
@@ -83,7 +88,12 @@ def test_a_stopped_bulk_delete_keeps_what_it_deleted_and_again_finishes_it(
     )
     assert resp.status_code == 200, resp.text
     assert asked == [204]
-    assert resp.json() == {"deleted": 1, "records": 1, "stopped": True}
+    assert resp.json() == {
+        "deleted": 1,
+        "records": 1,
+        "stopped": True,
+        "problem": None,
+    }
     assert sorted(_live(client, trials)) == [False, True, True, True]
 
     _back(monkeypatch)
@@ -103,7 +113,12 @@ def test_deleting_a_whole_collection_is_followed_and_stoppable(
     )
     assert resp.status_code == 200, resp.text
     assert asked == [204]
-    assert resp.json() == {"deleted": 2, "records": 2, "stopped": True}
+    assert resp.json() == {
+        "deleted": 2,
+        "records": 2,
+        "stopped": True,
+        "problem": None,
+    }
     state = client.get("/api/file-access/progress/stop-all-000001").json()
     assert (state["phase"], state["done"], state["total"]) == (
         "Deleting records",
@@ -199,3 +214,52 @@ def test_collection_and_schema_delete_and_restore_report_their_records(
         assert state["phase"] == (
             "Deleting records" if verb == "delete" else "Restoring records"
         )
+
+
+def test_a_stop_on_the_last_chunk_is_not_a_stop(
+    client: TestClient, trials, monkeypatch
+):
+    asked = _stop_after_first_chunk(client, monkeypatch, "stop-last-000001")
+    resp = client.post(
+        "/api/records/bulk-delete",
+        json={"ids": trials},
+        headers={"X-Civex-Progress": "stop-last-000001"},
+    )
+    assert asked == [204]  # pressed, but nothing was left to stop
+    assert resp.json() == {
+        "deleted": 4,
+        "records": 4,
+        "stopped": False,
+        "problem": None,
+    }
+
+
+def test_a_failure_after_some_chunks_answers_with_how_far_it_got(
+    client: TestClient, trials, monkeypatch
+):
+    from civex.domain.exceptions import ValidationError
+
+    monkeypatch.setattr(record_service, "_APPLY_CHUNK", 1)
+    real = record_service.RecordService._handle_referrers
+    calls: list[int] = []
+
+    def refuse_the_third_chunk(self, *args, **kwargs):
+        calls.append(1)
+        if len(calls) == 3:  # the check up front, chunk one, then chunk two
+            raise ValidationError("Cannot delete: something now points at it.")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        record_service.RecordService, "_handle_referrers", refuse_the_third_chunk
+    )
+    resp = client.post(
+        "/api/records/bulk-delete",
+        json={"ids": trials},
+        headers={"X-Civex-Progress": "fail-midway-0001"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert (body["deleted"], body["stopped"]) == (1, True)
+    assert "points at it" in body["problem"]
+    monkeypatch.setattr(record_service.RecordService, "_handle_referrers", real)
+    assert sorted(_live(client, trials)) == [False, True, True, True]

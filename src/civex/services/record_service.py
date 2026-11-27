@@ -852,6 +852,10 @@ class IncomingCache:
 
 
 class RecordService:
+    # Chunks still to come after the one a chunked operation just yielded: the
+    # caller gives way to other writers only when there is more to do.
+    chunks_left: int = 0
+
     def __init__(
         self,
         schema_svc: SchemaService,
@@ -4537,9 +4541,8 @@ class RecordService:
         doomed = set(every)
         for dataset_id in self._records.collections_of(every):
             self._permissions.require(permissions.DELETE, dataset_id)
-        # Refused whole, up front. What `force` clears is cleared a chunk at a
-        # time, with the records it points at, so a stop leaves no reference
-        # cleared for a record that was never deleted.
+        # Refused whole, up front (what is found here is what the progress
+        # counts). Each chunk checks again for what changed meanwhile.
         self._handle_referrers(doomed, force, dry_run=True)
         links = self._records.parent_links(every)
         roots = {rid for rid in set(ids) if rid in links and links[rid] not in doomed}
@@ -4556,12 +4559,43 @@ class RecordService:
         every = _by_tree(every, trees)  # a tree's entries together
         ops = trees if self._audit else None
         gone = gone_roots = written = 0
+        total = len(every)
         if progress:
-            progress.phase("Deleting records", len(every))
-        with _audit_batch(self._audit, "delete", len(every) > 1):
-            for chunk in _whole_trees(every, trees, _APPLY_CHUNK):
-                if force:
-                    self._handle_referrers(set(chunk), True, exclude=doomed)
+            progress.phase("Deleting records", total)
+        chunks = list(_whole_trees(every, trees, _APPLY_CHUNK))
+        del every
+        with _audit_batch(self._audit, "delete", total > 1):
+            for number, chunk in enumerate(chunks):
+                # Another save may have gone in since the last commit: a record
+                # added under one of these is deleted with its parent, never
+                # left live under a deleted one.
+                top = [r for r in chunk if links.get(r) not in doomed]
+                fresh = [
+                    r
+                    for level in self._records.subtree_levels(top, deleted=False)
+                    for r in level
+                    if r not in doomed
+                ]
+                if fresh:
+                    fresh_links = self._records.parent_links(fresh)
+                    for r in fresh:  # parents first, so a tree's id is known
+                        up = fresh_links[r]
+                        trees[r] = trees.get(up, uuid.uuid4()) if up else uuid.uuid4()
+                        links[r] = fresh_links[r]
+                    doomed.update(fresh)
+                    chunk = _by_tree([*chunk, *fresh], trees)
+                    total += len(fresh)
+                    for dataset_id in self._records.collections_of(fresh):
+                        self._permissions.require(permissions.DELETE, dataset_id)
+                # Referrers are checked for what this chunk takes: what points
+                # at it now is refused, or (`force`) cleared. The first chunk
+                # clears for everything, once, so a record that points at
+                # several is saved once, as one request would.
+                self._handle_referrers(
+                    set(doomed) if force and number == 0 else set(chunk),
+                    force,
+                    exclude=doomed,
+                )
                 for start in range(0, len(chunk), _APPLY_CHUNK):
                     part = chunk[start : start + _APPLY_CHUNK]
                     held = (
@@ -4590,8 +4624,9 @@ class RecordService:
                         )
                     written += len(part)
                     if progress:
-                        progress.advance(written)
+                        progress.advance(written, total)
                 # Counted from what this write deleted, not from what was asked.
+                self.chunks_left = len(chunks) - number - 1
                 yield gone_roots, gone
 
     def list_deleted(
@@ -4655,26 +4690,50 @@ class RecordService:
             return
         stamp = _dt.now(timezone.utc)
         root_ids = {r.id for r in roots}
+        # Only ids are kept from here: each chunk reads its own records.
         tree = _tree_actions(records)
-        by_id = {r.id: r for r in records}
-        # A tree's entries together, and a chunk is whole trees: a child may not
-        # sit in another collection than its parent when a commit is checked
-        # (`fk_records_parent_same_dataset`), and a tree moves as one action.
         ordered = _by_tree([r.id for r in records], tree)
+        del records, roots
+        chunks = list(_whole_trees(ordered, tree, _APPLY_CHUNK))
+        total = len(ordered)
+        del ordered, tree
         if progress:
-            progress.phase("Moving records", len(ordered))
-        moved = 0
-        with _audit_batch(self._audit, "move", len(records) > 1):
-            for chunk in _whole_trees(ordered, tree, _APPLY_CHUNK):
+            progress.phase("Moving records", total)
+        moved = moved_roots = 0
+        with _audit_batch(self._audit, "move", total > 1):
+            for number, chunk in enumerate(chunks):
+                # Planned again from what is there now: other saves go in
+                # between two chunks (a record added under one of these, the
+                # target or a key changed), and a plan made before them is not
+                # one to write from.
+                top = [str(r) for r in chunk if r in root_ids]
+                try:
+                    fplan, froots, frecords, ftarget = self._move_plan(
+                        to, parent, ids=top, query=None
+                    )
+                except NotFoundError as e:
+                    raise ValidationError(
+                        f"It changed while it was moving: {e} "
+                        "What was moved before stays moved."
+                    ) from e
+                if fplan.problems:
+                    raise ValidationError(
+                        "It changed while it was moving: "
+                        + " ".join(fplan.problems)
+                        + " What was moved before stays moved."
+                    )
+                ftree = _tree_actions(frecords)
+                by_id = {r.id: r for r in frecords}
+                froot_ids = {r.id for r in froots}
                 if self._audit:
-                    for rid in chunk:
+                    for rid in _by_tree(list(by_id), ftree):
                         record = by_id[rid]
                         after = dataclasses.replace(
                             record,
-                            dataset_id=target.id,
+                            dataset_id=ftarget.id,
                             parent_record_id=(
-                                plan.parent_id
-                                if rid in root_ids
+                                fplan.parent_id
+                                if rid in froot_ids
                                 else record.parent_record_id
                             ),
                             updated_at=stamp,
@@ -4686,22 +4745,24 @@ class RecordService:
                             self._snapshot(record),
                             self._snapshot(after),
                             timestamp=stamp,
-                            op=tree[rid],
+                            op=ftree[rid],
                         )
-                self._records.move(
-                    chunk,
-                    target.id,
-                    [rid for rid in chunk if rid in root_ids],
-                    plan.parent_id,
-                    stamp,
-                )
-                moved += len(chunk)
+                if frecords:
+                    self._records.move(
+                        list(by_id),
+                        ftarget.id,
+                        list(froot_ids),
+                        fplan.parent_id,
+                        stamp,
+                    )
+                total += len(frecords) - len(chunk)
+                moved += len(frecords)
+                moved_roots += len(froot_ids)
                 if progress:
-                    progress.advance(moved)
+                    progress.advance(moved, total)
+                self.chunks_left = len(chunks) - number - 1
                 yield RecordMoveResultDTO(
-                    roots=len(root_ids & set(ordered[:moved])),
-                    records=moved,
-                    collection=target.name,
+                    roots=moved_roots, records=moved, collection=target.name
                 )
 
     def move(
@@ -6230,8 +6291,10 @@ class RecordService:
         if progress:
             progress.phase("Restoring records", len(ids))
         done = 0
+        stamp = _dt.now(timezone.utc)  # one instant for every chunk's entries
+        chunks = list(_whole_trees(ids, ops, _APPLY_CHUNK))
         with _audit_batch(self._audit, "restore", len(ids) > 1):
-            for chunk in _whole_trees(ids, ops, _APPLY_CHUNK):
+            for number, chunk in enumerate(chunks):
                 # Only what this write brought back is put in history: a record
                 # someone else restored first is theirs.
                 got = self._records.restore_many(chunk)
@@ -6248,11 +6311,13 @@ class RecordService:
                             for i in chunk
                             if i in got
                         ),
+                        timestamp=stamp,
                         ops=ops,
                     )
                 done += len(chunk)
                 if progress:
                     progress.advance(done)
+                self.chunks_left = len(chunks) - number - 1
                 yield got  # this chunk's only: nothing here grows with the lot
 
     def _require_restore(
@@ -6477,21 +6542,31 @@ class RecordService:
             progress.phase("Deleting records for good", len(ids))
         with _audit_batch(self._audit, "purge", len(ids) > 1):
             for start in range(0, len(ids), _PURGE_CHUNK):
-                self._purge_chunk(ids[start : start + _PURGE_CHUNK])
+                if not self._purge_chunk(ids[start : start + _PURGE_CHUNK]):
+                    return  # one was restored meanwhile: what is live stays
                 done = min(start + _PURGE_CHUNK, len(ids))
                 if progress:
                     progress.advance(done)
+                self.chunks_left = (len(ids) - done + _PURGE_CHUNK - 1) // _PURGE_CHUNK
                 yield done
 
-    def _purge_chunk(self, ids: list[uuid.UUID]) -> None:
-        going = self._records.list_by_ids(ids)
-        self._require_each(permissions.DELETE, going)
-        if self._audit:
-            stones = [(gone.id, tombstone(self._snapshot(gone))) for gone in going]
-            self._audit.forget_records(ids)
+    def _purge_chunk(self, ids: list[uuid.UUID]) -> bool:
+        """Remove these records, but only those still deleted: what was read as
+        deleted may have been restored since (another save goes in between two
+        chunks). Only what this removed gets its history erased and a
+        tombstone. False when any came back live: the caller stops."""
+        going = {r.id: r for r in self._records.list_by_ids(ids)}
+        self._require_each(permissions.DELETE, list(going.values()))
+        gone = self._records.purge_deleted(ids)
+        if self._audit and gone:
+            stones = [
+                (i, tombstone(self._snapshot(going[i]))) for i in ids if i in gone
+            ]
+            self._audit.forget_records([i for i, _ in stones])
             for record_id, stone in stones:
                 self._audit.log_change("purge", "record", record_id, stone, None)
-        self._records.purge_many(ids)
+        # A record that is gone altogether (purged by someone else) is as wanted.
+        return all(i in gone or i not in going for i in ids)
 
     def purge(self, record_id: str) -> None:
         for _ in self.purge_chunks(record_id):

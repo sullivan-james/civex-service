@@ -47,6 +47,7 @@ def test_the_plan_says_what_would_move_and_the_move_does_it(client: TestClient):
         "records": 2,
         "collection": "archive",
         "stopped": False,
+        "problem": None,
     }
     for record in (site, visit):
         got = client.get(f"/api/records/{record['id']}").json()

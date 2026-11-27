@@ -705,6 +705,10 @@ class RestoreSelectedResponse(BaseModel):
         description="Stopped by the person (`X-Civex-Progress` cancel) before "
         "it was done: what came back stays.",
     )
+    problem: str | None = Field(
+        default=None,
+        description="Why it stopped when a later chunk could not go ahead.",
+    )
 
 
 class RecordQueryRequest(BaseModel):
@@ -1309,6 +1313,10 @@ class MoveRecordsResponse(BaseModel):
         default=False,
         description="Stopped by the person (`X-Civex-Progress` cancel) before "
         "it was done: `records` is what moved, and stays moved.",
+    )
+    problem: str | None = Field(
+        default=None,
+        description="Why it stopped when a later chunk could not go ahead.",
     )
 
 

@@ -305,6 +305,7 @@ export interface MoveRecordsResult {
   collection: string
   /** Stopped by the person before it was done: what moved stays moved. */
   stopped?: boolean
+  problem?: string | null
 }
 
 /** What a delete of many records did: the chosen records gone, all of them
@@ -313,6 +314,8 @@ export interface DeleteManyResult {
   deleted: number
   records: number
   stopped: boolean
+  /** Why it stopped when a later chunk could not go ahead. */
+  problem?: string | null
 }
 
 export interface CivexRecord {
@@ -367,6 +370,8 @@ export interface RestoreSelectedResult {
   left: number
   /** Stopped by the person before it was done: what came back stays. */
   stopped?: boolean
+  /** Why a later chunk could not go ahead (what is done stays done). */
+  problem?: string | null
 }
 
 export interface DeletedFieldValue {
@@ -735,10 +740,9 @@ export const recordsApi = {
 
   /** Answers 204, or `{ stopped: true, purged }` when it was stopped. */
   purge: (id: string, progressId?: string) =>
-    api.delete<{ stopped: true; purged: number } | undefined>(
-      `/records/${encodeURIComponent(id)}/purge`,
-      progressHeaders(progressId),
-    ),
+    api.delete<
+      { stopped: true; purged: number; problem?: string | null } | undefined
+    >(`/records/${encodeURIComponent(id)}/purge`, progressHeaders(progressId)),
 
   /** What a permanent delete would take (the record and those deleted with
    * it), and which releases keep files of theirs, so the files stay. */

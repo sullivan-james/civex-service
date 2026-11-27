@@ -370,3 +370,156 @@ def test_a_stopped_move_keeps_the_trees_it_moved_whole(ctx, forest, monkeypatch)
     ]
     # No tree split across collections; two of the three moved.
     assert sorted(map(sorted, where)) == [["a"], ["c"], ["c"]]
+
+
+# -- other saves go in between two chunks --------------------------------------
+
+
+def _live_top(ctx, trees):
+    """A tree not touched yet (its chunk is still to come)."""
+    return next(t for t in trees if _state(ctx, t) == {False})
+
+
+def test_a_record_added_under_a_later_tree_between_chunks_goes_with_it(
+    ctx, forest, monkeypatch
+):
+    trees = forest("a")
+    monkeypatch.setattr(record_service, "_APPLY_CHUNK", 7)
+    chunks = ctx.record_svc.delete_many_chunks(_roots(trees))
+    with ctx.chunked_writes() as turn:
+        next(chunks)
+        turn()
+        later = _live_top(ctx, trees)
+        newcomer = ctx.record_svc.add(
+            "a", "trial", {"subject": "late"}, parent_record_id=str(later[0])
+        )
+        ctx.commit()
+        for _ in chunks:
+            turn()
+    ctx.commit()
+    # Never left live under a deleted parent.
+    assert _state(ctx, [*later, newcomer.id]) == {True}
+
+
+def test_a_reference_added_between_chunks_stops_the_rest_and_keeps_the_first(
+    ctx, forest, make_schema, monkeypatch
+):
+    trees = forest("a")
+    ctx.schema_svc.add_field("site", "link", "reference")
+    ctx.commit()
+    outsider = ctx.record_svc.add("a", "site", {"name": "out"})
+    ctx.commit()
+    monkeypatch.setattr(record_service, "_APPLY_CHUNK", 7)
+    chunks = ctx.record_svc.delete_many_chunks(_roots(trees))
+    with ctx.chunked_writes() as turn:
+        next(chunks)
+        turn()
+        later = _live_top(ctx, trees)
+        ctx.record_svc.update(str(outsider.id), {"link": str(later[0])})
+        ctx.commit()
+        with pytest.raises(Exception, match="referenc"):
+            next(chunks)
+    ctx.rollback()
+    assert sorted(map(sorted, [_state(ctx, t) for t in trees])) == [
+        [False],
+        [True],
+        [True],
+    ]
+
+
+def test_forced_clearing_saves_a_record_that_points_at_several_once(
+    ctx, make_schema, make_collection, monkeypatch
+):
+    make_schema("thing", fields=[("name", "string")])
+    ctx.schema_svc.add_field("thing", "links", "reference_list")
+    make_collection("c")
+    ctx.commit()
+    targets = [ctx.record_svc.add("c", "thing", {"name": f"t{i}"}) for i in range(3)]
+    holder = ctx.record_svc.add(
+        "c", "thing", {"name": "h", "links": [str(t.id) for t in targets]}
+    )
+    ctx.commit()
+    monkeypatch.setattr(record_service, "_APPLY_CHUNK", 1)
+    _drive(
+        ctx,
+        ctx.record_svc.delete_many_chunks([str(t.id) for t in targets], force=True),
+    )
+    updates = (
+        ctx._session.query(AuditLog)
+        .filter(AuditLog.entity_id == holder.id, AuditLog.action == "update")
+        .count()
+    )
+    assert updates == 1
+    assert not ctx.record_svc.get(str(holder.id)).data.get("links")
+
+
+def test_a_purge_stops_when_a_record_is_restored_between_chunks(
+    ctx, forest, monkeypatch
+):
+    trees = forest("a")
+    ctx.record_svc.delete(str(trees[0][0]))
+    ctx.commit()
+    monkeypatch.setattr(record_service, "_PURGE_CHUNK", 2)
+    chunks = ctx.record_svc.purge_chunks(str(trees[0][0]))
+    with ctx.chunked_writes() as turn:
+        assert next(chunks) == 2
+        turn()
+        ctx.record_svc.restore(str(trees[0][0]))  # the root, with what is left
+        ctx.commit()
+        assert list(chunks) == []  # stopped: nothing live is removed
+    ctx.commit()
+    left = ctx.record_svc.records_repo.deleted_at_of(trees[0])
+    assert len(left) == 3 and set(left.values()) == {None}
+    # Their history is whole: only the two removed were tombstoned.
+    purged = ctx._session.query(AuditLog).filter(AuditLog.action == "purge").count()
+    assert purged == 2
+    assert (
+        ctx._session.query(AuditLog)
+        .filter(AuditLog.entity_id.in_(list(left)), AuditLog.action == "delete")
+        .count()
+        == 3
+    )
+
+
+def test_a_move_takes_a_record_added_meanwhile_and_stops_if_the_target_went(
+    ctx, forest, monkeypatch
+):
+    trees = forest("a")
+    monkeypatch.setattr(record_service, "_APPLY_CHUNK", 7)
+    chunks = ctx.record_svc.move_chunks("c", ids=_roots(trees))
+    with ctx.chunked_writes() as turn:
+        next(chunks)
+        turn()
+        later = _live_top(ctx, trees)  # unchanged: not in "c" yet
+        later = next(
+            t for t in trees if ctx.record_svc.get(str(t[0])).dataset_name == "a"
+        )
+        newcomer = ctx.record_svc.add(
+            "a", "trial", {"subject": "late"}, parent_record_id=str(later[0])
+        )
+        ctx.commit()
+        for _ in chunks:  # no key error: the new record moves with its parent
+            turn()
+    ctx.commit()
+    assert ctx.record_svc.get(str(newcomer.id)).dataset_name == "c"
+
+    more = forest("b")
+    chunks = ctx.record_svc.move_chunks("d", ids=_roots(more))
+    with ctx.chunked_writes() as turn:
+        next(chunks)
+        turn()
+        ctx.dataset_svc.delete("d")
+        ctx.commit()
+        with pytest.raises(Exception, match="changed while"):
+            next(chunks)
+    ctx.rollback()
+    moved = [
+        {
+            ctx.record_svc.records_repo.get_by_prefix(
+                str(r), include_deleted=True
+            ).dataset_id
+            for r in t
+        }
+        for t in more
+    ]
+    assert all(len(m) == 1 for m in moved)  # still whole trees

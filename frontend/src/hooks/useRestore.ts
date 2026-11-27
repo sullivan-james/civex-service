@@ -215,8 +215,10 @@ export function useRestoreSelected(onDone?: () => void) {
       const n = (c: number, w: string) =>
         `${c.toLocaleString()} ${w}${c === 1 ? '' : 's'}`
       const extra = result.came_back - result.restored
-      if (result.stopped) {
-        toast.success(`Stopped. ${n(result.came_back, 'record')} restored.`)
+      if (result.stopped || result.problem) {
+        toast.success(
+          `Stopped. ${n(result.came_back, 'record')} restored.${result.problem ? ` ${result.problem}` : ''}`,
+        )
         onDone?.()
         return
       }

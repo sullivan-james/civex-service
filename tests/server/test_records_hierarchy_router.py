@@ -153,7 +153,12 @@ def test_delete_with_a_filter_deletes_only_what_matches(client: TestClient, seed
         },
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"deleted": 1, "records": 1, "stopped": False}
+    assert resp.json() == {
+        "deleted": 1,
+        "records": 1,
+        "stopped": False,
+        "problem": None,
+    }
     remaining = _list(client, schema="selection")
     assert {r["id"] for r in remaining["items"]} == {seeded["s1"], seeded["s3"]}
 

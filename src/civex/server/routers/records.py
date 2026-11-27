@@ -73,20 +73,41 @@ def _in_chunks(
     chunks: Generator[T, None, None],
     progress: Progress | None,
     empty: T,
-) -> tuple[T, bool]:
+) -> tuple[T, bool, str | None]:
     """Drive work done a chunk at a time: commit after each (so other saves go
     in between two and nothing holds the database for the whole job), and stop
-    before the next when the person asked to. What was committed stays. Returns
-    what the last chunk said, and whether it was stopped."""
-    last, stopped = empty, False
-    with ctx.chunked_writes() as turn:
-        for last in chunks:
-            turn()
-            if progress is not None and progress.cancelled:
-                stopped = True
-                chunks.close()
-                break
-    return last, stopped
+    before the next when the person asked to. What was committed stays.
+
+    Returns what the last chunk said; whether it ended with work left (stopped
+    by the person, or by something that changed meanwhile: `progress` knows how
+    many steps there were); and, when a later chunk failed (a record added that
+    now blocks it, say), why. A failure before any chunk was done is raised as
+    it always was; after that the answer says how far it got, since what is
+    done stays done."""
+    last, problem = empty, None
+    done_any = False
+    try:
+        with ctx.chunked_writes() as turn:
+            for last in chunks:
+                done_any = True
+                # Give way to other writers only when there is more to write.
+                if ctx.record_svc.chunks_left:
+                    turn()
+                else:
+                    ctx.commit()
+                if progress is not None and progress.cancelled:
+                    chunks.close()
+                    break
+    except Exception as e:
+        if not done_any:
+            raise
+        ctx.rollback()
+        problem = (
+            str(e)
+            if isinstance(e, (ValidationError, NotFoundError, ValueError))
+            else "Something changed while it ran."
+        )
+    return last, progress is not None and progress.unfinished, problem
 
 
 router = APIRouter(tags=["records"])
@@ -656,7 +677,7 @@ def restore_selected_records(
     own. Tag the request with `X-Civex-Progress` to follow it (records of
     records) and to stop it (`POST /file-access/progress/{id}/cancel`): a
     stopped restore keeps what has come back (`stopped` in the answer)."""
-    result, stopped = _in_chunks(
+    result, stopped, problem = _in_chunks(
         ctx,
         ctx.record_svc.restore_records_chunks(
             body.ids, body.with_parents, progress=progress
@@ -670,6 +691,7 @@ def restore_selected_records(
         came_back=result.came_back,
         left=len(result.left),
         stopped=stopped,
+        problem=problem,
     )
 
 
@@ -698,7 +720,7 @@ def purge_record(
     to follow it and to stop it; a stopped purge answers 200 with
     `{"stopped": true, "purged": n}` instead of 204."""
     try:
-        done, stopped = _in_chunks(
+        done, stopped, problem = _in_chunks(
             ctx,
             ctx.record_svc.purge_chunks(record_id, progress=progress),
             progress,
@@ -709,8 +731,8 @@ def purge_record(
         raise HTTPException(404, detail=str(e))
     except ValidationError as e:
         raise HTTPException(422, detail=str(e))
-    if stopped:
-        return JSONResponse({"stopped": True, "purged": done})
+    if stopped or problem:
+        return JSONResponse({"stopped": True, "purged": done, "problem": problem})
 
 
 @router.post("/records/bulk-delete")
@@ -727,14 +749,19 @@ def bulk_delete_records(
     stopped delete keeps what it deleted (`stopped` in the answer; `deleted`
     counts the chosen records gone, `records` all of them with what sat under
     them)."""
-    (deleted, records), stopped = _in_chunks(
+    (deleted, records), stopped, problem = _in_chunks(
         ctx,
         ctx.record_svc.delete_many_chunks(ids, force=force, progress=progress),
         progress,
         (0, 0),
     )
     ctx.commit()
-    return {"deleted": deleted, "records": records, "stopped": stopped}
+    return {
+        "deleted": deleted,
+        "records": records,
+        "stopped": stopped,
+        "problem": problem,
+    }
 
 
 @router.post("/records/delete-preview", response_model=RecordDeletePreviewResponse)
@@ -921,7 +948,7 @@ def move_records(
     request with `X-Civex-Progress` to follow it and to stop it: a stopped move
     keeps the trees already moved (`stopped` in the answer)."""
     try:
-        result, stopped = _in_chunks(
+        result, stopped, problem = _in_chunks(
             ctx,
             ctx.record_svc.move_chunks(
                 body.to, body.parent, progress=progress, **_selection(body, "move")
@@ -939,6 +966,7 @@ def move_records(
         records=result.records,
         collection=result.collection,
         stopped=stopped,
+        problem=problem,
     )
 
 
@@ -1023,7 +1051,7 @@ def delete_all_records(
     `POST /records/bulk-delete`."""
     query.dataset = dataset_name
     try:
-        (deleted, records), stopped = _in_chunks(
+        (deleted, records), stopped, problem = _in_chunks(
             ctx,
             ctx.record_svc.delete_matching_chunks(
                 query, force=force, progress=progress
@@ -1036,7 +1064,12 @@ def delete_all_records(
     except (ValueError, ValidationError) as e:
         raise HTTPException(422, detail=str(e))
     ctx.commit()
-    return {"deleted": deleted, "records": records, "stopped": stopped}
+    return {
+        "deleted": deleted,
+        "records": records,
+        "stopped": stopped,
+        "problem": problem,
+    }
 
 
 @router.get("/collections/{collection_name}/export.csv")

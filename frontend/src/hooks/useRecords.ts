@@ -304,6 +304,21 @@ export function useRecordFileSaver(recordId: string): FileSaver {
   )
 }
 
+/** After a failure part way: what was done stays done, so every list may have
+ * changed. */
+function refreshAfterFailure(qc: QueryClient) {
+  for (const key of [
+    'records',
+    'record',
+    'record-counts',
+    'collections',
+    'records-deleted',
+    'trash',
+  ])
+    qc.invalidateQueries({ queryKey: [key] })
+  invalidateRecordNames(qc)
+}
+
 const records = (n: number) =>
   `${n.toLocaleString()} record${n === 1 ? '' : 's'}`
 
@@ -311,6 +326,7 @@ const records = (n: number) =>
  * (what is deleted stays deleted). */
 function deletedMessage(result: DeleteManyResult): string {
   const n = records(result.records)
+  if (result.problem) return `Stopped. ${n} deleted. ${result.problem}`
   return result.stopped ? `Stopped. ${n} deleted.` : `${n} deleted`
 }
 
@@ -354,7 +370,10 @@ export function useDeleteRecord(datasetName: string) {
           : undefined,
       })
     },
-    onError: (err) => toast.error(errorMessage(err)),
+    onError: (err) => {
+      refreshAfterFailure(qc)
+      toast.error(errorMessage(err))
+    },
   })
 }
 
@@ -380,10 +399,15 @@ export function usePurgeRecord() {
       qc.invalidateQueries({ queryKey: ['trash'] })
       invalidateRecordNames(qc)
       if (result?.stopped)
-        toast.success(`Stopped. ${records(result.purged)} deleted.`)
+        toast.success(
+          `Stopped. ${records(result.purged)} deleted.${result.problem ? ` ${result.problem}` : ''}`,
+        )
       else toast.success('Record permanently deleted')
     },
-    onError: (err) => toast.error(errorMessage(err)),
+    onError: (err) => {
+      refreshAfterFailure(qc)
+      toast.error(errorMessage(err))
+    },
   })
 }
 
@@ -404,7 +428,10 @@ export function useDeleteManyRecords(datasetName: string) {
       qc.invalidateQueries({ queryKey: ['records-deleted'] })
       toast.success(deletedMessage(result))
     },
-    onError: (err) => toast.error(errorMessage(err)),
+    onError: (err) => {
+      refreshAfterFailure(qc)
+      toast.error(errorMessage(err))
+    },
   })
 }
 
@@ -426,7 +453,10 @@ export function useDeleteMatchingRecords(datasetName: string) {
       qc.invalidateQueries({ queryKey: ['records-deleted'] })
       toast.success(deletedMessage(result))
     },
-    onError: (err) => toast.error(errorMessage(err)),
+    onError: (err) => {
+      refreshAfterFailure(qc)
+      toast.error(errorMessage(err))
+    },
   })
 }
 
@@ -481,10 +511,13 @@ export function useMoveRecords() {
       qc.invalidateQueries({ queryKey: ['record-move-plan'] })
       toast.success(
         result.stopped
-          ? `Stopped. ${records(result.records)} moved.`
+          ? `Stopped. ${records(result.records)} moved.${result.problem ? ` ${result.problem}` : ''}`
           : `${records(result.records)} moved to ${result.collection}`,
       )
     },
-    onError: (err) => toast.error(errorMessage(err)),
+    onError: (err) => {
+      refreshAfterFailure(qc)
+      toast.error(errorMessage(err))
+    },
   })
 }
