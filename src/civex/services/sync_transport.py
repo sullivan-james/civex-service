@@ -36,6 +36,7 @@ from civex.domain.sync import (
     GZIP_REQUESTS,
     FILE_PART_BYTES,
     FILE_PART_MAX,
+    FILE_PART_MIN,
     FILE_PARTS,
     MAX_FILE_PARTS,
     DeviceCredentials,
@@ -53,13 +54,17 @@ from civex.domain.sync import (
     session_answer,
     session_request,
 )
+from civex.services import transfer_budget
 from civex.services.http_wire import Reply, Wire, retries
 
 _CHUNK = 1024 * 1024
-# A file above this many bytes goes in parts, this many at a time (each part is
-# held in memory while it is sent, so at most PART_THREADS x the part size is).
-PARTS_MIN_BYTES = 2 * FILE_PART_BYTES
-PART_THREADS = 4
+# A file above this many bytes goes in parts (where the authority takes them):
+# one stream is held back by the line's round trip, parts are not. Parts of all
+# the files on their way share one pool, `windows().part_threads` wide, and the
+# bytes they hold come from the process-wide budget (`transfer_budget`).
+PARTS_MIN_BYTES = 8 * 1024 * 1024
+# A file is cut so that it has at least this many parts, down to FILE_PART_MIN.
+PARTS_PER_FILE = 4
 # A file coming down is fetched in ranges, this many at a time (shared by all
 # the files being fetched), when it is at least DOWNLOAD_PARTS_MIN_BYTES: a
 # range is written where it belongs in a temporary file as it arrives, so
@@ -162,6 +167,9 @@ class HttpSyncTransport:
     # How many small files the sender may upload at once over this transport
     # (each is its own HTTP request; the session token is shared).
     upload_threads = 4
+    # Big files sent at once: their parts share one pool, and the round trips
+    # that open and finish one overlap the parts of the other.
+    upload_large_files = 2
     # And how many files it may download at once.
     download_threads = 6
 
@@ -368,7 +376,7 @@ class HttpSyncTransport:
             begun = self._json(
                 "POST",
                 f"/files/{sha256}/parts",
-                {"size": size, "part_size": FILE_PART_BYTES},
+                {"size": size, "part_size": _part_size_for(size)},
                 idempotent=True,  # says which parts it holds already
             )
         except SyncError as e:
@@ -1023,6 +1031,34 @@ class _PackBody:
         return out
 
 
+def _part_size_for(size: int) -> int:
+    """The part size asked for: FILE_PART_BYTES (smaller on a small machine),
+    but a file is cut into at least PARTS_PER_FILE parts (not under
+    FILE_PART_MIN) so that a middling file is not a single stream either."""
+    even = -(-size // PARTS_PER_FILE)
+    even = -(-even // FILE_PART_MIN) * FILE_PART_MIN
+    return max(1, min(FILE_PART_BYTES, transfer_budget.windows().part_bytes, even))
+
+
+_lane_lock = threading.Lock()
+_lane: tuple[int, ThreadPoolExecutor, threading.BoundedSemaphore] | None = None
+
+
+def _part_lane() -> tuple[ThreadPoolExecutor, threading.BoundedSemaphore]:
+    """The pool every part of every file goes through, and the semaphore that
+    keeps the parts held (queued or sending) to its width."""
+    global _lane
+    width = transfer_budget.windows().part_threads
+    with _lane_lock:
+        if _lane is None or _lane[0] != width:
+            _lane = (
+                width,
+                ThreadPoolExecutor(width, thread_name_prefix="civex-part"),
+                threading.BoundedSemaphore(width),
+            )
+        return _lane[1], _lane[2]
+
+
 def _in_parts(
     source: UploadSource,
     size: int,
@@ -1030,43 +1066,63 @@ def _in_parts(
     held: set[int],
     put: Callable[[int, bytes], None],
 ) -> None:
-    """Read `source` a part at a time and `put` each (but those in `held`),
-    PART_THREADS at once. One thread reads, in order, so the file is read once;
-    it waits for a free slot before reading the next part, so memory holds at
-    most PART_THREADS parts. The first failure stops reading, lets the parts in
-    flight finish (they stay with the authority, for the next try), and is
-    raised."""
+    """Read `source` a part at a time and `put` each (but those in `held`)
+    through the shared part pool. One thread per file reads, in order, so the
+    file is read once; before a part is read it takes a slot (the pool's
+    width, all files together) and its bytes from the process budget, and gives
+    both back when the part is sent, so memory holds at most that many parts
+    however many files are on their way. The first failure stops reading, lets
+    this file's parts in flight finish (they stay with the authority, for the
+    next try), and is raised."""
     count = max(1, -(-size // part_size)) if size else 0
-    slots = threading.BoundedSemaphore(PART_THREADS)
+    pool, slots = _part_lane()
+    budget = transfer_budget.process_budget()
     flying: set[Future[None]] = set()
     failure: list[BaseException] = []
 
-    def send(number: int, data: bytes) -> None:
+    def send(number: int, data: bytes, charged: int) -> None:
         try:
             put(number, data)
         except BaseException as e:
             failure.append(e)
             raise
         finally:
+            del data
+            budget.release(charged)
             slots.release()
 
-    with ThreadPoolExecutor(PART_THREADS) as pool:
+    try:
         for number in range(1, count + 1):
             length = min(part_size, size - (number - 1) * part_size)
             if number in held:
                 source.seek(length, 1)  # held already: counted, not sent
                 continue
-            slots.acquire()
             if failure:
+                break
+            slots.acquire()
+            try:
+                charged = budget.acquire(length)
+            except BaseException:
+                slots.release()
+                raise
+            if failure:
+                budget.release(charged)
                 slots.release()
                 break
-            data = source.read(length)
+            try:
+                data = source.read(length)
+            except BaseException:
+                budget.release(charged)
+                slots.release()
+                raise
             if len(data) != length:
+                budget.release(charged)
                 slots.release()
                 raise SyncError("A file being sent was cut short", retryable=True)
-            flying.add(pool.submit(send, number, data))
+            flying.add(pool.submit(send, number, data, charged))
             del data
             flying -= {f for f in flying if f.done()}
+    finally:
         wait(flying)
     if failure:
         raise failure[0]

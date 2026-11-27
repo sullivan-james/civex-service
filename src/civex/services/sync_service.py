@@ -106,7 +106,7 @@ from civex.repositories.protocols import (
 from civex.services.record_service import RecordService
 from civex.services.sync_applier import SyncApplier, stamp_of
 from civex.services.sync_lock import sync_lock, sync_running
-from civex.services import ssh_tunnel
+from civex.services import ssh_tunnel, transfer_budget
 
 # Changes per push. The authority settles at most 500 in one request
 # (`sync_authority.PUSH_MAX`), so a batch never goes over that. Measured on
@@ -117,10 +117,15 @@ PUSH_BATCH = 250
 FLAG_CHUNK = 500
 # How many referenced files are checked against the authority per request.
 FILE_CHECK_PAGE = 1000
-# A file above this many bytes is sent alone, one at a time, and confirmed and
-# committed as soon as it arrives: it never shares memory or bandwidth with
-# another upload, and its arrival is never lost to a later failure.
+# A file above this many bytes is a big one: it goes in parts (where the
+# authority takes them), at most `upload_large_files` at a time (2 over HTTP) so
+# the round trips that open and finish one overlap the parts of the other, and
+# it is confirmed and committed as soon as it arrives: its arrival is never
+# lost to a later failure. (Where the transport has no pool, one at a time.)
 LARGE_FILE_BYTES = 8 * 1024 * 1024
+# What a pack in flight holds: the read buffer of its stream, taken from the
+# process-wide transfer budget (`transfer_budget`).
+PACK_HELD_BYTES = 2 * 1024 * 1024
 # Smaller files go several at a time (where the transport allows it:
 # `upload_threads`), and are confirmed and committed in groups: after this many
 # files, or this many seconds, whichever comes first.
@@ -133,9 +138,9 @@ SMALL_FILE_GROUP_SECONDS = 2.0
 PACK_BYTES = 32 * 1024 * 1024
 PACK_FILES = 100
 PACKS_IN_FLIGHT = 4
-# The slice asked about at a time when sending in packs: a slice is settled
-# before the next is read, so a bigger one means fewer pauses for the packs
-# still on their way (the authority answers up to 5000 per request).
+# The slice asked about at a time when sending in packs: the next slice is
+# asked about while the packs of this one are still on their way (there is no
+# pause between slices), the authority answers up to 5000 per request.
 PACKED_CHECK_PAGE = 4000
 # Files downloaded together: one is held in memory up to this many bytes, then
 # in a temp file, until this side has written it to the drive.
@@ -2466,13 +2471,25 @@ class SyncService:
         # together as they arrive. Large ones never do.
         threads = max(1, int(getattr(transport, "upload_threads", 1)))
         pool = ThreadPoolExecutor(threads) if threads > 1 else None
+        budget = transfer_budget.process_budget()
+        wins = transfer_budget.windows()
+        packs_cap = max(1, min(PACKS_IN_FLIGHT, wins.packs))
+        lanes = max(1, int(getattr(transport, "upload_large_files", 1)))
+        lanes = min(lanes, wins.large_files)
+        # Big files go through their own pool where the transport allows more
+        # than one (their parts share the transport's part pool).
+        big_pool = ThreadPoolExecutor(lanes) if pool is not None and lanes > 1 else None
         accepts = getattr(transport, "accepts_packs", None)
         packing = pool is not None and callable(accepts) and bool(accepts())
         arrived: list[str] = []
         # What is on its way: the hashes sent together, and the answer to come
         # (per hash: None when stored, else why not; a hash missing from it was
         # not answered and is simply left for the next pass).
-        flying: list[tuple[list[str], Future[dict[str, str | None]]]] = []
+        # (and whether it is a big file: those are counted apart).
+        flying: list[tuple[list[str], Future[dict[str, str | None]], bool]] = []
+        # The last hash of a slice fully handed over: resume_after goes there
+        # once nothing before it is still on its way.
+        mark: list[str] = []
         pack: list[tuple[str, BinaryIO, int]] = []
         pack_bytes = 0
         failed = threading.Event()
@@ -2498,7 +2515,8 @@ class SyncService:
                 counted = [
                     (sha, _Counting(f, went_in_pool), size) for sha, f, size in items
                 ]
-                return transport.upload_pack(counted)  # type: ignore[attr-defined,arg-type]
+                with budget.hold(PACK_HELD_BYTES):
+                    return transport.upload_pack(counted)  # type: ignore[attr-defined,arg-type]
             except BaseException:
                 failed.set()
                 raise
@@ -2532,22 +2550,37 @@ class SyncService:
             items = list(pack)
             pack.clear()
             pack_bytes = 0
-            while pool is not None and len(flying) >= PACKS_IN_FLIGHT:
+            while (
+                pool is not None
+                and sum(1 for *_, big in flying if not big) >= packs_cap
+            ):
                 reap()
             assert pool is not None
-            flying.append(([s for s, _, _ in items], pool.submit(run_pack, items)))
+            flying.append(
+                ([s for s, _, _ in items], pool.submit(run_pack, items), False)
+            )
+
+        def send_big(sha: str, f: BinaryIO, size: int) -> None:
+            while sum(1 for *_, big in flying if big) >= lanes:
+                reap()
+            assert big_pool is not None
+            flying.append(([sha], big_pool.submit(run, f, sha, size), True))
 
         def reap() -> None:
             """Wait for the oldest pack on its way and keep what arrived (so
             settling goes in the order sent). If it failed, everything on its
             way is waited for and the failure is raised."""
-            shas, fut = flying[0]
-            wait([fut])
+            shas, fut, _big = flying[0]
+            while not fut.done():
+                wait([fut], timeout=0.25)
+                say()  # bytes move while it goes
             if fut.exception() is not None:
                 drain()  # raises it, after keeping what arrived
             flying.pop(0)
             keep(shas, fut.result())
             record()
+            if not flying:
+                advance()
 
         def drain(quiet: bool = False) -> None:
             """Wait for the small files in flight, then keep every one that
@@ -2564,11 +2597,11 @@ class SyncService:
                 else:
                     send_pack()
             if flying:
-                pending_uploads = {f for _, f in flying}
+                pending_uploads = {f for _, f, _ in flying}
                 while pending_uploads:
                     _done, pending_uploads = wait(pending_uploads, timeout=0.25)
                     say()  # bytes move while the small files go
-            for shas, fut in flying:
+            for shas, fut, _big in flying:
                 try:
                     keep(shas, fut.result())
                 except BaseException as e:
@@ -2580,13 +2613,41 @@ class SyncService:
             if group_began:
                 spent += time.monotonic() - group_began.pop()
             if error is None:
-                # Settled after the group's files, so the point to go on from
-                # never passes a file that did not arrive.
-                for sha, why in unreadable:
-                    settle(sha, why)
+                flush_unreadable()
+                advance()
             unreadable.clear()
             if error is not None and not quiet:
                 raise error
+
+        def flush_unreadable() -> None:
+            # Settled after the group's files, so the point to go on from
+            # never passes a file that did not arrive.
+            for sha, why in unreadable:
+                settle(sha, why)
+            unreadable.clear()
+
+        def advance() -> None:
+            """Go on from the end of the last slice handed over, once nothing
+            before it is still unsettled."""
+            if mark and not (flying or pack or arrived or unreadable):
+                report.resume_after = max(report.resume_after or "", mark[-1])
+                mark.clear()
+
+        def add_big(sha: str, size: int) -> None:
+            """Send a big file through its lane."""
+            nonlocal tried
+            tried += 1
+            if not group_began:
+                group_began.append(time.monotonic())
+            try:
+                f = self._files.open(sha)
+            except VolumeUnavailableError as e:
+                unreadable.append((sha, str(e)))
+                return
+            except (FileNotFoundError, OSError):
+                unreadable.append((sha, "its copy here couldn't be read"))
+                return
+            send_big(sha, f, size)
 
         def add(sha: str, size: int) -> None:
             nonlocal tried, inflight, pack_bytes
@@ -2615,7 +2676,7 @@ class SyncService:
                     send_pack()
                 return
             if pool is not None:
-                flying.append(([sha], pool.submit(run, f, sha, size)))
+                flying.append(([sha], pool.submit(run, f, sha, size), False))
             else:
                 try:
                     transport.upload_file(sha, _Counting(f, went), size)
@@ -2671,9 +2732,12 @@ class SyncService:
                     if size is not None and size <= LARGE_FILE_BYTES:
                         add(sha, size)
                         continue
-                    # Large (or with no copy here, which says why): alone, after
-                    # everything before it is confirmed, and confirmed and
-                    # committed the moment it arrives.
+                    if size is not None and big_pool is not None:
+                        add_big(sha, size)  # in its lane, no pause for the rest
+                        continue
+                    # Large with no lanes (or with no copy here, which says why):
+                    # alone, after everything before it is confirmed, and
+                    # confirmed and committed the moment it arrives.
                     drain()
                     tried += 1
                     inflight = 0
@@ -2686,13 +2750,18 @@ class SyncService:
                         report.sent += 1
                         log.debug("sent file %s", sha[:12])
                     settle(sha, why)
-                drain()
-                report.resume_after = page[-1]
+                # No pause here: the next slice is asked about while this one's
+                # packs and big files are still on their way.
+                mark[:] = [page[-1]]
+                if not (flying or pack or arrived):
+                    flush_unreadable()
+                advance()
                 page = self._repo.referenced_shas(
                     page[-1],
                     PACKED_CHECK_PAGE if packing else FILE_CHECK_PAGE,
                     unconfirmed=not everything,
                 )
+            drain()  # the last of the packs and big files, kept before returning
         finally:
             try:
                 try:
@@ -2704,6 +2773,8 @@ class SyncService:
             finally:
                 if pool is not None:
                     pool.shutdown(wait=True)
+                if big_pool is not None:
+                    big_pool.shutdown(wait=True)
 
     def _upload(
         self,

@@ -17,7 +17,7 @@ from civex.config import load_config, save_config
 from civex.domain import sync as sync_domain
 from civex.domain.dtos import FileRef
 from civex.domain.exceptions import VolumeUnavailableError
-from civex.services import sync_service, sync_transport
+from civex.services import sync_service, sync_transport, transfer_budget
 from civex.services.file_service import FileService
 from civex.services.sync_transport import HttpSyncTransport
 
@@ -259,4 +259,4 @@ def test_parts_in_memory_are_bounded():
 
     sync_transport._in_parts(Source(b"x" * size), size, part, {3}, put)
     assert live["now"] == 0
-    assert live["max"] <= sync_transport.PART_THREADS
+    assert live["max"] <= transfer_budget.windows().part_threads
