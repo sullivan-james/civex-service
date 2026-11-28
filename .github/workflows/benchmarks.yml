@@ -55,7 +55,7 @@ jobs:
 
       - name: Restore the generated project
         id: project
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.PROJECT }}
           key: bench-medium-${{ hashFiles('benchmarks/generate.py', 'src/civex/db/migrations/**', 'src/civex/services/record_service.py', 'src/civex/repositories/local/record_repo.py', 'src/civex/db/models.py') }}
