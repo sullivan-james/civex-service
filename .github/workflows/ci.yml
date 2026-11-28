@@ -94,7 +94,7 @@ jobs:
         if: matrix.group == 1
         run: uv run pytest civex-plugin-sdk/tests -q
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: github.event_name != 'pull_request'
         with:
           name: coverage-${{ matrix.group }}
